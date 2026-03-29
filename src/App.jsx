@@ -630,7 +630,7 @@ function ProjectCard({ habit, onOpenLog, onReflect, onAddNote }) {
         </div>
       )}
       {logged && <DoneBanner habit={habit}/>}
-      {logged && <NoteStrip habitId={habit.id} habit={habit} savedNote={tLog?.note||""} onNoteChange={onNoteChange} onReflect={onReflect}/>}
+      {logged && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote} onReflect={onReflect}/>}
     </div>
   );
 }
