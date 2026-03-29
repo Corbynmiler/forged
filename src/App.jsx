@@ -69,79 +69,6 @@ function nextLevel(xp) {
   return XP_LEVELS.find(l => l.min > xp) || null;
 }
 
-// ─── MOCK DATA ────────────────────────────────────────────────────────────────
-function buildHabits() {
-  const t = todayStr();
-  return [
-    {
-      id:"gym", name:"Gym", emoji:"🏋️", habitType:"weekly", color:"#C0392B",
-      weeklyTarget:4, reflection:true,
-      reflectionPrompt:"What felt strong today? What needs work?",
-      streak:6,
-      logs:[
-        { date:daysAgo(20), value:true, note:"Upper body.", reflection:"Form on rows cleaner. Coach noticed." },
-        { date:daysAgo(18), value:true, note:"Leg day.", reflection:"Squats felt solid. Pushed through." },
-        { date:daysAgo(16), value:true, note:"Bench PR attempt.", reflection:"Hit 80kg for 3. Shoulders tight — warm up longer." },
-        { date:daysAgo(13), value:true, note:"Back and bis.", reflection:null },
-        { date:daysAgo(11), value:true, note:"Push day.", reflection:null },
-        { date:daysAgo(8),  value:true, note:"Full body.", reflection:"Felt strong. Best session in weeks." },
-        { date:daysAgo(5),  value:true, note:"Upper body.", reflection:null },
-        { date:daysAgo(3),  value:true, note:"Legs.", reflection:null },
-        { date:daysAgo(1),  value:true, note:"Shoulders and arms.", reflection:null },
-      ],
-    },
-    {
-      id:"weight", name:"Hit 80kg", emoji:"⚖️", habitType:"progress", color:"#E67E22",
-      startValue:74.5, targetValue:80, unit:"kg",
-      reflection:true, reflectionPrompt:"How many meals today? Energy levels?",
-      streak:9,
-      logs:[
-        { date:daysAgo(27), value:74.5, note:"Starting weight." },
-        { date:daysAgo(23), value:74.8, note:"" },
-        { date:daysAgo(19), value:75.1, note:"Slow but it's real." },
-        { date:daysAgo(15), value:75.3, note:"" },
-        { date:daysAgo(12), value:75.8, note:"" },
-        { date:daysAgo(8),  value:76.2, note:"Meal prepped Sunday.", reflection:"3 full meals every day this week. Feel it." },
-        { date:daysAgo(4),  value:76.4, note:"3 meals + shake." },
-        { date:daysAgo(1),  value:76.6, note:"Feeling fuller.", reflection:"Up 2.1kg in a month. Slow but real." },
-      ],
-    },
-    {
-      id:"eat", name:"Eat better", emoji:"🥗", habitType:"daily", color:"#27AE60",
-      reflection:true, reflectionPrompt:"What did you eat today? Any patterns?",
-      streak:4,
-      logs:[
-        { date:daysAgo(6), value:true, note:"Meal prepped Sunday.", reflection:"Prep makes the whole week easier." },
-        { date:daysAgo(5), value:true, note:"" },
-        { date:daysAgo(4), value:true, note:"Extra protein every meal." },
-        { date:daysAgo(3), value:true, note:"" },
-        { date:daysAgo(2), value:true, note:"" },
-        { date:daysAgo(1), value:true, note:"Skipped lunch.", reflection:"Busy day. Not the end — just data." },
-      ],
-    },
-    {
-      id:"stretch", name:"Stretch", emoji:"🧘", habitType:"daily", color:"#8E44AD",
-      reflection:true, reflectionPrompt:"Where did you feel tight? What released?",
-      streak:12,
-      logs: Array.from({length:12}, (_, i) => ({
-        date: daysAgo(12 - i), value:true, note:"",
-        reflection: i === 11 ? "Hip flexors loosening. 12 days straight." : null,
-      })),
-    },
-    {
-      id:"forged", name:"Build Forged", emoji:"⚒️", habitType:"project", color:"#2980B9",
-      reflection:true, reflectionPrompt:"What did you build? What's blocking you? Any wins?",
-      streak:5,
-      logs:[
-        { date:daysAgo(6), value:{minutes:90,  win:"Data model done.",           hardPart:"CSS stacking context nightmare."}, note:"", reflection:"Clean model makes everything downstream easier." },
-        { date:daysAgo(5), value:{minutes:120, win:"Bottom sheet working.",       hardPart:"Layout fight — 1hr wasted."     }, note:"" },
-        { date:daysAgo(4), value:{minutes:75,  win:"Tap animation feels right.",  hardPart:"Particle burst timing was off." }, note:"", reflection:"Small interactions matter more than I expected." },
-        { date:daysAgo(2), value:{minutes:60,  win:"Habits screen fixed.",        hardPart:"IIFEs crash React silently."   }, note:"" },
-        { date:daysAgo(1), value:{minutes:45,  win:"Habit type system designed.", hardPart:null                            }, note:"" },
-      ],
-    },
-  ];
-}
 
 // ─── COMPUTED ─────────────────────────────────────────────────────────────────
 function isLoggedToday(h) {
@@ -217,16 +144,33 @@ function getStreak(h) {
   return getDailyStreak(h); // daily (default)
 }
 function getWeeklyStreak(h) {
-  // Count consecutive weeks (ending with most recent) where sessions >= target
+  // Count consecutive Mon–Sun calendar weeks where sessions >= target.
+  // Week 0 = current week. A partial current week never breaks the streak.
+  const daysSinceMon = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
   let streak = 0;
   for (let w = 0; w <= 52; w++) {
-    const end   = daysAgo(w * 7);
-    const start = daysAgo(w * 7 + 6);
-    const count = h.logs.filter(l => l.date >= start && l.date <= end).length;
+    const monBack   = daysSinceMon + w * 7;
+    const weekStart = daysAgo(monBack);
+    const weekEnd   = daysAgo(Math.max(0, monBack - 6));
+    const count = h.logs.filter(l => l.date >= weekStart && l.date <= weekEnd).length;
     if (count >= h.weeklyTarget) streak++;
-    else break;
+    else if (w > 0) break; // partial current week doesn't break streak
   }
   return streak;
+}
+// Longest consecutive-day run in the habit's full log history
+function getBestStreak(h) {
+  const dates = [...new Set(
+    h.logs.filter(l => l.value !== "skip" && l.value !== "quicknote").map(l => l.date)
+  )].sort();
+  if (!dates.length) return 0;
+  let best = 1, cur = 1;
+  for (let i = 1; i < dates.length; i++) {
+    const diff = Math.round((parseLocal(dates[i]) - parseLocal(dates[i - 1])) / 86400000);
+    if (diff === 1) { cur++; if (cur > best) best = cur; }
+    else cur = 1;
+  }
+  return best;
 }
 function getCompletionRate(h) {
   const cutoff = daysAgo(28);
@@ -1229,6 +1173,19 @@ function TodayScreen({ habits, xp, onTap, onUndo, onSkip, onReflect, onAddNote, 
   const weekly   = habits.filter(h => h.habitType === "weekly");
   const progress = habits.filter(h => h.habitType === "progress");
   const project  = habits.filter(h => h.habitType === "project");
+  if (habits.length === 0) return (
+    <div style={{ padding:"48px 28px", textAlign:"center" }}>
+      <div style={{ fontSize:48, marginBottom:18 }}>⚒️</div>
+      <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, marginBottom:10 }}>Nothing forged yet.</div>
+      <div style={{ fontSize:14, color:T.muted, lineHeight:1.75, marginBottom:28 }}>
+        Add your first habit and start building something that lasts.
+      </div>
+      <button onClick={onAdd} style={{ padding:"14px 32px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:15, fontWeight:500, cursor:"pointer" }}>
+        Add your first habit
+      </button>
+    </div>
+  );
+
   return (
     <div>
       <div style={{ margin:"6px 14px 16px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:"18px 20px", display:"flex", alignItems:"center", gap:18 }}>
@@ -1454,27 +1411,6 @@ function JournalScreen({ habits, onReflect }) {
   });
   const dates = Object.keys(allByDate).sort((a, b) => b.localeCompare(a));
 
-  // For calendar month view: still use the old entries approach (notes/reflections only)
-  const entries = [];
-  habits.forEach(h => {
-    h.logs.forEach(l => {
-      const hasNote = l.note && l.note.trim();
-      const hasReflection = !!l.reflection;
-      const hasWin = !!l.value?.win;
-      const hasHard = !!l.value?.hardPart;
-      if (hasNote || hasReflection || hasWin || hasHard) {
-        entries.push({
-          habitId:h.id, habitName:h.name, habitEmoji:h.emoji, habitColor:h.color,
-          date:l.date, note:l.note||"", reflection:l.reflection||"",
-          win: l.value?.win || "", hardPart: l.value?.hardPart || "",
-          minutes: typeof l.value === "object" && l.value?.minutes ? l.value.minutes : null,
-        });
-      }
-    });
-  });
-  const filtered = filter === "all" ? entries : entries.filter(e => e.habitId === filter);
-  const byDate = {};
-  filtered.forEach(e => { if (!byDate[e.date]) byDate[e.date] = []; byDate[e.date].push(e); });
 
   // ── Journey start date (earliest log across ALL habits, unfiltered) ──────────
   const allLogDatesRaw = habits.flatMap(h => h.logs.map(l => l.date)).filter(Boolean).sort();
@@ -1497,18 +1433,15 @@ function JournalScreen({ habits, onReflect }) {
     return `${viewYear}-${String(viewMonth+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
   }
 
-  // Count entries per day in this month for the calendar
+  // Calendar: show a dot for every day that has ANY log (not just notes)
   const entryDays = {};
-  filtered.forEach(e => {
-    const d = parseLocal(e.date);
+  Object.entries(allByDate).forEach(([dateStr, habitMap]) => {
+    const d = parseLocal(dateStr);
     if (d.getFullYear() === viewYear && d.getMonth() === viewMonth) {
       const day = d.getDate();
-      if (!entryDays[day]) entryDays[day] = [];
-      entryDays[day].push(e);
+      entryDays[day] = Object.values(habitMap).map(({ habit }) => ({ habitColor: habit.color }));
     }
   });
-
-  const selectedDayEntries = selectedDay ? (entryDays[selectedDay] || []) : [];
 
   return (
     <div>
@@ -1602,23 +1535,21 @@ function JournalScreen({ habits, onReflect }) {
 
           {/* Selected day entries */}
           {selectedDay && (
-            <div>
+            <div style={{ marginBottom:12 }}>
               <div style={{ fontSize:11, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:10 }}>
                 {MONTHS[viewMonth]} {selectedDay}
               </div>
-              {selectedDayEntries.length === 0 ? (
-                firstLogDate && dayStr(selectedDay) === firstLogDate ? (
-                  <div style={{ padding:"20px 0 10px", textAlign:"center" }}>
-                    <div style={{ fontSize:22, marginBottom:8 }}>✦</div>
-                    <div style={{ fontSize:14, color:T.gold, fontWeight:500, marginBottom:6 }}>Day one.</div>
-                    <div style={{ fontSize:13, color:T.muted, lineHeight:1.65 }}>This is where your journey began.</div>
-                  </div>
-                ) : (
-                  <div style={{ padding:"20px 0", textAlign:"center", color:T.muted, fontSize:13 }}>No entries this day</div>
-                )
+              {firstLogDate && dayStr(selectedDay) === firstLogDate && (
+                <div style={{ margin:"0 0 8px", padding:"10px 14px", background:"rgba(200,144,42,0.08)", borderRadius:T.rsm, border:`0.5px solid rgba(200,144,42,0.25)`, display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ fontSize:14 }}>✦</span>
+                  <span style={{ fontSize:12, color:T.gold, fontWeight:500 }}>Day one — this is where your journey began.</span>
+                </div>
+              )}
+              {Object.values(allByDate[dayStr(selectedDay)] || {}).length === 0 ? (
+                <div style={{ padding:"20px 0", textAlign:"center", color:T.muted, fontSize:13 }}>No entries this day</div>
               ) : (
-                selectedDayEntries.map((entry, i) => (
-                  <EntryCard key={i} entry={entry} onReflect={onReflect}/>
+                Object.values(allByDate[dayStr(selectedDay)] || {}).map(({ habit, logs }) => (
+                  <HabitDayCard key={habit.id} habit={habit} logs={logs} onReflect={onReflect}/>
                 ))
               )}
             </div>
@@ -1725,7 +1656,6 @@ function EntryCard({ entry, onReflect }) {
 
 // ─── INSIGHTS SCREEN ──────────────────────────────────────────────────────────
 function InsightsScreen({ habits, onShowHistory, onShare }) {
-  const last7 = Array.from({length:7}, (_, i) => { const d = new Date(); d.setDate(d.getDate() - (6 - i)); return DAYS[d.getDay()]; });
   function IC({ title, children, action }) {
     return (
       <div style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:18 }}>
@@ -1737,20 +1667,156 @@ function InsightsScreen({ habits, onShowHistory, onShare }) {
       </div>
     );
   }
+
+  // ── Summary stats ──────────────────────────────────────────────────────────
+  const allRealLogs = habits.flatMap(h => h.logs.filter(l => l.value !== "quicknote" && l.value !== "skip"));
+  const totalDaysLogged = new Set(allRealLogs.map(l => l.date)).size;
+  const allLogDates = habits.flatMap(h => h.logs.map(l => l.date)).filter(Boolean).sort();
+  const firstLogDate = allLogDates[0] || null;
+  const firstLogLabel = firstLogDate
+    ? `${MONTHS[parseInt(firstLogDate.split("-")[1])-1]} ${firstLogDate.split("-")[0]}`
+    : null;
+  const longestBestStreak = habits.reduce((best, h) => Math.max(best, getBestStreak(h)), 0);
+  const totalLogsEver = allRealLogs.length;
+
+  // Most consistent habit (highest 28-day completion rate)
+  const mostConsistent = habits.length
+    ? habits.reduce((best, h) => getCompletionRate(h) > getCompletionRate(best) ? h : best, habits[0])
+    : null;
+
+  const last7Labels = Array.from({length:7}, (_, i) => {
+    const d = new Date(); d.setDate(d.getDate() - (6 - i)); return DAYS[d.getDay()];
+  });
+
+  if (habits.length === 0) return (
+    <div style={{ padding:"60px 28px", textAlign:"center" }}>
+      <div style={{ fontSize:36, marginBottom:14 }}>📈</div>
+      <div style={{ fontSize:14, color:T.muted, lineHeight:1.7 }}>
+        Start logging habits and your stats will appear here.
+      </div>
+    </div>
+  );
+
   return (
     <div>
+      {/* Header */}
       <div style={{ padding:"16px 18px 10px", display:"flex", alignItems:"flex-end", justifyContent:"space-between" }}>
         <div>
           <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>Forge report</div>
-          <div style={{ fontSize:13, color:T.muted, marginTop:3 }}>Last 28 days</div>
+          {firstLogLabel && (
+            <div style={{ fontSize:12, color:T.muted, marginTop:3 }}>Forging since {firstLogLabel}</div>
+          )}
         </div>
         <button onClick={onShare} style={{ display:"flex", alignItems:"center", gap:6, padding:"8px 14px", borderRadius:T.rsm, background:"rgba(200,144,42,0.12)", border:"none", color:T.gold, fontSize:12, fontWeight:500, cursor:"pointer", marginBottom:4 }}>
           📤 Share
         </button>
       </div>
-      <IC title="Last 7 days" action={<button onClick={onShowHistory} style={{ fontSize:12, color:T.accent, background:"none", border:"none", cursor:"pointer", fontWeight:500 }}>View all →</button>}>
-        <div style={{ display:"grid", gridTemplateColumns:"90px repeat(7,1fr)", gap:4, marginBottom:6 }}>
-          <div/>{last7.map((d, i) => <div key={i} style={{ fontSize:10, color:T.hint, textAlign:"center" }}>{d}</div>)}
+
+      {/* Summary stats row */}
+      <div style={{ margin:"0 14px 12px", display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8 }}>
+        <Stat label="habits" value={habits.length}/>
+        <Stat label="days logged" value={totalDaysLogged} color={T.text}/>
+        <Stat label="best streak" value={longestBestStreak > 0 ? `🔥${longestBestStreak}` : "—"} color={T.gold}/>
+        <Stat label="total logs" value={totalLogsEver}/>
+      </div>
+
+      {/* Streaks */}
+      <IC title="Streaks" action={<button onClick={onShowHistory} style={{ fontSize:12, color:T.accent, background:"none", border:"none", cursor:"pointer", fontWeight:500 }}>Full history →</button>}>
+        {[...habits].sort((a, b) => getStreak(b) - getStreak(a)).map(h => {
+          const cur  = getStreak(h);
+          const best = getBestStreak(h);
+          const act  = get7DayActivity(h);
+          return (
+            <div key={h.id} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14 }}>
+              <span style={{ fontSize:20, width:24, flexShrink:0 }}>{h.emoji}</span>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:13, color:T.text, fontWeight:500, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", marginBottom:5 }}>{h.name}</div>
+                <div style={{ display:"flex", gap:3 }}>
+                  {act.map((on, i) => (
+                    <div key={i} style={{ width:16, height:6, borderRadius:2, background:on ? h.color : T.surface, opacity:on?1:0.2 }}/>
+                  ))}
+                </div>
+              </div>
+              <div style={{ textAlign:"right", flexShrink:0 }}>
+                <div style={{ fontSize:16, fontWeight:600, color:cur > 0 ? h.color : T.hint }}>
+                  {cur > 0 ? `🔥 ${cur}` : "—"}
+                </div>
+                {best > cur && best > 1 && (
+                  <div style={{ fontSize:10, color:T.hint, marginTop:1 }}>best {best}</div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        {mostConsistent && (
+          <div style={{ marginTop:4, padding:"10px 12px", background:`${mostConsistent.color}10`, borderRadius:T.rsm, border:`0.5px solid ${mostConsistent.color}33`, display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:16 }}>🏆</span>
+            <span style={{ fontSize:12, color:T.sub, lineHeight:1.5 }}>
+              <span style={{ color:mostConsistent.color, fontWeight:500 }}>{mostConsistent.name}</span>
+              {" "}is your most consistent habit — {getCompletionRate(mostConsistent)}% over 28 days
+            </span>
+          </div>
+        )}
+      </IC>
+
+      {/* 12-week heatmap */}
+      <IC title="12-week activity">
+        {habits.map(h => {
+          const grid = get12WeekGrid(h);
+          const sessionCount = h.logs.filter(l => l.value !== "quicknote" && l.value !== "skip").length;
+          return (
+            <div key={h.id} style={{ marginBottom:14 }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:5 }}>
+                <span style={{ fontSize:12, color:T.sub }}>
+                  {h.emoji} <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{h.name}</span>
+                </span>
+                <span style={{ fontSize:10, color:T.hint }}>{sessionCount} sessions</span>
+              </div>
+              <div style={{ display:"flex", gap:3 }}>
+                {grid.map((week, wi) => (
+                  <div key={wi} style={{ display:"flex", flexDirection:"column", gap:3 }}>
+                    {week.map((day, di) => (
+                      <div key={di} style={{
+                        width:11, height:11, borderRadius:3,
+                        background: day.logged ? h.color : T.surface,
+                        opacity: day.logged ? 1 : 0.18,
+                      }}/>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+        <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, color:T.hint, marginTop:2 }}>
+          <span>← 12 weeks ago</span><span>today →</span>
+        </div>
+      </IC>
+
+      {/* 28-day completion rate */}
+      <IC title="28-day completion rate">
+        <div style={{ fontSize:11, color:T.hint, marginBottom:14, lineHeight:1.55 }}>
+          How often you hit your goal. Daily = out of 28 days. Weekly = 4 weeks at target. Progress = 14 measurements.
+        </div>
+        {[...habits].sort((a, b) => getCompletionRate(b) - getCompletionRate(a)).map(h => {
+          const rate = getCompletionRate(h);
+          return (
+            <div key={h.id} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+              <span style={{ fontSize:15, width:22, flexShrink:0 }}>{h.emoji}</span>
+              <span style={{ fontSize:12, color:T.text, width:90, flexShrink:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{h.name}</span>
+              <div style={{ flex:1, height:7, background:T.surface, borderRadius:4, overflow:"hidden" }}>
+                <div style={{ height:"100%", borderRadius:4, background:rate>=80?T.green:rate>=50?h.color:T.amber, width:`${rate}%`, transition:"width 0.7s ease" }}/>
+              </div>
+              <span style={{ fontSize:12, color:rate>=80?T.green:rate>=50?h.color:T.muted, width:34, textAlign:"right", flexShrink:0, fontWeight:rate>=50?500:400 }}>{rate}%</span>
+            </div>
+          );
+        })}
+      </IC>
+
+      {/* Last 7 days grid */}
+      <IC title="Last 7 days">
+        <div style={{ display:"grid", gridTemplateColumns:"90px repeat(7,1fr)", gap:4, marginBottom:8 }}>
+          <div/>{last7Labels.map((d, i) => <div key={i} style={{ fontSize:10, color:T.hint, textAlign:"center" }}>{d}</div>)}
         </div>
         {habits.map(h => {
           const act = get7DayActivity(h);
@@ -1761,32 +1827,18 @@ function InsightsScreen({ habits, onShowHistory, onShare }) {
             </div>
           );
         })}
-        <div style={{ fontSize:11, color:T.hint, marginTop:8 }}>Filled = logged that day</div>
       </IC>
-      <IC title="28-day completion rate">
-        <div style={{ fontSize:11, color:T.hint, marginBottom:14, lineHeight:1.55 }}>
-          How consistently you've logged each habit. Daily = out of 28 days. Weekly = out of 4 weeks hitting target. Progress = out of 14 ideal measurements.
-        </div>
-        {habits.map(h => {
-          const rate = getCompletionRate(h);
-          return (
-            <div key={h.id} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
-              <span style={{ fontSize:15, width:22, flexShrink:0 }}>{h.emoji}</span>
-              <span style={{ fontSize:12, color:T.text, width:88, flexShrink:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{h.name}</span>
-              <div style={{ flex:1, height:7, background:T.surface, borderRadius:4, overflow:"hidden" }}>
-                <div style={{ height:"100%", borderRadius:4, background:h.color, width:`${rate}%`, transition:"width 0.7s ease" }}/>
-              </div>
-              <span style={{ fontSize:11, color:rate>70?h.color:T.muted, width:32, textAlign:"right", flexShrink:0, fontWeight:rate>70?500:400 }}>{rate}%</span>
-            </div>
-          );
-        })}
-      </IC>
+
+      {/* Build (project) stats */}
       {habits.filter(h => h.habitType === "project").map(h => {
         const s = getProjectStats(h);
         return (
           <IC key={h.id} title={`${h.emoji} ${h.name} — all time`}>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8, marginBottom:s.wins>0?16:0 }}>
-              <Stat label="total hrs" value={s.totalHours} color={h.color}/><Stat label="hrs this wk" value={s.weekHours}/><Stat label="wins" value={s.wins} color={T.green}/><Stat label="hard parts" value={s.hard} color={T.amber}/>
+              <Stat label="total hrs" value={s.totalHours} color={h.color}/>
+              <Stat label="hrs this wk" value={s.weekHours}/>
+              <Stat label="wins" value={s.wins} color={T.green}/>
+              <Stat label="hard parts" value={s.hard} color={T.amber}/>
             </div>
             {s.wins > 0 && (
               <>
@@ -1802,6 +1854,8 @@ function InsightsScreen({ habits, onShowHistory, onShare }) {
           </IC>
         );
       })}
+
+      {/* Progress goals */}
       {habits.filter(h => h.habitType === "progress").map(h => {
         const logs = [...h.logs].sort((a, b) => a.date.localeCompare(b.date));
         const latest = getLatestValue(h);
@@ -1814,13 +1868,13 @@ function InsightsScreen({ habits, onShowHistory, onShare }) {
               <span style={{ fontSize:13, color:T.muted }}>Goal: <strong style={{ color:T.text }}>{h.targetValue}{h.unit}</strong></span>
             </div>
             <div style={{ height:8, background:T.surface, borderRadius:4, overflow:"hidden", marginBottom:6 }}>
-              <div style={{ height:"100%", borderRadius:4, background:h.color, width:`${pct}%` }}/>
+              <div style={{ height:"100%", borderRadius:4, background:h.color, width:`${pct}%`, transition:"width 0.5s ease" }}/>
             </div>
             <div style={{ fontSize:11, color:T.muted, marginBottom:16, textAlign:"center" }}>{pct}% · {(h.targetValue - latest).toFixed(1)}{h.unit} remaining</div>
-            <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Measurements</div>
+            <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Recent measurements</div>
             {logs.slice(-6).reverse().map((l, i) => (
               <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderTop:`0.5px solid ${T.border}` }}>
-                <span style={{ fontSize:11, color:h.color+"99", fontWeight:500 }}>{l.date}</span>
+                <span style={{ fontSize:11, color:h.color+"99", fontWeight:500 }}>{fmtEntryDate(l.date)}</span>
                 <div style={{ display:"flex", alignItems:"baseline", gap:4 }}>
                   <span style={{ fontSize:15, color:T.text, fontWeight:500 }}>{l.value}</span>
                   <span style={{ fontSize:11, color:T.muted }}>{h.unit}</span>
@@ -1830,21 +1884,6 @@ function InsightsScreen({ habits, onShowHistory, onShare }) {
           </IC>
         );
       })}
-      <IC title="Patterns">
-        <div style={{ textAlign:"center", padding:"16px 0 8px" }}>
-          <div style={{ fontSize:44, marginBottom:14 }}>🔮</div>
-          <div style={{ fontFamily:T.serif, fontSize:20, color:T.text, marginBottom:10 }}>Patterns, incoming.</div>
-          <div style={{ fontSize:13, color:T.muted, lineHeight:1.75, maxWidth:280, margin:"0 auto" }}>
-            Log consistently for a few weeks and Forged will start surfacing real patterns — connections between your habits you wouldn't notice yourself.
-          </div>
-          <div style={{ marginTop:20, display:"flex", justifyContent:"center", gap:8 }}>
-            {["🏋️","📈","😴","🔗","🥗","⚒️"].map((e, i) => (
-              <div key={i} style={{ width:34, height:34, borderRadius:10, background:T.surface, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, opacity:0.2 + (i * 0.12) }}>{e}</div>
-            ))}
-          </div>
-          <div style={{ marginTop:14, fontSize:10, color:T.hint, letterSpacing:"0.1em", textTransform:"uppercase" }}>Coming soon</div>
-        </div>
-      </IC>
     </div>
   );
 }
@@ -1885,7 +1924,10 @@ function HabitsScreen({ habits, onEdit, onDelete, onAdd, onReflect, onCoach }) {
                 <div style={{ width:44, height:44, borderRadius:12, flexShrink:0, background:h.color+"20", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>{h.emoji}</div>
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{h.name}</div>
-                  <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>{getStreak(h)>0?`🔥 ${getStreak(h)} · `:""}{h.logs.length} logs total</div>
+                  <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>
+                    {getStreak(h)>0?`🔥 ${getStreak(h)} · `:""}
+                    {new Set(h.logs.filter(l=>l.value!=="quicknote").map(l=>l.date)).size} days logged
+                  </div>
                 </div>
                 {confirmDelete === h.id ? (
                   <>
@@ -2373,11 +2415,11 @@ function UpgradeModal({ onClose }) {
           </div>
         </div>
 
-        {/* CTA — replace href with your Stripe Payment Link once set up */}
-        <a href="https://buy.stripe.com/REPLACE_WITH_YOUR_STRIPE_LINK" target="_blank" rel="noreferrer"
+        {/* CTA — opens beta interest form until Stripe is live */}
+        <button onClick={() => { onClose(); window.open("mailto:corbyn.miller2000@gmail.com?subject=Forged%20Pro%20%E2%80%94%20Early%20Access&body=Hey%2C%20I%27d%20like%20to%20lock%20in%20the%20beta%20price%20for%20Forged%20Pro.%20Please%20send%20me%20the%20payment%20link%20when%20it%27s%20ready.", "_blank"); }}
           style={{ display:"block", width:"100%", padding:"16px", borderRadius:T.rsm, border:"none", background:T.gold, color:"#1a1a16", fontSize:16, fontWeight:600, cursor:"pointer", marginBottom:12, textAlign:"center", textDecoration:"none", boxSizing:"border-box" }}>
-          Get Forged Pro →
-        </a>
+          Reserve my beta price →
+        </button>
         <div style={{ fontSize:12, color:T.hint, textAlign:"center", lineHeight:1.7 }}>
           ✦ Beta price is yours forever — it won't increase when we launch publicly
         </div>
@@ -3153,24 +3195,6 @@ export default function App() {
     }));
     if (updated) syncHabit(updated);
     addToast("✓ Logged — none today");
-  }
-
-  // Note change: update most recent today log (called on every keystroke — debounce the DB write)
-  function handleNoteChange(id, val) {
-    let updatedHabit = null;
-    setHabits(prev => prev.map(h => {
-      if (h.id !== id) return h;
-      const logs = [...h.logs];
-      const idx = logs.map(l => l.date).lastIndexOf(todayStr());
-      if (idx >= 0) logs[idx] = { ...logs[idx], note:val };
-      updatedHabit = { ...h, logs };
-      return updatedHabit;
-    }));
-    // Debounce the Supabase write by 800ms (outside the updater)
-    clearTimeout(noteDebounceRef.current[id]);
-    noteDebounceRef.current[id] = setTimeout(() => {
-      if (updatedHabit) syncHabit(updatedHabit);
-    }, 800);
   }
 
   // Reflection: save to most recent today log, or create standalone entry
