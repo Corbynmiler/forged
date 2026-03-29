@@ -772,11 +772,15 @@ function LogProgressModal({ habit, onClose, onLog }) {
 
 function LogProjectModal({ habit, onClose, onLog }) {
   const [minutes, setMinutes] = useState("");
-  const [win, setWin] = useState("");
+  const [win,  setWin]  = useState("");
   const [hard, setHard] = useState("");
   const [note, setNote] = useState("");
   const count = todayLogs(habit).length;
   const QUICK_MINS = [15, 30, 45, 60, 90, 120];
+
+  const winSpeech  = useSpeechInput(t => setWin(p  => p.trim() ? p  + " " + t : t));
+  const hardSpeech = useSpeechInput(t => setHard(p => p.trim() ? p + " " + t : t));
+
   return (
     <Modal onClose={onClose}>
       {/* Header */}
@@ -808,19 +812,27 @@ function LogProjectModal({ habit, onClose, onLog }) {
       {/* Win */}
       <div style={{ marginBottom:12 }}>
         <label style={lbl}>A win <span style={{ color:T.hint, fontWeight:400, textTransform:"none", letterSpacing:0 }}>(optional)</span></label>
-        <div style={{ position:"relative" }}>
-          <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", fontSize:16 }}>🏆</span>
-          <input style={{ ...inp, paddingLeft:38 }} placeholder="Something that clicked or worked" value={win} onChange={e => setWin(e.target.value)} maxLength={140}/>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <div style={{ position:"relative", flex:1 }}>
+            <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", fontSize:16 }}>🏆</span>
+            <input style={{ ...inp, paddingLeft:38, paddingRight:8 }} placeholder={winSpeech.listening ? "Listening…" : "Something that clicked or worked"} value={win} onChange={e => setWin(e.target.value)} maxLength={140}/>
+          </div>
+          <MicBtn speech={winSpeech} color={habit.color} size={30}/>
         </div>
+        {winSpeech.interim && <div style={{ fontSize:12, color:T.hint, fontStyle:"italic", marginTop:4, paddingLeft:2 }}>{winSpeech.interim}…</div>}
       </div>
 
       {/* Hard part */}
       <div style={{ marginBottom:20 }}>
         <label style={lbl}>A hard part <span style={{ color:T.hint, fontWeight:400, textTransform:"none", letterSpacing:0 }}>(optional)</span></label>
-        <div style={{ position:"relative" }}>
-          <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", fontSize:16 }}>🧱</span>
-          <input style={{ ...inp, paddingLeft:38 }} placeholder="Something that blocked you" value={hard} onChange={e => setHard(e.target.value)} maxLength={140}/>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <div style={{ position:"relative", flex:1 }}>
+            <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", fontSize:16 }}>🧱</span>
+            <input style={{ ...inp, paddingLeft:38, paddingRight:8 }} placeholder={hardSpeech.listening ? "Listening…" : "Something that blocked you"} value={hard} onChange={e => setHard(e.target.value)} maxLength={140}/>
+          </div>
+          <MicBtn speech={hardSpeech} color={habit.color} size={30}/>
         </div>
+        {hardSpeech.interim && <div style={{ fontSize:12, color:T.hint, fontStyle:"italic", marginTop:4, paddingLeft:2 }}>{hardSpeech.interim}…</div>}
       </div>
 
       <PBtn color={habit.color} onClick={() => {
@@ -1502,8 +1514,8 @@ function HabitDayCard({ habit, logs, onReflect }) {
         </div>
       )}
 
-      {/* Quick notes */}
-      {uniqueNotes.map((n, i) => (
+      {/* Quick notes — newest first */}
+      {[...uniqueNotes].reverse().map((n, i) => (
         <div key={i} style={{ padding:"8px 14px", borderBottom:i<uniqueNotes.length-1?`0.5px solid ${T.border}`:"none", background:`${T.surface}66` }}>
           <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:3 }}>Note</div>
           <div style={{ fontSize:13, color:T.sub, lineHeight:1.55, fontStyle:"italic" }}>{n}</div>
@@ -2485,74 +2497,104 @@ function AvatarPickerModal({ current, onSelect, onClose }) {
 
 // ─── PROFILE / SETTINGS SCREEN ────────────────────────────────────────────────
 // ─── UPGRADE MODAL ────────────────────────────────────────────────────────────
-function UpgradeModal({ onClose }) {
+function UpgradeModal({ onClose, habitCount = 0 }) {
+  const [spots, setSpots] = useState(null); // total users signed up so far
+
+  useEffect(() => {
+    supabase.rpc("beta_spot_count").then(({ data }) => {
+      if (typeof data === "number") setSpots(data);
+    });
+  }, []);
+
+  const spotsLeft = spots !== null ? Math.max(0, 100 - spots) : null;
+  const spotsPct  = spots !== null ? Math.min(100, (spots / 100) * 100) : 0;
+
   const features = [
-    { icon:"🤖", label:"AI Habit Coach",           desc:"Personalised coaching based on your actual habits" },
-    { icon:"∞",  label:"Unlimited habits",          desc:"Free plan includes up to 5 habits" },
-    { icon:"📊", label:"Advanced pattern analysis", desc:"Spot connections between habits you'd miss yourself" },
-    { icon:"🔔", label:"Push reminders",            desc:"Smart nudges at the right time" },
+    { icon:"∞",  label:"Unlimited habits",   free:"Up to 5",          pro:"No limit",              live:true },
+    { icon:"🤖", label:"AI Habit Coach",      free:"—",                pro:"Personalised coaching", live:true },
+    { icon:"📜", label:"Full history",        free:"Last 7 days",      pro:"Every entry, forever",  live:true },
+    { icon:"🔔", label:"Push reminders",      free:"—",                pro:"Smart daily nudges",    live:false },
+    { icon:"📊", label:"Advanced analytics",  free:"28-day view",      pro:"90-day + connections",  live:false },
   ];
+
   return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", zIndex:500, display:"flex", alignItems:"flex-end", justifyContent:"center" }}
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.88)", zIndex:500, display:"flex", alignItems:"flex-end", justifyContent:"center" }}
       onClick={e => e.target === e.currentTarget && onClose()}>
-      <div style={{ width:430, maxWidth:"100vw", background:T.raised, borderRadius:"24px 24px 0 0", padding:"28px 24px 44px" }}>
-        {/* Header */}
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:22 }}>
-          <div>
-            <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>Forged Pro</div>
-            <div style={{ fontSize:13, color:T.gold, marginTop:3 }}>Early access pricing — lock it in forever</div>
-          </div>
+      <div style={{ width:430, maxWidth:"100vw", background:T.raised, borderRadius:"24px 24px 0 0", padding:"24px 22px 44px", overflowY:"auto", maxHeight:"92vh" }}>
+
+        {/* Close */}
+        <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:4 }}>
           <button onClick={onClose} style={{ background:"none", border:"none", color:T.muted, fontSize:26, cursor:"pointer", lineHeight:1 }}>×</button>
         </div>
 
-        {/* Feature list */}
-        <div style={{ marginBottom:24 }}>
+        {/* Beta spots urgency bar */}
+        <div style={{ background:"rgba(200,144,42,0.08)", border:`1px solid rgba(200,144,42,0.3)`, borderRadius:T.r, padding:"12px 14px", marginBottom:20 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:7 }}>
+            <span style={{ fontSize:12, fontWeight:600, color:T.gold }}>🔥 Beta pricing — first 100 users only</span>
+            {spotsLeft !== null && (
+              <span style={{ fontSize:11, color: spotsLeft <= 10 ? "#e74c3c" : T.muted, fontWeight:500 }}>
+                {spotsLeft} spot{spotsLeft !== 1 ? "s" : ""} left
+              </span>
+            )}
+          </div>
+          <div style={{ height:5, background:T.surface, borderRadius:3, overflow:"hidden" }}>
+            <div style={{ height:"100%", borderRadius:3, background:T.gold, width:`${spotsPct}%`, transition:"width 0.8s ease" }}/>
+          </div>
+          <div style={{ fontSize:11, color:T.hint, marginTop:6, lineHeight:1.5 }}>
+            Lock in <strong style={{ color:T.text }}>$4.99/mo forever</strong> — goes to $7.99 once we hit 100 users.
+          </div>
+        </div>
+
+        {/* Header */}
+        <div style={{ marginBottom:20 }}>
+          <div style={{ fontFamily:T.serif, fontSize:28, color:T.text, marginBottom:4 }}>Forged Pro</div>
+          {habitCount >= 5 && (
+            <div style={{ fontSize:13, color:T.amber }}>You've hit the 5-habit free limit — Pro removes it.</div>
+          )}
+        </div>
+
+        {/* Feature comparison */}
+        <div style={{ background:T.surface, borderRadius:T.r, overflow:"hidden", marginBottom:20, border:`0.5px solid ${T.border}` }}>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 80px 80px", borderBottom:`0.5px solid ${T.border}`, padding:"7px 14px" }}>
+            <span style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.07em" }}>Feature</span>
+            <span style={{ fontSize:10, color:T.hint, textAlign:"center", textTransform:"uppercase", letterSpacing:"0.07em" }}>Free</span>
+            <span style={{ fontSize:10, color:T.gold, textAlign:"center", textTransform:"uppercase", letterSpacing:"0.07em", fontWeight:600 }}>Pro</span>
+          </div>
           {features.map((f, i) => (
-            <div key={i} style={{ display:"flex", gap:14, alignItems:"flex-start", marginBottom:14 }}>
-              <div style={{ width:38, height:38, borderRadius:11, background:"rgba(200,144,42,0.15)", border:`0.5px solid rgba(200,144,42,0.3)`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:17, flexShrink:0 }}>{f.icon}</div>
+            <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 80px 80px", padding:"10px 14px", borderBottom: i < features.length-1 ? `0.5px solid ${T.border}` : "none", alignItems:"center" }}>
               <div>
-                <div style={{ fontSize:14, fontWeight:500, color:T.text }}>{f.label}</div>
-                <div style={{ fontSize:12, color:T.muted, marginTop:2, lineHeight:1.5 }}>{f.desc}</div>
+                <span style={{ fontSize:13 }}>{f.icon} </span>
+                <span style={{ fontSize:13, color:T.text, fontWeight:500 }}>{f.label}</span>
+                {!f.live && <span style={{ fontSize:9, color:T.hint, marginLeft:6, textTransform:"uppercase", letterSpacing:"0.07em" }}>soon</span>}
               </div>
-              <div style={{ marginLeft:"auto", flexShrink:0 }}>
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8l3.5 3.5 6.5-7" stroke={T.green} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              </div>
+              <span style={{ fontSize:11, color:T.hint, textAlign:"center" }}>{f.free}</span>
+              <span style={{ fontSize:11, color: f.live ? T.gold : T.muted, textAlign:"center", fontWeight: f.live ? 500 : 400 }}>{f.pro}</span>
             </div>
           ))}
         </div>
 
-        {/* Beta pricing callout */}
-        <div style={{ background:"rgba(200,144,42,0.07)", border:`0.5px solid rgba(200,144,42,0.25)`, borderRadius:T.r, padding:"10px 14px", marginBottom:14, display:"flex", alignItems:"center", gap:10 }}>
-          <span style={{ fontSize:16 }}>🔐</span>
-          <div style={{ fontSize:12, color:T.muted, lineHeight:1.5 }}>
-            <span style={{ color:T.gold, fontWeight:600 }}>Beta pricing — first 100 users only.</span> Lock this in forever. Regular price will be $7.99/mo.
-          </div>
-        </div>
-
         {/* Pricing tiers */}
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:20 }}>
-          <div style={{ background:T.surface, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:"16px 12px", textAlign:"center" }}>
-            <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Monthly</div>
-            <div style={{ fontSize:26, fontWeight:600, color:T.text, letterSpacing:"-0.02em" }}>$4.99</div>
-            <div style={{ fontSize:11, color:T.muted, marginTop:3 }}>per month</div>
-            <div style={{ fontSize:10, color:T.hint, marginTop:4, textDecoration:"line-through" }}>$7.99 later</div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:18 }}>
+          <div style={{ background:T.surface, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:"14px 12px", textAlign:"center" }}>
+            <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:5 }}>Monthly</div>
+            <div style={{ fontSize:28, fontWeight:600, color:T.text, letterSpacing:"-0.02em" }}>$4.99</div>
+            <div style={{ fontSize:11, color:T.hint, marginTop:3, textDecoration:"line-through" }}>$7.99/mo after 100 users</div>
           </div>
-          <div style={{ background:"rgba(200,144,42,0.08)", borderRadius:T.r, border:`1px solid rgba(200,144,42,0.4)`, padding:"16px 12px", textAlign:"center", position:"relative" }}>
-            <div style={{ position:"absolute", top:-11, left:"50%", transform:"translateX(-50%)", background:T.gold, color:"#1a1a16", fontSize:9, fontWeight:700, padding:"3px 9px", borderRadius:20, letterSpacing:"0.08em", textTransform:"uppercase", whiteSpace:"nowrap" }}>Best value</div>
-            <div style={{ fontSize:10, color:T.gold, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Annual</div>
-            <div style={{ fontSize:26, fontWeight:600, color:T.gold, letterSpacing:"-0.02em" }}>$39.99</div>
-            <div style={{ fontSize:11, color:T.muted, marginTop:3 }}>per year · $3.33/mo</div>
-            <div style={{ fontSize:10, color:T.green, marginTop:4 }}>save 33%</div>
+          <div style={{ background:"rgba(200,144,42,0.08)", borderRadius:T.r, border:`1px solid rgba(200,144,42,0.45)`, padding:"14px 12px", textAlign:"center", position:"relative" }}>
+            <div style={{ position:"absolute", top:-10, left:"50%", transform:"translateX(-50%)", background:T.gold, color:"#1a1a16", fontSize:9, fontWeight:700, padding:"3px 9px", borderRadius:20, letterSpacing:"0.08em", textTransform:"uppercase", whiteSpace:"nowrap" }}>Best value</div>
+            <div style={{ fontSize:10, color:T.gold, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:5 }}>Annual</div>
+            <div style={{ fontSize:28, fontWeight:600, color:T.gold, letterSpacing:"-0.02em" }}>$39.99</div>
+            <div style={{ fontSize:11, color:T.green, marginTop:3 }}>$3.33/mo · save 33%</div>
           </div>
         </div>
 
-        {/* CTA — opens beta interest form until Stripe is live */}
+        {/* CTA */}
         <button onClick={() => { onClose(); window.open("mailto:corbyn.miller2000@gmail.com?subject=Forged%20Pro%20%E2%80%94%20Early%20Access&body=Hey%2C%20I%27d%20like%20to%20lock%20in%20the%20beta%20price%20for%20Forged%20Pro.%20Please%20send%20me%20the%20payment%20link%20when%20it%27s%20ready.", "_blank"); }}
-          style={{ display:"block", width:"100%", padding:"16px", borderRadius:T.rsm, border:"none", background:T.gold, color:"#1a1a16", fontSize:16, fontWeight:600, cursor:"pointer", marginBottom:12, textAlign:"center", textDecoration:"none", boxSizing:"border-box" }}>
-          Reserve my beta price →
+          style={{ display:"block", width:"100%", padding:"16px", borderRadius:T.rsm, border:"none", background:T.gold, color:"#1a1a16", fontSize:16, fontWeight:700, cursor:"pointer", marginBottom:10, textAlign:"center", boxSizing:"border-box", letterSpacing:"0.01em" }}>
+          Reserve my beta spot →
         </button>
-        <div style={{ fontSize:12, color:T.hint, textAlign:"center", lineHeight:1.7 }}>
-          ✦ Beta price is yours forever — it won't increase when we launch publicly
+        <div style={{ fontSize:11, color:T.hint, textAlign:"center", lineHeight:1.7 }}>
+          Your price is locked in forever — even after we raise it publicly
         </div>
       </div>
     </div>
@@ -3340,6 +3382,15 @@ export default function App() {
     addToast("✓ Habit updated");
   }
 
+  // Gate adding habits at 5 for free users
+  function handleStartAdd() {
+    if (!isPro && habits.length >= 5) {
+      setShowUpgrade(true);
+    } else {
+      setShowAdd(true);
+    }
+  }
+
   // Add a new habit
   function handleAddHabit(h) {
     setHabits(p => [...p, h]);
@@ -3390,10 +3441,10 @@ export default function App() {
           </button>
         </div>
 
-        {screen === "today"    && <TodayScreen    habits={habits} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onReflect={setReflectId} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onAdd={() => setShowAdd(true)} onXPInfo={() => setShowXP(true)}/>}
+        {screen === "today"    && <TodayScreen    habits={habits} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onReflect={setReflectId} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onAdd={handleStartAdd} onXPInfo={() => setShowXP(true)}/>}
         {screen === "journal"  && <JournalScreen  habits={habits} onReflect={setReflectId}/>}
         {screen === "insights" && <InsightsScreen habits={habits} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)}/>}
-        {screen === "habits"   && <HabitsScreen   habits={habits} onEdit={setEditId} onDelete={handleDeleteHabit} onAdd={() => setShowAdd(true)} onReflect={setReflectId} onCoach={() => setShowCoach(true)}/>}
+        {screen === "habits"   && <HabitsScreen   habits={habits} onEdit={setEditId} onDelete={handleDeleteHabit} onAdd={handleStartAdd} onReflect={setReflectId} onCoach={() => setShowCoach(true)}/>}
         {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro}
           onUpgrade={() => setShowUpgrade(true)}
           onUpdateUser={updates => {
@@ -3430,7 +3481,7 @@ export default function App() {
       {logId && logHabit?.habitType === "progress" && <LogProgressModal  habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
       {logId && logHabit?.habitType === "project"  && <LogProjectModal   habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
       {showCoach   && <AICoach habits={habits} user={user} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)}/>}
-      {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)}/>}
+      {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} habitCount={habits.length}/>}
       {showShare && <ShareCardModal user={user} habits={habits} xp={xp} onClose={() => setShowShare(false)}/>}
       {showTour && (
         <TourOverlay
