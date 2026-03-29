@@ -345,16 +345,118 @@ function DoneBanner({ habit }) {
   );
 }
 
+// ─── SPEECH-TO-TEXT ───────────────────────────────────────────────────────────
+function useSpeechInput(onFinal) {
+  const [listening, setListening] = useState(false);
+  const [interim,   setInterim]   = useState("");
+  const R = useRef({ recog:null, stream:null, ctx:null, raf:null, ringEl:null });
+
+  const supported = !!(typeof window !== "undefined" &&
+    (window.SpeechRecognition || window.webkitSpeechRecognition));
+
+  const stopAll = useCallback(() => {
+    const r = R.current;
+    if (r.raf)    cancelAnimationFrame(r.raf);
+    if (r.ctx)    r.ctx.close().catch(()=>{});
+    if (r.stream) r.stream.getTracks().forEach(t => t.stop());
+    try { r.recog?.stop(); } catch {}
+    r.raf = null; r.ctx = null; r.stream = null; r.recog = null;
+    if (r.ringEl) { r.ringEl.style.transform = "scale(1)"; r.ringEl.style.opacity = "0"; }
+    setListening(false);
+    setInterim("");
+  }, []);
+
+  useEffect(() => stopAll, [stopAll]);
+
+  const setRingEl = useCallback(el => { R.current.ringEl = el; }, []);
+
+  function startVolume() {
+    navigator.mediaDevices?.getUserMedia({ audio:true, video:false }).then(stream => {
+      R.current.stream = stream;
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 64;
+      ctx.createMediaStreamSource(stream).connect(analyser);
+      R.current.ctx = ctx;
+      const buf = new Uint8Array(analyser.frequencyBinCount);
+      const tick = () => {
+        analyser.getByteFrequencyData(buf);
+        const avg = buf.reduce((a,b) => a+b, 0) / buf.length;
+        const v   = Math.min(1, avg / 48);
+        const el  = R.current.ringEl;
+        if (el) { el.style.transform = `scale(${1 + v*0.65})`; el.style.opacity = String(Math.max(0.12, v)); }
+        R.current.raf = requestAnimationFrame(tick);
+      };
+      tick();
+    }).catch(() => {});
+  }
+
+  function toggle() {
+    if (listening) { stopAll(); return; }
+    if (!supported) { alert("Voice input requires Chrome or Safari."); return; }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recog = new SR();
+    recog.continuous     = true;
+    recog.interimResults = true;
+    recog.lang           = navigator.language || "en-US";
+    recog.onresult = e => {
+      let iText = "";
+      for (let j = e.resultIndex; j < e.results.length; j++) {
+        if (e.results[j].isFinal) { onFinal(e.results[j][0].transcript.trim()); setInterim(""); }
+        else iText += e.results[j][0].transcript;
+      }
+      if (iText) setInterim(iText);
+    };
+    recog.onerror = () => stopAll();
+    recog.onend   = () => stopAll();
+    R.current.recog = recog;
+    try { recog.start(); setListening(true); startVolume(); } catch { stopAll(); }
+  }
+
+  return { listening, interim, toggle, supported, setRingEl };
+}
+
+function MicBtn({ speech, color = T.accent, size = 28 }) {
+  if (!speech.supported) return null;
+  const c = speech.listening ? color : T.hint;
+  return (
+    <button onClick={speech.toggle}
+      title={speech.listening ? "Tap to stop" : "Tap to dictate"}
+      style={{ position:"relative", width:size, height:size, borderRadius:"50%",
+        border:`1px solid ${speech.listening ? color+"55" : T.border}`,
+        background: speech.listening ? color+"14" : "transparent",
+        cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center",
+        flexShrink:0, padding:0, transition:"border-color 0.2s, background 0.2s" }}>
+      {/* volume ring — animated via direct DOM in RAF loop, no React state */}
+      <div ref={speech.setRingEl} style={{ position:"absolute", inset:-5, borderRadius:"50%",
+        border:`1.5px solid ${color}`, opacity:0, transform:"scale(1)", pointerEvents:"none",
+        transition: speech.listening ? "none" : "opacity 0.5s" }}/>
+      {/* mic icon */}
+      <svg width={size*0.56} height={size*0.56} viewBox="0 0 16 16" fill="none" style={{ color:c, transition:"color 0.2s" }}>
+        <rect x="5" y="1" width="6" height="8" rx="3" fill="currentColor"/>
+        <path d="M3 7.5a5 5 0 0 0 10 0" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" fill="none"/>
+        <line x1="8" y1="12.5" x2="8" y2="14.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+        <line x1="5.5" y1="14.5" x2="10.5" y2="14.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+      </svg>
+    </button>
+  );
+}
+
 // ─── NOTE STRIP ───────────────────────────────────────────────────────────────
-// Type a quick note, tap ✓ Done to save it as a permanent entry and clear.
+// Type a quick note or dictate it, tap ✓ Done to save as a permanent entry.
 // Each Done tap creates a separate note entry — multiple notes per day supported.
 // "Go deeper" opens the full reflection modal.
 function NoteStrip({ habitId, habit, onAddNote, onReflect }) {
   const [val, setVal] = useState("");
   const [lastSaved, setLastSaved] = useState("");
 
+  const speech = useSpeechInput(text =>
+    setVal(p => p.trim() ? p + " " + text : text)
+  );
+
   function handleDone() {
     if (!val.trim()) return;
+    speech.listening && speech.toggle(); // stop recording if active
     onAddNote(habitId, val.trim());
     setLastSaved(val.trim());
     setVal("");
@@ -371,19 +473,27 @@ function NoteStrip({ habitId, habit, onAddNote, onReflect }) {
       <textarea
         rows={2} maxLength={280}
         style={{ width:"100%", border:"none", background:"none", fontSize:13, color:T.text, resize:"none", lineHeight:1.55, minHeight:36, outline:"none" }}
-        placeholder="Quick note…"
+        placeholder={speech.listening ? "Listening…" : "Quick note…"}
         value={val}
         onChange={e => setVal(e.target.value)}
       />
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+      {speech.interim && (
+        <div style={{ fontSize:12, color:T.hint, fontStyle:"italic", lineHeight:1.45, marginTop:-4 }}>
+          {speech.interim}…
+        </div>
+      )}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
         <button onClick={() => onReflect(habitId)}
           style={{ fontSize:12, color:habit.color+"99", background:"none", border:"none", cursor:"pointer", fontWeight:500, padding:0 }}>
           Go deeper →
         </button>
-        <button onClick={handleDone} disabled={!val.trim()}
-          style={{ fontSize:12, color:val.trim()?T.text:T.hint, background:val.trim()?habit.color+"22":"none", border:`0.5px solid ${val.trim()?habit.color+"55":T.border}`, borderRadius:T.rsm, padding:"4px 12px", cursor:val.trim()?"pointer":"default", fontWeight:500, transition:"all 0.15s" }}>
-          ✓ Done
-        </button>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <MicBtn speech={speech} color={habit.color} size={26}/>
+          <button onClick={handleDone} disabled={!val.trim() && !speech.interim}
+            style={{ fontSize:12, color:val.trim()?T.text:T.hint, background:val.trim()?habit.color+"22":"none", border:`0.5px solid ${val.trim()?habit.color+"55":T.border}`, borderRadius:T.rsm, padding:"4px 12px", cursor:val.trim()?"pointer":"default", fontWeight:500, transition:"all 0.15s" }}>
+            ✓ Done
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -726,14 +836,22 @@ function LogProjectModal({ habit, onClose, onLog }) {
 function ReflectModal({ habit, onClose, onSave }) {
   const [text, setText] = useState("");
   const [saved, setSaved] = useState(false);
+
+  const speech = useSpeechInput(transcript =>
+    setText(p => p.trim() ? p + " " + transcript : transcript)
+  );
+
   if (!habit) return null;
   const past = habit.logs.filter(l => l.reflection).slice(-4).reverse();
+
   function handleSave() {
+    if (speech.listening) speech.toggle();
     if (!text.trim()) { onClose(); return; }
     onSave(habit.id, text.trim());
     setSaved(true);
     setTimeout(onClose, 700);
   }
+
   return (
     <Modal onClose={onClose}>
       <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:4 }}>
@@ -744,12 +862,25 @@ function ReflectModal({ habit, onClose, onSave }) {
       <div style={{ background:T.surface, borderRadius:T.rsm, padding:"11px 14px", fontSize:13, color:T.sub, fontStyle:"italic", marginBottom:16, borderLeft:`2px solid ${habit.color}` }}>
         {habit.reflectionPrompt || "How did it go? What do you want to remember?"}
       </div>
-      {saved
-        ? <div style={{ textAlign:"center", padding:"28px 0", fontSize:16, color:T.green }}>✓ Saved</div>
-        : <textarea value={text} onChange={e => setText(e.target.value)}
-            style={{ width:"100%", border:`0.5px solid ${T.borderStrong}`, borderRadius:T.rsm, background:T.surface, padding:12, fontSize:14, color:T.text, resize:"none", minHeight:130, lineHeight:1.6, boxSizing:"border-box" }}
-            placeholder="Write freely — this is just for you..." rows={5} autoFocus/>
-      }
+      {saved ? (
+        <div style={{ textAlign:"center", padding:"28px 0", fontSize:16, color:T.green }}>✓ Saved</div>
+      ) : (
+        <div style={{ position:"relative", marginBottom:speech.interim ? 6 : 0 }}>
+          <textarea value={text} onChange={e => setText(e.target.value)}
+            style={{ width:"100%", border:`0.5px solid ${speech.listening ? habit.color+"66" : T.borderStrong}`, borderRadius:T.rsm, background:T.surface, padding:12, paddingBottom:40, fontSize:14, color:T.text, resize:"none", minHeight:130, lineHeight:1.6, boxSizing:"border-box", transition:"border-color 0.2s" }}
+            placeholder={speech.listening ? "Listening…" : "Write freely — this is just for you..."}
+            rows={5} autoFocus={!speech.listening}/>
+          {/* mic button floated inside textarea bottom-right */}
+          <div style={{ position:"absolute", bottom:10, right:10 }}>
+            <MicBtn speech={speech} color={habit.color} size={30}/>
+          </div>
+        </div>
+      )}
+      {speech.interim && !saved && (
+        <div style={{ fontSize:13, color:T.hint, fontStyle:"italic", lineHeight:1.5, marginBottom:10, paddingLeft:4 }}>
+          {speech.interim}…
+        </div>
+      )}
       {past.length > 0 && (
         <div style={{ marginTop:22 }}>
           <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:10 }}>Past reflections</div>
