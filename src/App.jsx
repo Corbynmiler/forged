@@ -2661,7 +2661,6 @@ function AuthScreen({ onSent }) {
   const [loading,    setLoading]    = useState(false);
   const [error,      setError]      = useState("");
   const [forgotSent, setForgotSent] = useState(false);
-  const [keepSignedIn, setKeepSignedIn] = useState(true);
 
   async function handleSubmit() {
     if (loading) return;
@@ -2683,12 +2682,6 @@ function AuthScreen({ onSent }) {
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email: e, password: p });
       if (error) { setError(error.message); setLoading(false); return; }
-      // If "keep me signed in" is off, remove the persisted token so the
-      // session ends when the tab is closed (Supabase defaults to localStorage).
-      if (!keepSignedIn) {
-        const key = Object.keys(localStorage).find(k => k.includes("supabase") && k.includes("auth-token"));
-        if (key) { sessionStorage.setItem(key, localStorage.getItem(key)); localStorage.removeItem(key); }
-      }
     }
     setLoading(false);
   }
@@ -2776,16 +2769,7 @@ function AuthScreen({ onSent }) {
         onKeyDown={e => e.key === "Enter" && handleSubmit()}
         style={authInp}
       />
-      {error && <div style={{ fontSize:13, color:T.accent, marginBottom:10 }}>{error}</div>}
-      {mode === "signin" && (
-        <button onClick={() => setKeepSignedIn(k => !k)}
-          style={{ display:"flex", alignItems:"center", gap:10, background:"none", border:"none", cursor:"pointer", padding:"2px 0 16px", width:"100%" }}>
-          <div style={{ width:20, height:20, borderRadius:6, border:`1.5px solid ${keepSignedIn ? T.accent : T.borderStrong}`, background:keepSignedIn ? T.accent : "transparent", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", transition:"all 0.15s" }}>
-            {keepSignedIn && <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M1.5 5.5l2.5 2.5 5.5-5.5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-          </div>
-          <span style={{ fontSize:13, color:T.muted, textAlign:"left" }}>Keep me signed in</span>
-        </button>
-      )}
+      {error && <div style={{ fontSize:14, color:"#e74c3c", background:"rgba(231,76,60,0.1)", border:"1px solid rgba(231,76,60,0.3)", borderRadius:T.rsm, padding:"10px 14px", marginBottom:12 }}>{error}</div>}
       <button onClick={handleSubmit}
         style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:!loading?T.accent:T.surface, color:!loading?"#fff":T.muted, fontSize:16, fontWeight:500, cursor:!loading?"pointer":"default", transition:"all 0.2s" }}>
         {loading ? "…" : mode === "signin" ? "Sign in" : "Create account"}
@@ -2968,19 +2952,19 @@ export default function App() {
           return;
         }
         if ((event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "INITIAL_SESSION") && session?.user?.id) {
-          // TOKEN_REFRESHED is critical: getSession() may time out (3s) while Supabase
-          // refreshes an expired token in the background. When the refresh completes,
-          // TOKEN_REFRESHED fires — this is the only chance to set userIdRef so saves work.
-          // Only load data if we don't already have this user loaded (avoids double-load).
+          // Load data only if this is a new user or a different user than what's loaded.
+          // TOKEN_REFRESHED can fire after getSession() times out — this is how we recover.
           if (userIdRef.current !== session.user.id) {
             setLoading(true);
             await loadUserData(session.user.id);
-            if (mounted) {
-              setAuthScreen(false);
-              setPendingEmail(null);
-              setPasswordRecovery(false);
-              setLoading(false);
-            }
+            if (mounted) setLoading(false);
+          }
+          // Always clear the auth screen when we have a valid session — even if data
+          // was already loaded. This is the safety net against getting stuck on login.
+          if (mounted) {
+            setAuthScreen(false);
+            setPendingEmail(null);
+            setPasswordRecovery(false);
           }
         }
       } catch (err) {
