@@ -1267,7 +1267,7 @@ function BetaModal({ onClose }) {
     const body = encodeURIComponent(
       `Email: ${email.trim()}\n\n${msg.trim() ? `Message: ${msg.trim()}` : "(No message)"}`
     );
-    window.open(`mailto:corbynmiller1@gmail.com?subject=${subject}&body=${body}`, "_blank");
+    window.open(`mailto:corbyn.miller2000@gmail.com?subject=${subject}&body=${body}`, "_blank");
     setSent(true);
   }
 
@@ -1476,6 +1476,13 @@ function JournalScreen({ habits, onReflect }) {
   const byDate = {};
   filtered.forEach(e => { if (!byDate[e.date]) byDate[e.date] = []; byDate[e.date].push(e); });
 
+  // ── Journey start date (earliest log across ALL habits, unfiltered) ──────────
+  const allLogDatesRaw = habits.flatMap(h => h.logs.map(l => l.date)).filter(Boolean).sort();
+  const firstLogDate  = allLogDatesRaw[0] || null; // e.g. "2025-01-15"
+  const firstLogYear  = firstLogDate ? parseInt(firstLogDate.split("-")[0]) : null;
+  const firstLogMonth = firstLogDate ? parseInt(firstLogDate.split("-")[1]) - 1 : null; // 0-indexed
+  const firstLogDay   = firstLogDate ? parseInt(firstLogDate.split("-")[2]) : null;
+
   // ── MONTH VIEW helpers ─────────────────────────────────────────────────────
   const now = new Date();
   const viewYear  = new Date(now.getFullYear(), now.getMonth() - monthOffset, 1).getFullYear();
@@ -1568,22 +1575,26 @@ function JournalScreen({ habits, onReflect }) {
               const hasEntries = !!entryDays[day];
               const isToday = ds === todayStr();
               const isSelected = selectedDay === day;
+              const isJourneyStart = firstLogDate === ds;
               const habitColors = hasEntries ? [...new Set(entryDays[day].map(e => e.habitColor))].slice(0,3) : [];
               return (
-                <button key={day} onClick={() => setSelectedDay(isSelected ? null : day)}
+                <button key={day} onClick={() => (hasEntries || isJourneyStart) && setSelectedDay(isSelected ? null : day)}
                   style={{
-                    aspectRatio:"1", borderRadius:8, border:`1px solid ${isSelected?T.accent:isToday?T.borderMid:T.border}`,
-                    background:isSelected?"rgba(192,57,43,0.15)":isToday?T.surface:T.raised,
-                    cursor:hasEntries?"pointer":"default",
+                    aspectRatio:"1", borderRadius:8,
+                    border:`1px solid ${isSelected?T.accent:isJourneyStart?T.gold:isToday?T.borderMid:T.border}`,
+                    background:isSelected?"rgba(192,57,43,0.15)":isJourneyStart&&!hasEntries?"rgba(200,144,42,0.08)":isToday?T.surface:T.raised,
+                    cursor:(hasEntries||isJourneyStart)?"pointer":"default",
                     display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:2,
                     padding:2, transition:"all 0.15s",
                   }}>
-                  <span style={{ fontSize:11, color:isToday?T.accent:hasEntries?T.text:T.muted, fontWeight:isToday?500:400 }}>{day}</span>
-                  {hasEntries && (
+                  <span style={{ fontSize:11, color:isToday?T.accent:isJourneyStart?T.gold:hasEntries?T.text:T.muted, fontWeight:isToday||isJourneyStart?500:400 }}>{day}</span>
+                  {hasEntries ? (
                     <div style={{ display:"flex", gap:2 }}>
                       {habitColors.map((c,ci) => <div key={ci} style={{ width:4, height:4, borderRadius:"50%", background:c }}/>)}
                     </div>
-                  )}
+                  ) : isJourneyStart ? (
+                    <div style={{ fontSize:7, color:T.gold }}>✦</div>
+                  ) : null}
                 </button>
               );
             })}
@@ -1596,7 +1607,15 @@ function JournalScreen({ habits, onReflect }) {
                 {MONTHS[viewMonth]} {selectedDay}
               </div>
               {selectedDayEntries.length === 0 ? (
-                <div style={{ padding:"20px 0", textAlign:"center", color:T.muted, fontSize:13 }}>No entries this day</div>
+                firstLogDate && dayStr(selectedDay) === firstLogDate ? (
+                  <div style={{ padding:"20px 0 10px", textAlign:"center" }}>
+                    <div style={{ fontSize:22, marginBottom:8 }}>✦</div>
+                    <div style={{ fontSize:14, color:T.gold, fontWeight:500, marginBottom:6 }}>Day one.</div>
+                    <div style={{ fontSize:13, color:T.muted, lineHeight:1.65 }}>This is where your journey began.</div>
+                  </div>
+                ) : (
+                  <div style={{ padding:"20px 0", textAlign:"center", color:T.muted, fontSize:13 }}>No entries this day</div>
+                )
               ) : (
                 selectedDayEntries.map((entry, i) => (
                   <EntryCard key={i} entry={entry} onReflect={onReflect}/>
@@ -1605,11 +1624,35 @@ function JournalScreen({ habits, onReflect }) {
             </div>
           )}
 
-          {Object.keys(entryDays).length === 0 && (
-            <div style={{ padding:"40px 20px", textAlign:"center" }}>
-              <div style={{ fontSize:13, color:T.muted }}>No entries this month</div>
-            </div>
-          )}
+          {Object.keys(entryDays).length === 0 && (() => {
+            // Is this month before the user's journey began?
+            const beforeJourney = firstLogDate && (
+              viewYear < firstLogYear ||
+              (viewYear === firstLogYear && viewMonth < firstLogMonth)
+            );
+            if (beforeJourney) {
+              return (
+                <div style={{ padding:"40px 20px", textAlign:"center" }}>
+                  <div style={{ fontSize:34, marginBottom:12 }}>✨</div>
+                  <div style={{ fontSize:15, color:T.text, fontWeight:500, marginBottom:8, fontFamily:T.serif }}>
+                    Your journey hadn't started yet
+                  </div>
+                  <div style={{ fontSize:13, color:T.muted, lineHeight:1.7 }}>
+                    You began forging on{" "}
+                    <span style={{ color:T.text, fontWeight:500 }}>
+                      {MONTHS[firstLogMonth]} {firstLogDay}, {firstLogYear}
+                    </span>
+                    {" "}— every great streak has a first day.
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div style={{ padding:"40px 20px", textAlign:"center" }}>
+                <div style={{ fontSize:13, color:T.muted }}>No entries this month</div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -1828,6 +1871,8 @@ function HabitsScreen({ habits, onEdit, onDelete, onAdd, onReflect, onCoach }) {
     }
     return null;
   }
+  const [confirmDelete, setConfirmDelete] = useState(null);
+
   return (
     <div>
       <div style={{ padding:"16px 18px 10px" }}>
@@ -1838,16 +1883,36 @@ function HabitsScreen({ habits, onEdit, onDelete, onAdd, onReflect, onCoach }) {
         <div key={type}>
           <SLabel>{HABIT_TYPES[type]?.label}</SLabel>
           {arr.map(h => (
-            <div key={h.id} className="rc" style={{ margin:"0 14px 10px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, overflow:"hidden" }}>
+            <div key={h.id} className="rc" style={{ margin:"0 14px 10px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${confirmDelete===h.id?"rgba(231,76,60,0.4)":T.border}`, overflow:"hidden", transition:"border-color 0.2s" }}>
               <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
                 <div style={{ width:44, height:44, borderRadius:12, flexShrink:0, background:h.color+"20", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>{h.emoji}</div>
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{h.name}</div>
                   <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>{getStreak(h)>0?`🔥 ${getStreak(h)} · `:""}{h.logs.length} logs total</div>
                 </div>
-                <button onClick={() => onEdit(h.id)} style={{ fontSize:12, color:h.color, background:"none", border:`0.5px solid ${h.color+"44"}`, borderRadius:T.rsm, padding:"4px 10px", cursor:"pointer", fontWeight:500, marginRight:6 }}>Edit</button>
-                <button onClick={() => onDelete(h.id)} style={{ fontSize:18, color:T.hint, background:"none", border:"none", cursor:"pointer" }}>×</button>
+                {confirmDelete === h.id ? (
+                  <>
+                    <button onClick={() => { onDelete(h.id); setConfirmDelete(null); }}
+                      style={{ fontSize:12, color:"#e74c3c", background:"rgba(231,76,60,0.1)", border:`0.5px solid rgba(231,76,60,0.4)`, borderRadius:T.rsm, padding:"5px 11px", cursor:"pointer", fontWeight:500, marginRight:4 }}>
+                      Delete
+                    </button>
+                    <button onClick={() => setConfirmDelete(null)}
+                      style={{ fontSize:12, color:T.muted, background:"none", border:`0.5px solid ${T.border}`, borderRadius:T.rsm, padding:"5px 11px", cursor:"pointer" }}>
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => onEdit(h.id)} style={{ fontSize:12, color:h.color, background:"none", border:`0.5px solid ${h.color+"44"}`, borderRadius:T.rsm, padding:"4px 10px", cursor:"pointer", fontWeight:500, marginRight:6 }}>Edit</button>
+                    <button onClick={() => setConfirmDelete(h.id)} style={{ fontSize:18, color:T.hint, background:"none", border:"none", cursor:"pointer" }}>×</button>
+                  </>
+                )}
               </div>
+              {confirmDelete === h.id && (
+                <div style={{ padding:"0 15px 12px", fontSize:12, color:"rgba(231,76,60,0.8)" }}>
+                  This will permanently delete <strong>{h.name}</strong> and all its logs. This can't be undone.
+                </div>
+              )}
               <DetailRow h={h}/>
             </div>
           ))}
@@ -2460,7 +2525,7 @@ function ProfileScreen({ user, xp, habits, isPro, onUpdateUser, onResetOnboardin
         <div style={{ fontSize:13, color:T.muted, lineHeight:1.65, marginBottom:12 }}>
           You're one of Forged's first users — thank you. Your feedback shapes what this becomes.
         </div>
-        <button onClick={() => window.open("mailto:corbynmiller1@gmail.com?subject=Forged%20Feedback&body=Hey%20Corbyn%2C%20here's%20my%20feedback%20on%20Forged%3A%0A%0A", "_blank")}
+        <button onClick={() => window.open("mailto:corbyn.miller2000@gmail.com?subject=Forged%20Feedback&body=Hey%20Corbyn%2C%20here's%20my%20feedback%20on%20Forged%3A%0A%0A", "_blank")}
           style={{ width:"100%", padding:"11px", borderRadius:T.rsm, border:`0.5px solid rgba(200,144,42,0.35)`, background:"none", color:T.gold, fontSize:13, fontWeight:500, cursor:"pointer", textAlign:"center" }}>
           Send quick feedback →
         </button>
@@ -2560,15 +2625,24 @@ function AuthScreen({ onSent }) {
   const [keepSignedIn, setKeepSignedIn] = useState(true);
 
   async function handleSubmit() {
-    const e = email.trim();
-    if (!e || !password || loading) return;
+    if (loading) return;
+    // Fall back to reading DOM values directly — browser autofill often populates
+    // the DOM without firing React's onChange, leaving state empty.
+    const emailEl = document.querySelector('input[type="email"]');
+    const passEl  = document.querySelector('input[type="password"]');
+    const e = (email.trim() || emailEl?.value?.trim() || "");
+    const p = (password     || passEl?.value          || "");
+    if (!e || !p) return;
+    // Sync state so UI reflects what we're submitting
+    if (!email.trim()) setEmail(e);
+    if (!password)     setPassword(p);
     setLoading(true); setError("");
     if (mode === "signup") {
-      const { error } = await supabase.auth.signUp({ email: e, password, options: { emailRedirectTo: window.location.origin } });
+      const { error } = await supabase.auth.signUp({ email: e, password: p, options: { emailRedirectTo: window.location.origin } });
       if (error) { setError(error.message); setLoading(false); return; }
       onSent(e);
     } else {
-      const { error } = await supabase.auth.signInWithPassword({ email: e, password });
+      const { error } = await supabase.auth.signInWithPassword({ email: e, password: p });
       if (error) { setError(error.message); setLoading(false); return; }
       // If "keep me signed in" is off, remove the persisted token so the
       // session ends when the tab is closed (Supabase defaults to localStorage).
@@ -2634,7 +2708,9 @@ function AuthScreen({ onSent }) {
   );
 
   // ── Sign in / Sign up view ────────────────────────────────────────────
-  const ready = email.trim() && password && !loading;
+  // Note: "ready" only drives button styling — handleSubmit reads DOM values
+  // as fallback so browser autofill always works even if React state is empty.
+  const ready = (email.trim() || false) && (password || false) && !loading;
   return (
     <div style={wrap}>
       <div style={{ fontFamily:T.serif, fontSize:40, color:T.text, marginBottom:24 }}>Forged.</div>
@@ -2648,12 +2724,16 @@ function AuthScreen({ onSent }) {
         ))}
       </div>
       <input type="email" placeholder="you@example.com" autoFocus
-        value={email} onChange={e => setEmail(e.target.value)}
+        value={email}
+        onChange={e => setEmail(e.target.value)}
+        onInput={e => setEmail(e.target.value)}
         onKeyDown={e => e.key === "Enter" && handleSubmit()}
         style={authInp}
       />
       <input type="password" placeholder="Password"
-        value={password} onChange={e => setPassword(e.target.value)}
+        value={password}
+        onChange={e => setPassword(e.target.value)}
+        onInput={e => setPassword(e.target.value)}
         onKeyDown={e => e.key === "Enter" && handleSubmit()}
         style={authInp}
       />
@@ -2667,8 +2747,8 @@ function AuthScreen({ onSent }) {
           <span style={{ fontSize:13, color:T.muted, textAlign:"left" }}>Keep me signed in</span>
         </button>
       )}
-      <button onClick={handleSubmit} disabled={!ready}
-        style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:ready?T.accent:T.surface, color:ready?"#fff":T.muted, fontSize:16, fontWeight:500, cursor:ready?"pointer":"default", transition:"all 0.2s" }}>
+      <button onClick={handleSubmit}
+        style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:!loading?T.accent:T.surface, color:!loading?"#fff":T.muted, fontSize:16, fontWeight:500, cursor:!loading?"pointer":"default", transition:"all 0.2s" }}>
         {loading ? "…" : mode === "signin" ? "Sign in" : "Create account"}
       </button>
       {mode === "signin" && (
