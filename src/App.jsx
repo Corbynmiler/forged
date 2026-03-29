@@ -1624,35 +1624,32 @@ function JournalScreen({ habits, onReflect }) {
             </div>
           )}
 
-          {Object.keys(entryDays).length === 0 && (() => {
-            // Is this month before the user's journey began?
-            const beforeJourney = firstLogDate && (
-              viewYear < firstLogYear ||
-              (viewYear === firstLogYear && viewMonth < firstLogMonth)
-            );
-            if (beforeJourney) {
-              return (
-                <div style={{ padding:"40px 20px", textAlign:"center" }}>
-                  <div style={{ fontSize:34, marginBottom:12 }}>✨</div>
-                  <div style={{ fontSize:15, color:T.text, fontWeight:500, marginBottom:8, fontFamily:T.serif }}>
-                    Your journey hadn't started yet
-                  </div>
-                  <div style={{ fontSize:13, color:T.muted, lineHeight:1.7 }}>
-                    You began forging on{" "}
-                    <span style={{ color:T.text, fontWeight:500 }}>
-                      {MONTHS[firstLogMonth]} {firstLogDay}, {firstLogYear}
-                    </span>
-                    {" "}— every great streak has a first day.
-                  </div>
-                </div>
-              );
-            }
-            return (
-              <div style={{ padding:"40px 20px", textAlign:"center" }}>
-                <div style={{ fontSize:13, color:T.muted }}>No entries this month</div>
+          {Object.keys(entryDays).length === 0 && firstLogDate && (
+            viewYear < firstLogYear ||
+            (viewYear === firstLogYear && viewMonth < firstLogMonth)
+          ) && (
+            <div style={{ padding:"40px 20px", textAlign:"center" }}>
+              <div style={{ fontSize:34, marginBottom:12 }}>✨</div>
+              <div style={{ fontSize:15, color:T.text, fontWeight:500, marginBottom:8, fontFamily:T.serif }}>
+                Your journey hadn't started yet
               </div>
-            );
-          })()}
+              <div style={{ fontSize:13, color:T.muted, lineHeight:1.7 }}>
+                You began forging on{" "}
+                <span style={{ color:T.text, fontWeight:500 }}>
+                  {MONTHS[firstLogMonth]} {firstLogDay}, {firstLogYear}
+                </span>
+                {" "}— every great streak has a first day.
+              </div>
+            </div>
+          )}
+          {Object.keys(entryDays).length === 0 && !(firstLogDate && (
+            viewYear < firstLogYear ||
+            (viewYear === firstLogYear && viewMonth < firstLogMonth)
+          )) && (
+            <div style={{ padding:"40px 20px", textAlign:"center" }}>
+              <div style={{ fontSize:13, color:T.muted }}>No entries this month</div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1854,6 +1851,7 @@ function InsightsScreen({ habits, onShowHistory, onShare }) {
 
 // ─── HABITS SCREEN ────────────────────────────────────────────────────────────
 function HabitsScreen({ habits, onEdit, onDelete, onAdd, onReflect, onCoach }) {
+  const [confirmDelete, setConfirmDelete] = useState(null);
   const grouped = Object.fromEntries(Object.keys(HABIT_TYPES).map(k => [k, habits.filter(h => h.habitType === k)]));
   function DetailRow({ h }) {
     if (h.habitType === "project") {
@@ -1871,7 +1869,6 @@ function HabitsScreen({ habits, onEdit, onDelete, onAdd, onReflect, onCoach }) {
     }
     return null;
   }
-  const [confirmDelete, setConfirmDelete] = useState(null);
 
   return (
     <div>
