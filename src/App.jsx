@@ -2128,69 +2128,268 @@ function HabitsScreen({ habits, onEdit, onDelete, onAdd, onReflect, onCoach }) {
 
 
 
-// ─── AI HABIT COACH — Coming Soon teaser ─────────────────────────────────────
-// Full coach will be activated once Forged Pro launches.
-// The backend is built and ready (/api/chat.js) — just needs an API key.
-function AICoach({ habits, user, onClose, onUpgrade }) {
-  const preview = [
-    `Hey ${user?.name || "there"} 👋 I can see you're working on ${habits.length} habit${habits.length !== 1 ? "s" : ""} right now.`,
-    "I can help you figure out what to focus on next, spot patterns between your habits, or just think through something that's been blocking you.",
-    "What's on your mind?",
-  ];
+// ─── AI HABIT COACH ──────────────────────────────────────────────────────────
+function buildCoachSystemPrompt(user, habits) {
+  const name = user?.name || "there";
+  const today = todayStr();
+
+  const habitSummaries = habits.map(h => {
+    const type  = HABIT_TYPES[h.habitType]?.label || h.habitType;
+    const recentLogs = h.logs
+      .filter(l => l.date >= daysAgo(14))
+      .sort((a, b) => b.date.localeCompare(a.date));
+
+    let detail = `- ${h.emoji || ""} ${h.name} (${type}, streak: ${h.streak} days)`;
+
+    if (h.habitType === "weekly" && h.weeklyTarget) {
+      const weekCount = getWeeklyCount(h);
+      detail += `, ${weekCount}/${h.weeklyTarget} sessions this week`;
+    }
+    if (h.habitType === "progress") {
+      detail += `, current: ${getLatestValue(h)}${h.unit || ""}, target: ${h.targetValue}${h.unit || ""}`;
+    }
+    if (h.habitType === "project") {
+      const s = getProjectStats(h);
+      detail += `, ${s.totalHours}h total, ${s.weekHours}h this week`;
+    }
+    if (h.habitType === "limit" && h.dailyBudget) {
+      detail += `, daily limit: ${h.dailyBudget}${h.unit || ""}`;
+    }
+
+    // Recent reflections
+    const reflections = recentLogs
+      .filter(l => l.reflection)
+      .slice(0, 3)
+      .map(l => `  [${l.date}] "${l.reflection}"`);
+    if (reflections.length) detail += `\n  Recent reflections:\n${reflections.join("\n")}`;
+
+    // Recent wins & hard parts (project type)
+    const wins = recentLogs.filter(l => l.value?.win).slice(0, 2).map(l => `  [${l.date}] Win: "${l.value.win}"`);
+    const hard = recentLogs.filter(l => l.value?.hardPart).slice(0, 2).map(l => `  [${l.date}] Hard part: "${l.value.hardPart}"`);
+    if (wins.length) detail += `\n${wins.join("\n")}`;
+    if (hard.length) detail += `\n${hard.join("\n")}`;
+
+    // Recent notes
+    const notes = recentLogs
+      .filter(l => l.value === "quicknote" && l.note)
+      .slice(0, 2)
+      .map(l => `  [${l.date}] Note: "${l.note}"`);
+    if (notes.length) detail += `\n${notes.join("\n")}`;
+
+    return detail;
+  }).join("\n\n");
+
+  return `You are a personal habit coach inside Forged, a minimalist habit-tracking app. Your job is to help ${name} understand their habits, spot patterns, troubleshoot blocks, and stay motivated — using their actual data below.
+
+Today: ${today}
+User: ${name}
+
+Their habits:
+${habitSummaries || "No habits yet."}
+
+Guidelines:
+- Be conversational, warm, and direct. No fluff or generic advice.
+- Reference their actual data when relevant (streaks, reflections, wins, hard parts).
+- Ask one focused question at a time rather than overwhelming them.
+- Keep responses concise — this is a mobile chat interface.
+- If they're struggling with a habit, dig into the why before suggesting tactics.
+- Celebrate genuine wins. Don't be sycophantic about small things.
+- Never make up data or invent habit details not shown above.`;
+}
+
+function AICoach({ habits, user, isPro, onClose, onUpgrade }) {
+  const greeting = `Hey ${user?.name || "there"} 👋 I can see you're working on ${habits.length} habit${habits.length !== 1 ? "s" : ""}. What's on your mind?`;
+  const [messages, setMessages] = useState([{ role:"assistant", content:greeting }]);
+  const [input,    setInput]    = useState("");
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState(null);
+  const bottomRef = useRef(null);
+  const speech    = useSpeechInput(t => setInput(p => p.trim() ? p + " " + t : t));
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior:"smooth" });
+  }, [messages, loading]);
+
+  async function send(text) {
+    const trimmed = text.trim();
+    if (!trimmed || loading) return;
+    setInput("");
+    setError(null);
+    const next = [...messages, { role:"user", content:trimmed }];
+    setMessages(next);
+    setLoading(true);
+    try {
+      const res = await fetch("/api/chat", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({
+          system:   buildCoachSystemPrompt(user, habits),
+          messages: next.map(m => ({ role:m.role, content:m.content })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Something went wrong");
+      setMessages(prev => [...prev, { role:"assistant", content:data.reply }]);
+    } catch (e) {
+      setError(e.message || "Couldn't reach the coach. Try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleKey(e) {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); }
+  }
+
+  // ── Free-user teaser ──────────────────────────────────────────────────────
+  if (!isPro) {
+    const preview = [
+      `Hey ${user?.name || "there"} 👋 I can see you're working on ${habits.length} habit${habits.length !== 1 ? "s" : ""} right now.`,
+      "I can help you figure out what to focus on next, spot patterns between your habits, or just think through something that's been blocking you.",
+      "What's on your mind?",
+    ];
+    return (
+      <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.82)", zIndex:400, display:"flex", alignItems:"flex-end", justifyContent:"center" }}
+        onClick={e => e.target === e.currentTarget && onClose()}>
+        <div style={{ width:430, maxWidth:"100vw", background:T.raised, borderRadius:"22px 22px 0 0", overflow:"hidden" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:12, padding:"18px 20px 14px", borderBottom:`0.5px solid ${T.border}` }}>
+            <div style={{ width:38, height:38, borderRadius:"50%", background:"rgba(200,144,42,0.18)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:19 }}>🤖</div>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:15, fontWeight:500, color:T.text }}>AI Habit Coach</div>
+              <div style={{ fontSize:11, color:T.gold }}>⚡ Forged Pro</div>
+            </div>
+            <button onClick={onClose} style={{ background:"none", border:"none", color:T.muted, fontSize:24, cursor:"pointer", lineHeight:1 }}>×</button>
+          </div>
+          <div style={{ padding:"20px 20px 10px", display:"flex", flexDirection:"column", gap:10 }}>
+            {preview.map((line, i) => (
+              <div key={i} style={{ display:"flex", justifyContent:"flex-start" }}>
+                <div style={{ maxWidth:"88%", padding:"10px 14px", borderRadius:"14px 14px 14px 3px", background:T.surface, fontSize:14, color:T.text, lineHeight:1.6 }}>{line}</div>
+              </div>
+            ))}
+            <div style={{ display:"flex", justifyContent:"flex-end", opacity:0.35 }}>
+              <div style={{ padding:"10px 14px", borderRadius:"14px 14px 3px 14px", background:T.accent, fontSize:14, color:"#fff", filter:"blur(3px)" }}>I keep skipping my workouts…</div>
+            </div>
+          </div>
+          <div style={{ margin:"0 20px 10px", background:"rgba(200,144,42,0.07)", border:`0.5px solid rgba(200,144,42,0.25)`, borderRadius:T.r, padding:"16px", textAlign:"center" }}>
+            <div style={{ fontSize:26, marginBottom:8 }}>🔒</div>
+            <div style={{ fontSize:14, fontWeight:500, color:T.text, marginBottom:4 }}>Coach unlocks with Forged Pro</div>
+            <div style={{ fontSize:12, color:T.muted, lineHeight:1.6, marginBottom:14 }}>It knows your actual habits, streaks, and reflections — not generic advice.</div>
+            <button onClick={() => { onClose(); onUpgrade(); }}
+              style={{ width:"100%", padding:"13px", borderRadius:T.rsm, border:"none", background:T.gold, color:"#1a1a16", fontSize:14, fontWeight:600, cursor:"pointer" }}>
+              See Pro pricing →
+            </button>
+          </div>
+          <div style={{ padding:"12px 16px 32px", borderTop:`0.5px solid ${T.border}`, display:"flex", gap:10, opacity:0.3, pointerEvents:"none" }}>
+            <div style={{ flex:1, background:T.surface, border:`0.5px solid ${T.borderStrong}`, borderRadius:T.rsm, padding:"10px 14px", fontSize:14, color:T.hint }}>Ask anything about your habits…</div>
+            <div style={{ width:44, height:44, borderRadius:"50%", background:T.surface, display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M2 9h14M9 2l7 7-7 7" stroke={T.muted} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Pro: real chat ────────────────────────────────────────────────────────
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.82)", zIndex:400, display:"flex", alignItems:"flex-end", justifyContent:"center" }}
       onClick={e => e.target === e.currentTarget && onClose()}>
-      <div style={{ width:430, maxWidth:"100vw", background:T.raised, borderRadius:"22px 22px 0 0", overflow:"hidden" }}>
+      <div style={{ width:430, maxWidth:"100vw", background:T.raised, borderRadius:"22px 22px 0 0", display:"flex", flexDirection:"column", height:"80vh", maxHeight:680 }}>
+
         {/* Header */}
-        <div style={{ display:"flex", alignItems:"center", gap:12, padding:"18px 20px 14px", borderBottom:`0.5px solid ${T.border}` }}>
+        <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 13px", borderBottom:`0.5px solid ${T.border}`, flexShrink:0 }}>
           <div style={{ width:38, height:38, borderRadius:"50%", background:"rgba(200,144,42,0.18)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:19 }}>🤖</div>
           <div style={{ flex:1 }}>
             <div style={{ fontSize:15, fontWeight:500, color:T.text }}>AI Habit Coach</div>
-            <div style={{ fontSize:11, color:T.gold }}>⚡ Forged Pro — coming soon</div>
+            <div style={{ display:"flex", alignItems:"center", gap:5 }}>
+              <div style={{ width:6, height:6, borderRadius:"50%", background:T.green }}/>
+              <div style={{ fontSize:11, color:T.muted }}>Knows your habits</div>
+            </div>
           </div>
           <button onClick={onClose} style={{ background:"none", border:"none", color:T.muted, fontSize:24, cursor:"pointer", lineHeight:1 }}>×</button>
         </div>
 
-        {/* Preview conversation */}
-        <div style={{ padding:"20px 20px 10px", display:"flex", flexDirection:"column", gap:10 }}>
-          {preview.map((line, i) => (
-            <div key={i} style={{ display:"flex", justifyContent:"flex-start" }}>
-              <div style={{ maxWidth:"88%", padding:"10px 14px", borderRadius:"14px 14px 14px 3px", background:T.surface, fontSize:14, color:T.text, lineHeight:1.6 }}>
-                {line}
+        {/* Messages */}
+        <div style={{ flex:1, overflowY:"auto", padding:"16px 16px 8px", display:"flex", flexDirection:"column", gap:10 }}>
+          {messages.map((m, i) => (
+            <div key={i} style={{ display:"flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
+              <div style={{
+                maxWidth:"85%", padding:"10px 14px",
+                borderRadius: m.role === "user" ? "14px 14px 3px 14px" : "14px 14px 14px 3px",
+                background: m.role === "user" ? T.accent : T.surface,
+                fontSize:14, color: m.role === "user" ? "#fff" : T.text,
+                lineHeight:1.6, whiteSpace:"pre-wrap", wordBreak:"break-word",
+              }}>
+                {m.content}
               </div>
             </div>
           ))}
-          {/* Blurred fake user input */}
-          <div style={{ display:"flex", justifyContent:"flex-end", opacity:0.35 }}>
-            <div style={{ padding:"10px 14px", borderRadius:"14px 14px 3px 14px", background:T.accent, fontSize:14, color:"#fff", filter:"blur(3px)" }}>
-              I keep skipping my workouts…
+
+          {/* Typing indicator */}
+          {loading && (
+            <div style={{ display:"flex", justifyContent:"flex-start" }}>
+              <div style={{ padding:"10px 16px", borderRadius:"14px 14px 14px 3px", background:T.surface, display:"flex", gap:5, alignItems:"center" }}>
+                {[0,1,2].map(i => (
+                  <div key={i} style={{ width:6, height:6, borderRadius:"50%", background:T.muted,
+                    animation:"coachDot 1.2s ease-in-out infinite", animationDelay:`${i*0.2}s` }}/>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* Error */}
+          {error && (
+            <div style={{ textAlign:"center", fontSize:12, color:T.accent, padding:"4px 8px" }}>{error}</div>
+          )}
+
+          <div ref={bottomRef}/>
         </div>
 
-        {/* Lock overlay */}
-        <div style={{ margin:"0 20px 10px", background:"rgba(200,144,42,0.07)", border:`0.5px solid rgba(200,144,42,0.25)`, borderRadius:T.r, padding:"16px", textAlign:"center" }}>
-          <div style={{ fontSize:26, marginBottom:8 }}>🔒</div>
-          <div style={{ fontSize:14, fontWeight:500, color:T.text, marginBottom:4 }}>Coach is coming with Forged Pro</div>
-          <div style={{ fontSize:12, color:T.muted, lineHeight:1.6, marginBottom:14 }}>
-            It'll know your exact habits, streaks, and reflections — and actually ask useful questions instead of generic advice.
+        {/* Input bar */}
+        <div style={{ padding:"10px 14px 32px", borderTop:`0.5px solid ${T.border}`, display:"flex", gap:8, alignItems:"flex-end", flexShrink:0 }}>
+          <div style={{ flex:1, position:"relative" }}>
+            <textarea
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={handleKey}
+              placeholder={speech.listening ? "Listening…" : "Ask anything about your habits…"}
+              rows={1}
+              style={{
+                width:"100%", boxSizing:"border-box",
+                background:T.surface, border:`0.5px solid ${T.borderStrong}`,
+                borderRadius:T.rsm, padding:"10px 14px",
+                fontSize:14, color:T.text, resize:"none",
+                fontFamily:T.font, lineHeight:1.5, outline:"none",
+                overflowY:"auto", maxHeight:100,
+              }}
+            />
+            {speech.interim && <div style={{ fontSize:11, color:T.hint, fontStyle:"italic", marginTop:3, paddingLeft:2 }}>{speech.interim}…</div>}
           </div>
-          <button onClick={() => { onClose(); onUpgrade(); }}
-            style={{ width:"100%", padding:"13px", borderRadius:T.rsm, border:"none", background:T.gold, color:"#1a1a16", fontSize:14, fontWeight:600, cursor:"pointer" }}>
-            See Pro pricing →
+          <MicBtn speech={speech} color={T.gold} size={42}/>
+          <button
+            onClick={() => send(input)}
+            disabled={!input.trim() || loading}
+            style={{
+              width:42, height:42, borderRadius:"50%", border:"none", flexShrink:0,
+              background: input.trim() && !loading ? T.gold : T.surface,
+              cursor: input.trim() && !loading ? "pointer" : "default",
+              display:"flex", alignItems:"center", justifyContent:"center",
+              transition:"background 0.2s",
+            }}>
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <path d="M2 9h14M9 2l7 7-7 7" stroke={input.trim() && !loading ? "#1a1a16" : T.hint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
           </button>
         </div>
-
-        {/* Blurred fake input bar */}
-        <div style={{ padding:"12px 16px 32px", borderTop:`0.5px solid ${T.border}`, display:"flex", gap:10, opacity:0.3, pointerEvents:"none" }}>
-          <div style={{ flex:1, background:T.surface, border:`0.5px solid ${T.borderStrong}`, borderRadius:T.rsm, padding:"10px 14px", fontSize:14, color:T.hint }}>
-            Ask anything about your habits…
-          </div>
-          <div style={{ width:44, height:44, borderRadius:"50%", background:T.surface, display:"flex", alignItems:"center", justifyContent:"center" }}>
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M2 9h14M9 2l7 7-7 7" stroke={T.muted} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          </div>
-        </div>
       </div>
+
+      {/* Dot animation keyframes */}
+      <style>{`
+        @keyframes coachDot {
+          0%,80%,100% { transform:scale(0.6); opacity:0.4; }
+          40% { transform:scale(1); opacity:1; }
+        }
+      `}</style>
     </div>
   );
 }
@@ -2601,11 +2800,31 @@ function UpgradeModal({ onClose, habitCount = 0 }) {
   );
 }
 
-function ProfileScreen({ user, xp, habits, isPro, onUpdateUser, onResetOnboarding, onSignOut, onShowTour, onUpgrade }) {
+function ProfileScreen({ user, xp, habits, isPro, refCode, onUpdateUser, onResetOnboarding, onSignOut, onShowTour, onUpgrade }) {
   const [editingName,    setEditingName]    = useState(false);
   const [nameVal,        setNameVal]        = useState(user.name);
   const [showAvatarPick, setShowAvatarPick] = useState(false);
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
+  const [refCount,       setRefCount]       = useState(null);
+  const [refCopied,      setRefCopied]      = useState(false);
+
+  useEffect(() => {
+    supabase.rpc("my_referral_count").then(({ data }) => {
+      if (typeof data === "number") setRefCount(data);
+    });
+  }, []);
+
+  const refLink = refCode
+    ? `https://forged-sage.vercel.app/landing.html?ref=${refCode}`
+    : null;
+
+  function copyRefLink() {
+    if (!refLink) return;
+    navigator.clipboard.writeText(refLink).then(() => {
+      setRefCopied(true);
+      setTimeout(() => setRefCopied(false), 2000);
+    });
+  }
 
   const level = getLevel(xp);
   const next  = nextLevel(xp);
@@ -2742,6 +2961,41 @@ function ProfileScreen({ user, xp, habits, isPro, onUpdateUser, onResetOnboardin
           Send quick feedback →
         </button>
       </div>
+
+      {/* Refer a friend */}
+      {refLink && (
+        <div style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:"16px 18px" }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+            <div style={{ fontSize:10, fontWeight:600, color:T.muted, textTransform:"uppercase", letterSpacing:"0.08em" }}>Refer a friend</div>
+            {refCount !== null && refCount > 0 && (
+              <div style={{ fontSize:11, color:T.green, fontWeight:600, background:T.green+"18", padding:"2px 9px", borderRadius:10 }}>
+                {refCount} joined
+              </div>
+            )}
+          </div>
+          <div style={{ fontSize:13, color:T.muted, lineHeight:1.6, marginBottom:14 }}>
+            Share your link and every person you bring in helps lock in the beta price for everyone.
+          </div>
+          {/* Link display + copy */}
+          <div style={{ display:"flex", gap:8, alignItems:"stretch" }}>
+            <div style={{ flex:1, background:T.surface, border:`0.5px solid ${T.border}`, borderRadius:T.rsm, padding:"10px 12px", fontSize:12, color:T.hint, fontFamily:"monospace", overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis", letterSpacing:"0.03em" }}>
+              {refLink.replace("https://", "")}
+            </div>
+            <button onClick={copyRefLink}
+              style={{ flexShrink:0, padding:"10px 16px", borderRadius:T.rsm, border:"none", background:refCopied ? T.green+"22" : "rgba(255,255,255,0.07)", color:refCopied ? T.green : T.text, fontSize:13, fontWeight:500, cursor:"pointer", transition:"all 0.2s", whiteSpace:"nowrap" }}>
+              {refCopied ? "✓ Copied" : "Copy"}
+            </button>
+          </div>
+          {/* Share via native share if available */}
+          {typeof navigator.share === "function" && (
+            <button onClick={() => navigator.share({ title:"Forged", text:"Track your habits seriously. No fluff.", url: refLink })}
+              style={{ width:"100%", marginTop:8, padding:"11px", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:"none", color:T.muted, fontSize:13, cursor:"pointer" }}>
+              Share →
+            </button>
+          )}
+          <div style={{ fontSize:11, color:T.hint, marginTop:10, textAlign:"center" }}>Your code: <span style={{ color:T.text, fontFamily:"monospace", letterSpacing:"0.1em" }}>{refCode}</span></div>
+        </div>
+      )}
 
       {/* Data */}
       <div style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, overflow:"hidden" }}>
@@ -3000,6 +3254,7 @@ export default function App() {
   const [showShare,   setShowShare]   = useState(false);
   const [isPro,       setIsPro]       = useState(false);
   const [showUpgrade, setShowUpgrade] = useState(false);
+  const [refCode,     setRefCode]     = useState(null);
   const userIdRef = useRef(null);
   const noteDebounceRef = useRef({});
 
@@ -3056,6 +3311,7 @@ export default function App() {
         setXp(profile.xp ?? 0);
         setOnboarded(profile.onboarded ?? false);
         setIsPro(profile.is_pro ?? false);
+        setRefCode(profile.ref_code ?? null);
       }
       const { data: rows, error: hErr } = await supabase
         .from("habits").select("*").eq("user_id", uid).order("created_at");
@@ -3167,6 +3423,15 @@ export default function App() {
   const editHabit    = habits.find(h => h.id === editId)    || null;
   const logHabit     = habits.find(h => h.id === logId)     || null;
 
+  // Capture ?ref= from URL and store for later use during onboarding
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get("ref");
+    if (ref && /^[A-Z2-9]{6}$/.test(ref)) {
+      localStorage.setItem("forged_pending_ref", ref);
+    }
+  }, []);
+
   async function completeOnboarding({ name, habits: newHabits }) {
     const uid = userIdRef.current;
     setUser({ name });
@@ -3174,10 +3439,13 @@ export default function App() {
     const habitsToSet = (newHabits && newHabits.length > 0) ? newHabits : [];
     setHabits(habitsToSet);
     setOnboarded(true);
+    const pendingRef = localStorage.getItem("forged_pending_ref") || null;
     if (uid) {
       await supabase.from("profiles").upsert({
         id: uid, name, xp: 0, onboarded: true, updated_at: new Date().toISOString(),
+        ...(pendingRef ? { referred_by: pendingRef } : {}),
       });
+      if (pendingRef) localStorage.removeItem("forged_pending_ref");
       if (habitsToSet.length > 0) {
         await supabase.from("habits").upsert(habitsToSet.map(h => habitToRow(h, uid)));
       }
@@ -3445,7 +3713,7 @@ export default function App() {
         {screen === "journal"  && <JournalScreen  habits={habits} onReflect={setReflectId}/>}
         {screen === "insights" && <InsightsScreen habits={habits} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)}/>}
         {screen === "habits"   && <HabitsScreen   habits={habits} onEdit={setEditId} onDelete={handleDeleteHabit} onAdd={handleStartAdd} onReflect={setReflectId} onCoach={() => setShowCoach(true)}/>}
-        {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro}
+        {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} refCode={refCode}
           onUpgrade={() => setShowUpgrade(true)}
           onUpdateUser={updates => {
             if (updates._clearData) { setHabits([]); setXp(0); setUser(u => ({...u})); return; }
@@ -3480,7 +3748,7 @@ export default function App() {
       {editId      && editHabit && <EditModal habit={editHabit}          onClose={() => setEditId(null)}    onSave={handleEditSave}/>}
       {logId && logHabit?.habitType === "progress" && <LogProgressModal  habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
       {logId && logHabit?.habitType === "project"  && <LogProjectModal   habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
-      {showCoach   && <AICoach habits={habits} user={user} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)}/>}
+      {showCoach   && <AICoach habits={habits} user={user} isPro={isPro} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)}/>}
       {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} habitCount={habits.length}/>}
       {showShare && <ShareCardModal user={user} habits={habits} xp={xp} onClose={() => setShowShare(false)}/>}
       {showTour && (
