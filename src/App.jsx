@@ -402,49 +402,43 @@ function DoneBanner({ habit }) {
 }
 
 // ─── NOTE STRIP ───────────────────────────────────────────────────────────────
-// Auto-saves as you type. Shows a subtle "Saved ✓" indicator after 800ms pause.
+// Type a quick note, tap ✓ Done to save it as a permanent entry and clear.
+// Each Done tap creates a separate note entry — multiple notes per day supported.
 // "Go deeper" opens the full reflection modal.
-function NoteStrip({ habitId, habit, savedNote, onNoteChange, onReflect }) {
-  const [val, setVal] = useState(savedNote || "");
-  const [showSaved, setShowSaved] = useState(false);
-  const saveTimer = useRef(null);
+function NoteStrip({ habitId, habit, onAddNote, onReflect }) {
+  const [val, setVal] = useState("");
+  const [lastSaved, setLastSaved] = useState("");
 
-  // Sync in only when parent has actual content (don't wipe local draft on uncheck)
-  useEffect(() => {
-    if (savedNote) setVal(savedNote);
-  }, [savedNote]);
-
-  function handleChange(e) {
-    const newVal = e.target.value;
-    setVal(newVal);
-    onNoteChange(habitId, newVal);
-    // Debounce saved indicator: show "Saved ✓" 800ms after last keystroke
-    clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      if (newVal.trim()) setShowSaved(true);
-      setTimeout(() => setShowSaved(false), 1800);
-    }, 800);
+  function handleDone() {
+    if (!val.trim()) return;
+    onAddNote(habitId, val.trim());
+    setLastSaved(val.trim());
+    setVal("");
   }
 
   return (
     <div style={{ borderTop:`0.5px solid ${T.border}`, padding:"10px 15px 12px", display:"flex", flexDirection:"column", gap:7 }}>
+      {lastSaved && (
+        <div style={{ fontSize:12, color:T.muted, fontStyle:"italic", borderLeft:`2px solid ${habit.color}44`, paddingLeft:8, lineHeight:1.5 }}>
+          <span style={{ fontSize:10, color:T.hint, display:"block", marginBottom:2 }}>Saved ✓</span>
+          {lastSaved}
+        </div>
+      )}
       <textarea
-        rows={2} maxLength={140}
-        style={{ width:"100%", border:"none", background:"none", fontSize:13, color:T.text, resize:"none", lineHeight:1.55, minHeight:36 }}
-        placeholder="Quick note… (optional, 140 chars)"
+        rows={2} maxLength={280}
+        style={{ width:"100%", border:"none", background:"none", fontSize:13, color:T.text, resize:"none", lineHeight:1.55, minHeight:36, outline:"none" }}
+        placeholder="Quick note…"
         value={val}
-        onChange={handleChange}
+        onChange={e => setVal(e.target.value)}
       />
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          <span style={{ fontSize:11, color:T.hint }}>{140 - val.length} left</span>
-          {showSaved && (
-            <span style={{ fontSize:11, color:T.green, animation:"savedFade 2s ease forwards" }}>Saved ✓</span>
-          )}
-        </div>
         <button onClick={() => onReflect(habitId)}
-          style={{ fontSize:12, color:habit.color, background:"none", border:"none", cursor:"pointer", fontWeight:500 }}>
+          style={{ fontSize:12, color:habit.color+"99", background:"none", border:"none", cursor:"pointer", fontWeight:500, padding:0 }}>
           Go deeper →
+        </button>
+        <button onClick={handleDone} disabled={!val.trim()}
+          style={{ fontSize:12, color:val.trim()?T.text:T.hint, background:val.trim()?habit.color+"22":"none", border:`0.5px solid ${val.trim()?habit.color+"55":T.border}`, borderRadius:T.rsm, padding:"4px 12px", cursor:val.trim()?"pointer":"default", fontWeight:500, transition:"all 0.15s" }}>
+          ✓ Done
         </button>
       </div>
     </div>
@@ -484,7 +478,7 @@ function PlusBtn({ habit, logged, onClick }) {
 
 // ─── HABIT CARDS ─────────────────────────────────────────────────────────────
 
-function DailyCard({ habit, onTap, onSkip, onReflect, onNoteChange }) {
+function DailyCard({ habit, onTap, onSkip, onReflect, onAddNote }) {
   const tLog  = latestTodayLog(habit);
   const logged = isLoggedToday(habit);
   const isSkip = tLog?.value === "skip";
@@ -513,7 +507,7 @@ function DailyCard({ habit, onTap, onSkip, onReflect, onNoteChange }) {
         </div>
       )}
       {logged && !isSkip && <DoneBanner habit={habit}/>}
-      {logged && !isSkip && <NoteStrip habitId={habit.id} habit={habit} savedNote={tLog?.note||""} onNoteChange={onNoteChange} onReflect={onReflect}/>}
+      {logged && !isSkip && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote} onReflect={onReflect}/>}
       {!logged && (
         <div style={{ padding:"0 15px 10px", display:"flex", justifyContent:"flex-end" }}>
           <button onClick={() => onSkip(habit.id)}
@@ -526,7 +520,7 @@ function DailyCard({ habit, onTap, onSkip, onReflect, onNoteChange }) {
   );
 }
 
-function WeeklyCard({ habit, onTap, onReflect, onNoteChange }) {
+function WeeklyCard({ habit, onTap, onReflect, onAddNote }) {
   const logged = isLoggedToday(habit);
   const wk = getWeeklyCount(habit);
   const streak = getWeeklyStreak(habit);
@@ -559,12 +553,12 @@ function WeeklyCard({ habit, onTap, onReflect, onNoteChange }) {
         </div>
       </div>
       {logged && <DoneBanner habit={habit}/>}
-      {logged && <NoteStrip habitId={habit.id} habit={habit} savedNote={tLog?.note||""} onNoteChange={onNoteChange} onReflect={onReflect}/>}
+      {logged && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote} onReflect={onReflect}/>}
     </div>
   );
 }
 
-function ProgressCard({ habit, onOpenLog, onReflect, onNoteChange }) {
+function ProgressCard({ habit, onOpenLog, onReflect, onAddNote }) {
   const latest = getLatestValue(habit);
   const range = habit.targetValue - habit.startValue;
   const pct = range > 0 ? Math.min(100, Math.round(((latest - habit.startValue) / range) * 100)) : 0;
@@ -596,12 +590,12 @@ function ProgressCard({ habit, onOpenLog, onReflect, onNoteChange }) {
         </div>
       </div>
       {logged && <DoneBanner habit={habit}/>}
-      {logged && <NoteStrip habitId={habit.id} habit={habit} savedNote={tLog?.note||""} onNoteChange={onNoteChange} onReflect={onReflect}/>}
+      {logged && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote} onReflect={onReflect}/>}
     </div>
   );
 }
 
-function ProjectCard({ habit, onOpenLog, onReflect, onNoteChange }) {
+function ProjectCard({ habit, onOpenLog, onReflect, onAddNote }) {
   const stats = getProjectStats(habit);
   const tLogs = todayLogs(habit);
   const logged = tLogs.length > 0;
@@ -641,15 +635,15 @@ function ProjectCard({ habit, onOpenLog, onReflect, onNoteChange }) {
   );
 }
 
-function LimitCard({ habit, onTap, onUndo, onReflect, onNoteChange }) {
-  const todayLogsArr = habit.logs.filter(l => l.date === todayStr());
-  const used   = todayLogsArr.reduce((s, l) => s + (l.value || 0), 0);
+function LimitCard({ habit, onTap, onUndo, onLogZero, onReflect, onAddNote }) {
+  const todayLogsArr = habit.logs.filter(l => l.date === todayStr() && l.value !== "quicknote");
+  const used   = todayLogsArr.reduce((s, l) => s + (typeof l.value === "number" ? l.value : 0), 0);
   const budget = habit.dailyBudget || 60;
   const pct      = Math.min(120, Math.round((used / budget) * 100));
   const barColor = pct < 60 ? T.green : pct < 90 ? T.amber : T.accent;
   const over     = used > budget;
+  // Distinguish: explicitly logged (any numeric entry today) vs truly not logged at all
   const logged   = todayLogsArr.length > 0;
-  const tLog     = todayLogsArr[todayLogsArr.length - 1];
   const inc      = habit.tapIncrement ?? 1;
   return (
     <div className="rc" style={{ ...cardStyle(false, habit), borderColor:over?T.accent+"66":T.border, background:over?`${T.accent}0A`:T.raised }}>
@@ -670,16 +664,31 @@ function LimitCard({ habit, onTap, onUndo, onReflect, onNoteChange }) {
             style={{ width:44, height:44, borderRadius:"50%", border:`2px solid ${habit.color+"66"}`, background:"transparent", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, color:habit.color, fontWeight:300, transition:"all 0.18s" }}>+</button>
         </div>
       </div>
-      <div style={{ padding:"0 15px 14px" }}>
-        <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:T.muted, marginBottom:5 }}>
-          <span>{used}/{budget} {habit.unit || "uses"} used</span>
-          <span style={{ color:barColor, fontWeight:500 }}>{over ? `${used - budget} over` : `${budget - used} left`}</span>
+
+      {logged ? (
+        <div style={{ padding:"0 15px 14px" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:T.muted, marginBottom:5 }}>
+            <span>{used}/{budget} {habit.unit || "logged"}</span>
+            <span style={{ color:barColor, fontWeight:500 }}>{over ? `${used - budget} over limit` : `${budget - used} remaining`}</span>
+          </div>
+          <div style={{ height:6, background:T.surface, borderRadius:3, overflow:"hidden" }}>
+            <div style={{ height:"100%", borderRadius:3, background:barColor, width:`${Math.min(100, pct)}%`, transition:"width 0.4s ease" }}/>
+          </div>
         </div>
-        <div style={{ height:6, background:T.surface, borderRadius:3, overflow:"hidden" }}>
-          <div style={{ height:"100%", borderRadius:3, background:barColor, width:`${Math.min(100, pct)}%`, transition:"width 0.4s ease" }}/>
+      ) : (
+        /* Distinct "not logged" state — greyed out, with an explicit "None today" option */
+        <div style={{ padding:"0 15px 14px", display:"flex", alignItems:"center", gap:10 }}>
+          <div style={{ height:6, flex:1, background:T.surface, borderRadius:3, opacity:0.3 }}/>
+          <span style={{ fontSize:12, color:T.hint, flexShrink:0 }}>– not logged</span>
+          <button onClick={() => onLogZero(habit.id)}
+            title="Mark that you had none today"
+            style={{ fontSize:11, color:T.muted, background:"none", border:`0.5px solid ${T.border}`, borderRadius:T.rsm, padding:"3px 9px", cursor:"pointer", flexShrink:0, whiteSpace:"nowrap" }}>
+            None today
+          </button>
         </div>
-      </div>
-      {logged && <NoteStrip habitId={habit.id} habit={habit} savedNote={tLog?.note||""} onNoteChange={onNoteChange} onReflect={onReflect}/>}
+      )}
+
+      {logged && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote} onReflect={onReflect}/>}
     </div>
   );
 }
@@ -1121,6 +1130,7 @@ function HabitGrid({ habit }) {
 }
 function HistoryModal({ habits, onClose, isPro, onUpgrade }) {
   const [selected, setSelected] = useState(habits[0]?.id || null);
+  const [showBeta, setShowBeta] = useState(false);
   const habit = habits.find(h => h.id === selected);
   const cutoff = daysAgo(6); // free users see last 7 days
 
@@ -1155,14 +1165,16 @@ function HistoryModal({ habits, onClose, isPro, onUpgrade }) {
             ))}
           </div>
           {/* Overlay */}
-          <div style={{ position:"absolute", inset:0, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:10, background:"rgba(14,14,14,0.7)", backdropFilter:"blur(2px)", borderRadius:T.rsm }}>
-            <div style={{ fontSize:16 }}>🔒</div>
-            <div style={{ fontSize:13, color:T.text, fontWeight:500, textAlign:"center" }}>Full history is a Pro feature</div>
+          <div style={{ position:"absolute", inset:0, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:8, background:"rgba(14,14,14,0.75)", backdropFilter:"blur(2px)", borderRadius:T.rsm, padding:"0 20px" }}>
+            <div style={{ fontSize:20 }}>🔒</div>
+            <div style={{ fontSize:13, color:T.text, fontWeight:500, textAlign:"center" }}>Full history is coming with Pro</div>
             <div style={{ fontSize:12, color:T.muted, textAlign:"center" }}>You have {habit.logs.filter(l => l.date < cutoff).length} older logs waiting</div>
-            <button onClick={() => { onClose(); onUpgrade(); }} style={{ marginTop:4, padding:"9px 20px", borderRadius:T.rsm, border:"none", background:"rgba(200,144,42,0.2)", color:T.gold, fontSize:13, fontWeight:600, cursor:"pointer" }}>
-              Unlock with Pro →
+            <button onClick={() => setShowBeta(true)}
+              style={{ marginTop:6, padding:"9px 20px", borderRadius:T.rsm, border:"none", background:"rgba(200,144,42,0.2)", color:T.gold, fontSize:13, fontWeight:600, cursor:"pointer" }}>
+              I'm interested in Pro →
             </button>
           </div>
+          {showBeta && <BetaModal onClose={() => setShowBeta(false)}/>}
         </div>
       )}
       <GBtn onClick={onClose}>Close</GBtn>
@@ -1206,7 +1218,7 @@ function TourOverlay({ step, onNext, onSkip }) {
 }
 
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
-function TodayScreen({ habits, xp, onTap, onUndo, onSkip, onReflect, onNoteChange, onOpenLog, onAdd, onXPInfo }) {
+function TodayScreen({ habits, xp, onTap, onUndo, onSkip, onReflect, onAddNote, onLogZero, onOpenLog, onAdd, onXPInfo }) {
   const loggedCount = habits.filter(h => isLoggedToday(h)).length;
   const pct = habits.length ? Math.round((loggedCount / habits.length) * 100) : 0;
   const hr = new Date().getHours();
@@ -1229,15 +1241,196 @@ function TodayScreen({ habits, xp, onTap, onUndo, onSkip, onReflect, onNoteChang
           </button>
         </div>
       </div>
-      {daily.length    > 0 && <><SLabel>Daily</SLabel>          {daily.map(h    => <DailyCard    key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onReflect={onReflect} onNoteChange={onNoteChange}/>)}</>}
-      {limit.length    > 0 && <><SLabel>Limits</SLabel>         {limit.map(h    => <LimitCard    key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onReflect={onReflect} onNoteChange={onNoteChange}/>)}</>}
-      {weekly.length   > 0 && <><SLabel>Weekly targets</SLabel> {weekly.map(h   => <WeeklyCard   key={h.id} habit={h} onTap={onTap}       onReflect={onReflect} onNoteChange={onNoteChange}/>)}</>}
-      {progress.length > 0 && <><SLabel>Progress goals</SLabel> {progress.map(h => <ProgressCard key={h.id} habit={h} onOpenLog={onOpenLog} onReflect={onReflect} onNoteChange={onNoteChange}/>)}</>}
-      {project.length  > 0 && <><SLabel>Projects</SLabel>       {project.map(h  => <ProjectCard  key={h.id} habit={h} onOpenLog={onOpenLog} onReflect={onReflect} onNoteChange={onNoteChange}/>)}</>}
+      {daily.length    > 0 && <><SLabel>Daily</SLabel>          {daily.map(h    => <DailyCard    key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onReflect={onReflect} onAddNote={onAddNote}/>)}</>}
+      {limit.length    > 0 && <><SLabel>Limits</SLabel>         {limit.map(h    => <LimitCard    key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onReflect={onReflect} onAddNote={onAddNote}/>)}</>}
+      {weekly.length   > 0 && <><SLabel>Weekly targets</SLabel> {weekly.map(h   => <WeeklyCard   key={h.id} habit={h} onTap={onTap}             onReflect={onReflect} onAddNote={onAddNote}/>)}</>}
+      {progress.length > 0 && <><SLabel>Progress goals</SLabel> {progress.map(h => <ProgressCard key={h.id} habit={h} onOpenLog={onOpenLog}     onReflect={onReflect} onAddNote={onAddNote}/>)}</>}
+      {project.length  > 0 && <><SLabel>Build</SLabel>          {project.map(h  => <ProjectCard  key={h.id} habit={h} onOpenLog={onOpenLog}     onReflect={onReflect} onAddNote={onAddNote}/>)}</>}
       <button onClick={onAdd} style={{ margin:"8px 14px 0", width:"calc(100% - 28px)", border:`1px dashed ${T.borderStrong}`, background:"none", borderRadius:T.r, padding:14, fontSize:13, color:T.muted, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2v10M2 7h10" stroke={T.muted} strokeWidth="1.5" strokeLinecap="round"/></svg>
         Add habit
       </button>
+    </div>
+  );
+}
+
+// ─── BETA INTEREST MODAL ─────────────────────────────────────────────────────
+function BetaModal({ onClose }) {
+  const [email, setEmail] = useState("");
+  const [msg, setMsg] = useState("");
+  const [sent, setSent] = useState(false);
+
+  function handleSubmit() {
+    if (!email.trim()) return;
+    // mailto fallback — works immediately, no backend needed
+    const subject = encodeURIComponent("Forged Pro — Beta Interest");
+    const body = encodeURIComponent(
+      `Email: ${email.trim()}\n\n${msg.trim() ? `Message: ${msg.trim()}` : "(No message)"}`
+    );
+    window.open(`mailto:corbynmiller1@gmail.com?subject=${subject}&body=${body}`, "_blank");
+    setSent(true);
+  }
+
+  if (sent) return (
+    <Modal onClose={onClose}>
+      <div style={{ textAlign:"center", padding:"10px 0 20px" }}>
+        <div style={{ fontSize:36, marginBottom:14 }}>🙌</div>
+        <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:10 }}>You're on the list.</div>
+        <div style={{ fontSize:14, color:T.muted, lineHeight:1.75, marginBottom:24 }}>
+          Thanks for being early. You'll hear from me directly as things come together — I genuinely appreciate it.
+        </div>
+        <GBtn onClick={onClose}>Close</GBtn>
+      </div>
+    </Modal>
+  );
+
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:10 }}>Interested in Pro?</div>
+      <div style={{ fontSize:13, color:T.muted, lineHeight:1.8, marginBottom:20 }}>
+        I'm gauging interest before charging anything. If you want to be one of the first 100 beta testers,
+        it's <strong style={{ color:T.text }}>$5/month</strong> — and that price is yours for life if you sign up early.
+        <br/><br/>
+        You won't be charged yet. In exchange I'd genuinely love your feedback as I build this out. This is a solo-built app
+        and early voices shape everything.
+      </div>
+      <FG label="Your email">
+        <input style={inp} type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} autoFocus/>
+      </FG>
+      <FG label="Anything you'd love to see? (optional)" mb={0}>
+        <textarea style={{ ...inp, resize:"none", lineHeight:1.6 }} rows={3}
+          placeholder="Features, questions, feedback — anything goes"
+          value={msg} onChange={e => setMsg(e.target.value)}/>
+      </FG>
+      <PBtn onClick={handleSubmit} style={{ marginTop:16 }}>I'm interested →</PBtn>
+      <GBtn onClick={onClose}>Maybe later</GBtn>
+      <div style={{ fontSize:11, color:T.hint, marginTop:10, textAlign:"center", lineHeight:1.6 }}>
+        This opens your email app with your details pre-filled. No spam, ever.
+      </div>
+    </Modal>
+  );
+}
+
+// ─── JOURNAL DAY SECTION ──────────────────────────────────────────────────────
+// One section per date in the list view. Today is expanded by default.
+// Past days collapse into a single row showing a snapshot.
+function DaySection({ date, dayHabits, onReflect }) {
+  const isToday = date === todayStr();
+  const [open, setOpen] = useState(isToday);
+
+  const label = isToday ? "Today" : date === daysAgo(1) ? "Yesterday" : fmtEntryDate(date);
+  // Snapshot: unique habit emojis for this day + total log count
+  const totalLogs = dayHabits.reduce((s, dh) => s + dh.logs.length, 0);
+  const emojis = dayHabits.slice(0, 4).map(dh => dh.habit.emoji).join(" ");
+
+  return (
+    <div style={{ marginBottom: isToday ? 4 : 2 }}>
+      {/* Date header — past days are clickable accordions */}
+      {isToday ? (
+        <div style={{ padding:"12px 18px 6px" }}>
+          <div style={{ fontSize:13, fontWeight:600, color:T.text, letterSpacing:"0.01em" }}>Today</div>
+        </div>
+      ) : (
+        <button onClick={() => setOpen(o => !o)}
+          style={{ width:"100%", display:"flex", alignItems:"center", padding:"10px 18px 8px", background:"none", border:"none", cursor:"pointer", gap:10 }}>
+          {/* Colour line */}
+          <div style={{ width:3, height:28, borderRadius:2, background:open?T.accent:T.borderStrong, flexShrink:0, transition:"background 0.2s" }}/>
+          <div style={{ flex:1, textAlign:"left" }}>
+            <div style={{ fontSize:13, fontWeight:500, color:open?T.text:T.muted, transition:"color 0.2s" }}>{label}</div>
+            {!open && <div style={{ fontSize:11, color:T.hint, marginTop:1 }}>{emojis} · {totalLogs} {totalLogs === 1 ? "entry" : "entries"}</div>}
+          </div>
+          <div style={{ fontSize:14, color:T.hint, transition:"transform 0.2s", transform:open?"rotate(90deg)":"rotate(0deg)" }}>›</div>
+        </button>
+      )}
+
+      {/* Expanded content */}
+      {open && dayHabits.map(({ habit, logs }) => (
+        <HabitDayCard key={habit.id} habit={habit} logs={logs} onReflect={onReflect}/>
+      ))}
+    </div>
+  );
+}
+
+// Card showing one habit's full activity for a single day
+function HabitDayCard({ habit, logs, onReflect }) {
+  const nonNote = logs.filter(l => l.value !== "quicknote");
+  const notes   = logs.filter(l => l.value === "quicknote" || (l.note && l.note.trim()));
+  const uniqueNotes = [...new Set(notes.map(l => l.note).filter(Boolean))];
+
+  // Summary line based on habit type
+  function summaryLine() {
+    if (habit.habitType === "project") {
+      const mins = nonNote.reduce((s, l) => s + (l.value?.minutes || 0), 0);
+      const sessions = nonNote.length;
+      return mins > 0 ? `${mins} min · ${sessions} session${sessions!==1?"s":""}` : `${sessions} session${sessions!==1?"s":""}`;
+    }
+    if (habit.habitType === "limit") {
+      const total = nonNote.reduce((s, l) => s + (typeof l.value === "number" ? l.value : 0), 0);
+      return `${total} ${habit.unit || "logged"} of ${habit.dailyBudget} limit`;
+    }
+    if (habit.habitType === "weekly") return `${nonNote.length} session${nonNote.length!==1?"s":""}`;
+    if (habit.habitType === "progress") {
+      const latest = nonNote.slice(-1)[0];
+      return latest ? `${latest.value}${habit.unit}` : "logged";
+    }
+    return "logged ✓";
+  }
+
+  // Grab wins, hard parts, reflections from any log
+  const wins       = nonNote.filter(l => l.value?.win).map(l => l.value.win);
+  const hardParts  = nonNote.filter(l => l.value?.hardPart).map(l => l.value.hardPart);
+  const reflection = nonNote.map(l => l.reflection).filter(Boolean).join(" ");
+
+  return (
+    <div style={{ margin:"0 14px 8px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, overflow:"hidden" }}>
+      {/* Habit header */}
+      <div style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 14px 8px", borderBottom:`0.5px solid ${T.border}` }}>
+        <div style={{ width:24, height:24, borderRadius:6, background:habit.color+"22", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13 }}>{habit.emoji}</div>
+        <span style={{ fontSize:13, fontWeight:500, color:habit.color }}>{habit.name}</span>
+        <span style={{ marginLeft:"auto", fontSize:11, color:T.hint }}>{summaryLine()}</span>
+      </div>
+
+      {/* Wins */}
+      {wins.map((w, i) => (
+        <div key={i} style={{ padding:"9px 14px", borderBottom:`0.5px solid ${T.border}` }}>
+          <div style={{ fontSize:10, color:T.green, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:3 }}>Win 🏆</div>
+          <div style={{ fontSize:13, color:T.text, lineHeight:1.6 }}>{w}</div>
+        </div>
+      ))}
+
+      {/* Hard parts */}
+      {hardParts.map((h, i) => (
+        <div key={i} style={{ padding:"9px 14px", borderBottom:`0.5px solid ${T.border}` }}>
+          <div style={{ fontSize:10, color:T.amber, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:3 }}>Hard part 🧱</div>
+          <div style={{ fontSize:13, color:T.sub, lineHeight:1.6 }}>{h}</div>
+        </div>
+      ))}
+
+      {/* Reflection */}
+      {reflection && (
+        <div style={{ padding:"9px 14px", borderBottom:`0.5px solid ${T.border}` }}>
+          <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:3 }}>Reflection</div>
+          <div style={{ fontSize:13, color:T.text, lineHeight:1.6 }}>{reflection}</div>
+        </div>
+      )}
+
+      {/* Quick notes */}
+      {uniqueNotes.map((n, i) => (
+        <div key={i} style={{ padding:"8px 14px", borderBottom:i<uniqueNotes.length-1?`0.5px solid ${T.border}`:"none", background:`${T.surface}66` }}>
+          <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:3 }}>Note</div>
+          <div style={{ fontSize:13, color:T.sub, lineHeight:1.55, fontStyle:"italic" }}>{n}</div>
+        </div>
+      ))}
+
+      {/* Add reflection prompt if none yet */}
+      {!reflection && (
+        <div style={{ padding:"8px 14px" }}>
+          <button onClick={() => onReflect(habit.id)}
+            style={{ fontSize:12, color:habit.color+"99", background:"none", border:"none", cursor:"pointer", fontWeight:500, padding:0 }}>
+            Add reflection →
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1249,31 +1442,39 @@ function JournalScreen({ habits, onReflect }) {
   const [monthOffset, setMonthOffset] = useState(0); // 0 = current month
   const [selectedDay, setSelectedDay] = useState(null);
 
-  // Build flat list of all entries with any noteworthy content
+  // Build ALL habit activity grouped by date (not just entries with notes)
+  const allByDate = {};
+  habits.forEach(h => {
+    const hLogs = filter === "all" || filter === h.id ? h.logs : [];
+    hLogs.forEach(l => {
+      if (!allByDate[l.date]) allByDate[l.date] = {};
+      if (!allByDate[l.date][h.id]) allByDate[l.date][h.id] = { habit: h, logs: [] };
+      allByDate[l.date][h.id].logs.push(l);
+    });
+  });
+  const dates = Object.keys(allByDate).sort((a, b) => b.localeCompare(a));
+
+  // For calendar month view: still use the old entries approach (notes/reflections only)
   const entries = [];
   habits.forEach(h => {
     h.logs.forEach(l => {
-      const hasNote       = l.note && l.note.trim();
+      const hasNote = l.note && l.note.trim();
       const hasReflection = !!l.reflection;
-      const hasWin        = !!l.value?.win;
-      const hasHard       = !!l.value?.hardPart;
+      const hasWin = !!l.value?.win;
+      const hasHard = !!l.value?.hardPart;
       if (hasNote || hasReflection || hasWin || hasHard) {
         entries.push({
           habitId:h.id, habitName:h.name, habitEmoji:h.emoji, habitColor:h.color,
           date:l.date, note:l.note||"", reflection:l.reflection||"",
-          win:      l.value?.win      || "",
-          hardPart: l.value?.hardPart || "",
-          minutes:  typeof l.value === "object" && l.value?.minutes ? l.value.minutes : null,
+          win: l.value?.win || "", hardPart: l.value?.hardPart || "",
+          minutes: typeof l.value === "object" && l.value?.minutes ? l.value.minutes : null,
         });
       }
     });
   });
-  entries.sort((a, b) => b.date.localeCompare(a.date));
-
   const filtered = filter === "all" ? entries : entries.filter(e => e.habitId === filter);
   const byDate = {};
   filtered.forEach(e => { if (!byDate[e.date]) byDate[e.date] = []; byDate[e.date].push(e); });
-  const dates = Object.keys(byDate).sort((a, b) => b.localeCompare(a));
 
   // ── MONTH VIEW helpers ─────────────────────────────────────────────────────
   const now = new Date();
@@ -1308,7 +1509,7 @@ function JournalScreen({ habits, onReflect }) {
       <div style={{ padding:"16px 18px 10px", display:"flex", alignItems:"flex-end", justifyContent:"space-between" }}>
         <div>
           <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>Journal</div>
-          <div style={{ fontSize:13, color:T.muted, marginTop:3 }}>{entries.length} entries</div>
+          <div style={{ fontSize:13, color:T.muted, marginTop:3 }}>{dates.length} days logged</div>
         </div>
         {/* View toggle */}
         <div style={{ display:"flex", background:T.surface, borderRadius:T.rsm, padding:3, gap:2 }}>
@@ -1415,21 +1616,19 @@ function JournalScreen({ habits, onReflect }) {
       {/* ── LIST VIEW ── */}
       {viewMode === "list" && (
         <>
-          {filtered.length === 0 && (
+          {dates.length === 0 && (
             <div style={{ padding:"60px 30px", textAlign:"center" }}>
               <div style={{ fontSize:36, marginBottom:14 }}>📓</div>
-              <div style={{ fontSize:14, color:T.muted, lineHeight:1.7 }}>No entries yet. Log a habit and tap "Go deeper" to write your first reflection.</div>
+              <div style={{ fontSize:14, color:T.muted, lineHeight:1.7 }}>No entries yet. Start logging habits — everything shows up here.</div>
             </div>
           )}
           {dates.map(date => (
-            <div key={date}>
-              <div style={{ padding:"10px 18px 6px", fontSize:11, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em" }}>
-                {fmtEntryDate(date)}
-              </div>
-              {byDate[date].map((entry, i) => (
-                <EntryCard key={i} entry={entry} onReflect={onReflect}/>
-              ))}
-            </div>
+            <DaySection
+              key={date}
+              date={date}
+              dayHabits={Object.values(allByDate[date])}
+              onReflect={onReflect}
+            />
           ))}
         </>
       )}
@@ -2853,6 +3052,32 @@ export default function App() {
     addToast("🛡️ Rest day — streak protected");
   }
 
+  // Add a quick note as a standalone log entry — each Done tap creates a separate record
+  function handleAddNote(id, text) {
+    if (!text.trim()) return;
+    let updated = null;
+    setHabits(prev => prev.map(h => {
+      if (h.id !== id) return h;
+      updated = { ...h, logs: [...h.logs, { date: todayStr(), value: "quicknote", note: text.trim() }] };
+      return updated;
+    }));
+    if (updated) syncHabit(updated);
+    addToast("✓ Note saved");
+  }
+
+  // Explicitly log 0 for a limit habit — marks "had none today" as a conscious choice
+  function handleLogZero(id) {
+    let updated = null;
+    setHabits(prev => prev.map(h => {
+      if (h.id !== id) return h;
+      if (h.logs.some(l => l.date === todayStr() && typeof l.value === "number")) return h; // already logged
+      updated = { ...h, logs: [...h.logs, { date: todayStr(), value: 0, note: "" }] };
+      return updated;
+    }));
+    if (updated) syncHabit(updated);
+    addToast("✓ Logged — none today");
+  }
+
   // Note change: update most recent today log (called on every keystroke — debounce the DB write)
   function handleNoteChange(id, val) {
     let updatedHabit = null;
@@ -2949,7 +3174,7 @@ export default function App() {
           </button>
         </div>
 
-        {screen === "today"    && <TodayScreen    habits={habits} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onReflect={setReflectId} onNoteChange={handleNoteChange} onOpenLog={id => setLogId(id)} onAdd={() => setShowAdd(true)} onXPInfo={() => setShowXP(true)}/>}
+        {screen === "today"    && <TodayScreen    habits={habits} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onReflect={setReflectId} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onAdd={() => setShowAdd(true)} onXPInfo={() => setShowXP(true)}/>}
         {screen === "journal"  && <JournalScreen  habits={habits} onReflect={setReflectId}/>}
         {screen === "insights" && <InsightsScreen habits={habits} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)}/>}
         {screen === "habits"   && <HabitsScreen   habits={habits} onEdit={setEditId} onDelete={handleDeleteHabit} onAdd={() => setShowAdd(true)} onReflect={setReflectId} onCoach={() => setShowCoach(true)}/>}
