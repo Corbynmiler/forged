@@ -349,56 +349,93 @@ function DoneBanner({ habit }) {
 function useSpeechInput(onFinal) {
   const [listening, setListening] = useState(false);
   const [interim,   setInterim]   = useState("");
+  // R holds mutable refs that must not trigger re-renders
   const R = useRef({ recog:null, stream:null, ctx:null, raf:null, ringEl:null });
+  const stopping = useRef(false); // true while we're mid-teardown
 
   const supported = !!(typeof window !== "undefined" &&
     (window.SpeechRecognition || window.webkitSpeechRecognition));
 
-  const stopAll = useCallback(() => {
+  const stopAll = useCallback((fromOnEnd = false) => {
     const r = R.current;
-    if (r.raf)    cancelAnimationFrame(r.raf);
-    if (r.ctx)    r.ctx.close().catch(()=>{});
-    if (r.stream) r.stream.getTracks().forEach(t => t.stop());
-    try { r.recog?.stop(); } catch {}
-    r.raf = null; r.ctx = null; r.stream = null; r.recog = null;
+    stopping.current = true;
+
+    // Cancel volume animation
+    if (r.raf) { cancelAnimationFrame(r.raf); r.raf = null; }
+
+    // Stop mic stream
+    if (r.stream) { r.stream.getTracks().forEach(t => t.stop()); r.stream = null; }
+
+    // Suspend (not close) AudioContext so it can be reused next time.
+    // close() on iOS blocks creation of new contexts for ~300ms and causes silent failures.
+    if (r.ctx) { try { r.ctx.suspend(); } catch {} }
+
+    // Null out recog FIRST, then stop — this prevents the onend callback
+    // (which fires async after stop()) from calling stopAll a second time.
+    const recog = r.recog;
+    r.recog = null;
+    if (!fromOnEnd && recog) { try { recog.stop(); } catch {} }
+
     if (r.ringEl) { r.ringEl.style.transform = "scale(1)"; r.ringEl.style.opacity = "0"; }
     setListening(false);
     setInterim("");
+
+    // Allow restart after a brief settling period
+    setTimeout(() => { stopping.current = false; }, 350);
   }, []);
 
-  useEffect(() => stopAll, [stopAll]);
+  useEffect(() => () => stopAll(), [stopAll]);
 
   const setRingEl = useCallback(el => { R.current.ringEl = el; }, []);
 
   function startVolume() {
+    const r = R.current;
+    // Reuse existing context if suspended, otherwise create once
+    if (!r.ctx) {
+      try { r.ctx = new (window.AudioContext || window.webkitAudioContext)(); }
+      catch { return; }
+    }
+    if (r.ctx.state === "suspended") r.ctx.resume().catch(() => {});
+
     navigator.mediaDevices?.getUserMedia({ audio:true, video:false }).then(stream => {
+      if (!R.current.recog) { stream.getTracks().forEach(t => t.stop()); return; } // stopped before mic granted
       R.current.stream = stream;
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 64;
-      ctx.createMediaStreamSource(stream).connect(analyser);
-      R.current.ctx = ctx;
-      const buf = new Uint8Array(analyser.frequencyBinCount);
-      const tick = () => {
-        analyser.getByteFrequencyData(buf);
-        const avg = buf.reduce((a,b) => a+b, 0) / buf.length;
-        const v   = Math.min(1, avg / 48);
-        const el  = R.current.ringEl;
-        if (el) { el.style.transform = `scale(${1 + v*0.65})`; el.style.opacity = String(Math.max(0.12, v)); }
-        R.current.raf = requestAnimationFrame(tick);
-      };
-      tick();
+      const ctx = R.current.ctx;
+      if (!ctx) return;
+      try {
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 64;
+        ctx.createMediaStreamSource(stream).connect(analyser);
+        const buf = new Uint8Array(analyser.frequencyBinCount);
+        const tick = () => {
+          if (!R.current.recog) return; // stopped — bail out of RAF loop
+          analyser.getByteFrequencyData(buf);
+          const avg = buf.reduce((a,b) => a+b, 0) / buf.length;
+          const v   = Math.min(1, avg / 48);
+          const el  = R.current.ringEl;
+          if (el) { el.style.transform = `scale(${1+v*0.65})`; el.style.opacity = String(Math.max(0.12, v)); }
+          R.current.raf = requestAnimationFrame(tick);
+        };
+        tick();
+      } catch {}
     }).catch(() => {});
   }
 
   function toggle() {
-    if (listening) { stopAll(); return; }
+    if (listening || stopping.current) { if (listening) stopAll(); return; }
     if (!supported) { alert("Voice input requires Chrome or Safari."); return; }
+
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const recog = new SR();
+    let recog;
+    try { recog = new SR(); } catch { return; }
+
     recog.continuous     = true;
     recog.interimResults = true;
     recog.lang           = navigator.language || "en-US";
+
+    // Set listening only when the browser confirms recognition has started
+    recog.onstart  = () => { setListening(true); };
+
     recog.onresult = e => {
       let iText = "";
       for (let j = e.resultIndex; j < e.results.length; j++) {
@@ -407,10 +444,23 @@ function useSpeechInput(onFinal) {
       }
       if (iText) setInterim(iText);
     };
-    recog.onerror = () => stopAll();
-    recog.onend   = () => stopAll();
+
+    recog.onerror = () => { stopAll(); };
+
+    // onend fires async after stop() — only clean up if this recog is still current
+    recog.onend = () => {
+      if (R.current.recog === recog) stopAll(true);
+      else { setListening(false); setInterim(""); }
+    };
+
     R.current.recog = recog;
-    try { recog.start(); setListening(true); startVolume(); } catch { stopAll(); }
+    try {
+      recog.start();
+      startVolume();
+    } catch {
+      R.current.recog = null;
+      stopAll();
+    }
   }
 
   return { listening, interim, toggle, supported, setRingEl };
@@ -2696,8 +2746,9 @@ function AvatarPickerModal({ current, onSelect, onClose }) {
 
 // ─── PROFILE / SETTINGS SCREEN ────────────────────────────────────────────────
 // ─── UPGRADE MODAL ────────────────────────────────────────────────────────────
-function UpgradeModal({ onClose, habitCount = 0 }) {
-  const [spots, setSpots] = useState(null); // total users signed up so far
+function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
+  const [spots,        setSpots]        = useState(null);
+  const [checkoutPlan, setCheckoutPlan] = useState(null); // "monthly" | "annual" | null = idle
 
   useEffect(() => {
     supabase.rpc("beta_spot_count").then(({ data }) => {
@@ -2788,9 +2839,41 @@ function UpgradeModal({ onClose, habitCount = 0 }) {
         </div>
 
         {/* CTA */}
-        <button onClick={() => { onClose(); window.open("mailto:corbyn.miller2000@gmail.com?subject=Forged%20Pro%20%E2%80%94%20Early%20Access&body=Hey%2C%20I%27d%20like%20to%20lock%20in%20the%20beta%20price%20for%20Forged%20Pro.%20Please%20send%20me%20the%20payment%20link%20when%20it%27s%20ready.", "_blank"); }}
-          style={{ display:"block", width:"100%", padding:"16px", borderRadius:T.rsm, border:"none", background:T.gold, color:"#1a1a16", fontSize:16, fontWeight:700, cursor:"pointer", marginBottom:10, textAlign:"center", boxSizing:"border-box", letterSpacing:"0.01em" }}>
-          Reserve my beta spot →
+        <button
+          disabled={!!checkoutPlan}
+          onClick={async () => {
+            setCheckoutPlan("monthly");
+            try {
+              const res = await fetch("/api/create-checkout", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userId, email: userEmail, plan: "monthly" }),
+              });
+              const { url, error } = await res.json();
+              if (url) { window.location.href = url; }
+              else { alert(error || "Couldn't start checkout — try again"); setCheckoutPlan(null); }
+            } catch { alert("Couldn't connect — try again"); setCheckoutPlan(null); }
+          }}
+          style={{ display:"block", width:"100%", padding:"16px", borderRadius:T.rsm, border:"none", background:T.gold, color:"#1a1a16", fontSize:16, fontWeight:700, cursor: checkoutPlan ? "wait" : "pointer", marginBottom:10, textAlign:"center", boxSizing:"border-box", letterSpacing:"0.01em", opacity: checkoutPlan ? 0.7 : 1 }}>
+          {checkoutPlan === "monthly" ? "Redirecting to checkout…" : "Get Forged Pro — $4.99/mo →"}
+        </button>
+        <button
+          disabled={!!checkoutPlan}
+          onClick={async () => {
+            setCheckoutPlan("annual");
+            try {
+              const res = await fetch("/api/create-checkout", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userId, email: userEmail, plan: "annual" }),
+              });
+              const { url, error } = await res.json();
+              if (url) { window.location.href = url; }
+              else { alert(error || "Couldn't start checkout — try again"); setCheckoutPlan(null); }
+            } catch { alert("Couldn't connect — try again"); setCheckoutPlan(null); }
+          }}
+          style={{ display:"block", width:"100%", padding:"12px", borderRadius:T.rsm, border:`1px solid rgba(200,144,42,0.4)`, background:"none", color:T.gold, fontSize:14, fontWeight:600, cursor: checkoutPlan ? "wait" : "pointer", marginBottom:10, textAlign:"center", boxSizing:"border-box", opacity: checkoutPlan ? 0.7 : 1 }}>
+          {checkoutPlan === "annual" ? "Redirecting to checkout…" : "Annual — $39.99/yr (save 33%) →"}
         </button>
         <div style={{ fontSize:11, color:T.hint, textAlign:"center", lineHeight:1.7 }}>
           Your price is locked in forever — even after we raise it publicly
@@ -3255,7 +3338,9 @@ export default function App() {
   const [isPro,       setIsPro]       = useState(false);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [refCode,     setRefCode]     = useState(null);
-  const userIdRef = useRef(null);
+  const [authEmail,   setAuthEmail]   = useState(null);
+  const userIdRef     = useRef(null);
+  const loadingUidRef = useRef(null); // uid currently being loaded — prevents concurrent loads
   const noteDebounceRef = useRef({});
 
   // ─── Supabase helpers ──────────────────────────────────────────────────────
@@ -3301,50 +3386,71 @@ export default function App() {
   }
 
   async function loadUserData(uid) {
+    // Prevent concurrent loads for the same user (init() and INITIAL_SESSION both fire)
+    if (loadingUidRef.current === uid) return;
+    loadingUidRef.current = uid;
     userIdRef.current = uid;
     try {
-      const { data: profile, error: pErr } = await supabase
-        .from("profiles").select("*").eq("id", uid).single();
+      // Parallel fetch — faster and avoids partial-state flashes
+      const [profileRes, habitsRes] = await Promise.all([
+        supabase.from("profiles").select("*").eq("id", uid).single(),
+        supabase.from("habits").select("*").eq("user_id", uid).order("created_at"),
+      ]);
+
+      const { data: profile, error: pErr } = profileRes;
+      const { data: rows,    error: hErr  } = habitsRes;
+
       if (pErr && pErr.code !== "PGRST116") console.error("profile fetch:", pErr.message);
+      if (hErr) console.error("habits fetch:", hErr.message);
+
+      let isOnboarded = false;
+
       if (profile) {
         setUser({ name: profile.name, avatarUrl: profile.avatar_url || null });
         setXp(profile.xp ?? 0);
-        setOnboarded(profile.onboarded ?? false);
-        setIsPro(profile.is_pro ?? false);
+        setIsPro(!!(profile.is_pro || profile.is_admin));
         setRefCode(profile.ref_code ?? null);
+        isOnboarded = profile.onboarded ?? false;
       }
-      const { data: rows, error: hErr } = await supabase
-        .from("habits").select("*").eq("user_id", uid).order("created_at");
-      if (hErr) console.error("habits fetch:", hErr.message);
-      if (rows && rows.length > 0) setHabits(rows.map(rowToHabit));
+
+      // Safety net: habits exist → user finished onboarding even if profile flag is wrong
+      if (!isOnboarded && rows && rows.length > 0) {
+        isOnboarded = true;
+        // Repair the flag quietly
+        supabase.from("profiles").upsert({ id: uid, onboarded: true, updated_at: new Date().toISOString() });
+      }
+
+      setOnboarded(isOnboarded);
+      if (rows) setHabits(rows.map(rowToHabit));
     } catch (err) {
       console.error("loadUserData failed:", err);
+    } finally {
+      loadingUidRef.current = null;
     }
   }
 
   // ─── Auth init ────────────────────────────────────────────────────────────
   // Two-stage approach:
-  // 1. getSession() reads from localStorage instantly (no network) so the
-  //    loading screen clears in <100ms on every open, including PWA tile.
-  // 2. onAuthStateChange handles live changes: sign-in, sign-out, password reset.
-  //    We ignore INITIAL_SESSION / TOKEN_REFRESHED here — getSession() covers those.
+  // Stage 1: getSession() — reads localStorage, fast, handles the normal case.
+  //          Times out after 5s so a hung token refresh never blocks the app.
+  // Stage 2: onAuthStateChange — handles SIGNED_IN (new logins), SIGNED_OUT,
+  //          TOKEN_REFRESHED (recovery after Stage 1 timeout), PASSWORD_RECOVERY.
+  //          INITIAL_SESSION is intentionally ignored — Stage 1 covers it, and
+  //          handling both causes a concurrent loadUserData race.
   useEffect(() => {
     let mounted = true;
 
-    // ── Stage 1: session check with hard timeout ──────────────────────────
-    // getSession() can hang indefinitely if Supabase is trying to refresh an
-    // expired token over a slow/blocked network (common cause of infinite splash).
-    // We race it against a 3-second timeout so the app always unsticks.
     async function init() {
       try {
-        const timeoutSession = new Promise(resolve =>
-          setTimeout(() => resolve({ data: { session: null }, timedOut: true }), 3000)
+        const timeoutPromise = new Promise(resolve =>
+          setTimeout(() => resolve({ data: { session: null }, timedOut: true }), 5000)
         );
-        const result = await Promise.race([supabase.auth.getSession(), timeoutSession]);
+        const result = await Promise.race([supabase.auth.getSession(), timeoutPromise]);
         if (!mounted) return;
+        if (result?.timedOut) console.warn("getSession timed out — TOKEN_REFRESHED will recover");
         const session = result?.data?.session ?? null;
-        if (result?.timedOut) console.warn("getSession timed out — showing auth screen");
         if (session?.user?.id) {
+          if (mounted && session.user.email) setAuthEmail(session.user.email);
           await loadUserData(session.user.id);
           if (mounted) setAuthScreen(false);
         } else {
@@ -3359,42 +3465,51 @@ export default function App() {
     }
     init();
 
-    // ── Stage 2: live auth changes ────────────────────────────────────────
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return;
       try {
+        if (event === "INITIAL_SESSION") return; // handled by init() above
+
         if (event === "PASSWORD_RECOVERY") {
           setPasswordRecovery(true);
           setAuthScreen(false);
           setLoading(false);
           return;
         }
+
         if (event === "SIGNED_OUT") {
           userIdRef.current = null;
+          loadingUidRef.current = null;
           setHabits([]);
           setUser({ name: "", avatarUrl: null });
           setXp(0);
           setOnboarded(false);
           setIsPro(false);
+          setRefCode(null);
+          setAuthEmail(null);
           setAuthScreen(true);
           setLoading(false);
           return;
         }
-        if ((event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "INITIAL_SESSION") && session?.user?.id) {
-          // Load data only if this is a new user or a different user than what's loaded.
-          // TOKEN_REFRESHED can fire after getSession() times out — this is how we recover.
+
+        if (event === "SIGNED_IN" && session?.user?.id) {
+          // New sign-in (different user or first time this session)
+          if (session.user.email && mounted) setAuthEmail(session.user.email);
           if (userIdRef.current !== session.user.id) {
             setLoading(true);
             await loadUserData(session.user.id);
             if (mounted) setLoading(false);
           }
-          // Always clear the auth screen when we have a valid session — even if data
-          // was already loaded. This is the safety net against getting stuck on login.
-          if (mounted) {
-            setAuthScreen(false);
-            setPendingEmail(null);
-            setPasswordRecovery(false);
-          }
+          if (mounted) { setAuthScreen(false); setPendingEmail(null); setPasswordRecovery(false); }
+          return;
+        }
+
+        if (event === "TOKEN_REFRESHED" && session?.user?.id && !userIdRef.current) {
+          // Recovery path: init() timed out, token refreshed in background
+          if (session.user.email && mounted) setAuthEmail(session.user.email);
+          setLoading(true);
+          await loadUserData(session.user.id);
+          if (mounted) { setLoading(false); setAuthScreen(false); }
         }
       } catch (err) {
         console.error("auth event error:", err);
@@ -3423,12 +3538,27 @@ export default function App() {
   const editHabit    = habits.find(h => h.id === editId)    || null;
   const logHabit     = habits.find(h => h.id === logId)     || null;
 
-  // Capture ?ref= from URL and store for later use during onboarding
+  // Capture ?ref= from URL and handle ?checkout=success
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const ref = params.get("ref");
     if (ref && /^[A-Z2-9]{6}$/.test(ref)) {
       localStorage.setItem("forged_pending_ref", ref);
+    }
+    if (params.get("checkout") === "success") {
+      // Clean URL then reload Pro status from DB
+      window.history.replaceState({}, "", window.location.pathname);
+      const uid = userIdRef.current;
+      if (uid) {
+        supabase.from("profiles").select("is_pro, is_admin").eq("id", uid).single().then(({ data }) => {
+          if (data && (data.is_pro || data.is_admin)) {
+            setIsPro(true);
+            const id = Date.now();
+            setToasts(t => [...t, { id, msg: "🎉 Welcome to Forged Pro!" }]);
+            setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 4000);
+          }
+        });
+      }
     }
   }, []);
 
@@ -3666,11 +3796,19 @@ export default function App() {
     syncHabit(h);
   }
 
-  // Delete a habit
-  function handleDeleteHabit(id) {
-    setHabits(p => p.filter(h => h.id !== id));
+  // Delete a habit — optimistic remove, restore from DB on failure
+  async function handleDeleteHabit(id) {
     const uid = userIdRef.current;
-    if (uid) supabase.from("habits").delete().eq("id", id).eq("user_id", uid);
+    if (!uid) return;
+    setHabits(p => p.filter(h => h.id !== id));
+    const { error } = await supabase.from("habits").delete().eq("id", id).eq("user_id", uid);
+    if (error) {
+      console.error("Delete failed:", error.message);
+      addToast("⚠️ Couldn't delete — tap again to retry");
+      // Re-sync from DB so nothing is lost
+      const { data: rows } = await supabase.from("habits").select("*").eq("user_id", uid).order("created_at");
+      if (rows) setHabits(rows.map(rowToHabit));
+    }
   }
 
   async function handleSignOut() {
@@ -3749,7 +3887,7 @@ export default function App() {
       {logId && logHabit?.habitType === "progress" && <LogProgressModal  habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
       {logId && logHabit?.habitType === "project"  && <LogProjectModal   habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
       {showCoach   && <AICoach habits={habits} user={user} isPro={isPro} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)}/>}
-      {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} habitCount={habits.length}/>}
+      {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} habitCount={habits.length} userId={userIdRef.current} userEmail={authEmail}/>}
       {showShare && <ShareCardModal user={user} habits={habits} xp={xp} onClose={() => setShowShare(false)}/>}
       {showTour && (
         <TourOverlay
