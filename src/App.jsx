@@ -3186,14 +3186,28 @@ function AuthScreen({ onSent }) {
     if (!password)     setPassword(p);
     setLoading(true); setError("");
     if (mode === "signup") {
+      // Double-check: only ever call signUp when mode is explicitly "signup"
+      // This prevents any race/accident from creating unintended accounts
       const { error } = await supabase.auth.signUp({ email: e, password: p, options: { emailRedirectTo: window.location.origin } });
       if (error) { setError(error.message); setLoading(false); return; }
       onSent(e);
+      setLoading(false);
     } else {
-      const { error } = await supabase.auth.signInWithPassword({ email: e, password: p });
-      if (error) { setError(error.message); setLoading(false); return; }
+      // Always default to signInWithPassword — never auto-create
+      const { data, error } = await supabase.auth.signInWithPassword({ email: e, password: p });
+      if (error) {
+        // Supabase returns "Invalid login credentials" for both wrong password AND
+        // non-existent user — give a clearer message
+        const msg = error.message.toLowerCase().includes("invalid login")
+          ? "Incorrect email or password. Check your details and try again."
+          : error.message;
+        setError(msg);
+        setLoading(false);
+        return;
+      }
+      // signInWithPassword succeeded — onAuthStateChange(SIGNED_IN) will take it from here
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   async function handleForgot() {
@@ -3255,15 +3269,9 @@ function AuthScreen({ onSent }) {
   const ready = (email.trim() || false) && (password || false) && !loading;
   return (
     <div style={wrap}>
-      <div style={{ fontFamily:T.serif, fontSize:40, color:T.text, marginBottom:24 }}>Forged.</div>
-      <div style={{ display:"flex", background:T.surface, borderRadius:T.rsm, padding:3, marginBottom:28, width:"fit-content" }}>
-        {["signin","signup"].map(m => (
-          <button key={m} onClick={() => { setMode(m); setError(""); }}
-            style={{ padding:"7px 18px", borderRadius:T.rsm-2, border:"none", cursor:"pointer", fontSize:13, fontWeight:500, transition:"all 0.15s",
-              background:mode===m?T.raised:"transparent", color:mode===m?T.text:T.muted }}>
-            {m === "signin" ? "Sign in" : "Create account"}
-          </button>
-        ))}
+      <div style={{ fontFamily:T.serif, fontSize:40, color:T.text, marginBottom:8 }}>Forged.</div>
+      <div style={{ fontSize:15, color:T.muted, marginBottom:32 }}>
+        {mode === "signin" ? "Welcome back" : "Create your account"}
       </div>
       <input type="email" placeholder="you@example.com" autoFocus
         value={email}
@@ -3284,12 +3292,26 @@ function AuthScreen({ onSent }) {
         style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:!loading?T.accent:T.surface, color:!loading?"#fff":T.muted, fontSize:16, fontWeight:500, cursor:!loading?"pointer":"default", transition:"all 0.2s" }}>
         {loading ? "…" : mode === "signin" ? "Sign in" : "Create account"}
       </button>
-      {mode === "signin" && (
-        <button onClick={() => { setMode("forgot"); setError(""); setForgotSent(false); }}
-          style={{ background:"none", border:"none", color:T.muted, fontSize:13, cursor:"pointer", marginTop:12, textAlign:"center", width:"100%" }}>
-          Forgot password?
-        </button>
-      )}
+      {/* Secondary actions — kept small so users can't accidentally switch mode */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:16 }}>
+        {mode === "signin" ? (
+          <>
+            <button onClick={() => { setMode("forgot"); setError(""); setForgotSent(false); }}
+              style={{ background:"none", border:"none", color:T.muted, fontSize:13, cursor:"pointer", padding:0 }}>
+              Forgot password?
+            </button>
+            <button onClick={() => { setMode("signup"); setError(""); }}
+              style={{ background:"none", border:"none", color:T.muted, fontSize:13, cursor:"pointer", padding:0 }}>
+              New here? Create account
+            </button>
+          </>
+        ) : (
+          <button onClick={() => { setMode("signin"); setError(""); }}
+            style={{ background:"none", border:"none", color:T.muted, fontSize:13, cursor:"pointer", padding:0, width:"100%", textAlign:"center" }}>
+            ← Already have an account? Sign in
+          </button>
+        )}
+      </div>
     </div>
   );
 }
