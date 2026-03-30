@@ -3186,10 +3186,22 @@ function AuthScreen({ onSent }) {
     if (!password)     setPassword(p);
     setLoading(true); setError("");
     if (mode === "signup") {
-      // Double-check: only ever call signUp when mode is explicitly "signup"
-      // This prevents any race/accident from creating unintended accounts
       const { error } = await supabase.auth.signUp({ email: e, password: p, options: { emailRedirectTo: window.location.origin } });
-      if (error) { setError(error.message); setLoading(false); return; }
+      if (error) {
+        // "User already registered" — silently switch to sign-in instead of showing an error
+        const alreadyExists = error.message?.toLowerCase().includes("already registered")
+          || error.message?.toLowerCase().includes("already exists")
+          || error.code === "user_already_exists";
+        if (alreadyExists) {
+          setMode("signin");
+          setError("You already have an account — enter your password to sign in.");
+          setLoading(false);
+          return;
+        }
+        setError(error.message);
+        setLoading(false);
+        return;
+      }
       onSent(e);
       setLoading(false);
     } else {
@@ -3408,12 +3420,11 @@ export default function App() {
   }
 
   async function loadUserData(uid) {
-    // Prevent concurrent loads for the same user (init() and INITIAL_SESSION both fire)
+    // Prevent concurrent loads for the same user
     if (loadingUidRef.current === uid) return;
     loadingUidRef.current = uid;
     userIdRef.current = uid;
     try {
-      // Parallel fetch — faster and avoids partial-state flashes
       const [profileRes, habitsRes] = await Promise.all([
         supabase.from("profiles").select("*").eq("id", uid).single(),
         supabase.from("habits").select("*").eq("user_id", uid).order("created_at"),
@@ -3422,85 +3433,109 @@ export default function App() {
       const { data: profile, error: pErr } = profileRes;
       const { data: rows,    error: hErr  } = habitsRes;
 
-      if (pErr && pErr.code !== "PGRST116") console.error("profile fetch:", pErr.message);
-      if (hErr) console.error("habits fetch:", hErr.message);
+      // If both queries hard-failed (network/auth error, not just empty row),
+      // bail out without changing any UI state — better to stay on loading screen
+      // than push a valid user into onboarding due to a transient failure.
+      const profileHardFailed = pErr && pErr.code !== "PGRST116";
+      const habitsHardFailed  = hErr != null;
+      if (profileHardFailed && habitsHardFailed) {
+        console.error("loadUserData: both queries failed — profile:", pErr.message, "habits:", hErr.message);
+        return; // caller keeps loading=true; user sees spinner and can refresh
+      }
+
+      if (profileHardFailed) console.error("profile fetch:", pErr.message);
+      if (habitsHardFailed)  console.error("habits fetch:", hErr.message);
 
       let isOnboarded = false;
 
       if (profile) {
-        setUser({ name: profile.name, avatarUrl: profile.avatar_url || null });
+        setUser({ name: profile.name || "", avatarUrl: profile.avatar_url || null });
         setXp(profile.xp ?? 0);
         setIsPro(!!(profile.is_pro || profile.is_admin));
         setRefCode(profile.ref_code ?? null);
         isOnboarded = profile.onboarded ?? false;
+        // Safety net A: profile has a real name → they went through onboarding
+        // even if the flag got corrupted. Repair quietly.
+        if (!isOnboarded && profile.name && profile.name.trim()) {
+          isOnboarded = true;
+          supabase.from("profiles").update({ onboarded: true, updated_at: new Date().toISOString() }).eq("id", uid);
+        }
       }
 
-      // Safety net: habits exist → user finished onboarding even if profile flag is wrong
+      // Safety net B: habits exist → definitely onboarded. Repair quietly.
       if (!isOnboarded && rows && rows.length > 0) {
         isOnboarded = true;
-        // Repair the flag quietly
         supabase.from("profiles").upsert({ id: uid, onboarded: true, updated_at: new Date().toISOString() });
       }
 
       setOnboarded(isOnboarded);
       if (rows) setHabits(rows.map(rowToHabit));
     } catch (err) {
-      console.error("loadUserData failed:", err);
+      console.error("loadUserData exception:", err);
+      // Don't flip to onboarded=false on error — keep whatever state we had
     } finally {
       loadingUidRef.current = null;
     }
   }
 
   // ─── Auth init ────────────────────────────────────────────────────────────
-  // Two-stage approach:
-  // Stage 1: getSession() — reads localStorage, fast, handles the normal case.
-  //          Times out after 5s so a hung token refresh never blocks the app.
-  // Stage 2: onAuthStateChange — handles SIGNED_IN (new logins), SIGNED_OUT,
-  //          TOKEN_REFRESHED (recovery after Stage 1 timeout), PASSWORD_RECOVERY.
-  //          INITIAL_SESSION is intentionally ignored — Stage 1 covers it, and
-  //          handling both causes a concurrent loadUserData race.
+  // INITIAL_SESSION is the correct primary signal. It fires once Supabase has:
+  //   1. Read the persisted session from localStorage
+  //   2. Refreshed the access token if expired
+  //   3. Determined the definitive initial auth state
+  // getSession() can return null before that refresh completes — using it as
+  // the primary signal is the root cause of "session looks gone on refresh".
   useEffect(() => {
     let mounted = true;
 
-    async function init() {
-      try {
-        const timeoutPromise = new Promise(resolve =>
-          setTimeout(() => resolve({ data: { session: null }, timedOut: true }), 5000)
-        );
-        const result = await Promise.race([supabase.auth.getSession(), timeoutPromise]);
-        if (!mounted) return;
-        if (result?.timedOut) console.warn("getSession timed out — TOKEN_REFRESHED will recover");
-        const session = result?.data?.session ?? null;
-        if (session?.user?.id) {
-          if (mounted && session.user.email) setAuthEmail(session.user.email);
-          await loadUserData(session.user.id);
-          if (mounted) setAuthScreen(false);
-        } else {
-          if (mounted) setAuthScreen(true);
-        }
-      } catch (err) {
-        console.error("init error:", err);
-        if (mounted) setAuthScreen(true);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    }
-    init();
+    // Safety valve: if INITIAL_SESSION never fires (e.g. Supabase SDK bug or
+    // very slow network), unblock the app after 8s so the user isn't stuck.
+    const bailout = setTimeout(() => {
+      if (!mounted) return;
+      console.warn("Auth: INITIAL_SESSION did not fire within 8s");
+      if (!userIdRef.current) setAuthScreen(true);
+      setLoading(false);
+    }, 8000);
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return;
       try {
-        if (event === "INITIAL_SESSION") return; // handled by init() above
 
-        if (event === "PASSWORD_RECOVERY") {
-          setPasswordRecovery(true);
-          setAuthScreen(false);
-          setLoading(false);
+        // ── Initial session ───────────────────────────────────────────────
+        // This is the canonical "what is the user's auth state on load" event.
+        // We handle it here instead of getSession() so that the token refresh
+        // (which happens asynchronously before this event fires) is complete.
+        if (event === "INITIAL_SESSION") {
+          clearTimeout(bailout);
+          if (session?.user?.id) {
+            if (session.user.email) setAuthEmail(session.user.email);
+            await loadUserData(session.user.id);
+            if (mounted) setAuthScreen(false);
+          } else {
+            if (mounted) setAuthScreen(true);
+          }
+          if (mounted) setLoading(false);
           return;
         }
 
+        // ── Explicit sign-in ──────────────────────────────────────────────
+        if (event === "SIGNED_IN" && session?.user?.id) {
+          if (session.user.email && mounted) setAuthEmail(session.user.email);
+          // Only reload data if this is actually a different/new user
+          if (userIdRef.current !== session.user.id) {
+            setLoading(true);
+            await loadUserData(session.user.id);
+            if (mounted) setLoading(false);
+          }
+          // Always clear auth screen on sign-in, even if data was already loaded
+          if (mounted) { setAuthScreen(false); setPendingEmail(null); setPasswordRecovery(false); }
+          return;
+        }
+
+        // ── Sign-out ──────────────────────────────────────────────────────
         if (event === "SIGNED_OUT") {
-          userIdRef.current = null;
+          clearTimeout(bailout);
+          userIdRef.current     = null;
           loadingUidRef.current = null;
           setHabits([]);
           setUser({ name: "", avatarUrl: null });
@@ -3509,37 +3544,51 @@ export default function App() {
           setIsPro(false);
           setRefCode(null);
           setAuthEmail(null);
-          setAuthScreen(true);
-          setLoading(false);
+          if (mounted) { setAuthScreen(true); setLoading(false); }
           return;
         }
 
-        if (event === "SIGNED_IN" && session?.user?.id) {
-          // New sign-in (different user or first time this session)
+        // ── Token refresh ─────────────────────────────────────────────────
+        // Fires when the access token is silently refreshed. If we somehow
+        // don't have user data yet (e.g. INITIAL_SESSION timed out and the
+        // bailout showed auth screen), use this as a recovery path.
+        if (event === "TOKEN_REFRESHED" && session?.user?.id) {
           if (session.user.email && mounted) setAuthEmail(session.user.email);
-          if (userIdRef.current !== session.user.id) {
+          if (!userIdRef.current) {
             setLoading(true);
             await loadUserData(session.user.id);
-            if (mounted) setLoading(false);
+            if (mounted) { setLoading(false); setAuthScreen(false); }
           }
-          if (mounted) { setAuthScreen(false); setPendingEmail(null); setPasswordRecovery(false); }
           return;
         }
 
-        if (event === "TOKEN_REFRESHED" && session?.user?.id && !userIdRef.current) {
-          // Recovery path: init() timed out, token refreshed in background
-          if (session.user.email && mounted) setAuthEmail(session.user.email);
-          setLoading(true);
-          await loadUserData(session.user.id);
-          if (mounted) { setLoading(false); setAuthScreen(false); }
+        // ── Password recovery ─────────────────────────────────────────────
+        if (event === "PASSWORD_RECOVERY") {
+          if (mounted) { setPasswordRecovery(true); setAuthScreen(false); setLoading(false); }
+          return;
         }
+
       } catch (err) {
         console.error("auth event error:", err);
         if (mounted) setLoading(false);
       }
     });
 
-    return () => { mounted = false; subscription.unsubscribe(); };
+    return () => { mounted = false; clearTimeout(bailout); subscription.unsubscribe(); };
+  }, []);
+
+  // ─── Session refresh on page focus ────────────────────────────────────────
+  // On mobile, the app can be backgrounded for a long time. When it comes back,
+  // the access token may have expired. Calling getSession() triggers a refresh
+  // which fires TOKEN_REFRESHED — the handler above picks that up.
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState === "visible") {
+        supabase.auth.getSession(); // triggers token refresh → TOKEN_REFRESHED if expired
+      }
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
   }, []);
 
   // Sync XP to profile whenever it changes (after init)
@@ -3645,8 +3694,10 @@ export default function App() {
     );
   }
 
-  // Show onboarding on first launch
-  if (!onboarded) {
+  // Show onboarding — only when auth is fully resolved and user is genuinely new.
+  // Explicit guards prevent any loading/auth-screen race from showing this screen
+  // to an existing user who just hasn't had their data loaded yet.
+  if (!loading && !authScreen && !onboarded) {
     return (
       <><style>{CSS}</style>
       <OnboardingScreen
