@@ -33,6 +33,34 @@ function fmtEntryDate(dateStr) {
   const d = parseLocal(dateStr);
   return `${DAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}`;
 }
+function weekEndFromStart(weekStartStr) {
+  const d = parseLocal(weekStartStr);
+  d.setDate(d.getDate() + 6);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function fmtWeekRange(weekStartStr) {
+  const a = parseLocal(weekStartStr);
+  const b = parseLocal(weekEndFromStart(weekStartStr));
+  if (a.getMonth() === b.getMonth()) return `${MONTHS[a.getMonth()]} ${a.getDate()}–${b.getDate()}`;
+  return `${MONTHS[a.getMonth()]} ${a.getDate()} – ${MONTHS[b.getMonth()]} ${b.getDate()}`;
+}
+function loadJournalMissedMap(userId) {
+  if (!userId) return {};
+  try {
+    const raw = localStorage.getItem(`forged_journal_missed_${userId}`);
+    if (!raw) return {};
+    const o = JSON.parse(raw);
+    return typeof o === "object" && o !== null ? o : {};
+  } catch {
+    return {};
+  }
+}
+function saveJournalMissedMap(userId, map) {
+  if (!userId) return;
+  try {
+    localStorage.setItem(`forged_journal_missed_${userId}`, JSON.stringify(map));
+  } catch { /* ignore quota */ }
+}
 
 // ─── DESIGN TOKENS ────────────────────────────────────────────────────────────
 const T = {
@@ -1509,6 +1537,30 @@ function DaySection({ date, dayHabits, onReflect }) {
   );
 }
 
+// Missed day (marked by user, optional note) — list / week views
+function MissedDaySection({ date, note, onEdit, onClear }) {
+  const label = fmtEntryDate(date);
+  return (
+    <div style={{ margin:"0 14px 10px", background:"rgba(230,126,34,0.08)", borderRadius:T.r, border:"0.5px solid rgba(230,126,34,0.28)", overflow:"hidden" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 14px", borderBottom:note?.trim() ? `0.5px solid ${T.border}` : "none" }}>
+        <span style={{ fontSize:14 }}>✕</span>
+        <div style={{ flex:1 }}>
+          <div style={{ fontSize:12, fontWeight:600, color:T.amber }}>Missed</div>
+          <div style={{ fontSize:12, color:T.muted, marginTop:1 }}>{label}</div>
+        </div>
+        <button type="button" onClick={onEdit} style={{ fontSize:11, color:T.amber, background:"none", border:"none", cursor:"pointer", fontWeight:500 }}>Edit</button>
+        <button type="button" onClick={onClear} style={{ fontSize:11, color:T.hint, background:"none", border:"none", cursor:"pointer" }}>Clear</button>
+      </div>
+      {note?.trim() ? (
+        <div style={{ padding:"10px 14px" }}>
+          <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:4 }}>Note</div>
+          <div style={{ fontSize:13, color:T.sub, lineHeight:1.55 }}>{note}</div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // Card showing one habit's full activity for a single day
 function HabitDayCard({ habit, logs, onReflect }) {
   const nonNote = logs.filter(l => l.value !== "quicknote");
@@ -1594,13 +1646,49 @@ function HabitDayCard({ habit, logs, onReflect }) {
 }
 
 // ─── JOURNAL SCREEN ───────────────────────────────────────────────────────────
-function JournalScreen({ habits, onReflect }) {
+function JournalScreen({ habits, onReflect, journalUserId }) {
   const [filter, setFilter] = useState("all");
-  const [viewMode, setViewMode] = useState("list"); // "list" | "month"
-  const [monthOffset, setMonthOffset] = useState(0); // 0 = current month
+  const [viewMode, setViewMode] = useState("day"); // "day" | "week" | "month"
+  const [monthOffset, setMonthOffset] = useState(0);
   const [selectedDay, setSelectedDay] = useState(null);
+  const [missedMap, setMissedMap] = useState({});
+  const [missedEditDate, setMissedEditDate] = useState(null);
+  const [missedNoteDraft, setMissedNoteDraft] = useState("");
+  const [monthMissedDraft, setMonthMissedDraft] = useState("");
+  const [openWeeks, setOpenWeeks] = useState(() => new Set([weekStartFor(todayStr())]));
 
-  // Build ALL habit activity grouped by date (not just entries with notes)
+  useEffect(() => {
+    setMissedMap(loadJournalMissedMap(journalUserId));
+  }, [journalUserId]);
+
+  function toggleWeek(ws) {
+    setOpenWeeks(prev => {
+      const next = new Set(prev);
+      if (next.has(ws)) next.delete(ws);
+      else next.add(ws);
+      return next;
+    });
+  }
+
+  function persistMissed(next) {
+    saveJournalMissedMap(journalUserId, next);
+  }
+  function setMissed(date, note) {
+    setMissedMap(prev => {
+      const next = { ...prev, [date]: note };
+      persistMissed(next);
+      return next;
+    });
+  }
+  function clearMissed(date) {
+    setMissedMap(prev => {
+      const next = { ...prev };
+      delete next[date];
+      persistMissed(next);
+      return next;
+    });
+  }
+
   const allByDate = {};
   habits.forEach(h => {
     const hLogs = filter === "all" || filter === h.id ? h.logs : [];
@@ -1612,29 +1700,24 @@ function JournalScreen({ habits, onReflect }) {
   });
   const dates = Object.keys(allByDate).sort((a, b) => b.localeCompare(a));
 
-
-  // ── Journey start date (earliest log across ALL habits, unfiltered) ──────────
   const allLogDatesRaw = habits.flatMap(h => h.logs.map(l => l.date)).filter(Boolean).sort();
-  const firstLogDate  = allLogDatesRaw[0] || null; // e.g. "2025-01-15"
-  const firstLogYear  = firstLogDate ? parseInt(firstLogDate.split("-")[0]) : null;
-  const firstLogMonth = firstLogDate ? parseInt(firstLogDate.split("-")[1]) - 1 : null; // 0-indexed
-  const firstLogDay   = firstLogDate ? parseInt(firstLogDate.split("-")[2]) : null;
+  const firstLogDate  = allLogDatesRaw[0] || null;
+  const firstLogYear  = firstLogDate ? parseInt(firstLogDate.split("-")[0], 10) : null;
+  const firstLogMonth = firstLogDate ? parseInt(firstLogDate.split("-")[1], 10) - 1 : null;
+  const firstLogDay   = firstLogDate ? parseInt(firstLogDate.split("-")[2], 10) : null;
 
-  // ── MONTH VIEW helpers ─────────────────────────────────────────────────────
   const now = new Date();
   const viewYear  = new Date(now.getFullYear(), now.getMonth() - monthOffset, 1).getFullYear();
   const viewMonth = new Date(now.getFullYear(), now.getMonth() - monthOffset, 1).getMonth();
   const monthLabel = `${MONTHS[viewMonth]} ${viewYear}`;
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
-  const firstDow = new Date(viewYear, viewMonth, 1).getDay(); // 0=Sun
-  // Adjust for Mon start: shift so Mon=0
+  const firstDow = new Date(viewYear, viewMonth, 1).getDay();
   const startPad = (firstDow + 6) % 7;
 
   function dayStr(d) {
-    return `${viewYear}-${String(viewMonth+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+    return `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
   }
 
-  // Calendar: show a dot for every day that has ANY log (not just notes)
   const entryDays = {};
   Object.entries(allByDate).forEach(([dateStr, habitMap]) => {
     const d = parseLocal(dateStr);
@@ -1644,117 +1727,219 @@ function JournalScreen({ habits, onReflect }) {
     }
   });
 
+  const tStr = todayStr();
+  const missedDatesList = Object.keys(missedMap).sort((a, b) => b.localeCompare(a));
+  const mergedDatesSet = new Set([...dates, ...missedDatesList]);
+  const mergedDesc = [...mergedDatesSet].sort((a, b) => b.localeCompare(a));
+  const hasJournalRows = mergedDatesSet.size > 0;
+  // Today always first; remaining days newest → oldest (ISO date sort)
+  const sortedDatesDesc = hasJournalRows ? [tStr, ...mergedDesc.filter(d => d !== tStr)] : [];
+  const weekKeysDesc = [...new Set(sortedDatesDesc.map(d => weekStartFor(d)))].sort((a, b) => b.localeCompare(a));
+  const missedCount = missedDatesList.length;
+
+  useEffect(() => {
+    if (selectedDay == null) { setMonthMissedDraft(""); return; }
+    const ds = dayStr(selectedDay);
+    setMonthMissedDraft(Object.prototype.hasOwnProperty.call(missedMap, ds) ? (missedMap[ds] || "") : "");
+  }, [selectedDay, viewYear, viewMonth, missedMap]);
+
+  function renderDayOrMissed(date) {
+    if (Object.prototype.hasOwnProperty.call(missedMap, date)) {
+      return (
+        <MissedDaySection
+          key={date}
+          date={date}
+          note={missedMap[date]}
+          onEdit={() => { setMissedEditDate(date); setMissedNoteDraft(missedMap[date] || ""); }}
+          onClear={() => clearMissed(date)}
+        />
+      );
+    }
+    const hasLog = allByDate[date] && Object.keys(allByDate[date]).length > 0;
+    if (hasLog || date === tStr) {
+      return (
+        <DaySection
+          key={date}
+          date={date}
+          dayHabits={hasLog ? Object.values(allByDate[date]) : []}
+          onReflect={onReflect}
+        />
+      );
+    }
+    return null;
+  }
+
+  const listEmpty = sortedDatesDesc.length === 0;
+
   return (
     <div>
-      {/* Header */}
-      <div style={{ padding:"16px 18px 10px", display:"flex", alignItems:"flex-end", justifyContent:"space-between" }}>
+      <div style={{ padding:"16px 18px 10px", display:"flex", alignItems:"flex-end", justifyContent:"space-between", flexWrap:"wrap", gap:8 }}>
         <div>
           <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>Journal</div>
-          <div style={{ fontSize:13, color:T.muted, marginTop:3 }}>{dates.length} days logged</div>
+          <div style={{ fontSize:13, color:T.muted, marginTop:3 }}>
+            {dates.length} days logged
+            {missedCount > 0 ? <span> · {missedCount} missed marked</span> : null}
+          </div>
         </div>
-        {/* View toggle */}
         <div style={{ display:"flex", background:T.surface, borderRadius:T.rsm, padding:3, gap:2 }}>
-          {[["list","≡"],["month","▦"]].map(([mode, icon]) => (
-            <button key={mode} onClick={() => { setViewMode(mode); setSelectedDay(null); }}
-              style={{ padding:"5px 11px", borderRadius:7, border:"none", cursor:"pointer",
-                background:viewMode===mode?T.raised:"none",
-                color:viewMode===mode?T.text:T.muted, fontSize:14, transition:"all 0.15s" }}>
-              {icon}
+          {[
+            ["day", "Day"],
+            ["week", "Week"],
+            ["month", "Month"],
+          ].map(([mode, label]) => (
+            <button key={mode} type="button" onClick={() => { setViewMode(mode); setSelectedDay(null); }}
+              style={{ padding:"5px 10px", borderRadius:7, border:"none", cursor:"pointer",
+                background:viewMode === mode ? T.raised : "none",
+                color:viewMode === mode ? T.text : T.muted, fontSize:11, fontWeight:500, transition:"all 0.15s" }}>
+              {label}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Filter pills — shared between both views */}
       <div style={{ display:"flex", gap:6, padding:"0 16px 14px", overflowX:"auto", WebkitOverflowScrolling:"touch" }}>
         {[{ id:"all", name:"All", emoji:"", color:T.accent }, ...habits.map(h => ({ id:h.id, name:h.name, emoji:h.emoji, color:h.color }))].map(f => (
-          <button key={f.id} onClick={() => { setFilter(f.id); setSelectedDay(null); }}
+          <button key={f.id} type="button" onClick={() => { setFilter(f.id); setSelectedDay(null); }}
             style={{ padding:"5px 12px", borderRadius:20, whiteSpace:"nowrap", flexShrink:0,
-              border:`0.5px solid ${filter===f.id?f.color:T.borderStrong}`,
-              background:filter===f.id?f.color+"22":"none",
-              color:filter===f.id?f.color:T.muted,
-              fontSize:12, fontWeight:filter===f.id?500:400, cursor:"pointer" }}>
+              border:`0.5px solid ${filter === f.id ? f.color : T.borderStrong}`,
+              background:filter === f.id ? f.color + "22" : "none",
+              color:filter === f.id ? f.color : T.muted,
+              fontSize:12, fontWeight:filter === f.id ? 500 : 400, cursor:"pointer" }}>
             {f.emoji ? `${f.emoji} ${f.name}` : f.name}
           </button>
         ))}
       </div>
 
-      {/* ── MONTH VIEW ── */}
       {viewMode === "month" && (
         <div style={{ padding:"0 14px" }}>
-          {/* Month nav */}
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
-            <button onClick={() => { setMonthOffset(o => o+1); setSelectedDay(null); }}
+            <button type="button" onClick={() => { setMonthOffset(o => o + 1); setSelectedDay(null); }}
               style={{ background:"none", border:"none", color:T.muted, cursor:"pointer", fontSize:20, padding:"4px 8px" }}>‹</button>
             <div style={{ fontFamily:T.serif, fontSize:18, color:T.text }}>{monthLabel}</div>
-            <button onClick={() => { setMonthOffset(o => Math.max(0, o-1)); setSelectedDay(null); }}
+            <button type="button" onClick={() => { setMonthOffset(o => Math.max(0, o - 1)); setSelectedDay(null); }}
               disabled={monthOffset === 0}
-              style={{ background:"none", border:"none", color:monthOffset===0?T.hint:T.muted, cursor:monthOffset===0?"default":"pointer", fontSize:20, padding:"4px 8px" }}>›</button>
+              style={{ background:"none", border:"none", color:monthOffset === 0 ? T.hint : T.muted, cursor:monthOffset === 0 ? "default" : "pointer", fontSize:20, padding:"4px 8px" }}>›</button>
           </div>
 
-          {/* Day-of-week labels (Mon–Sun) */}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4, marginBottom:6 }}>
-            {["M","T","W","T","F","S","S"].map((d,i) => (
+            {["M","T","W","T","F","S","S"].map((d, i) => (
               <div key={i} style={{ textAlign:"center", fontSize:10, color:T.hint, fontWeight:500 }}>{d}</div>
             ))}
           </div>
 
-          {/* Calendar grid */}
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4, marginBottom:20 }}>
-            {/* Padding for first week */}
-            {Array.from({length:startPad}, (_, i) => <div key={`pad-${i}`}/>)}
-            {Array.from({length:daysInMonth}, (_, i) => {
+          <div style={{ fontSize:10, color:T.hint, marginBottom:8, display:"flex", gap:10, flexWrap:"wrap" }}>
+            <span>● logged</span>
+            <span>· open</span>
+            <span style={{ color:T.amber }}>✕ missed</span>
+          </div>
+
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4, marginBottom:16 }}>
+            {Array.from({ length:startPad }, (_, i) => <div key={`pad-${i}`}/>)}
+            {Array.from({ length:daysInMonth }, (_, i) => {
               const day = i + 1;
               const ds = dayStr(day);
               const hasEntries = !!entryDays[day];
-              const isToday = ds === todayStr();
+              const isToday = ds === tStr;
               const isSelected = selectedDay === day;
               const isJourneyStart = firstLogDate === ds;
-              const habitColors = hasEntries ? [...new Set(entryDays[day].map(e => e.habitColor))].slice(0,3) : [];
+              const isMissed = Object.prototype.hasOwnProperty.call(missedMap, ds);
+              const canMarkMissed = !!(firstLogDate && ds >= firstLogDate && ds < tStr && !hasEntries);
+              const isOpenDay = canMarkMissed && !isMissed;
+              const habitColors = hasEntries ? [...new Set(entryDays[day].map(e => e.habitColor))].slice(0, 3) : [];
+              const clickable = hasEntries || isJourneyStart || isMissed || canMarkMissed;
+              let border = T.border;
+              if (isSelected) border = T.accent;
+              else if (isJourneyStart) border = T.gold;
+              else if (isMissed) border = "rgba(230,126,34,0.45)";
+              else if (isOpenDay) border = T.borderMid;
+              else if (isToday) border = T.borderMid;
               return (
-                <button key={day} onClick={() => (hasEntries || isJourneyStart) && setSelectedDay(isSelected ? null : day)}
+                <button key={day} type="button"
+                  onClick={() => clickable && setSelectedDay(isSelected ? null : day)}
                   style={{
                     aspectRatio:"1", borderRadius:8,
-                    border:`1px solid ${isSelected?T.accent:isJourneyStart?T.gold:isToday?T.borderMid:T.border}`,
-                    background:isSelected?"rgba(192,57,43,0.15)":isJourneyStart&&!hasEntries?"rgba(200,144,42,0.08)":isToday?T.surface:T.raised,
-                    cursor:(hasEntries||isJourneyStart)?"pointer":"default",
+                    border:`1px ${isOpenDay ? "dashed" : "solid"} ${border}`,
+                    background:isSelected ? "rgba(192,57,43,0.15)" : isJourneyStart && !hasEntries ? "rgba(200,144,42,0.08)" : isMissed ? "rgba(230,126,34,0.06)" : isToday ? T.surface : T.raised,
+                    cursor:clickable ? "pointer" : "default",
                     display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:2,
                     padding:2, transition:"all 0.15s",
                   }}>
-                  <span style={{ fontSize:11, color:isToday?T.accent:isJourneyStart?T.gold:hasEntries?T.text:T.muted, fontWeight:isToday||isJourneyStart?500:400 }}>{day}</span>
+                  <span style={{
+                    fontSize:11,
+                    color:isToday ? T.accent : isJourneyStart ? T.gold : hasEntries ? T.text : isMissed ? T.amber : T.muted,
+                    fontWeight:isToday || isJourneyStart || isMissed ? 500 : 400,
+                  }}>{day}</span>
                   {hasEntries ? (
                     <div style={{ display:"flex", gap:2 }}>
-                      {habitColors.map((c,ci) => <div key={ci} style={{ width:4, height:4, borderRadius:"50%", background:c }}/>)}
+                      {habitColors.map((c, ci) => <div key={ci} style={{ width:4, height:4, borderRadius:"50%", background:c }}/>)}
                     </div>
+                  ) : isMissed ? (
+                    <div style={{ fontSize:8, color:T.amber }}>✕</div>
                   ) : isJourneyStart ? (
                     <div style={{ fontSize:7, color:T.gold }}>✦</div>
+                  ) : isOpenDay ? (
+                    <div style={{ fontSize:9, color:T.hint }}>·</div>
                   ) : null}
                 </button>
               );
             })}
           </div>
 
-          {/* Selected day entries */}
-          {selectedDay && (
-            <div style={{ marginBottom:12 }}>
-              <div style={{ fontSize:11, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:10 }}>
-                {MONTHS[viewMonth]} {selectedDay}
-              </div>
-              {firstLogDate && dayStr(selectedDay) === firstLogDate && (
-                <div style={{ margin:"0 0 8px", padding:"10px 14px", background:"rgba(200,144,42,0.08)", borderRadius:T.rsm, border:`0.5px solid rgba(200,144,42,0.25)`, display:"flex", alignItems:"center", gap:8 }}>
-                  <span style={{ fontSize:14 }}>✦</span>
-                  <span style={{ fontSize:12, color:T.gold, fontWeight:500 }}>Day one — this is where your journey began.</span>
+          {selectedDay && (() => {
+            const selDs = dayStr(selectedDay);
+            const selHabits = Object.values(allByDate[selDs] || {});
+            const hasSelEntries = selHabits.length > 0;
+            const showMissedEditor = !hasSelEntries && firstLogDate && selDs >= firstLogDate && selDs < tStr;
+            return (
+              <div style={{ marginBottom:12 }}>
+                <div style={{ fontSize:11, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:10 }}>
+                  {MONTHS[viewMonth]} {selectedDay}
                 </div>
-              )}
-              {Object.values(allByDate[dayStr(selectedDay)] || {}).length === 0 ? (
-                <div style={{ padding:"20px 0", textAlign:"center", color:T.muted, fontSize:13 }}>No entries this day</div>
-              ) : (
-                Object.values(allByDate[dayStr(selectedDay)] || {}).map(({ habit, logs }) => (
-                  <HabitDayCard key={habit.id} habit={habit} logs={logs} onReflect={onReflect}/>
-                ))
-              )}
-            </div>
-          )}
+                {firstLogDate && selDs === firstLogDate && (
+                  <div style={{ margin:"0 0 8px", padding:"10px 14px", background:"rgba(200,144,42,0.08)", borderRadius:T.rsm, border:"0.5px solid rgba(200,144,42,0.25)", display:"flex", alignItems:"center", gap:8 }}>
+                    <span style={{ fontSize:14 }}>✦</span>
+                    <span style={{ fontSize:12, color:T.gold, fontWeight:500 }}>Day one — this is where your journey began.</span>
+                  </div>
+                )}
+                {hasSelEntries ? (
+                  selHabits.map(({ habit, logs }) => (
+                    <HabitDayCard key={habit.id} habit={habit} logs={logs} onReflect={onReflect}/>
+                  ))
+                ) : (
+                  <div style={{ padding:"0 0 8px" }}>
+                    {showMissedEditor ? (
+                      <div style={{ padding:"12px 14px", background:T.surface, borderRadius:T.r, border:`0.5px solid ${T.border}` }}>
+                        <div style={{ fontSize:12, color:T.muted, marginBottom:6 }}>
+                          No logs this day. <span style={{ color:T.amber }}>Open day</span> — mark missed and add an optional note.
+                        </div>
+                        <textarea
+                          value={monthMissedDraft}
+                          onChange={e => setMonthMissedDraft(e.target.value)}
+                          placeholder="Optional note (e.g. sick, travel…)"
+                          rows={2}
+                          style={{ width:"100%", boxSizing:"border-box", resize:"vertical", borderRadius:8, border:`0.5px solid ${T.border}`, background:T.raised, color:T.text, fontSize:13, padding:10, fontFamily:T.font }}
+                        />
+                        <div style={{ display:"flex", gap:8, marginTop:10, flexWrap:"wrap" }}>
+                          <button type="button" onClick={() => { setMissed(selDs, monthMissedDraft.trim()); }}
+                            style={{ padding:"8px 14px", borderRadius:T.rsm, border:"none", background:T.amber, color:"#1a1208", fontSize:12, fontWeight:600, cursor:"pointer" }}>
+                            Mark missed
+                          </button>
+                          {Object.prototype.hasOwnProperty.call(missedMap, selDs) ? (
+                            <button type="button" onClick={() => { clearMissed(selDs); setMonthMissedDraft(""); }}
+                              style={{ padding:"8px 14px", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:"none", color:T.muted, fontSize:12, cursor:"pointer" }}>
+                              Clear mark
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ padding:"20px 0", textAlign:"center", color:T.muted, fontSize:13 }}>No entries (future or before you started)</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {Object.keys(entryDays).length === 0 && firstLogDate && (
             viewYear < firstLogYear ||
@@ -1785,24 +1970,76 @@ function JournalScreen({ habits, onReflect }) {
         </div>
       )}
 
-      {/* ── LIST VIEW ── */}
-      {viewMode === "list" && (
+      {viewMode === "day" && (
         <>
-          {dates.length === 0 && (
+          {listEmpty && (
             <div style={{ padding:"60px 30px", textAlign:"center" }}>
               <div style={{ fontSize:36, marginBottom:14 }}>📓</div>
-              <div style={{ fontSize:14, color:T.muted, lineHeight:1.7 }}>No entries yet. Start logging habits — everything shows up here.</div>
+              <div style={{ fontSize:14, color:T.muted, lineHeight:1.7 }}>No entries or missed marks yet. Log habits or mark open days in Month view.</div>
             </div>
           )}
-          {dates.map(date => (
-            <DaySection
-              key={date}
-              date={date}
-              dayHabits={Object.values(allByDate[date])}
-              onReflect={onReflect}
-            />
-          ))}
+          {!listEmpty && sortedDatesDesc.map(date => renderDayOrMissed(date))}
         </>
+      )}
+
+      {viewMode === "week" && (
+        <>
+          {listEmpty && (
+            <div style={{ padding:"60px 30px", textAlign:"center" }}>
+              <div style={{ fontSize:36, marginBottom:14 }}>📓</div>
+              <div style={{ fontSize:14, color:T.muted, lineHeight:1.7 }}>Nothing to group by week yet.</div>
+            </div>
+          )}
+          {!listEmpty && weekKeysDesc.map(ws => {
+            const daysInWeek = sortedDatesDesc
+              .filter(d => weekStartFor(d) === ws)
+              .sort((a, b) => b.localeCompare(a));
+            const expanded = openWeeks.has(ws);
+            return (
+              <div key={ws} style={{ margin:"0 14px 8px", borderRadius:T.r, border:`0.5px solid ${T.border}`, overflow:"hidden", background:T.raised }}>
+                <button
+                  type="button"
+                  onClick={() => toggleWeek(ws)}
+                  style={{
+                    width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between",
+                    padding:"12px 14px", background:T.surface, border:"none", cursor:"pointer", gap:10,
+                  }}>
+                  <span style={{ fontSize:12, fontWeight:600, color:T.text, textAlign:"left" }}>
+                    Week · {fmtWeekRange(ws)}
+                    <span style={{ fontWeight:400, color:T.muted, marginLeft:8 }}>({daysInWeek.length})</span>
+                  </span>
+                  <span style={{ fontSize:12, color:T.hint, flexShrink:0 }}>{expanded ? "▾" : "▸"}</span>
+                </button>
+                {expanded ? (
+                  <div style={{ padding:"4px 0 10px" }}>
+                    {daysInWeek.map(date => renderDayOrMissed(date))}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {missedEditDate && (
+        <div style={{ margin:"0 14px 24px", padding:14, background:T.surface, borderRadius:T.r, border:`0.5px solid ${T.border}` }}>
+          <div style={{ fontSize:12, color:T.text, marginBottom:8 }}>Missed · {fmtEntryDate(missedEditDate)}</div>
+          <textarea
+            value={missedNoteDraft}
+            onChange={e => setMissedNoteDraft(e.target.value)}
+            placeholder="Optional note"
+            rows={3}
+            style={{ width:"100%", boxSizing:"border-box", resize:"vertical", borderRadius:8, border:`0.5px solid ${T.border}`, background:T.raised, color:T.text, fontSize:13, padding:10, fontFamily:T.font }}
+          />
+          <div style={{ display:"flex", gap:8, marginTop:10, flexWrap:"wrap" }}>
+            <button type="button" onClick={() => { setMissed(missedEditDate, missedNoteDraft.trim()); setMissedEditDate(null); }}
+              style={{ padding:"8px 14px", borderRadius:T.rsm, border:"none", background:T.amber, color:"#1a1208", fontSize:12, fontWeight:600, cursor:"pointer" }}>Save</button>
+            <button type="button" onClick={() => setMissedEditDate(null)}
+              style={{ padding:"8px 14px", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:"none", color:T.muted, fontSize:12, cursor:"pointer" }}>Cancel</button>
+            <button type="button" onClick={() => { clearMissed(missedEditDate); setMissedEditDate(null); }}
+              style={{ padding:"8px 14px", borderRadius:T.rsm, border:"none", background:"none", color:T.hint, fontSize:12, cursor:"pointer" }}>Clear mark</button>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -2090,7 +2327,7 @@ function InsightsScreen({ habits, onShowHistory, onShare }) {
 }
 
 // ─── HABITS SCREEN ────────────────────────────────────────────────────────────
-function HabitsScreen({ habits, onEdit, onDelete, onAdd, onReflect, onCoach }) {
+function HabitsScreen({ habits, onEdit, onDelete, onAdd, onReflect, onCoach, onUpgrade, isPro, coachName }) {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const grouped = Object.fromEntries(Object.keys(HABIT_TYPES).map(k => [k, habits.filter(h => h.habitType === k)]));
   function DetailRow({ h }) {
@@ -2163,22 +2400,38 @@ function HabitsScreen({ habits, onEdit, onDelete, onAdd, onReflect, onCoach }) {
       </button>
 
       {/* AI Coach card */}
-      <div onClick={onCoach} style={{ margin:"16px 14px 0", background:T.raised, borderRadius:T.r, border:`0.5px solid rgba(200,144,42,0.25)`, padding:"16px 18px", cursor:"pointer" }}>
+      <style>{`
+        @keyframes coachPulse {
+          0%,100% { box-shadow: 0 0 0 0 rgba(200,144,42,0); }
+          50% { box-shadow: 0 0 0 8px rgba(200,144,42,0.12); }
+        }
+      `}</style>
+      <div onClick={isPro ? onCoach : onUpgrade}
+        style={{ margin:"16px 14px 0", background:T.raised, borderRadius:T.r, border:`1px solid rgba(200,144,42,${isPro?"0.4":"0.2"})`, padding:"16px 18px", cursor:"pointer" }}>
         <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:10 }}>
-          <div style={{ width:40, height:40, borderRadius:12, background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>🤖</div>
+          <div style={{ width:42, height:42, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:21, flexShrink:0, animation: isPro ? "coachPulse 3s ease-in-out infinite" : "none" }}>🤖</div>
           <div style={{ flex:1 }}>
             <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-              <div style={{ fontSize:14, fontWeight:500, color:T.text }}>AI Habit Coach</div>
-              <div style={{ fontSize:9, color:T.gold, background:"rgba(200,144,42,0.15)", border:`0.5px solid rgba(200,144,42,0.3)`, borderRadius:10, padding:"2px 7px", fontWeight:600, letterSpacing:"0.06em", textTransform:"uppercase" }}>Supporter · Soon</div>
+              <div style={{ fontSize:14, fontWeight:600, color:T.text }}>{coachName || "AI Coach"}</div>
+              {isPro
+                ? <div style={{ display:"flex", alignItems:"center", gap:4 }}><div style={{ width:6, height:6, borderRadius:"50%", background:T.green }}/><div style={{ fontSize:10, color:T.green, fontWeight:500 }}>Active</div></div>
+                : <div style={{ fontSize:9, color:T.gold, background:"rgba(200,144,42,0.15)", border:`0.5px solid rgba(200,144,42,0.3)`, borderRadius:10, padding:"2px 7px", fontWeight:600, letterSpacing:"0.06em", textTransform:"uppercase" }}>Early supporter</div>
+              }
             </div>
-            <div style={{ fontSize:12, color:T.muted, marginTop:1 }}>Personalised coaching based on your actual habits</div>
+            <div style={{ fontSize:12, color:T.muted, marginTop:1 }}>
+              {isPro ? "Coaching based on your actual habits & reflections" : "Unlock with early supporter access"}
+            </div>
           </div>
+          {!isPro && <div style={{ fontSize:16, color:T.hint }}>🔒</div>}
         </div>
         {/* Preview bubble */}
-        <div style={{ background:T.surface, borderRadius:"12px 12px 12px 3px", padding:"10px 14px", fontSize:13, color:T.sub, lineHeight:1.6, borderLeft:`2px solid rgba(200,144,42,0.3)` }}>
-          "Hey — I can see what you're working on. I can help you figure out what to focus on next, spot patterns between your habits, or just think through something that's been blocking you."
+        <div style={{ background:T.surface, borderRadius:"12px 12px 12px 3px", padding:"10px 14px", fontSize:13, color:T.sub, lineHeight:1.6, borderLeft:`2px solid rgba(200,144,42,0.3)`, filter: isPro ? "none" : "blur(0px)" }}>
+          {isPro
+            ? `"What's on your mind? I can see your streaks, reflections, and patterns — ask me anything."`
+            : `"Hey — I can see your habits. I can help you spot patterns, troubleshoot blocks, and figure out what to focus on next."`
+          }
         </div>
-        <div style={{ marginTop:10, fontSize:11, color:T.hint, textAlign:"center", letterSpacing:"0.04em" }}>✦ Available with early supporter (beta) access — coming soon</div>
+        {!isPro && <div style={{ marginTop:10, fontSize:11, color:T.gold, textAlign:"center", letterSpacing:"0.04em", fontWeight:500 }}>✦ See early supporter access →</div>}
       </div>
     </div>
   );
@@ -2187,8 +2440,9 @@ function HabitsScreen({ habits, onEdit, onDelete, onAdd, onReflect, onCoach }) {
 
 
 // ─── AI HABIT COACH ──────────────────────────────────────────────────────────
-function buildCoachSystemPrompt(user, habits) {
+function buildCoachSystemPrompt(user, habits, coachName) {
   const name = user?.name || "there";
+  const coach = coachName || "Coach";
   const today = todayStr();
 
   const habitSummaries = habits.map(h => {
@@ -2237,7 +2491,7 @@ function buildCoachSystemPrompt(user, habits) {
     return detail;
   }).join("\n\n");
 
-  return `You are a personal habit coach inside Forged, a minimalist habit-tracking app. Your job is to help ${name} understand their habits, spot patterns, troubleshoot blocks, and stay motivated — using their actual data below.
+  return `You are ${coach}, a personal habit coach inside Forged, a minimalist habit-tracking app. Your job is to help ${name} understand their habits, spot patterns, troubleshoot blocks, and stay motivated — using their actual data below.
 
 Today: ${today}
 User: ${name}
@@ -2255,7 +2509,8 @@ Guidelines:
 - Never make up data or invent habit details not shown above.`;
 }
 
-function AICoach({ habits, user, isPro, onClose, onUpgrade }) {
+function AICoach({ habits, user, isPro, onClose, onUpgrade, coachName }) {
+  const cName = coachName || "Coach";
   const greeting = `Hey ${user?.name || "there"} 👋 I can see you're working on ${habits.length} habit${habits.length !== 1 ? "s" : ""}. What's on your mind?`;
   const [messages, setMessages] = useState([{ role:"assistant", content:greeting }]);
   const [input,    setInput]    = useState("");
@@ -2281,7 +2536,7 @@ function AICoach({ habits, user, isPro, onClose, onUpgrade }) {
         method:"POST",
         headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({
-          system:   buildCoachSystemPrompt(user, habits),
+          system:   buildCoachSystemPrompt(user, habits, cName),
           messages: next.map(m => ({ role:m.role, content:m.content })),
         }),
       });
@@ -2313,7 +2568,7 @@ function AICoach({ habits, user, isPro, onClose, onUpgrade }) {
           <div style={{ display:"flex", alignItems:"center", gap:12, padding:"18px 20px 14px", borderBottom:`0.5px solid ${T.border}` }}>
             <div style={{ width:38, height:38, borderRadius:"50%", background:"rgba(200,144,42,0.18)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:19 }}>🤖</div>
             <div style={{ flex:1 }}>
-              <div style={{ fontSize:15, fontWeight:500, color:T.text }}>AI Habit Coach</div>
+              <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{cName}</div>
               <div style={{ fontSize:11, color:T.gold }}>⚡ Early supporter (beta)</div>
             </div>
             <button onClick={onClose} style={{ background:"none", border:"none", color:T.muted, fontSize:24, cursor:"pointer", lineHeight:1 }}>×</button>
@@ -2358,7 +2613,7 @@ function AICoach({ habits, user, isPro, onClose, onUpgrade }) {
         <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 13px", borderBottom:`0.5px solid ${T.border}`, flexShrink:0 }}>
           <div style={{ width:38, height:38, borderRadius:"50%", background:"rgba(200,144,42,0.18)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:19 }}>🤖</div>
           <div style={{ flex:1 }}>
-            <div style={{ fontSize:15, fontWeight:500, color:T.text }}>AI Habit Coach</div>
+            <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{cName}</div>
             <div style={{ display:"flex", alignItems:"center", gap:5 }}>
               <div style={{ width:6, height:6, borderRadius:"50%", background:T.green }}/>
               <div style={{ fontSize:11, color:T.muted }}>Knows your habits</div>
@@ -2471,6 +2726,20 @@ const ONBOARD_STEPS = [
     cta:"That's me",
   },
   {
+    id:"privacy",
+    title:"Your data stays private.",
+    sub:"A few things worth knowing before we start.",
+    body:null,
+    cta:"Got it",
+  },
+  {
+    id:"coach",
+    title:"Meet your AI coach.",
+    sub:"They'll know your habits, streaks, and reflections — and give you real coaching, not generic advice.",
+    body:null,
+    cta:"Continue",
+  },
+  {
     id:"focus",
     title:"What are you forging?",
     sub:"Pick what matters right now. You can always add more later.",
@@ -2493,6 +2762,7 @@ const FOCUS_OPTIONS = [
 function OnboardingScreen({ onComplete, onSkip }) {
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
+  const [coachNameInput, setCoachNameInput] = useState("");
   // Multi-select: array of selected labels
   const [selected, setSelected] = useState([]);
   const [weightGoal, setWeightGoal] = useState({ start:"", target:"", unit:"kg" });
@@ -2526,7 +2796,7 @@ function OnboardingScreen({ onComplete, onSkip }) {
     if (isLast) {
       const selectedOptions = FOCUS_OPTIONS.filter(o => selected.includes(o.label));
       const habits = selectedOptions.map(opt => buildHabitFromOption(opt, weightGoal, limitBudget));
-      onComplete({ name: name.trim() || "You", habits });
+      onComplete({ name: name.trim() || "You", habits, coachName: coachNameInput.trim() || "Coach" });
       return;
     }
     setStep(s => s + 1);
@@ -2534,6 +2804,8 @@ function OnboardingScreen({ onComplete, onSkip }) {
 
   const hasWeight = selected.includes("Hitting a weight goal");
   const hasLimit  = selected.includes("Reducing something");
+  const FOCUS_STEP = ONBOARD_STEPS.findIndex(s => s.id === "focus");
+  const COACH_STEP = ONBOARD_STEPS.findIndex(s => s.id === "coach");
 
   const styleInp = {
     width:"100%", border:`0.5px solid ${T.borderStrong}`, borderRadius:T.rsm,
@@ -2575,8 +2847,57 @@ function OnboardingScreen({ onComplete, onSkip }) {
           />
         )}
 
-        {/* Step 2: Multi-select focus areas */}
+        {/* Step 2: Privacy */}
         {step === 2 && (
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            {[
+              { icon:"🔒", title:"Your habits are yours", desc:"No ads, no data selling. Ever. Your logs and reflections are private to you." },
+              { icon:"🛡️", title:"Stored securely", desc:"All data is encrypted in transit and at rest on Supabase's infrastructure." },
+              { icon:"📤", title:"Export anytime", desc:"You can download everything as JSON from your profile at any time." },
+            ].map((item, i) => (
+              <div key={i} style={{ display:"flex", gap:14, alignItems:"flex-start", background:T.raised, borderRadius:T.rsm, padding:"14px 16px" }}>
+                <div style={{ fontSize:22, flexShrink:0, marginTop:1 }}>{item.icon}</div>
+                <div>
+                  <div style={{ fontSize:14, fontWeight:500, color:T.text, marginBottom:3 }}>{item.title}</div>
+                  <div style={{ fontSize:13, color:T.muted, lineHeight:1.6 }}>{item.desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Step 3: Coach naming */}
+        {step === COACH_STEP && (
+          <div>
+            <div style={{ background:"rgba(200,144,42,0.08)", border:`0.5px solid rgba(200,144,42,0.25)`, borderRadius:T.r, padding:"16px 18px", marginBottom:20 }}>
+              <div style={{ display:"flex", gap:12, alignItems:"center", marginBottom:12 }}>
+                <div style={{ width:44, height:44, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, flexShrink:0 }}>🤖</div>
+                <div>
+                  <div style={{ fontSize:13, fontWeight:500, color:T.text }}>Your coach is part of Forged supporter access</div>
+                  <div style={{ fontSize:11, color:T.gold, marginTop:2 }}>⚡ Early supporter (beta)</div>
+                </div>
+              </div>
+              <div style={{ background:T.surface, borderRadius:"12px 12px 12px 3px", padding:"10px 14px", fontSize:13, color:T.muted, lineHeight:1.6, borderLeft:`2px solid rgba(200,144,42,0.3)` }}>
+                "Hey {name || "there"} — I can see what you're working on. Tell me what's been on your mind."
+              </div>
+            </div>
+            <div style={{ fontSize:12, color:T.hint, marginBottom:8 }}>Give your coach a name (optional)</div>
+            <input
+              style={{ ...styleInp, fontSize:16, padding:"12px 14px" }}
+              placeholder="e.g. Atlas, Sam, Coach…"
+              value={coachNameInput}
+              onChange={e => setCoachNameInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleContinue()}
+              autoFocus
+            />
+            <div style={{ fontSize:11, color:T.hint, marginTop:8, lineHeight:1.6 }}>
+              They'll greet you by name and reference your actual habit data — not generic tips.
+            </div>
+          </div>
+        )}
+
+        {/* Focus step: Multi-select */}
+        {step === FOCUS_STEP && (
           <>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:16 }}>
               {FOCUS_OPTIONS.map(opt => {
@@ -2632,11 +2953,11 @@ function OnboardingScreen({ onComplete, onSkip }) {
       {/* CTA fixed at bottom */}
       <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
         <button onClick={handleContinue}
-          style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:step===2&&selected.length===0?T.surface:T.accent, color:step===2&&selected.length===0?T.muted:"#fff", fontSize:16, fontWeight:500, cursor:"pointer", transition:"all 0.2s" }}>
+          style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:step===FOCUS_STEP&&selected.length===0?T.surface:T.accent, color:step===FOCUS_STEP&&selected.length===0?T.muted:"#fff", fontSize:16, fontWeight:500, cursor:"pointer", transition:"all 0.2s" }}>
           {current.cta}
         </button>
-        {step === 2 && (
-          <button onClick={() => onComplete({ name:name.trim()||"You", habits:[] })}
+        {step === FOCUS_STEP && (
+          <button onClick={() => onComplete({ name:name.trim()||"You", habits:[], coachName:coachNameInput.trim()||"Coach" })}
             style={{ width:"100%", padding:12, borderRadius:T.rsm, border:"none", background:"none", color:T.muted, fontSize:14, cursor:"pointer", marginTop:8 }}>
             Skip for now
           </button>
@@ -2897,9 +3218,11 @@ function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
   );
 }
 
-function ProfileScreen({ user, xp, habits, isPro, refCode, onUpdateUser, onResetOnboarding, onSignOut, onShowTour, onUpgrade }) {
+function ProfileScreen({ user, xp, habits, isPro, refCode, onUpdateUser, onResetOnboarding, onSignOut, onShowTour, onUpgrade, coachName, onUpdateCoachName }) {
   const [editingName,    setEditingName]    = useState(false);
   const [nameVal,        setNameVal]        = useState(user.name);
+  const [editingCoach,   setEditingCoach]   = useState(false);
+  const [coachVal,       setCoachVal]       = useState(coachName || "Coach");
   const [showAvatarPick, setShowAvatarPick] = useState(false);
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
   const [refCount,       setRefCount]       = useState(null);
@@ -3003,6 +3326,31 @@ function ProfileScreen({ user, xp, habits, isPro, refCode, onUpdateUser, onReset
       <div style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, overflow:"hidden" }}>
         <div style={{ padding:"10px 16px 6px", fontSize:10, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em" }}>Account</div>
         <SRow label="Display name" value={user.name} onPress={() => setEditingName(true)}/>
+        <div style={{ borderBottom:`0.5px solid ${T.border}`, padding:"12px 16px" }}>
+          {editingCoach ? (
+            <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+              <div style={{ fontSize:14, color:T.text, flexShrink:0 }}>Coach name</div>
+              <input
+                style={{ flex:1, background:T.surface, border:`0.5px solid ${T.borderStrong}`, borderRadius:T.rsm, padding:"7px 10px", fontSize:14, color:T.text, outline:"none" }}
+                value={coachVal}
+                onChange={e => setCoachVal(e.target.value)}
+                onKeyDown={e => { if(e.key==="Enter"){ onUpdateCoachName(coachVal.trim()||"Coach"); setEditingCoach(false); }}}
+                autoFocus
+              />
+              <button onClick={() => { onUpdateCoachName(coachVal.trim()||"Coach"); setEditingCoach(false); }}
+                style={{ padding:"7px 12px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:13, cursor:"pointer", flexShrink:0 }}>Save</button>
+            </div>
+          ) : (
+            <button onClick={() => setEditingCoach(true)} style={{ display:"flex", alignItems:"center", width:"100%", background:"none", border:"none", cursor:"pointer", gap:10 }}>
+              <div style={{ fontSize:18, flexShrink:0 }}>🤖</div>
+              <div style={{ flex:1, textAlign:"left" }}>
+                <div style={{ fontSize:14, color:T.text }}>AI coach name</div>
+                <div style={{ fontSize:12, color:T.muted, marginTop:1 }}>{coachName || "Coach"}</div>
+              </div>
+              <span style={{ fontSize:18, color:T.hint }}>›</span>
+            </button>
+          )}
+        </div>
         <SRow label="Notifications" note="Coming soon" onPress={null}/>
         <SRow label="Replay app tour" onPress={onShowTour}/>
       </div>
@@ -3384,6 +3732,7 @@ export default function App() {
   const [tourStep,  setTourStep]  = useState(0);
   const [showShare,   setShowShare]   = useState(false);
   const [isPro,       setIsPro]       = useState(false);
+  const [coachName,   setCoachName]   = useState("Coach");
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [refCode,     setRefCode]     = useState(null);
   const [authEmail,   setAuthEmail]   = useState(null);
@@ -3491,6 +3840,7 @@ export default function App() {
         setXp(profile.xp ?? 0);
         setIsPro(!!(profile.is_pro || profile.is_admin));
         setRefCode(profile.ref_code ?? null);
+        setCoachName(profile.coach_name || "Coach");
         isOnboarded = profile.onboarded ?? false;
         if (!isOnboarded && profile.name && profile.name.trim()) {
           isOnboarded = true;
@@ -3785,17 +4135,19 @@ export default function App() {
     }
   }, []);
 
-  async function completeOnboarding({ name, habits: newHabits }) {
+  async function completeOnboarding({ name, habits: newHabits, coachName: newCoachName }) {
     const uid = userIdRef.current;
+    const resolvedCoach = newCoachName || "Coach";
     setUser({ name });
     setXp(0);
+    setCoachName(resolvedCoach);
     const habitsToSet = (newHabits && newHabits.length > 0) ? newHabits : [];
     setHabits(habitsToSet);
     setOnboarded(true);
     const pendingRef = localStorage.getItem("forged_pending_ref") || null;
     if (uid) {
       await supabase.from("profiles").upsert({
-        id: uid, name, xp: 0, onboarded: true, updated_at: new Date().toISOString(),
+        id: uid, name, xp: 0, onboarded: true, coach_name: resolvedCoach, updated_at: new Date().toISOString(),
         ...(pendingRef ? { referred_by: pendingRef } : {}),
       });
       if (pendingRef) localStorage.removeItem("forged_pending_ref");
@@ -4104,9 +4456,9 @@ export default function App() {
         </div>
 
         {screen === "today"    && <TodayScreen    habits={habits} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onReflect={setReflectId} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onAdd={handleStartAdd} onXPInfo={() => setShowXP(true)}/>}
-        {screen === "journal"  && <JournalScreen  habits={habits} onReflect={setReflectId}/>}
+        {screen === "journal"  && <JournalScreen habits={habits} onReflect={setReflectId} journalUserId={sessionUserId}/>}
         {screen === "insights" && <InsightsScreen habits={habits} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)}/>}
-        {screen === "habits"   && <HabitsScreen   habits={habits} onEdit={setEditId} onDelete={handleDeleteHabit} onAdd={handleStartAdd} onReflect={setReflectId} onCoach={() => setShowCoach(true)}/>}
+        {screen === "habits"   && <HabitsScreen   habits={habits} onEdit={setEditId} onDelete={handleDeleteHabit} onAdd={handleStartAdd} onReflect={setReflectId} onCoach={() => setShowCoach(true)} onUpgrade={() => setShowUpgrade(true)} isPro={isPro} coachName={coachName}/>}
         {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} refCode={refCode}
           onUpgrade={() => setShowUpgrade(true)}
           onUpdateUser={updates => {
@@ -4122,6 +4474,8 @@ export default function App() {
           onResetOnboarding={() => setOnboarded(false)}
           onSignOut={handleSignOut}
           onShowTour={() => { setTourStep(0); setShowTour(true); }}
+          coachName={coachName}
+          onUpdateCoachName={name => { setCoachName(name); syncProfile({ coach_name: name }); }}
         />}
 
         {/* Bottom nav */}
@@ -4142,7 +4496,7 @@ export default function App() {
       {editId      && editHabit && <EditModal habit={editHabit}          onClose={() => setEditId(null)}    onSave={handleEditSave}/>}
       {logId && logHabit?.habitType === "progress" && <LogProgressModal  habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
       {logId && logHabit?.habitType === "project"  && <LogProjectModal   habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
-      {showCoach   && <AICoach habits={habits} user={user} isPro={isPro} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)}/>}
+      {showCoach   && <AICoach habits={habits} user={user} isPro={isPro} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)} coachName={coachName}/>}
       {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} habitCount={habits.length} userId={userIdRef.current} userEmail={authEmail}/>}
       {showShare && <ShareCardModal user={user} habits={habits} xp={xp} onClose={() => setShowShare(false)}/>}
       {showTour && (
