@@ -86,7 +86,15 @@ function getWeeklyCount(h) {
 }
 function getLatestValue(h) {
   if (!h.logs.length) return h.startValue ?? 0;
-  return [...h.logs].sort((a, b) => a.date.localeCompare(b.date)).at(-1).value;
+  const sorted = [...h.logs].sort((a, b) => a.date.localeCompare(b.date));
+  // For numeric progress goals (e.g. weight), ignore non-numeric entries like quick notes
+  if (h.habitType === "progress") {
+    const numeric = sorted.filter(l => typeof l.value === "number");
+    if (numeric.length) return numeric.at(-1).value;
+    return h.startValue ?? 0;
+  }
+  const last = sorted.at(-1);
+  return typeof last.value === "number" ? last.value : (h.startValue ?? 0);
 }
 function getProjectStats(h) {
   const ws = currentWeekStart();
@@ -1304,11 +1312,11 @@ function HistoryModal({ habits, onClose, isPro, onUpgrade }) {
           {/* Overlay */}
           <div style={{ position:"absolute", inset:0, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:8, background:"rgba(14,14,14,0.75)", backdropFilter:"blur(2px)", borderRadius:T.rsm, padding:"0 20px" }}>
             <div style={{ fontSize:20 }}>🔒</div>
-            <div style={{ fontSize:13, color:T.text, fontWeight:500, textAlign:"center" }}>Full history is coming with Pro</div>
+            <div style={{ fontSize:13, color:T.text, fontWeight:500, textAlign:"center" }}>Full history will be part of early supporter access</div>
             <div style={{ fontSize:12, color:T.muted, textAlign:"center" }}>You have {habit.logs.filter(l => l.date < cutoff).length} older logs waiting</div>
             <button onClick={() => setShowBeta(true)}
               style={{ marginTop:6, padding:"9px 20px", borderRadius:T.rsm, border:"none", background:"rgba(200,144,42,0.2)", color:T.gold, fontSize:13, fontWeight:600, cursor:"pointer" }}>
-              I'm interested in Pro →
+              I want early supporter access →
             </button>
           </div>
           {showBeta && <BetaModal onClose={() => setShowBeta(false)}/>}
@@ -1413,7 +1421,7 @@ function BetaModal({ onClose }) {
   function handleSubmit() {
     if (!email.trim()) return;
     // mailto fallback — works immediately, no backend needed
-    const subject = encodeURIComponent("Forged Pro — Beta Interest");
+    const subject = encodeURIComponent("Forged early supporter — beta interest");
     const body = encodeURIComponent(
       `Email: ${email.trim()}\n\n${msg.trim() ? `Message: ${msg.trim()}` : "(No message)"}`
     );
@@ -1436,10 +1444,10 @@ function BetaModal({ onClose }) {
 
   return (
     <Modal onClose={onClose}>
-      <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:10 }}>Interested in Pro?</div>
+      <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:10 }}>Interested in becoming an early supporter?</div>
       <div style={{ fontSize:13, color:T.muted, lineHeight:1.8, marginBottom:20 }}>
-        I'm gauging interest before charging anything. If you want to be one of the first 100 beta testers,
-        it's <strong style={{ color:T.text }}>$5/month</strong> — and that price is yours for life if you sign up early.
+        I'm gauging interest before charging anything. If you want to be one of the first 100 beta supporters,
+        it's <strong style={{ color:T.text }}>$4.99/month</strong> — and that price is yours for life if you sign up early.
         <br/><br/>
         You won't be charged yet. In exchange I'd genuinely love your feedback as I build this out. This is a solo-built app
         and early voices shape everything.
@@ -2161,7 +2169,7 @@ function HabitsScreen({ habits, onEdit, onDelete, onAdd, onReflect, onCoach }) {
           <div style={{ flex:1 }}>
             <div style={{ display:"flex", alignItems:"center", gap:8 }}>
               <div style={{ fontSize:14, fontWeight:500, color:T.text }}>AI Habit Coach</div>
-              <div style={{ fontSize:9, color:T.gold, background:"rgba(200,144,42,0.15)", border:`0.5px solid rgba(200,144,42,0.3)`, borderRadius:10, padding:"2px 7px", fontWeight:600, letterSpacing:"0.06em", textTransform:"uppercase" }}>Pro · Soon</div>
+              <div style={{ fontSize:9, color:T.gold, background:"rgba(200,144,42,0.15)", border:`0.5px solid rgba(200,144,42,0.3)`, borderRadius:10, padding:"2px 7px", fontWeight:600, letterSpacing:"0.06em", textTransform:"uppercase" }}>Supporter · Soon</div>
             </div>
             <div style={{ fontSize:12, color:T.muted, marginTop:1 }}>Personalised coaching based on your actual habits</div>
           </div>
@@ -2170,7 +2178,7 @@ function HabitsScreen({ habits, onEdit, onDelete, onAdd, onReflect, onCoach }) {
         <div style={{ background:T.surface, borderRadius:"12px 12px 12px 3px", padding:"10px 14px", fontSize:13, color:T.sub, lineHeight:1.6, borderLeft:`2px solid rgba(200,144,42,0.3)` }}>
           "Hey — I can see what you're working on. I can help you figure out what to focus on next, spot patterns between your habits, or just think through something that's been blocking you."
         </div>
-        <div style={{ marginTop:10, fontSize:11, color:T.hint, textAlign:"center", letterSpacing:"0.04em" }}>✦ Available with Forged Pro — coming soon</div>
+        <div style={{ marginTop:10, fontSize:11, color:T.hint, textAlign:"center", letterSpacing:"0.04em" }}>✦ Available with early supporter (beta) access — coming soon</div>
       </div>
     </div>
   );
@@ -2306,7 +2314,7 @@ function AICoach({ habits, user, isPro, onClose, onUpgrade }) {
             <div style={{ width:38, height:38, borderRadius:"50%", background:"rgba(200,144,42,0.18)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:19 }}>🤖</div>
             <div style={{ flex:1 }}>
               <div style={{ fontSize:15, fontWeight:500, color:T.text }}>AI Habit Coach</div>
-              <div style={{ fontSize:11, color:T.gold }}>⚡ Forged Pro</div>
+              <div style={{ fontSize:11, color:T.gold }}>⚡ Early supporter (beta)</div>
             </div>
             <button onClick={onClose} style={{ background:"none", border:"none", color:T.muted, fontSize:24, cursor:"pointer", lineHeight:1 }}>×</button>
           </div>
@@ -2322,11 +2330,11 @@ function AICoach({ habits, user, isPro, onClose, onUpgrade }) {
           </div>
           <div style={{ margin:"0 20px 10px", background:"rgba(200,144,42,0.07)", border:`0.5px solid rgba(200,144,42,0.25)`, borderRadius:T.r, padding:"16px", textAlign:"center" }}>
             <div style={{ fontSize:26, marginBottom:8 }}>🔒</div>
-            <div style={{ fontSize:14, fontWeight:500, color:T.text, marginBottom:4 }}>Coach unlocks with Forged Pro</div>
-            <div style={{ fontSize:12, color:T.muted, lineHeight:1.6, marginBottom:14 }}>It knows your actual habits, streaks, and reflections — not generic advice.</div>
+            <div style={{ fontSize:14, fontWeight:500, color:T.text, marginBottom:4 }}>Coach unlocks with early supporter access</div>
+            <div style={{ fontSize:12, color:T.muted, lineHeight:1.6, marginBottom:14 }}>As an early supporter, you get beta access to a coach that knows your real habits, streaks, and reflections — not generic advice.</div>
             <button onClick={() => { onClose(); onUpgrade(); }}
               style={{ width:"100%", padding:"13px", borderRadius:T.rsm, border:"none", background:T.gold, color:"#1a1a16", fontSize:14, fontWeight:600, cursor:"pointer" }}>
-              See Pro pricing →
+              See early supporter details →
             </button>
           </div>
           <div style={{ padding:"12px 16px 32px", borderTop:`0.5px solid ${T.border}`, display:"flex", gap:10, opacity:0.3, pointerEvents:"none" }}>
@@ -2446,7 +2454,7 @@ function AICoach({ habits, user, isPro, onClose, onUpgrade }) {
 
 // ─── ONBOARDING ──────────────────────────────────────────────────────────────
 // 3 steps: Welcome → Name + focus → First habit suggestion
-// Shown only on first launch (onboarded === false in app state)
+// Shown only for brand-new users (onboarded === false — never when onboarded is null or true)
 const ONBOARD_STEPS = [
   {
     id:"welcome",
@@ -2797,9 +2805,9 @@ function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
 
         {/* Header */}
         <div style={{ marginBottom:20 }}>
-          <div style={{ fontFamily:T.serif, fontSize:28, color:T.text, marginBottom:4 }}>Forged Pro</div>
+          <div style={{ fontFamily:T.serif, fontSize:28, color:T.text, marginBottom:4 }}>Forged early supporter</div>
           {habitCount >= 5 && (
-            <div style={{ fontSize:13, color:T.amber }}>You've hit the 5-habit free limit — Pro removes it.</div>
+            <div style={{ fontSize:13, color:T.amber }}>You've hit the 5-habit free limit — early supporter access removes it.</div>
           )}
         </div>
 
@@ -2808,7 +2816,7 @@ function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
           <div style={{ display:"grid", gridTemplateColumns:"1fr 80px 80px", borderBottom:`0.5px solid ${T.border}`, padding:"7px 14px" }}>
             <span style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.07em" }}>Feature</span>
             <span style={{ fontSize:10, color:T.hint, textAlign:"center", textTransform:"uppercase", letterSpacing:"0.07em" }}>Free</span>
-            <span style={{ fontSize:10, color:T.gold, textAlign:"center", textTransform:"uppercase", letterSpacing:"0.07em", fontWeight:600 }}>Pro</span>
+            <span style={{ fontSize:10, color:T.gold, textAlign:"center", textTransform:"uppercase", letterSpacing:"0.07em", fontWeight:600 }}>Supporter</span>
           </div>
           {features.map((f, i) => (
             <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 80px 80px", padding:"10px 14px", borderBottom: i < features.length-1 ? `0.5px solid ${T.border}` : "none", alignItems:"center" }}>
@@ -2846,8 +2854,11 @@ function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
             try {
               const res = await fetch("/api/create-checkout", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ userId, email: userEmail, plan: "monthly" }),
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token || ""}`,
+                },
+                body: JSON.stringify({ plan: "monthly" }),
               });
               const { url, error } = await res.json();
               if (url) { window.location.href = url; }
@@ -2855,7 +2866,7 @@ function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
             } catch { alert("Couldn't connect — try again"); setCheckoutPlan(null); }
           }}
           style={{ display:"block", width:"100%", padding:"16px", borderRadius:T.rsm, border:"none", background:T.gold, color:"#1a1a16", fontSize:16, fontWeight:700, cursor: checkoutPlan ? "wait" : "pointer", marginBottom:10, textAlign:"center", boxSizing:"border-box", letterSpacing:"0.01em", opacity: checkoutPlan ? 0.7 : 1 }}>
-          {checkoutPlan === "monthly" ? "Redirecting to checkout…" : "Get Forged Pro — $4.99/mo →"}
+          {checkoutPlan === "monthly" ? "Redirecting to checkout…" : "Become an early supporter — $4.99/mo →"}
         </button>
         <button
           disabled={!!checkoutPlan}
@@ -2864,8 +2875,11 @@ function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
             try {
               const res = await fetch("/api/create-checkout", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ userId, email: userEmail, plan: "annual" }),
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token || ""}`,
+                },
+                body: JSON.stringify({ plan: "annual" }),
               });
               const { url, error } = await res.json();
               if (url) { window.location.href = url; }
@@ -2996,14 +3010,14 @@ function ProfileScreen({ user, xp, habits, isPro, refCode, onUpdateUser, onReset
       {/* Pro section */}
       <div style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid rgba(200,144,42,0.3)`, overflow:"hidden" }}>
         <div style={{ padding:"10px 16px 6px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-          <div style={{ fontSize:10, fontWeight:500, color:T.gold, textTransform:"uppercase", letterSpacing:"0.08em" }}>Forged Pro</div>
+          <div style={{ fontSize:10, fontWeight:500, color:T.gold, textTransform:"uppercase", letterSpacing:"0.08em" }}>Forged early supporter</div>
           {isPro && <div style={{ fontSize:10, color:T.green, fontWeight:600, background:T.green+"18", padding:"2px 8px", borderRadius:10 }}>✓ Active</div>}
         </div>
         <div style={{ padding:"4px 16px 16px" }}>
           {isPro ? (
             <div style={{ fontSize:14, color:T.text, lineHeight:1.6 }}>
-              You're on Pro — thanks for supporting Forged. 🙌<br/>
-              <span style={{ fontSize:12, color:T.muted }}>All features unlocked, including AI Habit Coach.</span>
+              You're an early supporter — thanks for backing Forged while it's in beta. 🙌<br/>
+              <span style={{ fontSize:12, color:T.muted }}>You get beta access to everything, including AI Habit Coach.</span>
             </div>
           ) : (
             <>
@@ -3020,12 +3034,12 @@ function ProfileScreen({ user, xp, habits, isPro, refCode, onUpdateUser, onReset
                     </div>
                     <span style={{ fontSize:13, color:f.status==="soon"?T.muted:T.text }}>{f.label}</span>
                     {f.status==="soon" && <span style={{ fontSize:10, color:T.hint, marginLeft:"auto", letterSpacing:"0.06em", textTransform:"uppercase" }}>Soon</span>}
-                    {f.status==="pro" && <span style={{ fontSize:10, color:T.gold, marginLeft:"auto", letterSpacing:"0.06em", textTransform:"uppercase" }}>Pro</span>}
+                    {f.status==="pro" && <span style={{ fontSize:10, color:T.gold, marginLeft:"auto", letterSpacing:"0.06em", textTransform:"uppercase" }}>Supporter</span>}
                   </div>
                 ))}
               </div>
               <button onClick={onUpgrade} style={{ width:"100%", padding:"12px", borderRadius:T.rsm, border:"none", background:"rgba(200,144,42,0.15)", color:T.gold, fontSize:14, fontWeight:600, cursor:"pointer", letterSpacing:"0.01em" }}>
-                Upgrade to Pro — from $4.99/mo →
+                Become an early supporter — $4.99/mo →
               </button>
               <div style={{ fontSize:11, color:T.hint, marginTop:8, textAlign:"center" }}>✦ Early users get this price locked in forever</div>
             </>
@@ -3347,7 +3361,7 @@ function CheckEmailScreen({ email, onBack }) {
 
 // ─── ROOT APP ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const [onboarded,   setOnboarded]  = useState(false);
+  const [onboarded,   setOnboarded]  = useState(null);
   const [user,        setUser]        = useState({ name:"", avatarUrl:null });
   const [habits,      setHabits]     = useState([]);
   const [screen,      setScreen]     = useState("today");
@@ -3373,8 +3387,18 @@ export default function App() {
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [refCode,     setRefCode]     = useState(null);
   const [authEmail,   setAuthEmail]   = useState(null);
+  /** Supabase auth user id when signed in; null when logged out */
+  const [sessionUserId, setSessionUserId] = useState(null);
+  /** True only after profile/habits load succeeded for this session (never true while data is missing) */
+  const [accountDataReady, setAccountDataReady] = useState(false);
+  /** Load failed after retries — show retry UI while session still valid */
+  const [accountLoadError, setAccountLoadError] = useState(false);
   const userIdRef     = useRef(null);
   const loadingUidRef = useRef(null); // uid currently being loaded — prevents concurrent loads
+  const accountDataLoadedRef = useRef(false); // sync with accountDataReady for auth callbacks (no stale closures)
+  const lastResumeDataFetchRef = useRef(0);
+  const mountTimeRef = useRef(Date.now());
+  const initialAuthHandledRef = useRef(false);
   const noteDebounceRef = useRef({});
 
   // ─── Supabase helpers ──────────────────────────────────────────────────────
@@ -3419,34 +3443,48 @@ export default function App() {
     await syncProfile({ avatar_url: avatarUrl });
   }
 
+  /** @returns {Promise<boolean>} true if profile/habits were loaded and applied; false on hard failure */
   async function loadUserData(uid) {
-    // Prevent concurrent loads for the same user
-    if (loadingUidRef.current === uid) return;
+    // Mutex: skip if already loading this uid
+    if (loadingUidRef.current === uid) return false;
     loadingUidRef.current = uid;
-    userIdRef.current = uid;
     try {
-      const [profileRes, habitsRes] = await Promise.all([
+      const FETCH_MS = 12000;
+      const queryPromise = Promise.all([
         supabase.from("profiles").select("*").eq("id", uid).single(),
         supabase.from("habits").select("*").eq("user_id", uid).order("created_at"),
       ]);
+      const timeoutPromise = new Promise((_, rej) =>
+        setTimeout(() => rej(new Error("loadUserData_timeout")), FETCH_MS)
+      );
+
+      let profileRes, habitsRes;
+      try {
+        [profileRes, habitsRes] = await Promise.race([queryPromise, timeoutPromise]);
+      } catch (err) {
+        console.error("loadUserData: fetch failed —", err.message);
+        accountDataLoadedRef.current = false;
+        setAccountDataReady(false);
+        return false;
+      }
 
       const { data: profile, error: pErr } = profileRes;
       const { data: rows,    error: hErr  } = habitsRes;
 
-      // If both queries hard-failed (network/auth error, not just empty row),
-      // bail out without changing any UI state — better to stay on loading screen
-      // than push a valid user into onboarding due to a transient failure.
-      const profileHardFailed = pErr && pErr.code !== "PGRST116";
-      const habitsHardFailed  = hErr != null;
-      if (profileHardFailed && habitsHardFailed) {
+      const profileFailed = pErr && pErr.code !== "PGRST116";
+      const habitsFailed  = hErr != null;
+
+      if (profileFailed && habitsFailed) {
         console.error("loadUserData: both queries failed — profile:", pErr.message, "habits:", hErr.message);
-        return; // caller keeps loading=true; user sees spinner and can refresh
+        accountDataLoadedRef.current = false;
+        setAccountDataReady(false);
+        return false;
       }
 
-      if (profileHardFailed) console.error("profile fetch:", pErr.message);
-      if (habitsHardFailed)  console.error("habits fetch:", hErr.message);
+      if (profileFailed) console.error("profile fetch:", pErr.message);
+      if (habitsFailed)  console.error("habits fetch:", hErr.message);
 
-      let isOnboarded = false;
+      let isOnboarded = null;
 
       if (profile) {
         setUser({ name: profile.name || "", avatarUrl: profile.avatar_url || null });
@@ -3454,27 +3492,60 @@ export default function App() {
         setIsPro(!!(profile.is_pro || profile.is_admin));
         setRefCode(profile.ref_code ?? null);
         isOnboarded = profile.onboarded ?? false;
-        // Safety net A: profile has a real name → they went through onboarding
-        // even if the flag got corrupted. Repair quietly.
         if (!isOnboarded && profile.name && profile.name.trim()) {
           isOnboarded = true;
           supabase.from("profiles").update({ onboarded: true, updated_at: new Date().toISOString() }).eq("id", uid);
         }
       }
 
-      // Safety net B: habits exist → definitely onboarded. Repair quietly.
-      if (!isOnboarded && rows && rows.length > 0) {
-        isOnboarded = true;
-        supabase.from("profiles").upsert({ id: uid, onboarded: true, updated_at: new Date().toISOString() });
+      if (rows && rows.length > 0) {
+        if (isOnboarded === null) isOnboarded = false;
+        if (!isOnboarded) {
+          isOnboarded = true;
+          supabase.from("profiles").upsert({ id: uid, onboarded: true, updated_at: new Date().toISOString() });
+        }
       }
 
+      if (isOnboarded === null) isOnboarded = false;
       setOnboarded(isOnboarded);
       if (rows) setHabits(rows.map(rowToHabit));
+
+      userIdRef.current = uid;
+      accountDataLoadedRef.current = true;
+      setAccountDataReady(true);
+      return true;
     } catch (err) {
       console.error("loadUserData exception:", err);
-      // Don't flip to onboarded=false on error — keep whatever state we had
+      accountDataLoadedRef.current = false;
+      setAccountDataReady(false);
+      return false;
     } finally {
       loadingUidRef.current = null;
+    }
+  }
+
+  async function loadUserDataWithRetries(uid) {
+    const maxAttempts = 3;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (attempt > 0) await new Promise(r => setTimeout(r, 1500));
+      if (await loadUserData(uid)) return true;
+    }
+    return false;
+  }
+
+  async function retryAccountDataLoad() {
+    if (!sessionUserId) return;
+    setAccountLoadError(false);
+    setLoading(true);
+    const retryBudget = setTimeout(() => setLoading(false), 32000);
+    try {
+      const { error: refErr } = await supabase.auth.refreshSession();
+      if (refErr) console.warn("retryAccountDataLoad: refreshSession —", refErr.message);
+      const ok = await loadUserDataWithRetries(sessionUserId);
+      if (!ok) setAccountLoadError(true);
+    } finally {
+      clearTimeout(retryBudget);
+      setLoading(false);
     }
   }
 
@@ -3488,47 +3559,96 @@ export default function App() {
   useEffect(() => {
     let mounted = true;
 
-    // Safety valve: if INITIAL_SESSION never fires (e.g. Supabase SDK bug or
-    // very slow network), unblock the app after 8s so the user isn't stuck.
+    // If INITIAL_SESSION never fires, fall back to auth (don't guess signed-in without data).
     const bailout = setTimeout(() => {
-      if (!mounted) return;
-      console.warn("Auth: INITIAL_SESSION did not fire within 8s");
-      if (!userIdRef.current) setAuthScreen(true);
+      if (!mounted || initialAuthHandledRef.current) return;
+      console.warn("Auth: INITIAL_SESSION did not fire within 12s");
+      setAuthScreen(true);
       setLoading(false);
-    }, 8000);
+    }, 12000);
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return;
       try {
 
         // ── Initial session ───────────────────────────────────────────────
-        // This is the canonical "what is the user's auth state on load" event.
-        // We handle it here instead of getSession() so that the token refresh
-        // (which happens asynchronously before this event fires) is complete.
+        // Do not leave the loading screen until profile/habits load succeeds (or we show retry).
         if (event === "INITIAL_SESSION") {
           clearTimeout(bailout);
-          if (session?.user?.id) {
-            if (session.user.email) setAuthEmail(session.user.email);
-            await loadUserData(session.user.id);
-            if (mounted) setAuthScreen(false);
-          } else {
-            if (mounted) setAuthScreen(true);
+          // If profile/habits hang (blocked network / wrong origin), never leave the user on a dead spinner.
+          const LOAD_BUDGET_MS = 32000;
+          const loadBudgetTimer = setTimeout(() => {
+            if (!mounted) return;
+            console.warn("Auth: account load exceeded budget — unblocking UI (use Retry if needed)");
+            setLoading(false);
+            setAuthScreen(false);
+            if (session?.user?.id) setAccountLoadError(true);
+          }, LOAD_BUDGET_MS);
+
+          initialAuthHandledRef.current = true;
+          try {
+            if (session?.user?.id) {
+              if (session.user.email) setAuthEmail(session.user.email);
+              setSessionUserId(session.user.id);
+              setAccountLoadError(false);
+              accountDataLoadedRef.current = false;
+              setAccountDataReady(false);
+              userIdRef.current = null;
+              const ok = await loadUserDataWithRetries(session.user.id);
+              if (!mounted) return;
+              if (ok) setAccountLoadError(false);
+              else setAccountLoadError(true);
+              setAuthScreen(false);
+            } else {
+              setSessionUserId(null);
+              setAccountLoadError(false);
+              accountDataLoadedRef.current = false;
+              setAccountDataReady(false);
+              userIdRef.current = null;
+              if (mounted) setAuthScreen(true);
+            }
+          } finally {
+            clearTimeout(loadBudgetTimer);
+            if (mounted) setLoading(false);
           }
-          if (mounted) setLoading(false);
           return;
         }
 
         // ── Explicit sign-in ──────────────────────────────────────────────
+        // Reload account data on every real sign-in. Skip when Supabase also fires SIGNED_IN right
+        // after INITIAL_SESSION (same user, data already loaded) so we don't wipe userIdRef / flash loading.
         if (event === "SIGNED_IN" && session?.user?.id) {
           if (session.user.email && mounted) setAuthEmail(session.user.email);
-          // Only reload data if this is actually a different/new user
-          if (userIdRef.current !== session.user.id) {
-            setLoading(true);
-            await loadUserData(session.user.id);
+          setSessionUserId(session.user.id);
+          if (accountDataLoadedRef.current && userIdRef.current === session.user.id) {
+            if (mounted) { setAuthScreen(false); setPendingEmail(null); setPasswordRecovery(false); }
+            return;
+          }
+          setAccountLoadError(false);
+          accountDataLoadedRef.current = false;
+          setAccountDataReady(false);
+          userIdRef.current = null;
+          setLoading(true);
+          const signInBudget = setTimeout(() => {
+            if (!mounted) return;
+            console.warn("Auth: sign-in load exceeded budget — unblocking UI");
+            setLoading(false);
+            setAuthScreen(false);
+            setAccountLoadError(true);
+          }, 32000);
+          try {
+            const ok = await loadUserDataWithRetries(session.user.id);
+            if (mounted) {
+              setAuthScreen(false);
+              setPendingEmail(null);
+              setPasswordRecovery(false);
+              if (!ok) setAccountLoadError(true);
+              else setAccountLoadError(false);
+            }
+          } finally {
+            clearTimeout(signInBudget);
             if (mounted) setLoading(false);
           }
-          // Always clear auth screen on sign-in, even if data was already loaded
-          if (mounted) { setAuthScreen(false); setPendingEmail(null); setPasswordRecovery(false); }
           return;
         }
 
@@ -3537,10 +3657,14 @@ export default function App() {
           clearTimeout(bailout);
           userIdRef.current     = null;
           loadingUidRef.current = null;
+          accountDataLoadedRef.current = false;
+          setSessionUserId(null);
+          setAccountDataReady(false);
+          setAccountLoadError(false);
           setHabits([]);
           setUser({ name: "", avatarUrl: null });
           setXp(0);
-          setOnboarded(false);
+          setOnboarded(null);
           setIsPro(false);
           setRefCode(null);
           setAuthEmail(null);
@@ -3549,15 +3673,28 @@ export default function App() {
         }
 
         // ── Token refresh ─────────────────────────────────────────────────
-        // Fires when the access token is silently refreshed. If we somehow
-        // don't have user data yet (e.g. INITIAL_SESSION timed out and the
-        // bailout showed auth screen), use this as a recovery path.
+        // After idle, JWT renews but PostgREST may have failed earlier; reload if data never loaded.
         if (event === "TOKEN_REFRESHED" && session?.user?.id) {
           if (session.user.email && mounted) setAuthEmail(session.user.email);
-          if (!userIdRef.current) {
+          if (!accountDataLoadedRef.current) {
             setLoading(true);
-            await loadUserData(session.user.id);
-            if (mounted) { setLoading(false); setAuthScreen(false); }
+            const tokenBudget = setTimeout(() => {
+              if (!mounted) return;
+              setLoading(false);
+              setAuthScreen(false);
+              setAccountLoadError(true);
+            }, 32000);
+            try {
+              const ok = await loadUserDataWithRetries(session.user.id);
+              if (mounted) {
+                setAuthScreen(false);
+                if (!ok) setAccountLoadError(true);
+                else setAccountLoadError(false);
+              }
+            } finally {
+              clearTimeout(tokenBudget);
+              if (mounted) setLoading(false);
+            }
           }
           return;
         }
@@ -3577,27 +3714,42 @@ export default function App() {
     return () => { mounted = false; clearTimeout(bailout); subscription.unsubscribe(); };
   }, []);
 
-  // ─── Session refresh on page focus ────────────────────────────────────────
-  // On mobile, the app can be backgrounded for a long time. When it comes back,
-  // the access token may have expired. Calling getSession() triggers a refresh
-  // which fires TOKEN_REFRESHED — the handler above picks that up.
+  // ─── Session + data refresh on resume / bfcache ──────────────────────────────
   useEffect(() => {
+    function runResumeLoad() {
+      // Ignore visibilitychange that Chrome fires on initial page load (<5s since mount)
+      const now = Date.now();
+      if (now - mountTimeRef.current < 5000) return;
+      if (now - lastResumeDataFetchRef.current < 5000) return;
+      lastResumeDataFetchRef.current = now;
+      (async () => {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user?.id) return;
+        await loadUserDataWithRetries(session.user.id);
+      })();
+    }
     function onVisible() {
-      if (document.visibilityState === "visible") {
-        supabase.auth.getSession(); // triggers token refresh → TOKEN_REFRESHED if expired
-      }
+      if (document.visibilityState !== "visible") return;
+      runResumeLoad();
+    }
+    function onPageShow(e) {
+      if (e.persisted) runResumeLoad();
     }
     document.addEventListener("visibilitychange", onVisible);
-    return () => document.removeEventListener("visibilitychange", onVisible);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("pageshow", onPageShow);
+    };
   }, []);
 
   // Sync XP to profile whenever it changes (after init)
   const xpInitRef = useRef(false);
   useEffect(() => {
-    if (loading) return;
+    if (loading || !accountDataReady) return;
     if (!xpInitRef.current) { xpInitRef.current = true; return; }
     syncProfile({ xp });
-  }, [xp, loading]);
+  }, [xp, loading, accountDataReady]);
 
   // All hooks must be declared before any conditional returns
   const addToast = useCallback(msg => {
@@ -3625,7 +3777,7 @@ export default function App() {
           if (data && (data.is_pro || data.is_admin)) {
             setIsPro(true);
             const id = Date.now();
-            setToasts(t => [...t, { id, msg: "🎉 Welcome to Forged Pro!" }]);
+            setToasts(t => [...t, { id, msg: "🎉 Thanks for becoming an early supporter!" }]);
             setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 4000);
           }
         });
@@ -3694,10 +3846,41 @@ export default function App() {
     );
   }
 
-  // Show onboarding — only when auth is fully resolved and user is genuinely new.
-  // Explicit guards prevent any loading/auth-screen race from showing this screen
-  // to an existing user who just hasn't had their data loaded yet.
-  if (!loading && !authScreen && !onboarded) {
+  // Signed in but profile/habits failed after retries — never show empty main as if "no data"
+  if (!loading && !authScreen && sessionUserId && accountLoadError) {
+    return (
+      <><style>{CSS}</style>
+      <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"0 28px", textAlign:"center", gap:16 }}>
+        <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>Forged.</div>
+        <div style={{ fontSize:15, color:T.muted, lineHeight:1.7 }}>
+          You&apos;re signed in, but we couldn&apos;t load your profile and habits. Check your connection and try again.
+        </div>
+        <button type="button" onClick={() => retryAccountDataLoad()}
+          style={{ padding:"14px 24px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:15, fontWeight:600, cursor:"pointer" }}>
+          Retry
+        </button>
+        <button type="button" onClick={() => window.location.reload()}
+          style={{ background:"none", border:"none", color:T.muted, fontSize:13, cursor:"pointer" }}>
+          Refresh page
+        </button>
+      </div></>
+    );
+  }
+
+  // Should not happen often: session exists but data gate not satisfied yet
+  if (!loading && !authScreen && sessionUserId && !accountDataReady && !accountLoadError) {
+    return (
+      <><style>{CSS}</style>
+      <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:20 }}>
+        <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>Forged.</div>
+        <div style={{ width:22, height:22, border:`2px solid ${T.border}`, borderTopColor:T.accent, borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
+        <div style={{ fontSize:12, color:T.hint }}>Loading your account…</div>
+      </div></>
+    );
+  }
+
+  // Show onboarding — only after account data loaded and user is genuinely new.
+  if (!loading && !authScreen && accountDataReady && onboarded === false) {
     return (
       <><style>{CSS}</style>
       <OnboardingScreen
