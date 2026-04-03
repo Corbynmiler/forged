@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import { supabase, habitToRow, rowToHabit } from "./supabase.js";
 
 // ─── DATE UTILS ───────────────────────────────────────────────────────────────
@@ -1355,34 +1355,142 @@ function HistoryModal({ habits, onClose, isPro, onUpgrade }) {
   );
 }
 
-// ─── FIRST-TIME TOUR ──────────────────────────────────────────────────────────
-const TOUR_STEPS = [
-  { emoji:"✓",  title:"Log every day",          body:"Tap the circle on a habit to log it. That's it. No complicated input needed.",              nav:"today"    },
-  { emoji:"📓", title:"Your journal",            body:"Every note and reflection you write gets saved here automatically — sorted by date.",        nav:"journal"  },
-  { emoji:"📈", title:"Forge report",            body:"After a few weeks, your insights page fills up with real stats on your consistency.",        nav:"insights" },
-  { emoji:"⚒️", title:"Manage your habits",      body:"Tap Habits to add, edit or remove habits. Each type works differently — explore them.",     nav:"habits"   },
-  { emoji:"⚡", title:"XP tracks consistency",   body:"Every log earns XP. It takes 2 years of daily logging to hit Forged. Make it mean something.", nav:"profile" },
+// ─── TOUR SYSTEM ─────────────────────────────────────────────────────────────
+// Steps: { target?: CSS selector, title, body, pad?, radius?, callout?: "top"|"bottom" }
+// target = null → full dim with centered callout
+// callout = "top" forces card near top of screen (override auto-detect)
+
+const GLOBAL_TOUR = [
+  {
+    target: null,
+    title: "Quick tour",
+    body: "30 seconds. We'll show you what everything does — then you're on your own.",
+  },
+  {
+    target: "[data-tour='today-summary']",
+    title: "Your daily ring",
+    body: "Shows how many habits you've logged today. Tap the XP badge to see your level progress.",
+  },
+  {
+    target: "[data-tour='today-habits']",
+    title: "Log a habit",
+    body: "Tap the circle on any habit to log it. Hold or tap again for options like reflect, skip, or undo.",
+    pad: 4,
+  },
+  {
+    target: "[data-tour='today-add']",
+    title: "Add habits",
+    body: "Add daily habits, weekly targets, progress goals, limits, or project timers. Each type tracks differently.",
+  },
+  {
+    target: "[data-tour='nav']",
+    title: "Five screens",
+    body: "Today · Journal (your reflections) · Insights (patterns) · Habits (manage) · Profile (XP & account)",
+    pad: 4, radius: 16, callout: "top",
+  },
 ];
-function TourOverlay({ step, onNext, onSkip }) {
-  const s = TOUR_STEPS[step];
-  const isLast = step === TOUR_STEPS.length - 1;
+
+const PAGE_TOURS = {
+  today: [
+    { target: "[data-tour='today-summary']", title: "Daily progress ring", body: "Tracks how many habits you've logged today. Tap the XP badge to see your level." },
+    { target: "[data-tour='today-habits']",  title: "Log a habit",         body: "Tap the circle to log. Tap and hold or tap again for reflect, skip, add note, or undo." },
+    { target: "[data-tour='today-add']",     title: "Add a habit",         body: "Daily, weekly, progress goal, limit, or project. Pick the type that fits what you're tracking." },
+  ],
+  habits: [
+    { target: "[data-tour='habits-add']",  title: "Add habits",    body: "Tap + to add a new habit. Tap an existing one to edit, delete, or see its history." },
+    { target: "[data-tour='coach-card']",  title: "AI Coach",      body: "Your coach knows your actual habit data — streaks, reflections, patterns. Available with early supporter access.", callout: "top" },
+  ],
+  journal: [
+    { target: "[data-tour='journal-list']", title: "Your reflections", body: "Every reflection you write on a habit log appears here automatically, sorted by date. Tap any entry to edit it." },
+  ],
+  insights: [
+    { target: "[data-tour='insights-content']", title: "Your patterns", body: "After a few weeks of logging, this page fills up with consistency stats, streaks, and habit connections." },
+  ],
+  profile: [
+    { target: "[data-tour='xp-bar']",  title: "XP & levels", body: "Every log earns XP. Consistency compounds — it takes two years of daily logging to hit the Forged level." },
+  ],
+};
+
+function TourOverlay({ steps, stepIdx, onNext, onSkip }) {
+  const [rect, setRect] = useState(null);
+  const step = steps[stepIdx];
+  const isLast = stepIdx === steps.length - 1;
+
+  useLayoutEffect(() => {
+    if (!step?.target) { setRect(null); return; }
+    const el = document.querySelector(step.target);
+    if (el) {
+      const r = el.getBoundingClientRect();
+      setRect({ top: r.top, left: r.left, width: r.width, height: r.height, bottom: r.bottom });
+    } else {
+      setRect(null);
+    }
+  }, [stepIdx, step?.target]);
+
+  const PAD = step?.pad ?? 8;
+  const hl = rect ? {
+    top:    rect.top    - PAD,
+    left:   rect.left   - PAD,
+    width:  rect.width  + PAD * 2,
+    height: rect.height + PAD * 2,
+  } : null;
+
+  // Auto-detect callout position: if element is in bottom 45% → show callout near top
+  let calloutPos = step?.callout;
+  if (!calloutPos) {
+    if (!rect) calloutPos = "center";
+    else calloutPos = (rect.top + rect.height / 2) > window.innerHeight * 0.55 ? "top" : "bottom";
+  }
+
+  const calloutStyle = calloutPos === "top"
+    ? { top: 56, left: "50%", transform: "translateX(-50%)" }
+    : calloutPos === "center"
+    ? { top: "50%", left: "50%", transform: "translate(-50%, -50%)" }
+    : { bottom: 28, left: "50%", transform: "translateX(-50%)" };
+
   return (
-    <div style={{ position:"fixed", inset:0, zIndex:500, display:"flex", flexDirection:"column", justifyContent:"flex-end", alignItems:"center", background:"rgba(0,0,0,0.6)", backdropFilter:"blur(4px)" }}>
-      <div style={{ width:430, maxWidth:"100vw", background:T.raised, borderRadius:"22px 22px 0 0", padding:"28px 24px 60px", animation:"tourSlide 0.35s ease-out" }}>
-        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
-          {TOUR_STEPS.map((_, i) => (
-            <div key={i} style={{ height:3, borderRadius:2, flex:1, background:i<=step?T.accent:T.surface, transition:"background 0.3s" }}/>
+    <div style={{ position:"fixed", inset:0, zIndex:600 }} onMouseDown={e => e.stopPropagation()}>
+      {/* Spotlight — box-shadow dims everything outside the highlighted rect */}
+      {hl ? (
+        <div style={{
+          position: "fixed",
+          top: hl.top, left: hl.left, width: hl.width, height: hl.height,
+          borderRadius: step?.radius ?? 14,
+          boxShadow: "0 0 0 9999px rgba(0,0,0,0.80)",
+          border: "1.5px solid rgba(200,144,42,0.55)",
+          pointerEvents: "none",
+          zIndex: 601,
+          transition: "top 0.25s, left 0.25s, width 0.25s, height 0.25s",
+        }}/>
+      ) : (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.80)", pointerEvents:"none", zIndex:601 }}/>
+      )}
+
+      {/* Callout card */}
+      <div style={{
+        position: "fixed", ...calloutStyle,
+        width: 350, maxWidth: "calc(100vw - 24px)",
+        background: T.raised, borderRadius: 18,
+        padding: "20px 20px 22px",
+        zIndex: 602,
+        boxShadow: "0 8px 40px rgba(0,0,0,0.5)",
+      }}>
+        {/* Progress bar */}
+        <div style={{ display:"flex", gap:4, marginBottom:16 }}>
+          {steps.map((_, i) => (
+            <div key={i} style={{ height:3, flex:1, borderRadius:2, background:i<=stepIdx?T.accent:T.surface, transition:"background 0.25s" }}/>
           ))}
         </div>
-        <div style={{ marginTop:24, marginBottom:6, fontSize:40 }}>{s.emoji}</div>
-        <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, marginBottom:10 }}>{s.title}</div>
-        <div style={{ fontSize:14, color:T.muted, lineHeight:1.75, marginBottom:32 }}>{s.body}</div>
-        <div style={{ display:"flex", gap:10 }}>
-          <button onClick={onSkip} style={{ flex:1, padding:14, borderRadius:T.rsm, border:`0.5px solid ${T.borderStrong}`, background:"none", color:T.muted, fontSize:14, cursor:"pointer" }}>
-            Skip tour
+        <div style={{ fontFamily:T.serif, fontSize:21, color:T.text, marginBottom:8 }}>{step.title}</div>
+        <div style={{ fontSize:13, color:T.muted, lineHeight:1.65, marginBottom:18 }}>{step.body}</div>
+        <div style={{ display:"flex", gap:8 }}>
+          <button onClick={onSkip}
+            style={{ flex:1, padding:"11px", borderRadius:T.rsm, border:`0.5px solid ${T.borderStrong}`, background:"none", color:T.muted, fontSize:13, cursor:"pointer" }}>
+            Skip
           </button>
-          <button onClick={onNext} style={{ flex:2, padding:14, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:15, fontWeight:500, cursor:"pointer" }}>
-            {isLast ? "Let's go 🔥" : "Next →"}
+          <button onClick={onNext}
+            style={{ flex:2, padding:"11px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:500, cursor:"pointer" }}>
+            {isLast ? "Got it 🔥" : "Next →"}
           </button>
         </div>
       </div>
@@ -1417,7 +1525,7 @@ function TodayScreen({ habits, xp, onTap, onUndo, onSkip, onReflect, onAddNote, 
 
   return (
     <div>
-      <div style={{ margin:"6px 14px 16px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:"18px 20px", display:"flex", alignItems:"center", gap:18 }}>
+      <div data-tour="today-summary" style={{ margin:"6px 14px 16px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:"18px 20px", display:"flex", alignItems:"center", gap:18 }}>
         <Ring pct={pct}/>
         <div style={{ flex:1 }}>
           <div style={{ fontFamily:T.serif, fontSize:20, color:T.text, marginBottom:4 }}>{pct === 100 ? "Forged for today." : greeting}</div>
@@ -1427,12 +1535,14 @@ function TodayScreen({ habits, xp, onTap, onUndo, onSkip, onReflect, onAddNote, 
           </button>
         </div>
       </div>
+      <div data-tour="today-habits">
       {daily.length    > 0 && <><SLabel>Daily</SLabel>          {daily.map(h    => <DailyCard    key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onReflect={onReflect} onAddNote={onAddNote}/>)}</>}
       {limit.length    > 0 && <><SLabel>Limits</SLabel>         {limit.map(h    => <LimitCard    key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onReflect={onReflect} onAddNote={onAddNote}/>)}</>}
       {weekly.length   > 0 && <><SLabel>Weekly targets</SLabel> {weekly.map(h   => <WeeklyCard   key={h.id} habit={h} onTap={onTap}             onReflect={onReflect} onAddNote={onAddNote}/>)}</>}
       {progress.length > 0 && <><SLabel>Progress goals</SLabel> {progress.map(h => <ProgressCard key={h.id} habit={h} onOpenLog={onOpenLog}     onReflect={onReflect} onAddNote={onAddNote}/>)}</>}
       {project.length  > 0 && <><SLabel>Build</SLabel>          {project.map(h  => <ProjectCard  key={h.id} habit={h} onOpenLog={onOpenLog}     onReflect={onReflect} onAddNote={onAddNote}/>)}</>}
-      <button onClick={onAdd} style={{ margin:"8px 14px 0", width:"calc(100% - 28px)", border:`1px dashed ${T.borderStrong}`, background:"none", borderRadius:T.r, padding:14, fontSize:13, color:T.muted, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+      </div>
+      <button data-tour="today-add" onClick={onAdd} style={{ margin:"8px 14px 0", width:"calc(100% - 28px)", border:`1px dashed ${T.borderStrong}`, background:"none", borderRadius:T.r, padding:14, fontSize:13, color:T.muted, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2v10M2 7h10" stroke={T.muted} strokeWidth="1.5" strokeLinecap="round"/></svg>
         Add habit
       </button>
@@ -1772,7 +1882,7 @@ function JournalScreen({ habits, onReflect, journalUserId }) {
   const listEmpty = sortedDatesDesc.length === 0;
 
   return (
-    <div>
+    <div data-tour="journal-list">
       <div style={{ padding:"16px 18px 10px", display:"flex", alignItems:"flex-end", justifyContent:"space-between", flexWrap:"wrap", gap:8 }}>
         <div>
           <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>Journal</div>
@@ -2136,7 +2246,7 @@ function InsightsScreen({ habits, onShowHistory, onShare }) {
   );
 
   return (
-    <div>
+    <div data-tour="insights-content">
       {/* Header */}
       <div style={{ padding:"16px 18px 10px", display:"flex", alignItems:"flex-end", justifyContent:"space-between" }}>
         <div>
@@ -2395,7 +2505,7 @@ function HabitsScreen({ habits, onEdit, onDelete, onAdd, onReflect, onCoach, onU
           ))}
         </div>
       ))}
-      <button onClick={onAdd} style={{ margin:"8px 14px 0", width:"calc(100% - 28px)", border:`1px dashed ${T.borderStrong}`, background:"none", borderRadius:T.r, padding:14, fontSize:13, color:T.muted, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+      <button data-tour="habits-add" onClick={onAdd} style={{ margin:"8px 14px 0", width:"calc(100% - 28px)", border:`1px dashed ${T.borderStrong}`, background:"none", borderRadius:T.r, padding:14, fontSize:13, color:T.muted, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2v10M2 7h10" stroke={T.muted} strokeWidth="1.5" strokeLinecap="round"/></svg>Add habit
       </button>
 
@@ -2406,7 +2516,7 @@ function HabitsScreen({ habits, onEdit, onDelete, onAdd, onReflect, onCoach, onU
           50% { box-shadow: 0 0 0 8px rgba(200,144,42,0.12); }
         }
       `}</style>
-      <div onClick={isPro ? onCoach : onUpgrade}
+      <div data-tour="coach-card" onClick={isPro ? onCoach : onUpgrade}
         style={{ margin:"16px 14px 0", background:T.raised, borderRadius:T.r, border:`1px solid rgba(200,144,42,${isPro?"0.4":"0.2"})`, padding:"16px 18px", cursor:"pointer" }}>
         <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:10 }}>
           <div style={{ width:42, height:42, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:21, flexShrink:0, animation: isPro ? "coachPulse 3s ease-in-out infinite" : "none" }}>🤖</div>
@@ -3309,7 +3419,7 @@ function ProfileScreen({ user, xp, habits, isPro, refCode, onUpdateUser, onReset
           </div>
         )}
         <div style={{ fontSize:13, color:level.color, fontWeight:500, marginBottom:16 }}>⚡ {level.label} · {xp} xp</div>
-        <div style={{ height:4, background:T.surface, borderRadius:2, overflow:"hidden", marginBottom:4 }}>
+        <div data-tour="xp-bar" style={{ height:4, background:T.surface, borderRadius:2, overflow:"hidden", marginBottom:4 }}>
           <div style={{ height:"100%", borderRadius:2, background:level.color, width:`${pct}%`, transition:"width 0.6s ease" }}/>
         </div>
         <div style={{ fontSize:11, color:T.hint, marginBottom:24 }}>{next ? `${next.min - xp} xp to ${next.label}` : "Max level reached"}</div>
@@ -3728,8 +3838,8 @@ export default function App() {
   const [authScreen,       setAuthScreen]        = useState(false);
   const [pendingEmail,     setPendingEmail]       = useState(null);
   const [passwordRecovery, setPasswordRecovery]  = useState(false);
-  const [showTour,  setShowTour]  = useState(false);
-  const [tourStep,  setTourStep]  = useState(0);
+  const [tourSteps, setTourSteps] = useState(null); // null = hidden; array = active tour
+  const [tourIdx,   setTourIdx]   = useState(0);
   const [showShare,   setShowShare]   = useState(false);
   const [isPro,       setIsPro]       = useState(false);
   const [coachName,   setCoachName]   = useState("Coach");
@@ -4157,7 +4267,7 @@ export default function App() {
     }
     // Show tour for brand-new users
     if (!localStorage.getItem('forged_tour_done')) {
-      setShowTour(true);
+      setTimeout(() => { setTourSteps(GLOBAL_TOUR); setTourIdx(0); }, 600);
     }
   }
 
@@ -4450,9 +4560,20 @@ export default function App() {
                 : screen === "profile" ? user.name : screen.charAt(0).toUpperCase()+screen.slice(1)}
             </div>
           </div>
-          <button onClick={() => setShowXP(true)} style={{ display:"flex", alignItems:"center", gap:6, background:"rgba(200,144,42,0.12)", borderRadius:20, padding:"6px 13px", fontSize:13, fontWeight:500, color:T.gold, border:"none", cursor:"pointer" }}>
-            ⚡ {xp} xp
-          </button>
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <button
+              onClick={() => {
+                const pageTour = PAGE_TOURS[screen];
+                if (pageTour) { setTourSteps(pageTour); setTourIdx(0); }
+              }}
+              title="Help"
+              style={{ width:30, height:30, borderRadius:"50%", border:`0.5px solid ${T.borderStrong}`, background:"none", color:T.hint, fontSize:14, fontWeight:600, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>
+              ?
+            </button>
+            <button onClick={() => setShowXP(true)} style={{ display:"flex", alignItems:"center", gap:6, background:"rgba(200,144,42,0.12)", borderRadius:20, padding:"6px 13px", fontSize:13, fontWeight:500, color:T.gold, border:"none", cursor:"pointer" }}>
+              ⚡ {xp} xp
+            </button>
+          </div>
         </div>
 
         {screen === "today"    && <TodayScreen    habits={habits} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onReflect={setReflectId} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onAdd={handleStartAdd} onXPInfo={() => setShowXP(true)}/>}
@@ -4473,13 +4594,13 @@ export default function App() {
           }}
           onResetOnboarding={() => setOnboarded(false)}
           onSignOut={handleSignOut}
-          onShowTour={() => { setTourStep(0); setShowTour(true); }}
+          onShowTour={() => { setTourSteps(GLOBAL_TOUR); setTourIdx(0); }}
           coachName={coachName}
           onUpdateCoachName={name => { setCoachName(name); syncProfile({ coach_name: name }); }}
         />}
 
         {/* Bottom nav */}
-        <nav style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:430, maxWidth:"100vw", background:"rgba(26,26,22,0.96)", backdropFilter:"blur(16px)", borderTop:`0.5px solid ${T.border}`, display:"flex", zIndex:100, paddingBottom:6 }}>
+        <nav data-tour="nav" style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:430, maxWidth:"100vw", background:"rgba(26,26,22,0.96)", backdropFilter:"blur(16px)", borderTop:`0.5px solid ${T.border}`, display:"flex", zIndex:100, paddingBottom:6 }}>
           {NAV.map(n => (
             <button key={n.id} onClick={() => setScreen(n.id)} style={{ flex:1, padding:"10px 4px 6px", border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3, fontSize:10, fontWeight:500, color:screen===n.id?T.accent:T.muted, transition:"color 0.15s" }}>
               {n.icon}{n.label}
@@ -4499,14 +4620,24 @@ export default function App() {
       {showCoach   && <AICoach habits={habits} user={user} isPro={isPro} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)} coachName={coachName}/>}
       {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} habitCount={habits.length} userId={userIdRef.current} userEmail={authEmail}/>}
       {showShare && <ShareCardModal user={user} habits={habits} xp={xp} onClose={() => setShowShare(false)}/>}
-      {showTour && (
+      {tourSteps && (
         <TourOverlay
-          step={tourStep}
+          steps={tourSteps}
+          stepIdx={tourIdx}
           onNext={() => {
-            if (tourStep < TOUR_STEPS.length - 1) { setTourStep(s => s + 1); }
-            else { localStorage.setItem('forged_tour_done','1'); setShowTour(false); setTourStep(0); }
+            if (tourIdx < tourSteps.length - 1) {
+              setTourIdx(i => i + 1);
+            } else {
+              localStorage.setItem('forged_tour_done', '1');
+              setTourSteps(null);
+              setTourIdx(0);
+            }
           }}
-          onSkip={() => { localStorage.setItem('forged_tour_done','1'); setShowTour(false); setTourStep(0); }}
+          onSkip={() => {
+            localStorage.setItem('forged_tour_done', '1');
+            setTourSteps(null);
+            setTourIdx(0);
+          }}
         />
       )}
     </>
