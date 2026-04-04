@@ -1356,58 +1356,138 @@ function HistoryModal({ habits, onClose, isPro, onUpgrade }) {
 }
 
 // ─── TOUR SYSTEM ─────────────────────────────────────────────────────────────
-// Steps: { target?: CSS selector, title, body, pad?, radius?, callout?: "top"|"bottom" }
-// target = null → full dim with centered callout
-// callout = "top" forces card near top of screen (override auto-detect)
+// Steps: { target?, title, body, pad?, radius?, callout?, welcome? }
+// target = null → full dim, callout centered
+// welcome = true → renders a full-screen welcome card with Start/Skip layout
+// callout: "top" | "bottom" | "center" (auto-detected if omitted)
 
 const GLOBAL_TOUR = [
   {
+    welcome: true,
     target: null,
-    title: "Quick tour",
-    body: "30 seconds. We'll show you what everything does — then you're on your own.",
+    title: "Welcome to Forged.",
+    body: "This tour takes about 30 seconds. It'll show you what each screen does and how to get the most out of it.",
   },
   {
     target: "[data-tour='today-summary']",
-    title: "Your daily ring",
-    body: "Shows how many habits you've logged today. Tap the XP badge to see your level progress.",
+    title: "Your daily progress",
+    body: "This ring fills up as you log habits each day. Tap the XP badge to see your current level and how much further you have to go.",
+    pad: 10,
   },
   {
-    target: "[data-tour='today-habits']",
-    title: "Log a habit",
-    body: "Tap the circle on any habit to log it. Hold or tap again for options like reflect, skip, or undo.",
-    pad: 4,
+    target: "[data-tour='today-first-section']",
+    title: "Logging a habit",
+    body: "Tap the circle on any habit to log it for today. Tap it again — or hold — for more options: reflect, skip the day, add a note, or undo.",
+    pad: 6,
   },
   {
     target: "[data-tour='today-add']",
-    title: "Add habits",
-    body: "Add daily habits, weekly targets, progress goals, limits, or project timers. Each type tracks differently.",
+    title: "Adding habits",
+    body: "Tap here to add a new habit. You can choose daily habits, weekly targets, progress goals, limits, or project timers — each type tracks differently.",
+    pad: 6,
   },
   {
     target: "[data-tour='nav']",
-    title: "Five screens",
-    body: "Today · Journal (your reflections) · Insights (patterns) · Habits (manage) · Profile (XP & account)",
+    title: "Five screens, one app",
+    body: "Today logs habits. Journal stores reflections. Insights shows patterns. Habits lets you manage everything. Profile tracks your XP and account.",
     pad: 4, radius: 16, callout: "top",
   },
 ];
 
 const PAGE_TOURS = {
   today: [
-    { target: "[data-tour='today-summary']", title: "Daily progress ring", body: "Tracks how many habits you've logged today. Tap the XP badge to see your level." },
-    { target: "[data-tour='today-habits']",  title: "Log a habit",         body: "Tap the circle to log. Tap and hold or tap again for reflect, skip, add note, or undo." },
-    { target: "[data-tour='today-add']",     title: "Add a habit",         body: "Daily, weekly, progress goal, limit, or project. Pick the type that fits what you're tracking." },
+    {
+      target: "[data-tour='today-summary']",
+      title: "Daily progress ring",
+      body: "Fills up as you log habits. Tap the XP badge to see your current level and how close you are to the next one.",
+      pad: 10,
+    },
+    {
+      target: "[data-tour='today-first-section']",
+      title: "Logging habits",
+      body: "Tap the circle to log. Tap again or hold for options — reflect on the day, skip it, add a quick note, or undo a log.",
+      pad: 6,
+    },
+    {
+      target: "[data-tour='today-add']",
+      title: "Add a habit",
+      body: "Daily habit, weekly target, progress goal, limit, or project timer. Pick the type that fits what you're actually trying to track.",
+      pad: 6,
+    },
   ],
   habits: [
-    { target: "[data-tour='habits-add']",  title: "Add habits",    body: "Tap + to add a new habit. Tap an existing one to edit, delete, or see its history." },
-    { target: "[data-tour='coach-card']",  title: "AI Coach",      body: "Your coach knows your actual habit data — streaks, reflections, patterns. Available with early supporter access.", callout: "top" },
+    {
+      target: "[data-tour='habits-add']",
+      title: "Add and manage habits",
+      body: "Tap here to add a new habit. Tap any existing habit to edit it, view its full history, or delete it.",
+      pad: 6,
+    },
+    {
+      target: "[data-tour='coach-card']",
+      title: "Your AI coach",
+      body: "Unlike generic coaching apps, your coach actually reads your logs, streaks, and reflections before responding. Unlock it with early supporter access.",
+      callout: "top", pad: 8,
+    },
   ],
   journal: [
-    { target: "[data-tour='journal-list']", title: "Your reflections", body: "Every reflection you write on a habit log appears here automatically, sorted by date. Tap any entry to edit it." },
+    {
+      target: "[data-tour='journal-viewmode']",
+      title: "Switch your view",
+      body: "Day view lists every entry in order. Week groups them by week. Month shows a calendar grid so you can spot gaps at a glance.",
+      pad: 6,
+    },
+    {
+      target: "[data-tour='journal-filters']",
+      title: "Filter by habit",
+      body: "Tap a habit name to see only its logs and reflections. Useful when you want to review one habit's history without the noise.",
+      pad: 6,
+    },
+    {
+      target: "[data-tour='journal-list']",
+      title: "Your reflections",
+      body: "Every note and reflection you write while logging a habit appears here automatically. Tap any entry to read or edit it.",
+      pad: 6,
+    },
   ],
   insights: [
-    { target: "[data-tour='insights-content']", title: "Your patterns", body: "After a few weeks of logging, this page fills up with consistency stats, streaks, and habit connections." },
+    {
+      target: "[data-tour='insights-stats']",
+      title: "Your snapshot",
+      body: "Total habits tracked, how many days you've logged at least one habit, your longest streak ever, and your total log count.",
+      pad: 8,
+    },
+    {
+      target: "[data-tour='insights-streaks']",
+      title: "Streaks and activity",
+      body: "Each habit's current streak alongside its last 7 days. Green squares are logged days. Your most consistent habit is highlighted at the bottom.",
+      pad: 8,
+    },
   ],
   profile: [
-    { target: "[data-tour='xp-bar']",  title: "XP & levels", body: "Every log earns XP. Consistency compounds — it takes two years of daily logging to hit the Forged level." },
+    {
+      target: "[data-tour='profile-account']",
+      title: "Your account",
+      body: "Change your display name or rename your AI coach here. These are the names shown across the whole app.",
+      pad: 6,
+    },
+    {
+      target: "[data-tour='profile-upgrade']",
+      title: "Early supporter access",
+      body: "Unlocks the AI coach, unlimited habits, and full log history — at a price locked in forever. First 100 users get it at $4.99/mo.",
+      pad: 6,
+    },
+    {
+      target: "[data-tour='profile-feedback']",
+      title: "Send feedback",
+      body: "You're one of the first people using Forged. A quick note goes directly to the founder — it genuinely shapes what gets built next.",
+      pad: 6,
+    },
+    {
+      target: "[data-tour='profile-signout']",
+      title: "Sign out",
+      body: "Your data is saved to your account, so you can sign in on any device and pick up exactly where you left off.",
+      pad: 6,
+    },
   ],
 };
 
@@ -1415,13 +1495,16 @@ function TourOverlay({ steps, stepIdx, onNext, onSkip }) {
   const [rect, setRect] = useState(null);
   const step = steps[stepIdx];
   const isLast = stepIdx === steps.length - 1;
+  // Steps that don't count as "welcome" in the progress bar
+  const progressSteps = steps.filter(s => !s.welcome);
+  const progressIdx   = stepIdx - steps.filter((s, i) => s.welcome && i < stepIdx).length;
 
   useLayoutEffect(() => {
     if (!step?.target) { setRect(null); return; }
     const el = document.querySelector(step.target);
     if (el) {
       const r = el.getBoundingClientRect();
-      setRect({ top: r.top, left: r.left, width: r.width, height: r.height, bottom: r.bottom });
+      setRect({ top: r.top, left: r.left, width: r.width, height: r.height });
     } else {
       setRect(null);
     }
@@ -1435,61 +1518,83 @@ function TourOverlay({ steps, stepIdx, onNext, onSkip }) {
     height: rect.height + PAD * 2,
   } : null;
 
-  // Auto-detect callout position: if element is in bottom 45% → show callout near top
+  // Auto-detect callout position: element in bottom 45% → show callout near top
   let calloutPos = step?.callout;
   if (!calloutPos) {
-    if (!rect) calloutPos = "center";
+    if (!rect || step?.welcome) calloutPos = "center";
     else calloutPos = (rect.top + rect.height / 2) > window.innerHeight * 0.55 ? "top" : "bottom";
   }
 
-  const calloutStyle = calloutPos === "top"
-    ? { top: 56, left: "50%", transform: "translateX(-50%)" }
-    : calloutPos === "center"
-    ? { top: "50%", left: "50%", transform: "translate(-50%, -50%)" }
-    : { bottom: 28, left: "50%", transform: "translateX(-50%)" };
+  const calloutStyle =
+    calloutPos === "top"    ? { top: 64, left: "50%", transform: "translateX(-50%)" } :
+    calloutPos === "center" ? { top: "50%", left: "50%", transform: "translate(-50%,-50%)" } :
+                              { bottom: 32, left: "50%", transform: "translateX(-50%)" };
+
+  // Welcome card — special full-screen layout for the first global step
+  if (step?.welcome) {
+    return (
+      <div style={{ position:"fixed", inset:0, zIndex:600, background:"rgba(0,0,0,0.88)", display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+        <div style={{ width:360, maxWidth:"calc(100vw - 24px)", background:T.raised, borderRadius:22, padding:"32px 24px 28px", boxShadow:"0 12px 48px rgba(0,0,0,0.6)" }}>
+          <div style={{ fontSize:36, marginBottom:16, textAlign:"center" }}>⚒️</div>
+          <div style={{ fontFamily:T.serif, fontSize:26, color:T.text, marginBottom:10, textAlign:"center" }}>{step.title}</div>
+          <div style={{ fontSize:14, color:T.muted, lineHeight:1.7, marginBottom:28, textAlign:"center" }}>{step.body}</div>
+          <button onClick={onNext}
+            style={{ width:"100%", padding:"14px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:15, fontWeight:500, cursor:"pointer", marginBottom:10 }}>
+            Show me around →
+          </button>
+          <button onClick={onSkip}
+            style={{ width:"100%", padding:"10px", borderRadius:T.rsm, border:"none", background:"none", color:T.muted, fontSize:13, cursor:"pointer" }}>
+            Skip for now
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ position:"fixed", inset:0, zIndex:600 }} onMouseDown={e => e.stopPropagation()}>
-      {/* Spotlight — box-shadow dims everything outside the highlighted rect */}
+      {/* Spotlight */}
       {hl ? (
         <div style={{
-          position: "fixed",
+          position:"fixed",
           top: hl.top, left: hl.left, width: hl.width, height: hl.height,
           borderRadius: step?.radius ?? 14,
-          boxShadow: "0 0 0 9999px rgba(0,0,0,0.80)",
-          border: "1.5px solid rgba(200,144,42,0.55)",
+          boxShadow: "0 0 0 9999px rgba(0,0,0,0.82)",
+          border: "1.5px solid rgba(200,144,42,0.6)",
           pointerEvents: "none",
           zIndex: 601,
-          transition: "top 0.25s, left 0.25s, width 0.25s, height 0.25s",
+          transition: "top 0.2s ease, left 0.2s ease, width 0.2s ease, height 0.2s ease",
         }}/>
       ) : (
-        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.80)", pointerEvents:"none", zIndex:601 }}/>
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.82)", pointerEvents:"none", zIndex:601 }}/>
       )}
 
       {/* Callout card */}
       <div style={{
-        position: "fixed", ...calloutStyle,
-        width: 350, maxWidth: "calc(100vw - 24px)",
-        background: T.raised, borderRadius: 18,
-        padding: "20px 20px 22px",
-        zIndex: 602,
-        boxShadow: "0 8px 40px rgba(0,0,0,0.5)",
+        position:"fixed", ...calloutStyle,
+        width:340, maxWidth:"calc(100vw - 24px)",
+        background:T.raised, borderRadius:18,
+        padding:"18px 20px 20px",
+        zIndex:602,
+        boxShadow:"0 8px 40px rgba(0,0,0,0.55)",
       }}>
-        {/* Progress bar */}
-        <div style={{ display:"flex", gap:4, marginBottom:16 }}>
-          {steps.map((_, i) => (
-            <div key={i} style={{ height:3, flex:1, borderRadius:2, background:i<=stepIdx?T.accent:T.surface, transition:"background 0.25s" }}/>
-          ))}
-        </div>
-        <div style={{ fontFamily:T.serif, fontSize:21, color:T.text, marginBottom:8 }}>{step.title}</div>
-        <div style={{ fontSize:13, color:T.muted, lineHeight:1.65, marginBottom:18 }}>{step.body}</div>
+        {/* Progress dots */}
+        {progressSteps.length > 1 && (
+          <div style={{ display:"flex", gap:4, marginBottom:14 }}>
+            {progressSteps.map((_, i) => (
+              <div key={i} style={{ height:3, flex:1, borderRadius:2, background:i<=progressIdx?T.accent:T.surface, transition:"background 0.2s" }}/>
+            ))}
+          </div>
+        )}
+        <div style={{ fontFamily:T.serif, fontSize:20, color:T.text, marginBottom:7 }}>{step.title}</div>
+        <div style={{ fontSize:13, color:T.muted, lineHeight:1.65, marginBottom:16 }}>{step.body}</div>
         <div style={{ display:"flex", gap:8 }}>
           <button onClick={onSkip}
-            style={{ flex:1, padding:"11px", borderRadius:T.rsm, border:`0.5px solid ${T.borderStrong}`, background:"none", color:T.muted, fontSize:13, cursor:"pointer" }}>
-            Skip
+            style={{ flex:1, padding:"10px", borderRadius:T.rsm, border:`0.5px solid ${T.borderStrong}`, background:"none", color:T.muted, fontSize:13, cursor:"pointer" }}>
+            {progressSteps.length > 1 ? "Skip" : "Done"}
           </button>
           <button onClick={onNext}
-            style={{ flex:2, padding:"11px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:500, cursor:"pointer" }}>
+            style={{ flex:2, padding:"10px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:500, cursor:"pointer" }}>
             {isLast ? "Got it 🔥" : "Next →"}
           </button>
         </div>
@@ -1535,13 +1640,21 @@ function TodayScreen({ habits, xp, onTap, onUndo, onSkip, onReflect, onAddNote, 
           </button>
         </div>
       </div>
-      <div data-tour="today-habits">
-      {daily.length    > 0 && <><SLabel>Daily</SLabel>          {daily.map(h    => <DailyCard    key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onReflect={onReflect} onAddNote={onAddNote}/>)}</>}
-      {limit.length    > 0 && <><SLabel>Limits</SLabel>         {limit.map(h    => <LimitCard    key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onReflect={onReflect} onAddNote={onAddNote}/>)}</>}
-      {weekly.length   > 0 && <><SLabel>Weekly targets</SLabel> {weekly.map(h   => <WeeklyCard   key={h.id} habit={h} onTap={onTap}             onReflect={onReflect} onAddNote={onAddNote}/>)}</>}
-      {progress.length > 0 && <><SLabel>Progress goals</SLabel> {progress.map(h => <ProgressCard key={h.id} habit={h} onOpenLog={onOpenLog}     onReflect={onReflect} onAddNote={onAddNote}/>)}</>}
-      {project.length  > 0 && <><SLabel>Build</SLabel>          {project.map(h  => <ProjectCard  key={h.id} habit={h} onOpenLog={onOpenLog}     onReflect={onReflect} onAddNote={onAddNote}/>)}</>}
-      </div>
+      {/* Tour target: wraps only the first non-empty section so the spotlight ring is tight */}
+      {(() => {
+        const sections = [
+          daily.length    > 0 && <><SLabel>Daily</SLabel>          {daily.map(h    => <DailyCard    key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onReflect={onReflect} onAddNote={onAddNote}/>)}</>,
+          limit.length    > 0 && <><SLabel>Limits</SLabel>         {limit.map(h    => <LimitCard    key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onReflect={onReflect} onAddNote={onAddNote}/>)}</>,
+          weekly.length   > 0 && <><SLabel>Weekly targets</SLabel> {weekly.map(h   => <WeeklyCard   key={h.id} habit={h} onTap={onTap} onReflect={onReflect} onAddNote={onAddNote}/>)}</>,
+          progress.length > 0 && <><SLabel>Progress goals</SLabel> {progress.map(h => <ProgressCard key={h.id} habit={h} onOpenLog={onOpenLog} onReflect={onReflect} onAddNote={onAddNote}/>)}</>,
+          project.length  > 0 && <><SLabel>Build</SLabel>          {project.map(h  => <ProjectCard  key={h.id} habit={h} onOpenLog={onOpenLog} onReflect={onReflect} onAddNote={onAddNote}/>)}</>,
+        ].filter(Boolean);
+        return sections.map((sec, i) =>
+          i === 0
+            ? <div key={i} data-tour="today-first-section">{sec}</div>
+            : <div key={i}>{sec}</div>
+        );
+      })()}
       <button data-tour="today-add" onClick={onAdd} style={{ margin:"8px 14px 0", width:"calc(100% - 28px)", border:`1px dashed ${T.borderStrong}`, background:"none", borderRadius:T.r, padding:14, fontSize:13, color:T.muted, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2v10M2 7h10" stroke={T.muted} strokeWidth="1.5" strokeLinecap="round"/></svg>
         Add habit
@@ -1891,7 +2004,7 @@ function JournalScreen({ habits, onReflect, journalUserId }) {
             {missedCount > 0 ? <span> · {missedCount} missed marked</span> : null}
           </div>
         </div>
-        <div style={{ display:"flex", background:T.surface, borderRadius:T.rsm, padding:3, gap:2 }}>
+        <div data-tour="journal-viewmode" style={{ display:"flex", background:T.surface, borderRadius:T.rsm, padding:3, gap:2 }}>
           {[
             ["day", "Day"],
             ["week", "Week"],
@@ -1907,7 +2020,7 @@ function JournalScreen({ habits, onReflect, journalUserId }) {
         </div>
       </div>
 
-      <div style={{ display:"flex", gap:6, padding:"0 16px 14px", overflowX:"auto", WebkitOverflowScrolling:"touch" }}>
+      <div data-tour="journal-filters" style={{ display:"flex", gap:6, padding:"0 16px 14px", overflowX:"auto", WebkitOverflowScrolling:"touch" }}>
         {[{ id:"all", name:"All", emoji:"", color:T.accent }, ...habits.map(h => ({ id:h.id, name:h.name, emoji:h.emoji, color:h.color }))].map(f => (
           <button key={f.id} type="button" onClick={() => { setFilter(f.id); setSelectedDay(null); }}
             style={{ padding:"5px 12px", borderRadius:20, whiteSpace:"nowrap", flexShrink:0,
@@ -2204,9 +2317,9 @@ function EntryCard({ entry, onReflect }) {
 
 // ─── INSIGHTS SCREEN ──────────────────────────────────────────────────────────
 function InsightsScreen({ habits, onShowHistory, onShare }) {
-  function IC({ title, children, action }) {
+  function IC({ title, children, action, dataTour }) {
     return (
-      <div style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:18 }}>
+      <div data-tour={dataTour} style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:18 }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
           <div style={{ fontSize:10, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em" }}>{title}</div>
           {action}
@@ -2246,7 +2359,7 @@ function InsightsScreen({ habits, onShowHistory, onShare }) {
   );
 
   return (
-    <div data-tour="insights-content">
+    <div>
       {/* Header */}
       <div style={{ padding:"16px 18px 10px", display:"flex", alignItems:"flex-end", justifyContent:"space-between" }}>
         <div>
@@ -2261,7 +2374,7 @@ function InsightsScreen({ habits, onShowHistory, onShare }) {
       </div>
 
       {/* Summary stats row */}
-      <div style={{ margin:"0 14px 12px", display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8 }}>
+      <div data-tour="insights-stats" style={{ margin:"0 14px 12px", display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8 }}>
         <Stat label="habits" value={habits.length}/>
         <Stat label="days logged" value={totalDaysLogged} color={T.text}/>
         <Stat label="best streak" value={longestBestStreak > 0 ? `🔥${longestBestStreak}` : "—"} color={T.gold}/>
@@ -2269,7 +2382,7 @@ function InsightsScreen({ habits, onShowHistory, onShare }) {
       </div>
 
       {/* Streaks */}
-      <IC title="Streaks" action={<button onClick={onShowHistory} style={{ fontSize:12, color:T.accent, background:"none", border:"none", cursor:"pointer", fontWeight:500 }}>Full history →</button>}>
+      <IC dataTour="insights-streaks" title="Streaks" action={<button onClick={onShowHistory} style={{ fontSize:12, color:T.accent, background:"none", border:"none", cursor:"pointer", fontWeight:500 }}>Full history →</button>}>
         {[...habits].sort((a, b) => getStreak(b) - getStreak(a)).map(h => {
           const cur  = getStreak(h);
           const best = getBestStreak(h);
@@ -3433,7 +3546,7 @@ function ProfileScreen({ user, xp, habits, isPro, refCode, onUpdateUser, onReset
       </div>
 
       {/* Account */}
-      <div style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, overflow:"hidden" }}>
+      <div data-tour="profile-account" style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, overflow:"hidden" }}>
         <div style={{ padding:"10px 16px 6px", fontSize:10, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em" }}>Account</div>
         <SRow label="Display name" value={user.name} onPress={() => setEditingName(true)}/>
         <div style={{ borderBottom:`0.5px solid ${T.border}`, padding:"12px 16px" }}>
@@ -3466,7 +3579,7 @@ function ProfileScreen({ user, xp, habits, isPro, refCode, onUpdateUser, onReset
       </div>
 
       {/* Pro section */}
-      <div style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid rgba(200,144,42,0.3)`, overflow:"hidden" }}>
+      <div data-tour="profile-upgrade" style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid rgba(200,144,42,0.3)`, overflow:"hidden" }}>
         <div style={{ padding:"10px 16px 6px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
           <div style={{ fontSize:10, fontWeight:500, color:T.gold, textTransform:"uppercase", letterSpacing:"0.08em" }}>Forged early supporter</div>
           {isPro && <div style={{ fontSize:10, color:T.green, fontWeight:600, background:T.green+"18", padding:"2px 8px", borderRadius:10 }}>✓ Active</div>}
@@ -3506,7 +3619,7 @@ function ProfileScreen({ user, xp, habits, isPro, refCode, onUpdateUser, onReset
       </div>
 
       {/* Early user feedback */}
-      <div style={{ margin:"0 14px 12px", background:"rgba(200,144,42,0.07)", borderRadius:T.r, border:`0.5px solid rgba(200,144,42,0.25)`, padding:"16px 18px" }}>
+      <div data-tour="profile-feedback" style={{ margin:"0 14px 12px", background:"rgba(200,144,42,0.07)", borderRadius:T.r, border:`0.5px solid rgba(200,144,42,0.25)`, padding:"16px 18px" }}>
         <div style={{ fontSize:11, fontWeight:600, color:T.gold, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>⭐ Early user</div>
         <div style={{ fontSize:13, color:T.muted, lineHeight:1.65, marginBottom:12 }}>
           You're one of Forged's first users — thank you. Your feedback shapes what this becomes.
@@ -3564,7 +3677,7 @@ function ProfileScreen({ user, xp, habits, isPro, refCode, onUpdateUser, onReset
       </div>
 
       {/* Sign out */}
-      <div style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, overflow:"hidden" }}>
+      <div data-tour="profile-signout" style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, overflow:"hidden" }}>
         {showSignOutConfirm ? (
           <div style={{ padding:"14px 16px" }}>
             <div style={{ fontSize:14, color:T.text, marginBottom:12 }}>Sign out of Forged?</div>
@@ -4594,7 +4707,7 @@ export default function App() {
           }}
           onResetOnboarding={() => setOnboarded(false)}
           onSignOut={handleSignOut}
-          onShowTour={() => { setTourSteps(GLOBAL_TOUR); setTourIdx(0); }}
+          onShowTour={() => { setScreen("today"); setTimeout(() => { setTourSteps(GLOBAL_TOUR); setTourIdx(0); }, 120); }}
           coachName={coachName}
           onUpdateCoachName={name => { setCoachName(name); syncProfile({ coach_name: name }); }}
         />}
