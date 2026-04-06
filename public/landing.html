@@ -1158,8 +1158,7 @@
       <h2 style="font-family:'DM Serif Display',Georgia,serif;font-size:26px;color:#F0EDE6;margin-bottom:8px;line-height:1.2;">Want to try Forged?</h2>
       <p style="font-size:14px;color:#A8A49C;line-height:1.65;margin-bottom:28px;">The app is live. We're sending access to people who are actually keen — not everyone at once. Fill this in and we'll send you the link.</p>
 
-      <form id="betaForm" name="beta-interest" method="POST" data-netlify="true" onsubmit="handleBetaSubmit(event)">
-        <input type="hidden" name="form-name" value="beta-interest"/>
+      <form id="betaForm" onsubmit="handleBetaSubmit(event)">
 
         <div style="margin-bottom:16px;">
           <label style="display:block;font-size:12px;font-weight:500;color:#6A6860;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Name</label>
@@ -1248,16 +1247,30 @@
   async function handleBetaSubmit(e) {
     e.preventDefault();
     const form = document.getElementById('betaForm');
+    const btn = form.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+
     const data = new FormData(form);
+    const payload = {
+      name:     data.get('name'),
+      email:    data.get('email'),
+      why:      data.get('why'),
+      feedback: data.get('feedback'),
+      pay:      data.get('pay'),
+    };
 
     try {
-      await fetch('/', {
+      const res = await fetch('/api/beta-interest', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams(data).toString()
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       });
+      if (!res.ok) throw new Error('server error');
     } catch(err) {
-      // fail silently — still show success
+      btn.disabled = false;
+      btn.textContent = 'Send me the link';
+      // Still show success — don't block the user on a network glitch
     }
 
     document.getElementById('betaFormState').style.display = 'none';
