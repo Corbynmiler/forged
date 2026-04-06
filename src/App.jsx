@@ -3722,7 +3722,7 @@ function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
   );
 }
 
-function ProfileScreen({ user, xp, habits, isPro, refCode, authEmail, onUpdateUser, onResetOnboarding, onAdminReset, onSignOut, onShowTour, onUpgrade, coachName, onUpdateCoachName }) {
+function ProfileScreen({ user, xp, habits, isPro, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onSignOut, onShowTour, onUpgrade, coachName, onUpdateCoachName }) {
   const [editingName,    setEditingName]    = useState(false);
   const [nameVal,        setNameVal]        = useState(user.name);
   const [editingCoach,   setEditingCoach]   = useState(false);
@@ -3957,13 +3957,13 @@ function ProfileScreen({ user, xp, habits, isPro, refCode, authEmail, onUpdateUs
       </div>
 
       {/* Sign out */}
-      {/* Admin dev tools — only shown to admin account */}
-      {authEmail && authEmail.toLowerCase() === "corbyn@forged.app" && (
+      {/* Dev tools — only shown to corbyn.miller2000@gmail.com, preview mode only (no data changes) */}
+      {authEmail && authEmail.toLowerCase() === "corbyn.miller2000@gmail.com" && (
         <div style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.rsm, border:`0.5px solid ${T.border}`, padding:"12px 16px" }}>
           <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:10 }}>Dev tools</div>
-          <button onClick={onAdminReset}
+          <button onClick={onPreviewOnboarding}
             style={{ width:"100%", padding:"11px 0", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:"none", color:T.muted, fontSize:13, cursor:"pointer", fontFamily:T.font }}>
-            Replay onboarding from step 1
+            Preview onboarding (safe — no data changes)
           </button>
         </div>
       )}
@@ -4377,6 +4377,7 @@ export default function App() {
   const [showWelcome,    setShowWelcome]    = useState(false);
   const [demoMode,       setDemoMode]       = useState(false);
   const shownDemoRef = useRef(false); // prevent demo re-showing after sign-out
+  const [previewOnboarding, setPreviewOnboarding] = useState(false); // admin preview only — never touches DB
   const [refCode,     setRefCode]     = useState(null);
   const [authEmail,   setAuthEmail]   = useState(null);
   /** Supabase auth user id when signed in; null when logged out */
@@ -4488,15 +4489,20 @@ export default function App() {
       const profileFailed = pErr && pErr.code !== "PGRST116";
       const habitsFailed  = hErr != null;
 
-      if (profileFailed && habitsFailed) {
-        console.error("loadUserData: both queries failed — profile:", pErr.message, "habits:", hErr.message);
+      // Either query failing means data is incomplete — return false so the retry loop fires.
+      // A genuine empty habits list returns hErr=null and rows=[], not an error.
+      if (profileFailed) {
+        console.error("[Forged] loadUserData: profile query failed — code:", pErr.code, "msg:", pErr.message);
         accountDataLoadedRef.current = false;
         setAccountDataReady(false);
         return false;
       }
-
-      if (profileFailed) console.warn("[Forged] profile fetch failed — code:", pErr?.code, "msg:", pErr?.message);
-      if (habitsFailed)  console.warn("[Forged] habits fetch failed  — code:", hErr?.code,  "msg:", hErr?.message);
+      if (habitsFailed) {
+        console.error("[Forged] loadUserData: habits query failed — code:", hErr.code, "msg:", hErr.message);
+        accountDataLoadedRef.current = false;
+        setAccountDataReady(false);
+        return false;
+      }
 
       let isOnboarded = null;
 
@@ -4546,10 +4552,10 @@ export default function App() {
   }
 
   async function loadUserDataWithRetries(uid) {
-    // 150ms initial settle lets Chrome fully propagate the auth token
+    // 300ms initial settle lets Chrome fully propagate the auth token
     // to the PostgREST client before the first query fires.
     // Subsequent retries use exponential backoff.
-    const backoffs = [150, 1000, 2500, 5000, 8000];
+    const backoffs = [300, 1500, 3000, 6000, 10000];
     for (let attempt = 0; attempt < backoffs.length; attempt++) {
       await new Promise(r => setTimeout(r, backoffs[attempt]));
       if (attempt > 0) console.log(`[Forged] loadUserData retry ${attempt}/${backoffs.length - 1}`);
@@ -4620,6 +4626,15 @@ export default function App() {
               accountDataLoadedRef.current = false;
               setAccountDataReady(false);
               userIdRef.current = null;
+              // Force a token refresh before querying. This is the main fix for "first load of
+              // the day" — the access token may have expired overnight. refreshSession() ensures
+              // the Supabase client has a fresh JWT before PostgREST queries fire.
+              try {
+                const { error: rfErr } = await supabase.auth.refreshSession();
+                if (rfErr) console.warn("[Forged] INITIAL_SESSION: refreshSession error:", rfErr.message);
+              } catch(rfEx) {
+                console.warn("[Forged] INITIAL_SESSION: refreshSession threw:", rfEx.message);
+              }
               const ok = await loadUserDataWithRetries(session.user.id);
               if (!mounted) return;
               if (ok) setAccountLoadError(false);
@@ -4650,17 +4665,27 @@ export default function App() {
         }
 
         // ── Explicit sign-in ──────────────────────────────────────────────
-        // Reload account data on every real sign-in. Skip when Supabase also fires SIGNED_IN right
-        // after INITIAL_SESSION (same user, data already loaded) so we don't wipe userIdRef / flash loading.
+        // Supabase fires SIGNED_IN immediately after INITIAL_SESSION for existing sessions.
+        // We must not interfere with an in-progress INITIAL_SESSION load.
         if (event === "SIGNED_IN" && session?.user?.id) {
           if (session.user.email && mounted) setAuthEmail(session.user.email);
           setSessionUserId(session.user.id);
-          setDemoMode(false);
-          setHabits([]); // clear demo data before loading real data
+
+          // Case 1: data already fully loaded for this user — just update UI
           if (accountDataLoadedRef.current && userIdRef.current === session.user.id) {
-            if (mounted) { setAuthScreen(false); setPendingEmail(null); setPasswordRecovery(false); }
+            if (mounted) { setAuthScreen(false); setPendingEmail(null); setPasswordRecovery(false); setDemoMode(false); }
             return;
           }
+          // Case 2: INITIAL_SESSION (or a prior SIGNED_IN) is already loading this uid — don't
+          // interfere. The in-progress loader will finish and set all state correctly. If we let
+          // this handler continue it will hit the mutex on every retry and conclude with an error.
+          if (loadingUidRef.current === session.user.id) {
+            if (mounted) { setAuthScreen(false); setPendingEmail(null); setPasswordRecovery(false); setDemoMode(false); }
+            return;
+          }
+
+          setDemoMode(false);
+          setHabits([]); // clear demo data before loading real data
           setAccountLoadError(false);
           accountDataLoadedRef.current = false;
           setAccountDataReady(false);
@@ -4966,6 +4991,26 @@ export default function App() {
     );
   }
 
+  // Admin preview of onboarding — safe mode, no DB writes, no Stripe redirect
+  if (!loading && !authScreen && previewOnboarding) {
+    return (
+      <><style>{CSS}</style>
+      <div style={{ position:"fixed", top:0, left:"50%", transform:"translateX(-50%)", zIndex:9999, background:"rgba(200,144,42,0.18)", borderBottom:`1px solid ${T.gold}`, padding:"6px 18px", fontSize:11, color:T.gold, fontFamily:T.font, width:430, maxWidth:"100vw", textAlign:"center", boxSizing:"border-box" }}>
+        🔒 Preview mode — no changes will be saved
+      </div>
+      <OnboardingScreen
+        onComplete={() => setPreviewOnboarding(false)}
+        onSaveProgress={() => Promise.resolve()}
+        onCheckout={() => {
+          addToast("Preview mode — Stripe skipped");
+          setPreviewOnboarding(false);
+          return Promise.resolve();
+        }}
+        onSkip={() => setPreviewOnboarding(false)}
+      /></>
+    );
+  }
+
   // Show onboarding — only after account data loaded and user is genuinely new.
   if (!loading && !authScreen && accountDataReady && onboarded === false) {
     return (
@@ -5263,12 +5308,7 @@ export default function App() {
             });
           }}
           onResetOnboarding={() => setOnboarded(false)}
-          onAdminReset={async () => {
-            if (sessionUserId) {
-              await supabase.from("profiles").update({ onboarded: false }).eq("id", sessionUserId);
-            }
-            setOnboarded(false);
-          }}
+          onPreviewOnboarding={() => setPreviewOnboarding(true)}
           onSignOut={handleSignOut}
           onShowTour={() => { setScreen("today"); setTimeout(() => { setTourSteps(GLOBAL_TOUR); setTourIdx(0); }, 120); }}
           coachName={coachName}
