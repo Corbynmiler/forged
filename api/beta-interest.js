@@ -9,22 +9,25 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Name and email are required." });
   }
 
+  // Anon key — safe to use server-side; RLS policy allows public inserts on beta_signups
   const supabaseUrl = "https://apdmvbzfjuvxworjepze.supabase.co";
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!serviceRoleKey) {
-    return res.status(500).json({ error: "Server not configured." });
-  }
+  const anonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFwZG12YnpmanV2eHdvcmplcHplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MzU4MzAsImV4cCI6MjA5MDIxMTgzMH0.s3O-0m7eN9dLTmCagjezHP4Wwn8fdtlCyXITkI82bPU";
 
   const response = await fetch(`${supabaseUrl}/rest/v1/beta_signups`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "apikey": serviceRoleKey,
-      "Authorization": `Bearer ${serviceRoleKey}`,
+      "apikey": anonKey,
+      "Authorization": `Bearer ${anonKey}`,
       "Prefer": "return=minimal",
     },
-    body: JSON.stringify({ name, email, why: why || null, feedback: feedback || null, pay: pay || null }),
+    body: JSON.stringify({
+      name,
+      email,
+      why:      why      || null,
+      feedback: feedback || null,
+      pay:      pay      || null,
+    }),
   });
 
   if (!response.ok) {
