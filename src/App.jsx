@@ -3748,7 +3748,7 @@ function SetPasswordScreen({ onDone }) {
   );
 }
 
-function AuthScreen({ onSent }) {
+function AuthScreen({ onSent, checkoutPending }) {
   const [mode,       setMode]       = useState("signin"); // "signin" | "signup" | "forgot"
   const [email,      setEmail]      = useState("");
   const [password,   setPassword]   = useState("");
@@ -3866,6 +3866,11 @@ function AuthScreen({ onSent }) {
   return (
     <div style={wrap}>
       <div style={{ fontFamily:T.serif, fontSize:40, color:T.text, marginBottom:8 }}>Forged.</div>
+      {checkoutPending && (
+        <div style={{ background:"rgba(200,144,42,0.12)", border:"0.5px solid rgba(200,144,42,0.35)", borderRadius:10, padding:"12px 16px", marginBottom:20, fontSize:13, color:"#C8902A", lineHeight:1.6 }}>
+          ✓ Payment received — sign in to access your account.
+        </div>
+      )}
       <div style={{ fontSize:15, color:T.muted, marginBottom:32 }}>
         {mode === "signin" ? "Welcome back" : "Create your account"}
       </div>
@@ -3929,6 +3934,28 @@ function CheckEmailScreen({ email, onBack }) {
   );
 }
 
+// ─── WELCOME MODAL (shown once after successful beta payment) ─────────────────
+function WelcomeModal({ onContinue }) {
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.88)", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center", padding:"0 24px" }}>
+      <div style={{ background:"#1C1C18", borderRadius:20, border:"0.5px solid rgba(200,144,42,0.35)", padding:"40px 28px 32px", maxWidth:340, width:"100%", textAlign:"center", animation:"paywallIn 0.45s cubic-bezier(0.22,1,0.36,1) both" }}>
+        <div style={{ fontSize:48, marginBottom:20 }}>🔥</div>
+        <div style={{ fontSize:11, fontWeight:600, color:"#C8902A", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:10 }}>Beta access unlocked</div>
+        <h2 style={{ fontFamily:"'DM Serif Display',Georgia,serif", fontSize:28, color:"#F0EDE6", margin:"0 0 14px", lineHeight:1.2 }}>You're in.</h2>
+        <p style={{ fontSize:14, color:"#A8A49C", lineHeight:1.75, margin:"0 0 28px" }}>
+          Welcome to the Forged beta. Your account is fully unlocked — habits, reflections, AI coach, insights. Build the version of yourself you've been putting off.
+        </p>
+        <button
+          onClick={onContinue}
+          style={{ width:"100%", padding:"15px 0", borderRadius:12, border:"none", background:"#C0392B", color:"#fff", fontSize:15, fontWeight:600, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}
+        >
+          Let's go →
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── PAYWALL SCREEN ───────────────────────────────────────────────────────────
 function PaywallScreen({ onPaid }) {
   const [loading, setLoading] = useState(false);
@@ -3948,6 +3975,7 @@ function PaywallScreen({ onPaid }) {
       });
       const json = await res.json();
       if (!res.ok || !json.url) throw new Error(json.error || "Could not start checkout");
+      localStorage.setItem('forged_checkout_pending', '1');
       window.location.href = json.url;
     } catch (err) {
       setError(err.message || "Something went wrong. Try again.");
@@ -4035,6 +4063,7 @@ export default function App() {
   const [coachName,      setCoachName]      = useState("Coach");
   const [showUpgrade,    setShowUpgrade]    = useState(false);
   const [checkingPayment,setCheckingPayment]= useState(false);
+  const [showWelcome,    setShowWelcome]    = useState(false);
   const [refCode,     setRefCode]     = useState(null);
   const [authEmail,   setAuthEmail]   = useState(null);
   /** Supabase auth user id when signed in; null when logged out */
@@ -4099,6 +4128,26 @@ export default function App() {
     if (loadingUidRef.current === uid) return false;
     loadingUidRef.current = uid;
     try {
+      // Verify session is fully settled before querying.
+      // Chrome can fire INITIAL_SESSION before the PostgREST client
+      // has internalized the token, causing 401s on the first query.
+      try {
+        const { data: sd, error: sErr } = await supabase.auth.getSession();
+        if (sErr) console.warn("[Forged] loadUserData: getSession error:", sErr.message);
+        if (!sd?.session?.user?.id) {
+          console.warn("[Forged] loadUserData: no valid session, aborting");
+          loadingUidRef.current = null;
+          return false;
+        }
+        if (sd.session.user.id !== uid) {
+          console.warn("[Forged] loadUserData: session uid mismatch — expected", uid?.slice(0,8), "got", sd.session.user.id?.slice(0,8));
+          loadingUidRef.current = null;
+          return false;
+        }
+      } catch(sEx) {
+        console.warn("[Forged] loadUserData: getSession threw:", sEx.message);
+      }
+
       const FETCH_MS = 12000;
       const queryPromise = Promise.all([
         supabase.from("profiles").select("*").eq("id", uid).single(),
@@ -4131,15 +4180,21 @@ export default function App() {
         return false;
       }
 
-      if (profileFailed) console.error("profile fetch:", pErr.message);
-      if (habitsFailed)  console.error("habits fetch:", hErr.message);
+      if (profileFailed) console.warn("[Forged] profile fetch failed — code:", pErr?.code, "msg:", pErr?.message);
+      if (habitsFailed)  console.warn("[Forged] habits fetch failed  — code:", hErr?.code,  "msg:", hErr?.message);
 
       let isOnboarded = null;
 
       if (profile) {
         setUser({ name: profile.name || "", avatarUrl: profile.avatar_url || null });
         setXp(profile.xp ?? 0);
-        setIsPro(!!(profile.is_pro || profile.is_admin));
+        const proStatus = !!(profile.is_pro || profile.is_admin);
+        setIsPro(proStatus);
+        // Detect a completed payment on any sign-in path (session survived or user re-authenticated)
+        if (proStatus && localStorage.getItem('forged_checkout_pending') === '1') {
+          localStorage.removeItem('forged_checkout_pending');
+          setShowWelcome(true);
+        }
         setRefCode(profile.ref_code ?? null);
         setCoachName(profile.coach_name || "Coach");
         isOnboarded = profile.onboarded ?? false;
@@ -4176,11 +4231,16 @@ export default function App() {
   }
 
   async function loadUserDataWithRetries(uid) {
-    const maxAttempts = 3;
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      if (attempt > 0) await new Promise(r => setTimeout(r, 1500));
+    // 150ms initial settle lets Chrome fully propagate the auth token
+    // to the PostgREST client before the first query fires.
+    // Subsequent retries use exponential backoff.
+    const backoffs = [150, 1000, 2500, 5000, 8000];
+    for (let attempt = 0; attempt < backoffs.length; attempt++) {
+      await new Promise(r => setTimeout(r, backoffs[attempt]));
+      if (attempt > 0) console.log(`[Forged] loadUserData retry ${attempt}/${backoffs.length - 1}`);
       if (await loadUserData(uid)) return true;
     }
+    console.error("[Forged] loadUserDataWithRetries: all attempts failed for uid", uid?.slice(0, 8));
     return false;
   }
 
@@ -4319,6 +4379,7 @@ export default function App() {
           setIsPro(false);
           setRefCode(null);
           setAuthEmail(null);
+          localStorage.removeItem('forged_checkout_pending');
           if (mounted) { setAuthScreen(true); setLoading(false); }
           return;
         }
@@ -4441,11 +4502,11 @@ export default function App() {
           setIsPro(true);
           setCheckingPayment(false);
           clearInterval(pollId);
-          const id = Date.now();
-          setToasts(t => [...t, { id, msg: "🎉 Beta access unlocked. Welcome to Forged!" }]);
-          setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 5000);
+          localStorage.removeItem('forged_checkout_pending');
+          setShowWelcome(true);
         } else if (attempts >= 15) {
-          // Webhook hasn't fired — user lands on paywall with a note
+          // Webhook hasn't fired yet — drop back to paywall; user can reload
+          localStorage.removeItem('forged_checkout_pending');
           setCheckingPayment(false);
           clearInterval(pollId);
         }
@@ -4494,7 +4555,7 @@ export default function App() {
     }
     return (
       <><style>{CSS}</style>
-      <AuthScreen onSent={email => setPendingEmail(email)} /></>
+      <AuthScreen onSent={email => setPendingEmail(email)} checkoutPending={localStorage.getItem('forged_checkout_pending') === '1'} /></>
     );
   }
 
@@ -4834,6 +4895,7 @@ export default function App() {
       {showCoach   && <AICoach habits={habits} user={user} isPro={isPro} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)} coachName={coachName}/>}
       {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} habitCount={habits.length} userId={userIdRef.current} userEmail={authEmail}/>}
       {showShare && <ShareCardModal user={user} habits={habits} xp={xp} onClose={() => setShowShare(false)}/>}
+      {showWelcome && <WelcomeModal onContinue={() => setShowWelcome(false)} />}
       {/* TourOverlay disabled — restore tourSteps state and this block to re-enable */}
     </>
   );
