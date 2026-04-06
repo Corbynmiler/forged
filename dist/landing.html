@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="description" content="Forged — the habit tracker that takes you seriously. Voice reflections, streak protection, AI coaching. Beta pricing locked in forever for the first 100 users."/>
+  <title>Forged — Forge the person you mean to be.</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #0f0f0b;
+      --surface: #18180f;
+      --raised:  #1e1e14;
+      --text:    #e8e4d8;
+      --sub:     #b8b49e;
+      --muted:   #7a7560;
+      --hint:    #4a4838;
+      --gold:    #c8902a;
+      --gold-lt: #e8aa40;
+      --green:   #27AE60;
+      --amber:   #e67e22;
+      --border:  rgba(255,255,255,0.07);
+      --border2: rgba(255,255,255,0.12);
+      --gold-b:  rgba(200,144,42,0.25);
+      --serif:   'DM Serif Display', serif;
+      --sans:    'DM Sans', sans-serif;
+      --r: 14px;
+      --rsm: 10px;
+    }
+
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── NAV ── */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 28px;
+      background: rgba(15,15,11,0.7);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 0.5px solid var(--border);
+    }
+    .nav-logo { font-family: var(--serif); font-size: 22px; color: var(--text); letter-spacing: -0.01em; }
+    .nav-cta {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 9px 20px; border-radius: 50px;
+      background: var(--gold); color: #1a1a10;
+      font-size: 14px; font-weight: 600;
+      text-decoration: none; transition: all 0.2s;
+      letter-spacing: 0.01em;
+    }
+    .nav-cta:hover { background: var(--gold-lt); transform: translateY(-1px); box-shadow: 0 8px 24px rgba(200,144,42,0.35); }
+
+    /* ── HERO ── */
+    .hero {
+      min-height: 100vh;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 120px 24px 80px;
+      position: relative; overflow: hidden; text-align: center;
+    }
+
+    /* animated gradient orbs */
+    .orb {
+      position: absolute; border-radius: 50%;
+      filter: blur(80px); pointer-events: none;
+      animation: drift 20s ease-in-out infinite;
+    }
+    .orb-1 { width: 500px; height: 500px; background: rgba(200,144,42,0.12); top: -100px; left: -150px; animation-delay: 0s; }
+    .orb-2 { width: 400px; height: 400px; background: rgba(39,174,96,0.06); bottom: -80px; right: -100px; animation-delay: -7s; }
+    .orb-3 { width: 300px; height: 300px; background: rgba(200,144,42,0.07); top: 50%; left: 60%; animation-delay: -14s; }
+    @keyframes drift {
+      0%, 100% { transform: translate(0,0) scale(1); }
+      33%       { transform: translate(40px,-30px) scale(1.05); }
+      66%       { transform: translate(-20px,40px) scale(0.97); }
+    }
+
+    /* noise texture overlay */
+    .hero::before {
+      content: ''; position: absolute; inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+      pointer-events: none; z-index: 0;
+    }
+
+    .hero-inner { position: relative; z-index: 1; max-width: 680px; }
+
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 6px 16px; border-radius: 50px;
+      background: rgba(200,144,42,0.1); border: 1px solid var(--gold-b);
+      font-size: 12px; font-weight: 500; color: var(--gold);
+      margin-bottom: 32px; letter-spacing: 0.02em;
+      animation: fadeUp 0.8s ease both;
+    }
+    .hero-badge .dot {
+      width: 6px; height: 6px; border-radius: 50%; background: var(--gold);
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.4; transform: scale(0.7); }
+    }
+
+    .hero h1 {
+      font-family: var(--serif); font-size: clamp(48px, 8vw, 80px);
+      color: var(--text); line-height: 1.08; letter-spacing: -0.02em;
+      margin-bottom: 24px;
+      animation: fadeUp 0.8s 0.15s ease both;
+    }
+    .hero h1 em { font-style: italic; color: var(--gold); }
+
+    .hero-sub {
+      font-size: clamp(15px, 2vw, 18px); color: var(--sub);
+      line-height: 1.7; max-width: 520px; margin: 0 auto 40px;
+      animation: fadeUp 0.8s 0.3s ease both;
+    }
+
+    .hero-cta {
+      display: flex; flex-direction: column; align-items: center; gap: 12px;
+      animation: fadeUp 0.8s 0.45s ease both;
+    }
+    .btn-gold {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 16px 36px; border-radius: 50px;
+      background: var(--gold); color: #1a1a10;
+      font-size: 17px; font-weight: 700; text-decoration: none;
+      transition: all 0.2s; letter-spacing: 0.01em;
+      box-shadow: 0 0 0 0 rgba(200,144,42,0.5);
+      animation: glow-pulse 3s ease-in-out infinite;
+    }
+    .btn-gold:hover { background: var(--gold-lt); transform: translateY(-2px); box-shadow: 0 12px 40px rgba(200,144,42,0.4); }
+    @keyframes glow-pulse {
+      0%, 100% { box-shadow: 0 0 20px rgba(200,144,42,0.2); }
+      50%       { box-shadow: 0 0 40px rgba(200,144,42,0.45); }
+    }
+
+    .hero-note { font-size: 13px; color: var(--muted); }
+
+    /* phone mockup */
+    .hero-phone-wrap {
+      position: relative; z-index: 1;
+      margin-top: 64px;
+      animation: fadeUp 0.8s 0.6s ease both;
+    }
+    .phone {
+      width: 230px; height: 470px;
+      border-radius: 44px;
+      border: 1.5px solid rgba(200,144,42,0.35);
+      background: var(--surface);
+      box-shadow:
+        0 0 0 1px rgba(200,144,42,0.1),
+        0 0 60px rgba(200,144,42,0.12),
+        0 60px 120px rgba(0,0,0,0.7),
+        inset 0 1px 0 rgba(255,255,255,0.06);
+      overflow: hidden;
+      animation: float 7s ease-in-out infinite;
+      position: relative;
+    }
+    @keyframes float {
+      0%, 100% { transform: translateY(0px) rotate(-1.5deg); }
+      50%       { transform: translateY(-18px) rotate(1.5deg); }
+    }
+
+    /* notch */
+    .phone::before {
+      content: ''; position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+      width: 60px; height: 6px; border-radius: 3px;
+      background: rgba(255,255,255,0.12); z-index: 10;
+    }
+
+    .phone-screen {
+      padding: 36px 12px 16px;
+      display: flex; flex-direction: column; gap: 8px;
+      height: 100%;
+    }
+
+    .phone-header {
+      display: flex; justify-content: space-between; align-items: flex-end;
+      padding: 0 2px 10px; border-bottom: 0.5px solid var(--border);
+      margin-bottom: 2px;
+    }
+    .phone-date { font-size: 9px; color: var(--muted); }
+    .phone-title { font-family: var(--serif); font-size: 18px; color: var(--text); }
+    .phone-xp { font-size: 9px; color: var(--gold); }
+
+    .phone-habit {
+      background: var(--raised); border-radius: 12px;
+      border: 0.5px solid var(--border);
+      padding: 10px 11px;
+      display: flex; align-items: center; gap: 9px;
+    }
+    .phone-habit-dot {
+      width: 28px; height: 28px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; flex-shrink: 0;
+    }
+    .phone-habit-name { font-size: 11px; font-weight: 500; color: var(--text); }
+    .phone-habit-streak { font-size: 9px; color: var(--gold); }
+    .phone-habit-check {
+      margin-left: auto; width: 22px; height: 22px;
+      border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-size: 11px; flex-shrink: 0;
+    }
+    .checked { background: rgba(39,174,96,0.2); border: 1px solid rgba(39,174,96,0.4); }
+    .unchecked { background: transparent; border: 1px solid rgba(255,255,255,0.15); }
+
+    .phone-progress-bar {
+      height: 3px; background: rgba(255,255,255,0.08); border-radius: 2px;
+      margin: 4px 0 2px;
+    }
+    .phone-progress-fill { height: 100%; border-radius: 2px; background: var(--gold); }
+
+    .phone-nav {
+      margin-top: auto; display: flex; justify-content: space-around;
+      padding: 10px 4px 4px; border-top: 0.5px solid var(--border);
+    }
+    .phone-nav-item { font-size: 8px; color: var(--muted); text-align: center; display: flex; flex-direction: column; gap: 3px; align-items: center; }
+    .phone-nav-item.active { color: var(--gold); }
+    .phone-nav-icon { font-size: 14px; }
+
+    /* ── TICKER ── */
+    .ticker-wrap {
+      overflow: hidden; background: var(--surface);
+      border-top: 0.5px solid var(--border); border-bottom: 0.5px solid var(--border);
+      padding: 14px 0;
+    }
+    .ticker-track {
+      display: flex; gap: 0;
+      animation: ticker 30s linear infinite;
+      white-space: nowrap;
+    }
+    .ticker-track:hover { animation-play-state: paused; }
+    .ticker-item {
+      font-size: 13px; font-weight: 500; color: var(--muted);
+      padding: 0 32px; letter-spacing: 0.02em;
+    }
+    .ticker-item span { color: var(--gold); margin-right: 8px; }
+    @keyframes ticker {
+      from { transform: translateX(0); }
+      to   { transform: translateX(-50%); }
+    }
+
+    /* ── SECTIONS ── */
+    section { padding: 100px 24px; }
+    .container { max-width: 960px; margin: 0 auto; }
+    .section-label {
+      font-size: 11px; font-weight: 600; color: var(--gold);
+      text-transform: uppercase; letter-spacing: 0.12em;
+      margin-bottom: 16px;
+    }
+    .section-title {
+      font-family: var(--serif); font-size: clamp(32px, 5vw, 52px);
+      color: var(--text); line-height: 1.15; letter-spacing: -0.02em;
+      margin-bottom: 20px;
+    }
+    .section-sub {
+      font-size: 16px; color: var(--sub); line-height: 1.7;
+      max-width: 520px; margin-bottom: 56px;
+    }
+
+    /* ── FEATURES ── */
+    .features-bg {
+      background: radial-gradient(ellipse at 50% 0%, rgba(200,144,42,0.06) 0%, transparent 60%);
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+    }
+
+    .feature-card {
+      background: var(--surface); border-radius: var(--r);
+      border: 0.5px solid var(--border);
+      padding: 24px;
+      transition: all 0.3s ease;
+      position: relative; overflow: hidden;
+    }
+    .feature-card::before {
+      content: ''; position: absolute; inset: 0; border-radius: var(--r);
+      background: radial-gradient(circle at 20% 20%, rgba(200,144,42,0.06) 0%, transparent 50%);
+      opacity: 0; transition: opacity 0.3s;
+    }
+    .feature-card:hover { border-color: var(--gold-b); transform: translateY(-3px); box-shadow: 0 20px 40px rgba(0,0,0,0.3); }
+    .feature-card:hover::before { opacity: 1; }
+
+    .feature-icon {
+      width: 44px; height: 44px; border-radius: 12px;
+      background: rgba(200,144,42,0.1); border: 0.5px solid var(--gold-b);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; margin-bottom: 16px;
+    }
+    .feature-title { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+    .feature-desc { font-size: 14px; color: var(--sub); line-height: 1.65; }
+    .feature-badge {
+      display: inline-block; margin-top: 12px;
+      font-size: 10px; font-weight: 600; color: var(--gold);
+      background: rgba(200,144,42,0.12); padding: 3px 9px;
+      border-radius: 20px; letter-spacing: 0.06em; text-transform: uppercase;
+    }
+
+    /* ── HOW IT WORKS ── */
+    .steps {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 0; position: relative;
+    }
+    .steps::before {
+      content: ''; position: absolute; top: 28px; left: 16%; right: 16%; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--gold-b), var(--gold-b), transparent);
+      display: none;
+    }
+    @media (min-width: 700px) { .steps::before { display: block; } }
+
+    .step { text-align: center; padding: 32px 24px; position: relative; }
+    .step-num {
+      width: 56px; height: 56px; border-radius: 50%;
+      background: var(--surface); border: 1px solid var(--gold-b);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--serif); font-size: 22px; color: var(--gold);
+      margin: 0 auto 20px;
+      box-shadow: 0 0 20px rgba(200,144,42,0.15);
+    }
+    .step-title { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 10px; }
+    .step-desc { font-size: 14px; color: var(--sub); line-height: 1.65; }
+
+    /* ── PRICING ── */
+    .pricing-bg {
+      background: radial-gradient(ellipse at 50% 100%, rgba(200,144,42,0.07) 0%, transparent 60%);
+    }
+    .pricing-cards {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px; max-width: 680px; margin: 0 auto;
+    }
+    .pricing-card {
+      background: var(--surface); border-radius: var(--r);
+      border: 0.5px solid var(--border); padding: 28px 24px;
+    }
+    .pricing-card.featured {
+      border-color: rgba(200,144,42,0.5);
+      background: linear-gradient(135deg, rgba(200,144,42,0.07) 0%, var(--surface) 60%);
+      box-shadow: 0 0 40px rgba(200,144,42,0.12), 0 0 0 1px rgba(200,144,42,0.2);
+      position: relative;
+    }
+    .pricing-card.featured::before {
+      content: ''; position: absolute; inset: -1px; border-radius: var(--r);
+      background: linear-gradient(135deg, rgba(200,144,42,0.3), transparent, rgba(200,144,42,0.1));
+      z-index: -1;
+    }
+    .plan-label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; }
+    .plan-price { font-family: var(--serif); font-size: 48px; color: var(--text); letter-spacing: -0.03em; line-height: 1; }
+    .plan-price.gold-price { color: var(--gold); }
+    .plan-per { font-size: 14px; color: var(--muted); margin-bottom: 20px; }
+    .plan-tag {
+      display: inline-block; background: var(--gold); color: #1a1a10;
+      font-size: 10px; font-weight: 700; padding: 3px 10px;
+      border-radius: 20px; letter-spacing: 0.08em; text-transform: uppercase;
+      margin-bottom: 16px;
+    }
+    .plan-was { font-size: 12px; color: var(--hint); text-decoration: line-through; margin-left: 6px; }
+    .plan-features { list-style: none; display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+    .plan-feature {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 14px; color: var(--sub);
+    }
+    .plan-feature::before { content: '✓'; color: var(--green); font-size: 12px; font-weight: 700; flex-shrink: 0; }
+    .plan-feature.locked::before { content: '—'; color: var(--hint); }
+    .plan-feature.locked { color: var(--hint); }
+    .plan-cta {
+      display: block; width: 100%; margin-top: 24px;
+      padding: 14px; border-radius: var(--rsm); border: none;
+      font-size: 15px; font-weight: 600; cursor: pointer; text-align: center;
+      text-decoration: none; transition: all 0.2s;
+    }
+    .plan-cta.primary { background: var(--gold); color: #1a1a10; }
+    .plan-cta.primary:hover { background: var(--gold-lt); transform: translateY(-1px); box-shadow: 0 8px 24px rgba(200,144,42,0.3); }
+    .plan-cta.secondary { background: rgba(255,255,255,0.05); color: var(--sub); border: 0.5px solid var(--border2); }
+    .plan-cta.secondary:hover { background: rgba(255,255,255,0.08); color: var(--text); }
+
+    .pricing-note {
+      text-align: center; font-size: 13px; color: var(--muted);
+      margin-top: 24px; line-height: 1.7;
+    }
+    .spots-bar {
+      max-width: 340px; margin: 20px auto 0;
+      background: var(--surface); border-radius: 100px;
+      padding: 12px 18px; border: 0.5px solid var(--gold-b);
+      display: flex; align-items: center; gap: 12px;
+    }
+    .spots-fill-wrap { flex: 1; height: 5px; background: var(--raised); border-radius: 3px; overflow: hidden; }
+    .spots-fill { height: 100%; border-radius: 3px; background: var(--gold); width: 7%; transition: width 1.2s ease; }
+    .spots-text { font-size: 11px; color: var(--gold); font-weight: 600; white-space: nowrap; }
+
+    /* ── iOS INSTALL ── */
+    .install-steps {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px; margin-top: 48px;
+    }
+    .install-step {
+      background: var(--surface); border-radius: var(--r);
+      border: 0.5px solid var(--border); padding: 20px;
+      position: relative; overflow: hidden;
+    }
+    .install-step::after {
+      content: attr(data-arrow);
+      position: absolute; right: -6px; top: 50%; transform: translateY(-50%);
+      font-size: 18px; color: var(--hint);
+    }
+    .install-num {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: rgba(200,144,42,0.15); border: 1px solid var(--gold-b);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700; color: var(--gold);
+      margin-bottom: 12px;
+    }
+    .install-icon { font-size: 28px; margin-bottom: 8px; display: block; }
+    .install-title { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+    .install-desc { font-size: 13px; color: var(--sub); line-height: 1.6; }
+
+    .install-note {
+      margin-top: 24px; padding: 14px 18px;
+      background: rgba(200,144,42,0.06); border: 0.5px solid var(--gold-b);
+      border-radius: var(--r); font-size: 13px; color: var(--sub); line-height: 1.65;
+      display: flex; align-items: flex-start; gap: 10px;
+    }
+    .install-note-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+
+    /* ── FINAL CTA ── */
+    .final-cta-section {
+      text-align: center; padding: 120px 24px 100px;
+      background: radial-gradient(ellipse at 50% 50%, rgba(200,144,42,0.09) 0%, transparent 65%);
+      position: relative;
+    }
+    .final-cta-section h2 {
+      font-family: var(--serif); font-size: clamp(40px, 6vw, 68px);
+      color: var(--text); line-height: 1.1; letter-spacing: -0.02em;
+      margin-bottom: 16px;
+    }
+    .final-cta-section p { font-size: 17px; color: var(--sub); margin-bottom: 40px; line-height: 1.6; }
+
+    /* ── FOOTER ── */
+    footer {
+      border-top: 0.5px solid var(--border);
+      padding: 32px 28px; text-align: center;
+      font-size: 13px; color: var(--muted);
+      display: flex; flex-direction: column; gap: 8px; align-items: center;
+    }
+    footer a { color: var(--muted); text-decoration: none; }
+    footer a:hover { color: var(--gold); }
+
+    /* ── SCROLL ANIMATIONS ── */
+    .fade-up {
+      opacity: 0; transform: translateY(32px);
+      transition: opacity 0.7s ease, transform 0.7s ease;
+    }
+    .fade-up.visible { opacity: 1; transform: translateY(0); }
+    .fade-up-delay-1 { transition-delay: 0.1s; }
+    .fade-up-delay-2 { transition-delay: 0.2s; }
+    .fade-up-delay-3 { transition-delay: 0.3s; }
+    .fade-up-delay-4 { transition-delay: 0.4s; }
+    .fade-up-delay-5 { transition-delay: 0.5s; }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(24px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── DIVIDER ── */
+    .divider {
+      height: 0.5px; background: var(--border);
+      margin: 0; border: none;
+    }
+
+    /* ── STATS BAR ── */
+    .stats-bar {
+      display: flex; justify-content: center; gap: 0;
+      background: var(--surface); border-top: 0.5px solid var(--border);
+      border-bottom: 0.5px solid var(--border);
+    }
+    .stat-item {
+      flex: 1; max-width: 200px; padding: 24px 16px;
+      text-align: center;
+      border-right: 0.5px solid var(--border);
+    }
+    .stat-item:last-child { border-right: none; }
+    .stat-val { font-family: var(--serif); font-size: 36px; color: var(--text); letter-spacing: -0.02em; }
+    .stat-val.gold { color: var(--gold); }
+    .stat-lbl { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 640px) {
+      nav { padding: 14px 18px; }
+      .hero { padding: 100px 18px 60px; }
+      section { padding: 72px 18px; }
+      .stats-bar { flex-wrap: wrap; }
+      .stat-item { min-width: 50%; border-bottom: 0.5px solid var(--border); }
+      .phone { width: 200px; height: 410px; }
+      .steps::before { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav>
+    <div class="nav-logo">Forged.</div>
+    <a href="/" class="nav-cta">Open app →</a>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+
+    <div class="hero-inner">
+      <div class="hero-badge">
+        <div class="dot"></div>
+        Beta — first 100 users lock in $4.99/mo forever
+      </div>
+
+      <h1>Stop tracking.<br>Start <em>forging.</em></h1>
+
+      <p class="hero-sub">
+        A habit app built for people who take their growth seriously.
+        Voice reflections. Real streaks. AI coaching. Built to last.
+      </p>
+
+      <div class="hero-cta">
+        <a href="/" class="btn-gold">Try Forged free →</a>
+        <span class="hero-note">Free to start · No credit card</span>
+      </div>
+    </div>
+
+    <div class="hero-phone-wrap">
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="phone-header">
+            <div>
+              <div class="phone-date">Monday, today</div>
+              <div class="phone-title">Today</div>
+            </div>
+            <div class="phone-xp">⚡ 340 xp</div>
+          </div>
+
+          <div style="height:3px;background:rgba(200,144,42,0.15);border-radius:2px;margin:2px 0 8px">
+            <div style="height:100%;width:75%;border-radius:2px;background:#c8902a;transition:width 0.8s"></div>
+          </div>
+
+          <div class="phone-habit">
+            <div class="phone-habit-dot" style="background:rgba(39,174,96,0.18)">🏃</div>
+            <div>
+              <div class="phone-habit-name">Morning run</div>
+              <div class="phone-habit-streak">🔥 14 streak</div>
+            </div>
+            <div class="phone-habit-check checked">✓</div>
+          </div>
+
+          <div class="phone-habit">
+            <div class="phone-habit-dot" style="background:rgba(200,144,42,0.18)">📚</div>
+            <div>
+              <div class="phone-habit-name">Read 30 min</div>
+              <div class="phone-habit-streak">🔥 7 streak</div>
+            </div>
+            <div class="phone-habit-check checked">✓</div>
+          </div>
+
+          <div class="phone-habit" style="opacity:0.9">
+            <div class="phone-habit-dot" style="background:rgba(41,128,185,0.18)">🧘</div>
+            <div>
+              <div class="phone-habit-name">Meditate</div>
+              <div class="phone-habit-streak" style="color:#7a7560">Not yet today</div>
+            </div>
+            <div class="phone-habit-check unchecked"></div>
+          </div>
+
+          <div class="phone-habit">
+            <div class="phone-habit-dot" style="background:rgba(231,76,60,0.15)">☕</div>
+            <div>
+              <div class="phone-habit-name">Limit coffee</div>
+              <div class="phone-habit-streak">1 of 3 today</div>
+            </div>
+            <div class="phone-habit-check checked">✓</div>
+          </div>
+
+          <div style="margin-top:6px;padding:8px 10px;background:rgba(200,144,42,0.08);border-radius:8px;border:0.5px solid rgba(200,144,42,0.2)">
+            <div style="font-size:8px;color:#7a7560;margin-bottom:3px">Quick note 🎙️</div>
+            <div style="font-size:9px;color:#b8b49e;line-height:1.5;">"Felt strong today, first 5k under 25 min"</div>
+          </div>
+
+          <div class="phone-nav">
+            <div class="phone-nav-item active">
+              <div class="phone-nav-icon">◈</div>
+              <div>Today</div>
+            </div>
+            <div class="phone-nav-item">
+              <div class="phone-nav-icon">◫</div>
+              <div>Habits</div>
+            </div>
+            <div class="phone-nav-item">
+              <div class="phone-nav-icon">◉</div>
+              <div>Journal</div>
+            </div>
+            <div class="phone-nav-item">
+              <div class="phone-nav-icon">◎</div>
+              <div>Insights</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- STATS BAR -->
+  <div class="stats-bar">
+    <div class="stat-item fade-up">
+      <div class="stat-val gold" data-count="5">5</div>
+      <div class="stat-lbl">habit types</div>
+    </div>
+    <div class="stat-item fade-up fade-up-delay-1">
+      <div class="stat-val">∞</div>
+      <div class="stat-lbl">entries stored</div>
+    </div>
+    <div class="stat-item fade-up fade-up-delay-2">
+      <div class="stat-val gold">$0</div>
+      <div class="stat-lbl">to start</div>
+    </div>
+    <div class="stat-item fade-up fade-up-delay-3">
+      <div class="stat-val">100</div>
+      <div class="stat-lbl">beta spots total</div>
+    </div>
+  </div>
+
+  <!-- TICKER -->
+  <div class="ticker-wrap">
+    <div class="ticker-track" id="ticker">
+      <div class="ticker-item"><span>✦</span>Voice reflections</div>
+      <div class="ticker-item"><span>✦</span>Streak protection</div>
+      <div class="ticker-item"><span>✦</span>AI habit coach</div>
+      <div class="ticker-item"><span>✦</span>5 habit types</div>
+      <div class="ticker-item"><span>✦</span>Full journal history</div>
+      <div class="ticker-item"><span>✦</span>Skip days without guilt</div>
+      <div class="ticker-item"><span>✦</span>Log wins + hard parts</div>
+      <div class="ticker-item"><span>✦</span>Insights dashboard</div>
+      <div class="ticker-item"><span>✦</span>PWA — no App Store</div>
+      <div class="ticker-item"><span>✦</span>Dark mode only 🌑</div>
+      <!-- duplicate for infinite scroll -->
+      <div class="ticker-item"><span>✦</span>Voice reflections</div>
+      <div class="ticker-item"><span>✦</span>Streak protection</div>
+      <div class="ticker-item"><span>✦</span>AI habit coach</div>
+      <div class="ticker-item"><span>✦</span>5 habit types</div>
+      <div class="ticker-item"><span>✦</span>Full journal history</div>
+      <div class="ticker-item"><span>✦</span>Skip days without guilt</div>
+      <div class="ticker-item"><span>✦</span>Log wins + hard parts</div>
+      <div class="ticker-item"><span>✦</span>Insights dashboard</div>
+      <div class="ticker-item"><span>✦</span>PWA — no App Store</div>
+      <div class="ticker-item"><span>✦</span>Dark mode only 🌑</div>
+    </div>
+  </div>
+
+  <!-- FEATURES -->
+  <section class="features-bg">
+    <div class="container">
+      <div class="section-label fade-up">What makes Forged different</div>
+      <h2 class="section-title fade-up fade-up-delay-1">Built for the person<br>who actually shows up.</h2>
+      <p class="section-sub fade-up fade-up-delay-2">Most habit apps make you feel guilty. Forged makes you feel capable.</p>
+
+      <div class="features-grid">
+        <div class="feature-card fade-up fade-up-delay-1">
+          <div class="feature-icon">🎙️</div>
+          <div class="feature-title">Voice reflections</div>
+          <div class="feature-desc">Speak your quick notes and reflections — transcribed automatically. Capture the thought before it's gone, hands-free after a workout or commute.</div>
+        </div>
+        <div class="feature-card fade-up fade-up-delay-2">
+          <div class="feature-icon">🔥</div>
+          <div class="feature-title">Streak protection</div>
+          <div class="feature-desc">Skip days protect your streak without logging. Life happens. A missed day isn't a reset — it's a skip. Your chain stays intact, your momentum stays alive.</div>
+        </div>
+        <div class="feature-card fade-up fade-up-delay-3">
+          <div class="feature-icon">⚒️</div>
+          <div class="feature-title">5 habit types</div>
+          <div class="feature-desc">Daily check-ins. Weekly targets. Progress goals. Build projects with time + wins. Limit trackers. One app for the full shape of your self-improvement.</div>
+        </div>
+        <div class="feature-card fade-up fade-up-delay-1">
+          <div class="feature-icon">📓</div>
+          <div class="feature-title">Automatic journal</div>
+          <div class="feature-desc">Every tap, note, win, and reflection is saved forever. Scroll back through your journey — see who you were becoming, day by day.</div>
+        </div>
+        <div class="feature-card fade-up fade-up-delay-2">
+          <div class="feature-icon">📊</div>
+          <div class="feature-title">Insights that matter</div>
+          <div class="feature-desc">12-week heatmaps, best streaks, completion rates. You'll see the patterns in your data that your brain couldn't track on its own.</div>
+        </div>
+        <div class="feature-card fade-up fade-up-delay-3">
+          <div class="feature-icon">🤖</div>
+          <div class="feature-title">AI habit coach <span class="feature-badge">Supporter</span></div>
+          <div class="feature-desc">Coaching based on your actual habit data — not generic advice. Knows your streaks, your wins, your hard parts. Talks to you like a coach who's been watching.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider"/>
+
+  <!-- HOW IT WORKS -->
+  <section>
+    <div class="container" style="text-align:center">
+      <div class="section-label fade-up">How it works</div>
+      <h2 class="section-title fade-up fade-up-delay-1">Simple enough to stick to.<br>Deep enough to matter.</h2>
+
+      <div class="steps">
+        <div class="step fade-up fade-up-delay-1">
+          <div class="step-num">1</div>
+          <div class="step-title">Add your habits</div>
+          <div class="step-desc">Choose the type that fits — daily, weekly, a limit you're reducing, a goal you're climbing toward, or a project you're building. Up to 5 free.</div>
+        </div>
+        <div class="step fade-up fade-up-delay-2">
+          <div class="step-num">2</div>
+          <div class="step-title">Log every day</div>
+          <div class="step-desc">One tap to log. Add a voice note or reflection if you want. Each entry builds a permanent record of your consistency — not just a number.</div>
+        </div>
+        <div class="step fade-up fade-up-delay-3">
+          <div class="step-num">3</div>
+          <div class="step-title">Watch it compound</div>
+          <div class="step-desc">Streaks build. Patterns emerge. The journal fills up. You start to see who you're becoming — not just who you want to be.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider"/>
+
+  <!-- PRICING -->
+  <section class="pricing-bg">
+    <div class="container" style="text-align:center">
+      <div class="section-label fade-up">Pricing</div>
+      <h2 class="section-title fade-up fade-up-delay-1">Simple. Honest.<br>Locked in forever.</h2>
+      <p class="section-sub fade-up fade-up-delay-2" style="margin:0 auto 48px">Start free. Upgrade when you outgrow 5 habits. Beta testers keep their price forever — even after we raise it.</p>
+
+      <div class="pricing-cards fade-up fade-up-delay-1">
+        <div class="pricing-card">
+          <div class="plan-label">Free</div>
+          <div class="plan-price">$0</div>
+          <div class="plan-per">forever</div>
+          <ul class="plan-features">
+            <li class="plan-feature">Up to 5 habits</li>
+            <li class="plan-feature">All 5 habit types</li>
+            <li class="plan-feature">Voice reflections</li>
+            <li class="plan-feature">Last 7 days of history</li>
+            <li class="plan-feature">Insights dashboard</li>
+            <li class="plan-feature locked">AI Habit Coach</li>
+            <li class="plan-feature locked">Full history (all time)</li>
+            <li class="plan-feature locked">Unlimited habits</li>
+          </ul>
+          <a href="/" class="plan-cta secondary">Start free →</a>
+        </div>
+        <div class="pricing-card featured">
+          <div class="plan-tag">Beta pricing — limited spots</div>
+          <div class="plan-label" style="color:var(--gold)">Early supporter</div>
+          <div style="display:flex;align-items:baseline;gap:8px">
+            <div class="plan-price gold-price">$4.99</div>
+            <span class="plan-was">$7.99</span>
+          </div>
+          <div class="plan-per">/ month · locked in forever</div>
+          <ul class="plan-features">
+            <li class="plan-feature">Everything in free</li>
+            <li class="plan-feature">Unlimited habits</li>
+            <li class="plan-feature">AI Habit Coach</li>
+            <li class="plan-feature">Full history — every entry</li>
+            <li class="plan-feature">Advanced analytics (soon)</li>
+            <li class="plan-feature">Push reminders (soon)</li>
+          </ul>
+          <a href="/" class="plan-cta primary">Reserve my beta spot →</a>
+        </div>
+      </div>
+
+      <div class="spots-bar fade-up fade-up-delay-2" id="spots-bar">
+        <div class="spots-fill-wrap"><div class="spots-fill" id="spots-fill"></div></div>
+        <div class="spots-text" id="spots-text">Loading spots...</div>
+      </div>
+      <div class="pricing-note fade-up fade-up-delay-3">
+        Beta price is yours forever — it won't increase when we publicly launch.
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider"/>
+
+  <!-- iOS INSTALL -->
+  <section>
+    <div class="container">
+      <div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:8px">
+        <div style="flex:1;min-width:240px">
+          <div class="section-label fade-up">iPhone / iPad</div>
+          <h2 class="section-title fade-up fade-up-delay-1" style="margin-bottom:12px">Add to your<br>home screen.</h2>
+          <p class="section-sub fade-up fade-up-delay-2" style="margin-bottom:0">No App Store needed. Forged works as a full-screen app on iPhone — open it like any other app, it loads instantly, and works offline.</p>
+        </div>
+        <div style="flex:1;min-width:240px;background:var(--surface);border-radius:var(--r);border:0.5px solid var(--border);padding:20px;margin-top:auto" class="fade-up fade-up-delay-3">
+          <div style="font-size:11px;color:var(--gold);font-weight:600;text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px">Android too</div>
+          <div style="font-size:14px;color:var(--sub);line-height:1.7">On Android, tap the ⋮ menu in Chrome, then <strong style="color:var(--text)">Add to Home Screen</strong>. Works exactly the same.</div>
+        </div>
+      </div>
+
+      <div class="install-steps">
+        <div class="install-step fade-up fade-up-delay-1" data-arrow="→">
+          <div class="install-num">1</div>
+          <span class="install-icon">🧭</span>
+          <div class="install-title">Open in Safari</div>
+          <div class="install-desc">Forged must be opened in Safari on iPhone — not Chrome or Firefox. The install option only appears in Safari.</div>
+        </div>
+        <div class="install-step fade-up fade-up-delay-2" data-arrow="→">
+          <div class="install-num">2</div>
+          <span class="install-icon">⬆️</span>
+          <div class="install-title">Tap Share</div>
+          <div class="install-desc">Tap the Share button at the bottom of Safari — it looks like a box with an arrow pointing up.</div>
+        </div>
+        <div class="install-step fade-up fade-up-delay-3" data-arrow="→">
+          <div class="install-num">3</div>
+          <span class="install-icon">➕</span>
+          <div class="install-title">Add to Home Screen</div>
+          <div class="install-desc">Scroll down in the share menu and tap <strong>Add to Home Screen</strong>. Give it a name or leave it as Forged.</div>
+        </div>
+        <div class="install-step fade-up fade-up-delay-4">
+          <div class="install-num">4</div>
+          <span class="install-icon">📱</span>
+          <div class="install-title">Tap Add</div>
+          <div class="install-desc">Confirm and you're done. Forged appears on your home screen and opens full-screen — no browser bar, no distractions.</div>
+        </div>
+      </div>
+
+      <div class="install-note fade-up fade-up-delay-5">
+        <span class="install-note-icon">💡</span>
+        <span><strong style="color:var(--text)">Tip:</strong> Once installed, open the app from your home screen tile — not from the browser. You'll get the full experience: instant load, full screen, push notifications when they're ready.</span>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider"/>
+
+  <!-- FINAL CTA -->
+  <section class="final-cta-section">
+    <div class="orb orb-1" style="left:30%;top:20%"></div>
+    <div class="orb orb-2" style="right:20%;bottom:10%"></div>
+    <div style="position:relative;z-index:1">
+      <h2 class="fade-up">Start forging<br><em>today.</em></h2>
+      <p class="fade-up fade-up-delay-1">
+        First 100 beta users get $4.99/mo locked in forever.<br>
+        No App Store. No credit card. Start in 30 seconds.
+      </p>
+      <a href="/" class="btn-gold fade-up fade-up-delay-2">Open Forged →</a>
+      <div class="fade-up fade-up-delay-3" style="margin-top:20px;font-size:13px;color:var(--muted)">
+        Free to start · Add to home screen · Works on all devices
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <div style="font-family:var(--serif);font-size:20px;color:var(--text)">Forged.</div>
+    <div>Built by Corbyn Miller · <a href="mailto:corbyn.miller2000@gmail.com">corbyn.miller2000@gmail.com</a></div>
+    <div><a href="/">Open app</a> · <a href="mailto:corbyn.miller2000@gmail.com?subject=Forged%20Feedback">Send feedback</a></div>
+  </footer>
+
+  <script>
+    // ── Referral param ─────────────────────────────────────────────────────────
+    const urlParams = new URLSearchParams(window.location.search);
+    const pendingRef = urlParams.get('ref');
+
+    // Validate: 6 chars, uppercase letters + digits only (no O, 0, I, 1)
+    const validRef = pendingRef && /^[A-Z2-9]{6}$/.test(pendingRef) ? pendingRef : null;
+
+    if (validRef) {
+      // Persist for when they tap through to the app
+      localStorage.setItem('forged_pending_ref', validRef);
+
+      // Build app link with ref param forwarded
+      const appLink = '/?ref=' + validRef;
+
+      // Update all CTA links to forward the ref
+      document.querySelectorAll('a[href="/"]').forEach(el => {
+        el.setAttribute('href', appLink);
+      });
+
+      // Show referral welcome banner
+      const banner = document.createElement('div');
+      banner.id = 'ref-banner';
+      banner.style.cssText = `
+        position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+        background: rgba(200,144,42,0.12);
+        border-bottom: 0.5px solid rgba(200,144,42,0.35);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        padding: 10px 20px;
+        display: flex; align-items: center; justify-content: center; gap: 10px;
+        font-family: var(--sans); font-size: 13px; color: var(--text);
+        text-align: center;
+        animation: fadeUp 0.5s ease both;
+      `;
+      banner.innerHTML = `
+        <span style="font-size:16px">🔗</span>
+        <span>A friend shared Forged with you — <strong style="color:var(--gold)">beta pricing is still available.</strong></span>
+        <button onclick="this.parentElement.remove()" style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;line-height:1;padding:0;margin-left:4px">×</button>
+      `;
+      document.body.prepend(banner);
+
+      // Offset nav so it doesn't overlap banner
+      const nav = document.querySelector('nav');
+      if (nav) nav.style.top = banner.offsetHeight + 'px';
+    }
+
+    // ── Scroll animations ──────────────────────────────────────────────────────
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(e => {
+        if (e.isIntersecting) {
+          e.target.classList.add('visible');
+        }
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+    document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
+
+    // ── Spots counter from Supabase ────────────────────────────────────────────
+    const SUPABASE_URL = 'https://apdmvbzfjuvxworjepze.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_GdMepnUv2W4VRiOuV23xiA_O4J11RMl';
+
+    async function loadSpots() {
+      try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/beta_spot_count`, {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Content-Type': 'application/json'
+          },
+          body: '{}'
+        });
+        const count = await res.json();
+        if (typeof count === 'number') {
+          const left = Math.max(0, 100 - count);
+          const pct  = Math.min(100, (count / 100) * 100);
+          const el   = document.getElementById('spots-text');
+          const fill = document.getElementById('spots-fill');
+          if (el)   el.textContent  = left <= 10 ? `⚠️ ${left} spots left` : `${left} of 100 spots remaining`;
+          if (fill) fill.style.width = pct + '%';
+          if (el && left <= 10) el.style.color = '#e74c3c';
+        }
+      } catch (e) {
+        const el = document.getElementById('spots-text');
+        if (el) el.textContent = 'Beta pricing available now';
+      }
+    }
+    loadSpots();
+
+    // ── Animate spots bar fill when visible ──────────────────────────────────
+    const spotsBarObs = new IntersectionObserver((entries) => {
+      entries.forEach(e => {
+        if (e.isIntersecting) loadSpots();
+      });
+    }, { threshold: 0.5 });
+    const sbar = document.getElementById('spots-bar');
+    if (sbar) spotsBarObs.observe(sbar);
+  </script>
+</body>
+</html>

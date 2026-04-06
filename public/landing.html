@@ -1,971 +1,1269 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <meta name="description" content="Forged — the habit tracker that takes you seriously. Voice reflections, streak protection, AI coaching. Beta pricing locked in forever for the first 100 users."/>
-  <title>Forged — Forge the person you mean to be.</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com"/>
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet"/>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Forged — Build yourself. Understand yourself.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    :root {
-      --bg:      #0f0f0b;
-      --surface: #18180f;
-      --raised:  #1e1e14;
-      --text:    #e8e4d8;
-      --sub:     #b8b49e;
-      --muted:   #7a7560;
-      --hint:    #4a4838;
-      --gold:    #c8902a;
-      --gold-lt: #e8aa40;
-      --green:   #27AE60;
-      --amber:   #e67e22;
-      --border:  rgba(255,255,255,0.07);
-      --border2: rgba(255,255,255,0.12);
-      --gold-b:  rgba(200,144,42,0.25);
-      --serif:   'DM Serif Display', serif;
-      --sans:    'DM Sans', sans-serif;
-      --r: 14px;
-      --rsm: 10px;
-    }
+  :root {
+    --bg:       #0A0A08;
+    --surface:  #131310;
+    --raised:   #1C1C18;
+    --border:   rgba(255,255,255,0.07);
+    --border2:  rgba(255,255,255,0.12);
+    --text:     #F0EDE6;
+    --sub:      #A8A49C;
+    --muted:    #5A5852;
+    --accent:   #C0392B;
+    --gold:     #C8902A;
+    --goldbrt:  #F5C842;
+    --green:    #27AE60;
+    --serif:    'DM Serif Display', Georgia, serif;
+    --sans:     'DM Sans', system-ui, sans-serif;
+    --mono:     'DM Mono', monospace;
+  }
 
-    html { scroll-behavior: smooth; }
-    body {
-      font-family: var(--sans);
-      background: var(--bg);
-      color: var(--text);
-      overflow-x: hidden;
-      -webkit-font-smoothing: antialiased;
-    }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
 
-    /* ── NAV ── */
-    nav {
-      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 16px 28px;
-      background: rgba(15,15,11,0.7);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border-bottom: 0.5px solid var(--border);
-    }
-    .nav-logo { font-family: var(--serif); font-size: 22px; color: var(--text); letter-spacing: -0.01em; }
-    .nav-cta {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 9px 20px; border-radius: 50px;
-      background: var(--gold); color: #1a1a10;
-      font-size: 14px; font-weight: 600;
-      text-decoration: none; transition: all 0.2s;
-      letter-spacing: 0.01em;
-    }
-    .nav-cta:hover { background: var(--gold-lt); transform: translateY(-1px); box-shadow: 0 8px 24px rgba(200,144,42,0.35); }
+  /* ── NOISE TEXTURE OVERLAY ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 9999;
+    opacity: 0.4;
+  }
 
-    /* ── HERO ── */
-    .hero {
-      min-height: 100vh;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      padding: 120px 24px 80px;
-      position: relative; overflow: hidden; text-align: center;
-    }
+  /* ── NAV ── */
+  nav {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 40px;
+    background: rgba(10,10,8,0.85);
+    backdrop-filter: blur(20px);
+    border-bottom: 0.5px solid var(--border);
+  }
+  .nav-logo {
+    font-family: var(--serif);
+    font-size: 22px;
+    color: var(--text);
+    text-decoration: none;
+    letter-spacing: -0.02em;
+  }
+  .nav-links {
+    display: flex;
+    gap: 32px;
+    align-items: center;
+    list-style: none;
+  }
+  .nav-links a {
+    font-size: 13px;
+    color: var(--muted);
+    text-decoration: none;
+    transition: color 0.2s;
+  }
+  .nav-links a:hover { color: var(--text); }
+  .nav-cta {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text) !important;
+    background: var(--accent);
+    padding: 8px 18px;
+    border-radius: 6px;
+    transition: opacity 0.2s !important;
+  }
+  .nav-cta:hover { opacity: 0.85; }
 
-    /* animated gradient orbs */
-    .orb {
-      position: absolute; border-radius: 50%;
-      filter: blur(80px); pointer-events: none;
-      animation: drift 20s ease-in-out infinite;
-    }
-    .orb-1 { width: 500px; height: 500px; background: rgba(200,144,42,0.12); top: -100px; left: -150px; animation-delay: 0s; }
-    .orb-2 { width: 400px; height: 400px; background: rgba(39,174,96,0.06); bottom: -80px; right: -100px; animation-delay: -7s; }
-    .orb-3 { width: 300px; height: 300px; background: rgba(200,144,42,0.07); top: 50%; left: 60%; animation-delay: -14s; }
-    @keyframes drift {
-      0%, 100% { transform: translate(0,0) scale(1); }
-      33%       { transform: translate(40px,-30px) scale(1.05); }
-      66%       { transform: translate(-20px,40px) scale(0.97); }
-    }
+  /* ── HERO ── */
+  .hero {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding: 120px 40px 80px;
+    position: relative;
+    overflow: hidden;
+  }
 
-    /* noise texture overlay */
-    .hero::before {
-      content: ''; position: absolute; inset: 0;
-      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
-      pointer-events: none; z-index: 0;
-    }
+  /* Ember glow behind hero text */
+  .hero-glow {
+    position: absolute;
+    bottom: -100px;
+    left: -100px;
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, rgba(192,57,43,0.12) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .hero-glow-2 {
+    position: absolute;
+    top: 20%;
+    right: -150px;
+    width: 500px;
+    height: 500px;
+    background: radial-gradient(circle, rgba(200,144,42,0.06) 0%, transparent 70%);
+    pointer-events: none;
+  }
 
-    .hero-inner { position: relative; z-index: 1; max-width: 680px; }
+  /* Vertical rule */
+  .hero::before {
+    content: '';
+    position: absolute;
+    left: 40px;
+    top: 0; bottom: 0;
+    width: 0.5px;
+    background: linear-gradient(to bottom, transparent 0%, var(--border2) 20%, var(--border2) 80%, transparent 100%);
+  }
 
-    .hero-badge {
-      display: inline-flex; align-items: center; gap: 7px;
-      padding: 6px 16px; border-radius: 50px;
-      background: rgba(200,144,42,0.1); border: 1px solid var(--gold-b);
-      font-size: 12px; font-weight: 500; color: var(--gold);
-      margin-bottom: 32px; letter-spacing: 0.02em;
-      animation: fadeUp 0.8s ease both;
-    }
-    .hero-badge .dot {
-      width: 6px; height: 6px; border-radius: 50%; background: var(--gold);
-      animation: pulse-dot 2s ease-in-out infinite;
-    }
-    @keyframes pulse-dot {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50%       { opacity: 0.4; transform: scale(0.7); }
-    }
+  .hero-eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 24px;
+    margin-left: 60px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    opacity: 0;
+    animation: fadeUp 0.8s ease 0.2s forwards;
+  }
+  .hero-eyebrow::before {
+    content: '';
+    width: 20px;
+    height: 0.5px;
+    background: var(--accent);
+  }
 
-    .hero h1 {
-      font-family: var(--serif); font-size: clamp(48px, 8vw, 80px);
-      color: var(--text); line-height: 1.08; letter-spacing: -0.02em;
-      margin-bottom: 24px;
-      animation: fadeUp 0.8s 0.15s ease both;
-    }
-    .hero h1 em { font-style: italic; color: var(--gold); }
+  .hero-headline {
+    font-family: var(--serif);
+    font-size: clamp(52px, 8vw, 110px);
+    line-height: 0.95;
+    letter-spacing: -0.03em;
+    color: var(--text);
+    margin-left: 60px;
+    max-width: 900px;
+    opacity: 0;
+    animation: fadeUp 0.8s ease 0.35s forwards;
+  }
+  .hero-headline em {
+    font-style: italic;
+    color: var(--accent);
+  }
 
-    .hero-sub {
-      font-size: clamp(15px, 2vw, 18px); color: var(--sub);
-      line-height: 1.7; max-width: 520px; margin: 0 auto 40px;
-      animation: fadeUp 0.8s 0.3s ease both;
-    }
+  .hero-sub {
+    font-size: 18px;
+    color: var(--sub);
+    line-height: 1.6;
+    margin: 32px 60px 0;
+    max-width: 500px;
+    opacity: 0;
+    animation: fadeUp 0.8s ease 0.5s forwards;
+  }
 
-    .hero-cta {
-      display: flex; flex-direction: column; align-items: center; gap: 12px;
-      animation: fadeUp 0.8s 0.45s ease both;
-    }
-    .btn-gold {
-      display: inline-flex; align-items: center; gap: 8px;
-      padding: 16px 36px; border-radius: 50px;
-      background: var(--gold); color: #1a1a10;
-      font-size: 17px; font-weight: 700; text-decoration: none;
-      transition: all 0.2s; letter-spacing: 0.01em;
-      box-shadow: 0 0 0 0 rgba(200,144,42,0.5);
-      animation: glow-pulse 3s ease-in-out infinite;
-    }
-    .btn-gold:hover { background: var(--gold-lt); transform: translateY(-2px); box-shadow: 0 12px 40px rgba(200,144,42,0.4); }
-    @keyframes glow-pulse {
-      0%, 100% { box-shadow: 0 0 20px rgba(200,144,42,0.2); }
-      50%       { box-shadow: 0 0 40px rgba(200,144,42,0.45); }
-    }
+  .hero-actions {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    margin: 44px 60px 0;
+    opacity: 0;
+    animation: fadeUp 0.8s ease 0.65s forwards;
+  }
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--accent);
+    color: #fff;
+    font-family: var(--sans);
+    font-size: 15px;
+    font-weight: 500;
+    padding: 14px 28px;
+    border-radius: 8px;
+    text-decoration: none;
+    transition: opacity 0.2s, transform 0.15s;
+  }
+  .btn-primary:hover { opacity: 0.88; transform: translateY(-1px); }
+  .btn-ghost {
+    font-size: 14px;
+    color: var(--sub);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: color 0.2s;
+  }
+  .btn-ghost:hover { color: var(--text); }
 
-    .hero-note { font-size: 13px; color: var(--muted); }
+  .hero-stat-row {
+    display: flex;
+    gap: 40px;
+    margin: 60px 60px 0;
+    padding-top: 40px;
+    border-top: 0.5px solid var(--border);
+    opacity: 0;
+    animation: fadeUp 0.8s ease 0.8s forwards;
+  }
+  .hero-stat-num {
+    font-family: var(--serif);
+    font-size: 32px;
+    color: var(--text);
+  }
+  .hero-stat-label {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
 
-    /* phone mockup */
-    .hero-phone-wrap {
-      position: relative; z-index: 1;
-      margin-top: 64px;
-      animation: fadeUp 0.8s 0.6s ease both;
-    }
-    .phone {
-      width: 230px; height: 470px;
-      border-radius: 44px;
-      border: 1.5px solid rgba(200,144,42,0.35);
-      background: var(--surface);
-      box-shadow:
-        0 0 0 1px rgba(200,144,42,0.1),
-        0 0 60px rgba(200,144,42,0.12),
-        0 60px 120px rgba(0,0,0,0.7),
-        inset 0 1px 0 rgba(255,255,255,0.06);
-      overflow: hidden;
-      animation: float 7s ease-in-out infinite;
-      position: relative;
-    }
-    @keyframes float {
-      0%, 100% { transform: translateY(0px) rotate(-1.5deg); }
-      50%       { transform: translateY(-18px) rotate(1.5deg); }
-    }
+  /* ── SECTION SHARED ── */
+  section { padding: 100px 40px; }
+  .section-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+  .section-title {
+    font-family: var(--serif);
+    font-size: clamp(36px, 5vw, 64px);
+    line-height: 1.0;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    margin-bottom: 20px;
+  }
+  .section-body {
+    font-size: 17px;
+    color: var(--sub);
+    line-height: 1.7;
+    max-width: 520px;
+  }
 
-    /* notch */
-    .phone::before {
-      content: ''; position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
-      width: 60px; height: 6px; border-radius: 3px;
-      background: rgba(255,255,255,0.12); z-index: 10;
-    }
+  /* ── PROBLEM SECTION ── */
+  .problem {
+    background: var(--surface);
+    border-top: 0.5px solid var(--border);
+    border-bottom: 0.5px solid var(--border);
+  }
+  .problem-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px;
+    margin-top: 60px;
+    border: 0.5px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .problem-cell {
+    background: var(--raised);
+    padding: 32px;
+    position: relative;
+  }
+  .problem-cell::after {
+    content: attr(data-num);
+    position: absolute;
+    top: 20px;
+    right: 24px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .problem-cell h3 {
+    font-family: var(--serif);
+    font-size: 22px;
+    color: var(--text);
+    margin-bottom: 10px;
+    line-height: 1.2;
+  }
+  .problem-cell p {
+    font-size: 14px;
+    color: var(--sub);
+    line-height: 1.6;
+  }
+  .problem-cell.accent-cell {
+    background: rgba(192,57,43,0.08);
+    border: 0.5px solid rgba(192,57,43,0.2);
+    grid-column: span 2;
+  }
+  .problem-cell.accent-cell h3 {
+    color: var(--accent);
+    font-size: 28px;
+  }
 
-    .phone-screen {
-      padding: 36px 12px 16px;
-      display: flex; flex-direction: column; gap: 8px;
-      height: 100%;
-    }
+  /* ── FEATURES ── */
+  .features { position: relative; }
+  .features-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    margin-top: 60px;
+    background: var(--border);
+    border: 0.5px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+  .feature-card {
+    background: var(--bg);
+    padding: 40px 32px;
+    transition: background 0.25s;
+  }
+  .feature-card:hover { background: var(--raised); }
+  .feature-icon {
+    font-size: 28px;
+    margin-bottom: 20px;
+    display: block;
+  }
+  .feature-name {
+    font-family: var(--serif);
+    font-size: 22px;
+    color: var(--text);
+    margin-bottom: 10px;
+    line-height: 1.2;
+  }
+  .feature-desc {
+    font-size: 14px;
+    color: var(--sub);
+    line-height: 1.65;
+  }
+  .feature-tag {
+    display: inline-block;
+    margin-top: 16px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border: 0.5px solid rgba(192,57,43,0.3);
+    border-radius: 4px;
+  }
 
-    .phone-header {
-      display: flex; justify-content: space-between; align-items: flex-end;
-      padding: 0 2px 10px; border-bottom: 0.5px solid var(--border);
-      margin-bottom: 2px;
-    }
-    .phone-date { font-size: 9px; color: var(--muted); }
-    .phone-title { font-family: var(--serif); font-size: 18px; color: var(--text); }
-    .phone-xp { font-size: 9px; color: var(--gold); }
+  /* ── HABIT TYPES STRIP ── */
+  .types-strip {
+    background: var(--surface);
+    border-top: 0.5px solid var(--border);
+    border-bottom: 0.5px solid var(--border);
+    padding: 80px 40px;
+  }
+  .types-row {
+    display: flex;
+    gap: 12px;
+    margin-top: 48px;
+    flex-wrap: wrap;
+  }
+  .type-pill {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--raised);
+    border: 0.5px solid var(--border2);
+    border-radius: 40px;
+    padding: 12px 20px;
+    transition: border-color 0.2s, background 0.2s;
+    cursor: default;
+  }
+  .type-pill:hover {
+    border-color: var(--border2);
+    background: #2a2a26;
+  }
+  .type-pill-emoji { font-size: 20px; }
+  .type-pill-name { font-size: 14px; font-weight: 500; color: var(--text); }
+  .type-pill-desc { font-size: 12px; color: var(--muted); }
 
-    .phone-habit {
-      background: var(--raised); border-radius: 12px;
-      border: 0.5px solid var(--border);
-      padding: 10px 11px;
-      display: flex; align-items: center; gap: 9px;
-    }
-    .phone-habit-dot {
-      width: 28px; height: 28px; border-radius: 8px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 14px; flex-shrink: 0;
-    }
-    .phone-habit-name { font-size: 11px; font-weight: 500; color: var(--text); }
-    .phone-habit-streak { font-size: 9px; color: var(--gold); }
-    .phone-habit-check {
-      margin-left: auto; width: 22px; height: 22px;
-      border-radius: 50%; display: flex; align-items: center; justify-content: center;
-      font-size: 11px; flex-shrink: 0;
-    }
-    .checked { background: rgba(39,174,96,0.2); border: 1px solid rgba(39,174,96,0.4); }
-    .unchecked { background: transparent; border: 1px solid rgba(255,255,255,0.15); }
+  /* ── HOW IT WORKS ── */
+  .how { position: relative; overflow: hidden; }
+  .how-steps {
+    margin-top: 60px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 2px;
+    position: relative;
+  }
+  /* Connecting line */
+  .how-steps::before {
+    content: '';
+    position: absolute;
+    top: 28px;
+    left: 28px;
+    right: 28px;
+    height: 0.5px;
+    background: linear-gradient(to right, var(--accent), var(--gold), var(--border));
+    z-index: 0;
+  }
+  .how-step {
+    position: relative;
+    z-index: 1;
+    padding: 0 24px 0 0;
+  }
+  .how-step-num {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--raised);
+    border: 0.5px solid var(--border2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--accent);
+    margin-bottom: 24px;
+    position: relative;
+  }
+  .how-step:first-child .how-step-num {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .how-step h4 {
+    font-family: var(--serif);
+    font-size: 19px;
+    color: var(--text);
+    margin-bottom: 8px;
+    line-height: 1.2;
+  }
+  .how-step p {
+    font-size: 13px;
+    color: var(--sub);
+    line-height: 1.6;
+  }
 
-    .phone-progress-bar {
-      height: 3px; background: rgba(255,255,255,0.08); border-radius: 2px;
-      margin: 4px 0 2px;
-    }
-    .phone-progress-fill { height: 100%; border-radius: 2px; background: var(--gold); }
+  /* ── JOURNAL HIGHLIGHT ── */
+  .journal-section {
+    background: var(--surface);
+    border-top: 0.5px solid var(--border);
+    border-bottom: 0.5px solid var(--border);
+    padding: 100px 40px;
+  }
+  .journal-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 80px;
+    align-items: center;
+    margin-top: 60px;
+  }
+  .journal-entry {
+    background: var(--raised);
+    border: 0.5px solid var(--border2);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+  .journal-entry-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 16px;
+    border-bottom: 0.5px solid var(--border);
+    background: var(--surface);
+  }
+  .je-emoji {
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    background: rgba(192,57,43,0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+  }
+  .je-habit { font-size: 12px; font-weight: 500; color: var(--accent); }
+  .je-date { font-size: 11px; color: var(--muted); margin-left: auto; font-family: var(--mono); }
+  .journal-entry-body { padding: 16px; }
+  .je-prompt {
+    font-size: 12px;
+    color: var(--muted);
+    font-style: italic;
+    margin-bottom: 10px;
+    padding-left: 10px;
+    border-left: 2px solid var(--accent);
+  }
+  .je-text {
+    font-size: 14px;
+    color: var(--text);
+    line-height: 1.65;
+  }
+  .je-note {
+    margin-top: 12px;
+    padding: 8px 12px;
+    background: var(--surface);
+    border-radius: 6px;
+    font-size: 12px;
+    color: var(--sub);
+    font-style: italic;
+  }
+  .journal-features { display: flex; flex-direction: column; gap: 28px; }
+  .jf-item { display: flex; gap: 16px; align-items: flex-start; }
+  .jf-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+    margin-top: 7px;
+  }
+  .jf-item h4 {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .jf-item p { font-size: 14px; color: var(--sub); line-height: 1.6; }
 
-    .phone-nav {
-      margin-top: auto; display: flex; justify-content: space-around;
-      padding: 10px 4px 4px; border-top: 0.5px solid var(--border);
-    }
-    .phone-nav-item { font-size: 8px; color: var(--muted); text-align: center; display: flex; flex-direction: column; gap: 3px; align-items: center; }
-    .phone-nav-item.active { color: var(--gold); }
-    .phone-nav-icon { font-size: 14px; }
+  /* ── INSIGHTS SECTION ── */
+  .insights-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 60px;
+  }
+  .insight-card {
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+    border-radius: 14px;
+    padding: 28px;
+    transition: border-color 0.2s;
+  }
+  .insight-card:hover { border-color: var(--border2); }
+  .insight-icon { font-size: 24px; margin-bottom: 14px; }
+  .insight-text {
+    font-size: 14px;
+    color: var(--text);
+    line-height: 1.65;
+    margin-bottom: 10px;
+  }
+  .insight-q {
+    font-size: 13px;
+    color: var(--gold);
+    font-style: italic;
+  }
+  .insight-card.featured {
+    grid-column: span 2;
+    background: rgba(192,57,43,0.05);
+    border-color: rgba(192,57,43,0.2);
+  }
 
-    /* ── TICKER ── */
-    .ticker-wrap {
-      overflow: hidden; background: var(--surface);
-      border-top: 0.5px solid var(--border); border-bottom: 0.5px solid var(--border);
-      padding: 14px 0;
-    }
-    .ticker-track {
-      display: flex; gap: 0;
-      animation: ticker 30s linear infinite;
-      white-space: nowrap;
-    }
-    .ticker-track:hover { animation-play-state: paused; }
-    .ticker-item {
-      font-size: 13px; font-weight: 500; color: var(--muted);
-      padding: 0 32px; letter-spacing: 0.02em;
-    }
-    .ticker-item span { color: var(--gold); margin-right: 8px; }
-    @keyframes ticker {
-      from { transform: translateX(0); }
-      to   { transform: translateX(-50%); }
-    }
+  /* ── PRICING ── */
+  .pricing {
+    background: var(--surface);
+    border-top: 0.5px solid var(--border);
+    border-bottom: 0.5px solid var(--border);
+  }
+  .pricing-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 60px;
+    max-width: 760px;
+  }
+  .pricing-card {
+    background: var(--raised);
+    border: 0.5px solid var(--border2);
+    border-radius: 16px;
+    padding: 36px 32px;
+  }
+  .pricing-card.featured {
+    background: rgba(192,57,43,0.06);
+    border-color: rgba(192,57,43,0.3);
+  }
+  .pricing-badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    color: var(--gold);
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border: 0.5px solid rgba(200,144,42,0.3);
+    border-radius: 4px;
+    margin-bottom: 20px;
+  }
+  .pricing-name {
+    font-family: var(--serif);
+    font-size: 26px;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .pricing-price {
+    font-family: var(--serif);
+    font-size: 48px;
+    color: var(--text);
+    margin-bottom: 4px;
+    line-height: 1;
+  }
+  .pricing-price span {
+    font-family: var(--sans);
+    font-size: 14px;
+    color: var(--muted);
+    font-weight: 400;
+  }
+  .pricing-desc {
+    font-size: 13px;
+    color: var(--sub);
+    margin-bottom: 28px;
+    line-height: 1.5;
+  }
+  .pricing-features { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  .pricing-features li {
+    font-size: 14px;
+    color: var(--sub);
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .pricing-features li::before {
+    content: '✓';
+    color: var(--green);
+    font-size: 13px;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .pricing-cta {
+    display: block;
+    width: 100%;
+    text-align: center;
+    padding: 13px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    margin-top: 28px;
+    transition: opacity 0.2s;
+    cursor: pointer;
+    border: none;
+    font-family: var(--sans);
+  }
+  .pricing-cta.primary { background: var(--accent); color: #fff; }
+  .pricing-cta.secondary { background: var(--surface); color: var(--text); border: 0.5px solid var(--border2); }
+  .pricing-cta:hover { opacity: 0.85; }
 
-    /* ── SECTIONS ── */
-    section { padding: 100px 24px; }
-    .container { max-width: 960px; margin: 0 auto; }
-    .section-label {
-      font-size: 11px; font-weight: 600; color: var(--gold);
-      text-transform: uppercase; letter-spacing: 0.12em;
-      margin-bottom: 16px;
-    }
-    .section-title {
-      font-family: var(--serif); font-size: clamp(32px, 5vw, 52px);
-      color: var(--text); line-height: 1.15; letter-spacing: -0.02em;
-      margin-bottom: 20px;
-    }
-    .section-sub {
-      font-size: 16px; color: var(--sub); line-height: 1.7;
-      max-width: 520px; margin-bottom: 56px;
-    }
+  /* ── CTA SECTION ── */
+  .cta-section {
+    padding: 140px 40px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .cta-section::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 600px;
+    height: 400px;
+    background: radial-gradient(ellipse, rgba(192,57,43,0.1) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .cta-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    color: var(--gold);
+    text-transform: uppercase;
+    margin-bottom: 20px;
+  }
+  .cta-headline {
+    font-family: var(--serif);
+    font-size: clamp(40px, 6vw, 80px);
+    color: var(--text);
+    line-height: 1.0;
+    letter-spacing: -0.02em;
+    margin-bottom: 24px;
+    position: relative;
+  }
+  .cta-headline em { font-style: italic; color: var(--accent); }
+  .cta-sub {
+    font-size: 17px;
+    color: var(--sub);
+    max-width: 440px;
+    margin: 0 auto 44px;
+    line-height: 1.6;
+  }
+  .cta-buttons { display: flex; gap: 16px; justify-content: center; align-items: center; flex-wrap: wrap; }
+  .cta-note {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 20px;
+  }
 
-    /* ── FEATURES ── */
-    .features-bg {
-      background: radial-gradient(ellipse at 50% 0%, rgba(200,144,42,0.06) 0%, transparent 60%);
-    }
+  /* ── FOOTER ── */
+  footer {
+    border-top: 0.5px solid var(--border);
+    padding: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .footer-logo {
+    font-family: var(--serif);
+    font-size: 18px;
+    color: var(--muted);
+  }
+  .footer-copy { font-size: 12px; color: var(--muted); }
+  .footer-links { display: flex; gap: 24px; }
+  .footer-links a { font-size: 12px; color: var(--muted); text-decoration: none; }
+  .footer-links a:hover { color: var(--sub); }
 
-    .features-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 16px;
-    }
+  /* ── ANIMATIONS ── */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .reveal {
+    opacity: 0;
+    transform: translateY(24px);
+    transition: opacity 0.7s ease, transform 0.7s ease;
+  }
+  .reveal.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
 
-    .feature-card {
-      background: var(--surface); border-radius: var(--r);
-      border: 0.5px solid var(--border);
-      padding: 24px;
-      transition: all 0.3s ease;
-      position: relative; overflow: hidden;
+  /* ── MOBILE ── */
+  @media (max-width: 768px) {
+    nav { padding: 16px 20px; }
+    .nav-links { display: none; }
+    .hero { padding: 100px 24px 60px; }
+    .hero::before { display: none; }
+    .hero-eyebrow, .hero-headline, .hero-sub, .hero-actions, .hero-stat-row {
+      margin-left: 0;
     }
-    .feature-card::before {
-      content: ''; position: absolute; inset: 0; border-radius: var(--r);
-      background: radial-gradient(circle at 20% 20%, rgba(200,144,42,0.06) 0%, transparent 50%);
-      opacity: 0; transition: opacity 0.3s;
-    }
-    .feature-card:hover { border-color: var(--gold-b); transform: translateY(-3px); box-shadow: 0 20px 40px rgba(0,0,0,0.3); }
-    .feature-card:hover::before { opacity: 1; }
-
-    .feature-icon {
-      width: 44px; height: 44px; border-radius: 12px;
-      background: rgba(200,144,42,0.1); border: 0.5px solid var(--gold-b);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 20px; margin-bottom: 16px;
-    }
-    .feature-title { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
-    .feature-desc { font-size: 14px; color: var(--sub); line-height: 1.65; }
-    .feature-badge {
-      display: inline-block; margin-top: 12px;
-      font-size: 10px; font-weight: 600; color: var(--gold);
-      background: rgba(200,144,42,0.12); padding: 3px 9px;
-      border-radius: 20px; letter-spacing: 0.06em; text-transform: uppercase;
-    }
-
-    /* ── HOW IT WORKS ── */
-    .steps {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 0; position: relative;
-    }
-    .steps::before {
-      content: ''; position: absolute; top: 28px; left: 16%; right: 16%; height: 1px;
-      background: linear-gradient(90deg, transparent, var(--gold-b), var(--gold-b), transparent);
-      display: none;
-    }
-    @media (min-width: 700px) { .steps::before { display: block; } }
-
-    .step { text-align: center; padding: 32px 24px; position: relative; }
-    .step-num {
-      width: 56px; height: 56px; border-radius: 50%;
-      background: var(--surface); border: 1px solid var(--gold-b);
-      display: flex; align-items: center; justify-content: center;
-      font-family: var(--serif); font-size: 22px; color: var(--gold);
-      margin: 0 auto 20px;
-      box-shadow: 0 0 20px rgba(200,144,42,0.15);
-    }
-    .step-title { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 10px; }
-    .step-desc { font-size: 14px; color: var(--sub); line-height: 1.65; }
-
-    /* ── PRICING ── */
-    .pricing-bg {
-      background: radial-gradient(ellipse at 50% 100%, rgba(200,144,42,0.07) 0%, transparent 60%);
-    }
-    .pricing-cards {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 20px; max-width: 680px; margin: 0 auto;
-    }
-    .pricing-card {
-      background: var(--surface); border-radius: var(--r);
-      border: 0.5px solid var(--border); padding: 28px 24px;
-    }
-    .pricing-card.featured {
-      border-color: rgba(200,144,42,0.5);
-      background: linear-gradient(135deg, rgba(200,144,42,0.07) 0%, var(--surface) 60%);
-      box-shadow: 0 0 40px rgba(200,144,42,0.12), 0 0 0 1px rgba(200,144,42,0.2);
-      position: relative;
-    }
-    .pricing-card.featured::before {
-      content: ''; position: absolute; inset: -1px; border-radius: var(--r);
-      background: linear-gradient(135deg, rgba(200,144,42,0.3), transparent, rgba(200,144,42,0.1));
-      z-index: -1;
-    }
-    .plan-label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; }
-    .plan-price { font-family: var(--serif); font-size: 48px; color: var(--text); letter-spacing: -0.03em; line-height: 1; }
-    .plan-price.gold-price { color: var(--gold); }
-    .plan-per { font-size: 14px; color: var(--muted); margin-bottom: 20px; }
-    .plan-tag {
-      display: inline-block; background: var(--gold); color: #1a1a10;
-      font-size: 10px; font-weight: 700; padding: 3px 10px;
-      border-radius: 20px; letter-spacing: 0.08em; text-transform: uppercase;
-      margin-bottom: 16px;
-    }
-    .plan-was { font-size: 12px; color: var(--hint); text-decoration: line-through; margin-left: 6px; }
-    .plan-features { list-style: none; display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
-    .plan-feature {
-      display: flex; align-items: center; gap: 10px;
-      font-size: 14px; color: var(--sub);
-    }
-    .plan-feature::before { content: '✓'; color: var(--green); font-size: 12px; font-weight: 700; flex-shrink: 0; }
-    .plan-feature.locked::before { content: '—'; color: var(--hint); }
-    .plan-feature.locked { color: var(--hint); }
-    .plan-cta {
-      display: block; width: 100%; margin-top: 24px;
-      padding: 14px; border-radius: var(--rsm); border: none;
-      font-size: 15px; font-weight: 600; cursor: pointer; text-align: center;
-      text-decoration: none; transition: all 0.2s;
-    }
-    .plan-cta.primary { background: var(--gold); color: #1a1a10; }
-    .plan-cta.primary:hover { background: var(--gold-lt); transform: translateY(-1px); box-shadow: 0 8px 24px rgba(200,144,42,0.3); }
-    .plan-cta.secondary { background: rgba(255,255,255,0.05); color: var(--sub); border: 0.5px solid var(--border2); }
-    .plan-cta.secondary:hover { background: rgba(255,255,255,0.08); color: var(--text); }
-
-    .pricing-note {
-      text-align: center; font-size: 13px; color: var(--muted);
-      margin-top: 24px; line-height: 1.7;
-    }
-    .spots-bar {
-      max-width: 340px; margin: 20px auto 0;
-      background: var(--surface); border-radius: 100px;
-      padding: 12px 18px; border: 0.5px solid var(--gold-b);
-      display: flex; align-items: center; gap: 12px;
-    }
-    .spots-fill-wrap { flex: 1; height: 5px; background: var(--raised); border-radius: 3px; overflow: hidden; }
-    .spots-fill { height: 100%; border-radius: 3px; background: var(--gold); width: 7%; transition: width 1.2s ease; }
-    .spots-text { font-size: 11px; color: var(--gold); font-weight: 600; white-space: nowrap; }
-
-    /* ── iOS INSTALL ── */
-    .install-steps {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 16px; margin-top: 48px;
-    }
-    .install-step {
-      background: var(--surface); border-radius: var(--r);
-      border: 0.5px solid var(--border); padding: 20px;
-      position: relative; overflow: hidden;
-    }
-    .install-step::after {
-      content: attr(data-arrow);
-      position: absolute; right: -6px; top: 50%; transform: translateY(-50%);
-      font-size: 18px; color: var(--hint);
-    }
-    .install-num {
-      width: 28px; height: 28px; border-radius: 50%;
-      background: rgba(200,144,42,0.15); border: 1px solid var(--gold-b);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 12px; font-weight: 700; color: var(--gold);
-      margin-bottom: 12px;
-    }
-    .install-icon { font-size: 28px; margin-bottom: 8px; display: block; }
-    .install-title { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
-    .install-desc { font-size: 13px; color: var(--sub); line-height: 1.6; }
-
-    .install-note {
-      margin-top: 24px; padding: 14px 18px;
-      background: rgba(200,144,42,0.06); border: 0.5px solid var(--gold-b);
-      border-radius: var(--r); font-size: 13px; color: var(--sub); line-height: 1.65;
-      display: flex; align-items: flex-start; gap: 10px;
-    }
-    .install-note-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
-
-    /* ── FINAL CTA ── */
-    .final-cta-section {
-      text-align: center; padding: 120px 24px 100px;
-      background: radial-gradient(ellipse at 50% 50%, rgba(200,144,42,0.09) 0%, transparent 65%);
-      position: relative;
-    }
-    .final-cta-section h2 {
-      font-family: var(--serif); font-size: clamp(40px, 6vw, 68px);
-      color: var(--text); line-height: 1.1; letter-spacing: -0.02em;
-      margin-bottom: 16px;
-    }
-    .final-cta-section p { font-size: 17px; color: var(--sub); margin-bottom: 40px; line-height: 1.6; }
-
-    /* ── FOOTER ── */
-    footer {
-      border-top: 0.5px solid var(--border);
-      padding: 32px 28px; text-align: center;
-      font-size: 13px; color: var(--muted);
-      display: flex; flex-direction: column; gap: 8px; align-items: center;
-    }
-    footer a { color: var(--muted); text-decoration: none; }
-    footer a:hover { color: var(--gold); }
-
-    /* ── SCROLL ANIMATIONS ── */
-    .fade-up {
-      opacity: 0; transform: translateY(32px);
-      transition: opacity 0.7s ease, transform 0.7s ease;
-    }
-    .fade-up.visible { opacity: 1; transform: translateY(0); }
-    .fade-up-delay-1 { transition-delay: 0.1s; }
-    .fade-up-delay-2 { transition-delay: 0.2s; }
-    .fade-up-delay-3 { transition-delay: 0.3s; }
-    .fade-up-delay-4 { transition-delay: 0.4s; }
-    .fade-up-delay-5 { transition-delay: 0.5s; }
-
-    @keyframes fadeUp {
-      from { opacity: 0; transform: translateY(24px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
-
-    /* ── DIVIDER ── */
-    .divider {
-      height: 0.5px; background: var(--border);
-      margin: 0; border: none;
-    }
-
-    /* ── STATS BAR ── */
-    .stats-bar {
-      display: flex; justify-content: center; gap: 0;
-      background: var(--surface); border-top: 0.5px solid var(--border);
-      border-bottom: 0.5px solid var(--border);
-    }
-    .stat-item {
-      flex: 1; max-width: 200px; padding: 24px 16px;
-      text-align: center;
-      border-right: 0.5px solid var(--border);
-    }
-    .stat-item:last-child { border-right: none; }
-    .stat-val { font-family: var(--serif); font-size: 36px; color: var(--text); letter-spacing: -0.02em; }
-    .stat-val.gold { color: var(--gold); }
-    .stat-lbl { font-size: 12px; color: var(--muted); margin-top: 4px; }
-
-    /* ── RESPONSIVE ── */
-    @media (max-width: 640px) {
-      nav { padding: 14px 18px; }
-      .hero { padding: 100px 18px 60px; }
-      section { padding: 72px 18px; }
-      .stats-bar { flex-wrap: wrap; }
-      .stat-item { min-width: 50%; border-bottom: 0.5px solid var(--border); }
-      .phone { width: 200px; height: 410px; }
-      .steps::before { display: none; }
-    }
-  </style>
+    .hero-stat-row { gap: 24px; flex-wrap: wrap; }
+    section { padding: 64px 24px; }
+    .problem-grid { grid-template-columns: 1fr; }
+    .problem-cell.accent-cell { grid-column: span 1; }
+    .features-grid { grid-template-columns: 1fr; }
+    .how-steps { grid-template-columns: 1fr; gap: 32px; }
+    .how-steps::before { display: none; }
+    .journal-layout { grid-template-columns: 1fr; gap: 40px; }
+    .insights-grid { grid-template-columns: 1fr; }
+    .insight-card.featured { grid-column: span 1; }
+    .pricing-cards { grid-template-columns: 1fr; }
+    .types-strip, .journal-section, .pricing { padding: 64px 24px; }
+    footer { flex-direction: column; gap: 20px; text-align: center; }
+  }
+</style>
 </head>
 <body>
 
-  <!-- NAV -->
-  <nav>
-    <div class="nav-logo">Forged.</div>
-    <a href="/" class="nav-cta">Open app →</a>
-  </nav>
+<!-- NAV -->
+<nav>
+  <a href="#" class="nav-logo">Forged</a>
+  <ul class="nav-links">
+    <li><a href="#how">How it works</a></li>
+    <li><a href="#features">Features</a></li>
+    <li><a href="#pricing">Pricing</a></li>
+    <li><a href="#" class="nav-cta" onclick="openBetaForm();return false;">Request access →</a></li>
+  </ul>
+</nav>
 
-  <!-- HERO -->
-  <section class="hero">
-    <div class="orb orb-1"></div>
-    <div class="orb orb-2"></div>
-    <div class="orb orb-3"></div>
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-glow"></div>
+  <div class="hero-glow-2"></div>
 
-    <div class="hero-inner">
-      <div class="hero-badge">
-        <div class="dot"></div>
-        Beta — first 100 users lock in $4.99/mo forever
-      </div>
+  <p class="hero-eyebrow">Habit tracking · Reflection · Insight</p>
+  <h1 class="hero-headline">Build yourself.<br/><em>Understand</em><br/>yourself.</h1>
+  <p class="hero-sub">Most habit apps want you to maintain a streak. Forged wants you to understand why you show up — and why you don't.</p>
 
-      <h1>Stop tracking.<br>Start <em>forging.</em></h1>
+  <div class="hero-actions">
+    <a href="#" class="btn-primary" onclick="openBetaForm();return false;">Request beta access →</a>
+    <a href="#how" class="btn-ghost">See how it works ↓</a>
+  </div>
 
-      <p class="hero-sub">
-        A habit app built for people who take their growth seriously.
-        Voice reflections. Real streaks. AI coaching. Built to last.
-      </p>
+  <div class="hero-stat-row">
+    <div>
+      <div class="hero-stat-num">5</div>
+      <div class="hero-stat-label">habit types</div>
+    </div>
+    <div>
+      <div class="hero-stat-num">1 tap</div>
+      <div class="hero-stat-label">to log anything</div>
+    </div>
+    <div>
+      <div class="hero-stat-num">Free</div>
+      <div class="hero-stat-label">to start</div>
+    </div>
+  </div>
+</section>
 
-      <div class="hero-cta">
-        <a href="/" class="btn-gold">Try Forged free →</a>
-        <span class="hero-note">Free to start · No credit card</span>
+<!-- PROBLEM -->
+<section class="problem">
+  <p class="section-label reveal">The problem</p>
+  <h2 class="section-title reveal">Streaks don't teach<br/>you anything.</h2>
+  <p class="section-body reveal">You can hit a 60-day streak and still not know why exercise makes Tuesdays harder or why you always skip lunch on busy days. Data without reflection is just noise.</p>
+
+  <div class="problem-grid reveal">
+    <div class="problem-cell" data-num="01">
+      <h3>Other apps reward you for tapping</h3>
+      <p>XP, badges, streaks. All designed to keep you opening the app. None of it helps you understand the behaviour underneath.</p>
+    </div>
+    <div class="problem-cell" data-num="02">
+      <h3>Journaling apps don't track habits</h3>
+      <p>You can write beautifully about your goals every morning and still have no idea whether you actually hit them over the last month.</p>
+    </div>
+    <div class="problem-cell accent-cell" data-num="03">
+      <h3>Forged connects the two.</h3>
+      <p>Log fast. Reflect when you have something to say. See patterns emerge over time. Built for people who want to actually change, not just feel like they're trying.</p>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="features" id="features">
+  <p class="section-label reveal">What it does</p>
+  <h2 class="section-title reveal">Everything you need.<br/>Nothing you don't.</h2>
+
+  <div class="features-grid reveal">
+    <div class="feature-card">
+      <span class="feature-icon">⚡</span>
+      <div class="feature-name">One-tap logging</div>
+      <p class="feature-desc">Log any habit in a single tap. No forms, no friction. The app gets out of your way.</p>
+      <span class="feature-tag">Core</span>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon">📓</span>
+      <div class="feature-name">Journaling layer</div>
+      <p class="feature-desc">Quick note or full reflection — your choice. Every log entry can hold as much or as little as you want to say.</p>
+      <span class="feature-tag">Core</span>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon">📈</span>
+      <div class="feature-name">Pattern detection</div>
+      <p class="feature-desc">Forged notices when you exercise more after rest days, or when your weight logs cluster around 3-meal days.</p>
+      <span class="feature-tag">Insights</span>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon">⚒️</span>
+      <div class="feature-name">Project tracking</div>
+      <p class="feature-desc">Log time, wins, and hard parts per session. Built for people building something on the side.</p>
+      <span class="feature-tag">Projects</span>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon">🎯</span>
+      <div class="feature-name">Limit tracking</div>
+      <p class="feature-desc">Set a daily budget for habits you want to reduce. The bar turns red when you're close. No shame — just data.</p>
+      <span class="feature-tag">Limits</span>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon">🔒</span>
+      <div class="feature-name">Your data, yours</div>
+      <p class="feature-desc">Everything stays on your device. Export any time. No ads. No selling your habits to anyone.</p>
+      <span class="feature-tag">Privacy</span>
+    </div>
+  </div>
+</section>
+
+<!-- HABIT TYPES -->
+<section class="types-strip">
+  <p class="section-label reveal">5 habit types</p>
+  <h2 class="section-title reveal">Built for how<br/>real habits work.</h2>
+  <p class="section-body reveal">Not everything is a daily checkbox. Forged understands the difference between hitting the gym 4 times a week and logging your weight toward a target.</p>
+
+  <div class="types-row reveal">
+    <div class="type-pill">
+      <span class="type-pill-emoji">✓</span>
+      <div>
+        <div class="type-pill-name">Daily habit</div>
+        <div class="type-pill-desc">One tap. Done.</div>
       </div>
     </div>
+    <div class="type-pill">
+      <span class="type-pill-emoji">📅</span>
+      <div>
+        <div class="type-pill-name">Weekly target</div>
+        <div class="type-pill-desc">Hit N sessions per week</div>
+      </div>
+    </div>
+    <div class="type-pill">
+      <span class="type-pill-emoji">📈</span>
+      <div>
+        <div class="type-pill-name">Progress goal</div>
+        <div class="type-pill-desc">Track a number to a target</div>
+      </div>
+    </div>
+    <div class="type-pill">
+      <span class="type-pill-emoji">⚒️</span>
+      <div>
+        <div class="type-pill-name">Project habit</div>
+        <div class="type-pill-desc">Time + wins + hard parts</div>
+      </div>
+    </div>
+    <div class="type-pill">
+      <span class="type-pill-emoji">🎯</span>
+      <div>
+        <div class="type-pill-name">Limit / reduce</div>
+        <div class="type-pill-desc">Stay under a daily budget</div>
+      </div>
+    </div>
+  </div>
+</section>
 
-    <div class="hero-phone-wrap">
-      <div class="phone">
-        <div class="phone-screen">
-          <div class="phone-header">
-            <div>
-              <div class="phone-date">Monday, today</div>
-              <div class="phone-title">Today</div>
-            </div>
-            <div class="phone-xp">⚡ 340 xp</div>
-          </div>
+<!-- HOW IT WORKS -->
+<section class="how" id="how">
+  <p class="section-label reveal">How it works</p>
+  <h2 class="section-title reveal">Log. Reflect.<br/>Understand.</h2>
 
-          <div style="height:3px;background:rgba(200,144,42,0.15);border-radius:2px;margin:2px 0 8px">
-            <div style="height:100%;width:75%;border-radius:2px;background:#c8902a;transition:width 0.8s"></div>
-          </div>
+  <div class="how-steps reveal">
+    <div class="how-step">
+      <div class="how-step-num">01</div>
+      <h4>Set up your habits</h4>
+      <p>Choose the type that fits — daily, weekly, progress goal, project, or limit. Pick your reflection prompt. Takes 30 seconds.</p>
+    </div>
+    <div class="how-step">
+      <div class="how-step-num">02</div>
+      <h4>Log every day</h4>
+      <p>One tap marks something done. A quick note captures context. That's it — no login required, no loading screens.</p>
+    </div>
+    <div class="how-step">
+      <div class="how-step-num">03</div>
+      <h4>Go deeper when it matters</h4>
+      <p>After a hard session or a skip day, tap "Go deeper" to write freely. Your prompts are specific to each habit.</p>
+    </div>
+    <div class="how-step">
+      <div class="how-step-num">04</div>
+      <h4>See patterns emerge</h4>
+      <p>Forged shows you which days work, which habits cluster together, and where the quiet friction lives.</p>
+    </div>
+  </div>
+</section>
 
-          <div class="phone-habit">
-            <div class="phone-habit-dot" style="background:rgba(39,174,96,0.18)">🏃</div>
-            <div>
-              <div class="phone-habit-name">Morning run</div>
-              <div class="phone-habit-streak">🔥 14 streak</div>
-            </div>
-            <div class="phone-habit-check checked">✓</div>
-          </div>
+<!-- JOURNAL HIGHLIGHT -->
+<section class="journal-section">
+  <p class="section-label reveal">The journal</p>
+  <h2 class="section-title reveal">Reflection that<br/>actually sticks.</h2>
 
-          <div class="phone-habit">
-            <div class="phone-habit-dot" style="background:rgba(200,144,42,0.18)">📚</div>
-            <div>
-              <div class="phone-habit-name">Read 30 min</div>
-              <div class="phone-habit-streak">🔥 7 streak</div>
-            </div>
-            <div class="phone-habit-check checked">✓</div>
-          </div>
-
-          <div class="phone-habit" style="opacity:0.9">
-            <div class="phone-habit-dot" style="background:rgba(41,128,185,0.18)">🧘</div>
-            <div>
-              <div class="phone-habit-name">Meditate</div>
-              <div class="phone-habit-streak" style="color:#7a7560">Not yet today</div>
-            </div>
-            <div class="phone-habit-check unchecked"></div>
-          </div>
-
-          <div class="phone-habit">
-            <div class="phone-habit-dot" style="background:rgba(231,76,60,0.15)">☕</div>
-            <div>
-              <div class="phone-habit-name">Limit coffee</div>
-              <div class="phone-habit-streak">1 of 3 today</div>
-            </div>
-            <div class="phone-habit-check checked">✓</div>
-          </div>
-
-          <div style="margin-top:6px;padding:8px 10px;background:rgba(200,144,42,0.08);border-radius:8px;border:0.5px solid rgba(200,144,42,0.2)">
-            <div style="font-size:8px;color:#7a7560;margin-bottom:3px">Quick note 🎙️</div>
-            <div style="font-size:9px;color:#b8b49e;line-height:1.5;">"Felt strong today, first 5k under 25 min"</div>
-          </div>
-
-          <div class="phone-nav">
-            <div class="phone-nav-item active">
-              <div class="phone-nav-icon">◈</div>
-              <div>Today</div>
-            </div>
-            <div class="phone-nav-item">
-              <div class="phone-nav-icon">◫</div>
-              <div>Habits</div>
-            </div>
-            <div class="phone-nav-item">
-              <div class="phone-nav-icon">◉</div>
-              <div>Journal</div>
-            </div>
-            <div class="phone-nav-item">
-              <div class="phone-nav-icon">◎</div>
-              <div>Insights</div>
-            </div>
-          </div>
+  <div class="journal-layout">
+    <!-- Sample journal entry -->
+    <div class="reveal">
+      <div class="journal-entry" style="margin-bottom:12px">
+        <div class="journal-entry-header">
+          <div class="je-emoji">🏋️</div>
+          <span class="je-habit">Gym</span>
+          <span class="je-date">Mar 21</span>
+        </div>
+        <div class="journal-entry-body">
+          <p class="je-prompt">What felt strong today? What needs work?</p>
+          <p class="je-text">Hit 80kg for 3 on bench. Shoulders felt tight — probably skipping warmup again. Need to be honest about that. The energy was there, form is slipping.</p>
+          <div class="je-note">Quick note: Upper body · PR attempt</div>
+        </div>
+      </div>
+      <div class="journal-entry">
+        <div class="journal-entry-header">
+          <div class="je-emoji" style="background:rgba(39,174,96,0.2)">🥗</div>
+          <span class="je-habit" style="color:#27AE60">Eat better</span>
+          <span class="je-date">Mar 21</span>
+        </div>
+        <div class="journal-entry-body">
+          <p class="je-prompt">What did you actually eat today?</p>
+          <p class="je-text">Meal prepped Sunday and it showed. Three full meals, actually tasted good. The prep makes the whole week easier — why don't I do this every weekend?</p>
         </div>
       </div>
     </div>
-  </section>
 
-  <!-- STATS BAR -->
-  <div class="stats-bar">
-    <div class="stat-item fade-up">
-      <div class="stat-val gold" data-count="5">5</div>
-      <div class="stat-lbl">habit types</div>
+    <div class="journal-features reveal">
+      <div class="jf-item">
+        <div class="jf-dot"></div>
+        <div>
+          <h4>Prompts specific to each habit</h4>
+          <p>Not "how did it go?" — but "what made today's session feel hard or easy?" Set your own prompts when you create a habit.</p>
+        </div>
+      </div>
+      <div class="jf-item">
+        <div class="jf-dot" style="background:var(--gold)"></div>
+        <div>
+          <h4>Quick notes + deep reflections</h4>
+          <p>140-character quick note for context. Full journal entry when you have something real to say. Both show up in your journal history.</p>
+        </div>
+      </div>
+      <div class="jf-item">
+        <div class="jf-dot" style="background:var(--green)"></div>
+        <div>
+          <h4>Past reflections surfaced in context</h4>
+          <p>When you open a reflection, you see what you wrote last time. Patterns start becoming obvious fast.</p>
+        </div>
+      </div>
+      <div class="jf-item">
+        <div class="jf-dot" style="background:var(--sub)"></div>
+        <div>
+          <h4>Filterable by habit</h4>
+          <p>The journal tab shows everything in one place. Filter to a single habit and read your own progression like a story.</p>
+        </div>
+      </div>
     </div>
-    <div class="stat-item fade-up fade-up-delay-1">
-      <div class="stat-val">∞</div>
-      <div class="stat-lbl">entries stored</div>
+  </div>
+</section>
+
+<!-- INSIGHTS -->
+<section>
+  <p class="section-label reveal">Insights</p>
+  <h2 class="section-title reveal">Patterns you'd<br/>never notice yourself.</h2>
+  <p class="section-body reveal">Forged surfaces the connections between your habits — not generic encouragement, but actual observations from your own data.</p>
+
+  <div class="insights-grid reveal">
+    <div class="insight-card featured">
+      <div class="insight-icon">🔗</div>
+      <p class="insight-text">On days you stretch, you eat better 78% of the time. They cluster together.</p>
+      <p class="insight-q">Could a morning routine chain these habits together?</p>
     </div>
-    <div class="stat-item fade-up fade-up-delay-2">
-      <div class="stat-val gold">$0</div>
-      <div class="stat-lbl">to start</div>
+    <div class="insight-card">
+      <div class="insight-icon">💪</div>
+      <p class="insight-text">You hit the gym after rest days 89% of the time vs 41% on back-to-back days.</p>
+      <p class="insight-q">Is recovery your secret weapon?</p>
     </div>
-    <div class="stat-item fade-up fade-up-delay-3">
-      <div class="stat-val">100</div>
-      <div class="stat-lbl">beta spots total</div>
+    <div class="insight-card">
+      <div class="insight-icon">⚖️</div>
+      <p class="insight-text">Weight logs on 3-meal days average 300g higher than days you skip lunch.</p>
+      <p class="insight-q">Lunch might be the missing piece for hitting your goal.</p>
+    </div>
+  </div>
+</section>
+
+<!-- PRICING -->
+<section class="pricing" id="pricing">
+  <p class="section-label reveal">Pricing</p>
+  <h2 class="section-title reveal">Free to start.<br/>$7 to go deep.</h2>
+  <p class="section-body reveal">The free plan gets you logging and reflecting. Pro unlocks your history, patterns, and the AI habit coach — the parts that actually change behaviour.</p>
+
+  <div class="pricing-cards reveal">
+    <div class="pricing-card">
+      <div class="pricing-name">Free</div>
+      <div class="pricing-price">$0<span> / forever</span></div>
+      <p class="pricing-desc">Log habits, write reflections, and see what the last 7 days look like. No card needed, no expiry.</p>
+      <ul class="pricing-features">
+        <li>Up to 5 habits</li>
+        <li>Unlimited daily logging</li>
+        <li>Quick notes on every log</li>
+        <li>Reflection journal (last 7 days)</li>
+        <li>7-day activity view</li>
+        <li>Basic streak tracking</li>
+      </ul>
+      <a href="#" class="pricing-cta secondary" onclick="openBetaForm();return false;">Request access</a>
+    </div>
+    <div class="pricing-card featured">
+      <div class="pricing-badge">⚡ Early access — lock in this price</div>
+      <div class="pricing-name">Pro</div>
+      <div class="pricing-price">$7<span> / month</span></div>
+      <p class="pricing-desc">For people who want to understand themselves, not just track themselves. Cancel any time.</p>
+      <ul class="pricing-features">
+        <li>Unlimited habits</li>
+        <li>Full journal history — no cutoff</li>
+        <li>12-week activity calendar</li>
+        <li>AI habit coach — chat to figure out what to work on</li>
+        <li>AI pattern detection across your habits</li>
+        <li>Voice journaling</li>
+        <li>iCloud sync across devices</li>
+        <li>Data export (JSON + PDF)</li>
+        <li>Early access to new features</li>
+      </ul>
+      <a href="#" class="pricing-cta primary" onclick="openBetaForm();return false;">Join the waitlist →</a>
+      <p style="font-size:11px;color:var(--muted);text-align:center;margin-top:12px">Early users are grandfathered at $7 when Pro launches.</p>
     </div>
   </div>
 
-  <!-- TICKER -->
-  <div class="ticker-wrap">
-    <div class="ticker-track" id="ticker">
-      <div class="ticker-item"><span>✦</span>Voice reflections</div>
-      <div class="ticker-item"><span>✦</span>Streak protection</div>
-      <div class="ticker-item"><span>✦</span>AI habit coach</div>
-      <div class="ticker-item"><span>✦</span>5 habit types</div>
-      <div class="ticker-item"><span>✦</span>Full journal history</div>
-      <div class="ticker-item"><span>✦</span>Skip days without guilt</div>
-      <div class="ticker-item"><span>✦</span>Log wins + hard parts</div>
-      <div class="ticker-item"><span>✦</span>Insights dashboard</div>
-      <div class="ticker-item"><span>✦</span>PWA — no App Store</div>
-      <div class="ticker-item"><span>✦</span>Dark mode only 🌑</div>
-      <!-- duplicate for infinite scroll -->
-      <div class="ticker-item"><span>✦</span>Voice reflections</div>
-      <div class="ticker-item"><span>✦</span>Streak protection</div>
-      <div class="ticker-item"><span>✦</span>AI habit coach</div>
-      <div class="ticker-item"><span>✦</span>5 habit types</div>
-      <div class="ticker-item"><span>✦</span>Full journal history</div>
-      <div class="ticker-item"><span>✦</span>Skip days without guilt</div>
-      <div class="ticker-item"><span>✦</span>Log wins + hard parts</div>
-      <div class="ticker-item"><span>✦</span>Insights dashboard</div>
-      <div class="ticker-item"><span>✦</span>PWA — no App Store</div>
-      <div class="ticker-item"><span>✦</span>Dark mode only 🌑</div>
+  <div style="margin-top:40px;padding:24px 28px;background:var(--raised);border:0.5px solid var(--border2);border-radius:12px;display:flex;align-items:flex-start;gap:20px;max-width:760px" class="reveal">
+    <span style="font-size:28px;flex-shrink:0">🔒</span>
+    <div>
+      <div style="font-size:15px;font-weight:500;color:var(--text);margin-bottom:6px">Your data is always yours</div>
+      <div style="font-size:13px;color:var(--sub);line-height:1.6">Free or Pro, you can export everything at any time. If you cancel Pro, your data doesn't disappear — it stays accessible, just limited to the last 7 days of new entries. Nothing is held hostage.</div>
     </div>
   </div>
+</section>
 
-  <!-- FEATURES -->
-  <section class="features-bg">
-    <div class="container">
-      <div class="section-label fade-up">What makes Forged different</div>
-      <h2 class="section-title fade-up fade-up-delay-1">Built for the person<br>who actually shows up.</h2>
-      <p class="section-sub fade-up fade-up-delay-2">Most habit apps make you feel guilty. Forged makes you feel capable.</p>
+<!-- CTA -->
+<section class="cta-section">
+  <p class="cta-label reveal">Beta access</p>
+  <h2 class="cta-headline reveal">The app is live.<br/><em>Want in?</em></h2>
+  <p class="cta-sub reveal">Forged is built and running. Before we open it up fully, we want to know who's actually keen — not just who clicked a button. Drop your details and we'll send you the link.</p>
+  <div class="cta-buttons reveal">
+    <a href="#" class="btn-primary" onclick="openBetaForm();return false;" style="font-size:16px;padding:16px 32px">Request beta access →</a>
+  </div>
+  <p class="cta-note reveal">Takes 30 seconds. No spam, no pitch deck. Just the link when we're ready to send it.</p>
+</section>
 
-      <div class="features-grid">
-        <div class="feature-card fade-up fade-up-delay-1">
-          <div class="feature-icon">🎙️</div>
-          <div class="feature-title">Voice reflections</div>
-          <div class="feature-desc">Speak your quick notes and reflections — transcribed automatically. Capture the thought before it's gone, hands-free after a workout or commute.</div>
-        </div>
-        <div class="feature-card fade-up fade-up-delay-2">
-          <div class="feature-icon">🔥</div>
-          <div class="feature-title">Streak protection</div>
-          <div class="feature-desc">Skip days protect your streak without logging. Life happens. A missed day isn't a reset — it's a skip. Your chain stays intact, your momentum stays alive.</div>
-        </div>
-        <div class="feature-card fade-up fade-up-delay-3">
-          <div class="feature-icon">⚒️</div>
-          <div class="feature-title">5 habit types</div>
-          <div class="feature-desc">Daily check-ins. Weekly targets. Progress goals. Build projects with time + wins. Limit trackers. One app for the full shape of your self-improvement.</div>
-        </div>
-        <div class="feature-card fade-up fade-up-delay-1">
-          <div class="feature-icon">📓</div>
-          <div class="feature-title">Automatic journal</div>
-          <div class="feature-desc">Every tap, note, win, and reflection is saved forever. Scroll back through your journey — see who you were becoming, day by day.</div>
-        </div>
-        <div class="feature-card fade-up fade-up-delay-2">
-          <div class="feature-icon">📊</div>
-          <div class="feature-title">Insights that matter</div>
-          <div class="feature-desc">12-week heatmaps, best streaks, completion rates. You'll see the patterns in your data that your brain couldn't track on its own.</div>
-        </div>
-        <div class="feature-card fade-up fade-up-delay-3">
-          <div class="feature-icon">🤖</div>
-          <div class="feature-title">AI habit coach <span class="feature-badge">Pro</span></div>
-          <div class="feature-desc">Coaching based on your actual habit data — not generic advice. Knows your streaks, your wins, your hard parts. Talks to you like a coach who's been watching.</div>
-        </div>
-      </div>
-    </div>
-  </section>
+<!-- FOOTER -->
+<footer>
+  <span class="footer-logo">Forged</span>
+  <div class="footer-links">
+    <a href="#">Privacy</a>
+    <a href="#">Terms</a>
+    <a href="#">Contact</a>
+  </div>
+  <span class="footer-copy">© 2025 Forged. Built with intent.</span>
+</footer>
 
-  <hr class="divider"/>
-
-  <!-- HOW IT WORKS -->
-  <section>
-    <div class="container" style="text-align:center">
-      <div class="section-label fade-up">How it works</div>
-      <h2 class="section-title fade-up fade-up-delay-1">Simple enough to stick to.<br>Deep enough to matter.</h2>
-
-      <div class="steps">
-        <div class="step fade-up fade-up-delay-1">
-          <div class="step-num">1</div>
-          <div class="step-title">Add your habits</div>
-          <div class="step-desc">Choose the type that fits — daily, weekly, a limit you're reducing, a goal you're climbing toward, or a project you're building. Up to 5 free.</div>
-        </div>
-        <div class="step fade-up fade-up-delay-2">
-          <div class="step-num">2</div>
-          <div class="step-title">Log every day</div>
-          <div class="step-desc">One tap to log. Add a voice note or reflection if you want. Each entry builds a permanent record of your consistency — not just a number.</div>
-        </div>
-        <div class="step fade-up fade-up-delay-3">
-          <div class="step-num">3</div>
-          <div class="step-title">Watch it compound</div>
-          <div class="step-desc">Streaks build. Patterns emerge. The journal fills up. You start to see who you're becoming — not just who you want to be.</div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <hr class="divider"/>
-
-  <!-- PRICING -->
-  <section class="pricing-bg">
-    <div class="container" style="text-align:center">
-      <div class="section-label fade-up">Pricing</div>
-      <h2 class="section-title fade-up fade-up-delay-1">Simple. Honest.<br>Locked in forever.</h2>
-      <p class="section-sub fade-up fade-up-delay-2" style="margin:0 auto 48px">Start free. Upgrade when you outgrow 5 habits. Beta testers keep their price forever — even after we raise it.</p>
-
-      <div class="pricing-cards fade-up fade-up-delay-1">
-        <div class="pricing-card">
-          <div class="plan-label">Free</div>
-          <div class="plan-price">$0</div>
-          <div class="plan-per">forever</div>
-          <ul class="plan-features">
-            <li class="plan-feature">Up to 5 habits</li>
-            <li class="plan-feature">All 5 habit types</li>
-            <li class="plan-feature">Voice reflections</li>
-            <li class="plan-feature">Last 7 days of history</li>
-            <li class="plan-feature">Insights dashboard</li>
-            <li class="plan-feature locked">AI Habit Coach</li>
-            <li class="plan-feature locked">Full history (all time)</li>
-            <li class="plan-feature locked">Unlimited habits</li>
-          </ul>
-          <a href="/" class="plan-cta secondary">Start free →</a>
-        </div>
-        <div class="pricing-card featured">
-          <div class="plan-tag">Beta pricing — limited spots</div>
-          <div class="plan-label" style="color:var(--gold)">Pro</div>
-          <div style="display:flex;align-items:baseline;gap:8px">
-            <div class="plan-price gold-price">$4.99</div>
-            <span class="plan-was">$7.99</span>
-          </div>
-          <div class="plan-per">/ month · locked in forever</div>
-          <ul class="plan-features">
-            <li class="plan-feature">Everything in free</li>
-            <li class="plan-feature">Unlimited habits</li>
-            <li class="plan-feature">AI Habit Coach</li>
-            <li class="plan-feature">Full history — every entry</li>
-            <li class="plan-feature">Advanced analytics (soon)</li>
-            <li class="plan-feature">Push reminders (soon)</li>
-          </ul>
-          <a href="/" class="plan-cta primary">Reserve my beta spot →</a>
-        </div>
-      </div>
-
-      <div class="spots-bar fade-up fade-up-delay-2" id="spots-bar">
-        <div class="spots-fill-wrap"><div class="spots-fill" id="spots-fill"></div></div>
-        <div class="spots-text" id="spots-text">Loading spots...</div>
-      </div>
-      <div class="pricing-note fade-up fade-up-delay-3">
-        Beta price is yours forever — it won't increase when we publicly launch.
-      </div>
-    </div>
-  </section>
-
-  <hr class="divider"/>
-
-  <!-- iOS INSTALL -->
-  <section>
-    <div class="container">
-      <div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:8px">
-        <div style="flex:1;min-width:240px">
-          <div class="section-label fade-up">iPhone / iPad</div>
-          <h2 class="section-title fade-up fade-up-delay-1" style="margin-bottom:12px">Add to your<br>home screen.</h2>
-          <p class="section-sub fade-up fade-up-delay-2" style="margin-bottom:0">No App Store needed. Forged works as a full-screen app on iPhone — open it like any other app, it loads instantly, and works offline.</p>
-        </div>
-        <div style="flex:1;min-width:240px;background:var(--surface);border-radius:var(--r);border:0.5px solid var(--border);padding:20px;margin-top:auto" class="fade-up fade-up-delay-3">
-          <div style="font-size:11px;color:var(--gold);font-weight:600;text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px">Android too</div>
-          <div style="font-size:14px;color:var(--sub);line-height:1.7">On Android, tap the ⋮ menu in Chrome, then <strong style="color:var(--text)">Add to Home Screen</strong>. Works exactly the same.</div>
-        </div>
-      </div>
-
-      <div class="install-steps">
-        <div class="install-step fade-up fade-up-delay-1" data-arrow="→">
-          <div class="install-num">1</div>
-          <span class="install-icon">🧭</span>
-          <div class="install-title">Open in Safari</div>
-          <div class="install-desc">Forged must be opened in Safari on iPhone — not Chrome or Firefox. The install option only appears in Safari.</div>
-        </div>
-        <div class="install-step fade-up fade-up-delay-2" data-arrow="→">
-          <div class="install-num">2</div>
-          <span class="install-icon">⬆️</span>
-          <div class="install-title">Tap Share</div>
-          <div class="install-desc">Tap the Share button at the bottom of Safari — it looks like a box with an arrow pointing up.</div>
-        </div>
-        <div class="install-step fade-up fade-up-delay-3" data-arrow="→">
-          <div class="install-num">3</div>
-          <span class="install-icon">➕</span>
-          <div class="install-title">Add to Home Screen</div>
-          <div class="install-desc">Scroll down in the share menu and tap <strong>Add to Home Screen</strong>. Give it a name or leave it as Forged.</div>
-        </div>
-        <div class="install-step fade-up fade-up-delay-4">
-          <div class="install-num">4</div>
-          <span class="install-icon">📱</span>
-          <div class="install-title">Tap Add</div>
-          <div class="install-desc">Confirm and you're done. Forged appears on your home screen and opens full-screen — no browser bar, no distractions.</div>
-        </div>
-      </div>
-
-      <div class="install-note fade-up fade-up-delay-5">
-        <span class="install-note-icon">💡</span>
-        <span><strong style="color:var(--text)">Tip:</strong> Once installed, open the app from your home screen tile — not from the browser. You'll get the full experience: instant load, full screen, push notifications when they're ready.</span>
-      </div>
-    </div>
-  </section>
-
-  <hr class="divider"/>
-
-  <!-- FINAL CTA -->
-  <section class="final-cta-section">
-    <div class="orb orb-1" style="left:30%;top:20%"></div>
-    <div class="orb orb-2" style="right:20%;bottom:10%"></div>
-    <div style="position:relative;z-index:1">
-      <h2 class="fade-up">Start forging<br><em>today.</em></h2>
-      <p class="fade-up fade-up-delay-1">
-        First 100 beta users get $4.99/mo locked in forever.<br>
-        No App Store. No credit card. Start in 30 seconds.
-      </p>
-      <a href="/" class="btn-gold fade-up fade-up-delay-2">Open Forged →</a>
-      <div class="fade-up fade-up-delay-3" style="margin-top:20px;font-size:13px;color:var(--muted)">
-        Free to start · Add to home screen · Works on all devices
-      </div>
-    </div>
-  </section>
-
-  <!-- FOOTER -->
-  <footer>
-    <div style="font-family:var(--serif);font-size:20px;color:var(--text)">Forged.</div>
-    <div>Built by Corbyn Miller · <a href="mailto:corbyn.miller2000@gmail.com">corbyn.miller2000@gmail.com</a></div>
-    <div><a href="/">Open app</a> · <a href="mailto:corbyn.miller2000@gmail.com?subject=Forged%20Feedback">Send feedback</a></div>
-  </footer>
-
-  <script>
-    // ── Referral param ─────────────────────────────────────────────────────────
-    const urlParams = new URLSearchParams(window.location.search);
-    const pendingRef = urlParams.get('ref');
-
-    // Validate: 6 chars, uppercase letters + digits only (no O, 0, I, 1)
-    const validRef = pendingRef && /^[A-Z2-9]{6}$/.test(pendingRef) ? pendingRef : null;
-
-    if (validRef) {
-      // Persist for when they tap through to the app
-      localStorage.setItem('forged_pending_ref', validRef);
-
-      // Build app link with ref param forwarded
-      const appLink = '/?ref=' + validRef;
-
-      // Update all CTA links to forward the ref
-      document.querySelectorAll('a[href="/"]').forEach(el => {
-        el.setAttribute('href', appLink);
-      });
-
-      // Show referral welcome banner
-      const banner = document.createElement('div');
-      banner.id = 'ref-banner';
-      banner.style.cssText = `
-        position: fixed; top: 0; left: 0; right: 0; z-index: 200;
-        background: rgba(200,144,42,0.12);
-        border-bottom: 0.5px solid rgba(200,144,42,0.35);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        padding: 10px 20px;
-        display: flex; align-items: center; justify-content: center; gap: 10px;
-        font-family: var(--sans); font-size: 13px; color: var(--text);
-        text-align: center;
-        animation: fadeUp 0.5s ease both;
-      `;
-      banner.innerHTML = `
-        <span style="font-size:16px">🔗</span>
-        <span>A friend shared Forged with you — <strong style="color:var(--gold)">beta pricing is still available.</strong></span>
-        <button onclick="this.parentElement.remove()" style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;line-height:1;padding:0;margin-left:4px">×</button>
-      `;
-      document.body.prepend(banner);
-
-      // Offset nav so it doesn't overlap banner
-      const nav = document.querySelector('nav');
-      if (nav) nav.style.top = banner.offsetHeight + 'px';
-    }
-
-    // ── Scroll animations ──────────────────────────────────────────────────────
-    const observer = new IntersectionObserver((entries) => {
-      entries.forEach(e => {
-        if (e.isIntersecting) {
-          e.target.classList.add('visible');
-        }
-      });
-    }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
-    document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
-
-    // ── Spots counter from Supabase ────────────────────────────────────────────
-    const SUPABASE_URL = 'https://apdmvbzfjuvxworjepze.supabase.co';
-    const SUPABASE_KEY = 'sb_publishable_GdMepnUv2W4VRiOuV23xiA_O4J11RMl';
-
-    async function loadSpots() {
-      try {
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/beta_spot_count`, {
-          method: 'POST',
-          headers: {
-            'apikey': SUPABASE_KEY,
-            'Content-Type': 'application/json'
-          },
-          body: '{}'
-        });
-        const count = await res.json();
-        if (typeof count === 'number') {
-          const left = Math.max(0, 100 - count);
-          const pct  = Math.min(100, (count / 100) * 100);
-          const el   = document.getElementById('spots-text');
-          const fill = document.getElementById('spots-fill');
-          if (el)   el.textContent  = left <= 10 ? `⚠️ ${left} spots left` : `${left} of 100 spots remaining`;
-          if (fill) fill.style.width = pct + '%';
-          if (el && left <= 10) el.style.color = '#e74c3c';
-        }
-      } catch (e) {
-        const el = document.getElementById('spots-text');
-        if (el) el.textContent = 'Beta pricing available now';
+<script>
+  // Scroll reveal
+  const reveals = document.querySelectorAll('.reveal');
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        e.target.classList.add('visible');
+        io.unobserve(e.target);
       }
-    }
-    loadSpots();
+    });
+  }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+  reveals.forEach(el => io.observe(el));
 
-    // ── Animate spots bar fill when visible ──────────────────────────────────
-    const spotsBarObs = new IntersectionObserver((entries) => {
-      entries.forEach(e => {
-        if (e.isIntersecting) loadSpots();
+  // Stagger children of grids
+  document.querySelectorAll('.features-grid, .how-steps, .types-row, .insights-grid').forEach(grid => {
+    Array.from(grid.children).forEach((child, i) => {
+      child.style.transitionDelay = `${i * 0.08}s`;
+      if (!child.classList.contains('reveal')) {
+        child.classList.add('reveal');
+        io.observe(child);
+      }
+    });
+  });
+
+  // Smooth nav hide/show on scroll
+  let lastY = 0;
+  const nav = document.querySelector('nav');
+  window.addEventListener('scroll', () => {
+    const y = window.scrollY;
+    nav.style.transform = y > lastY && y > 80 ? 'translateY(-100%)' : 'translateY(0)';
+    nav.style.transition = 'transform 0.3s ease';
+    lastY = y;
+  }, { passive: true });
+</script>
+
+<!-- BETA INTEREST FORM MODAL -->
+<div id="betaOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:1000;align-items:flex-end;justify-content:center;" onclick="if(event.target===this)closeBetaForm()">
+  <div id="betaSheet" style="width:520px;max-width:100vw;background:#1C1C18;border-radius:22px 22px 0 0;padding:0 28px 52px;transform:translateY(100%);transition:transform 0.35s cubic-bezier(0.32,0.72,0,1);overflow-y:auto;max-height:92vh;">
+    <div style="width:36px;height:4px;background:rgba(255,255,255,0.15);border-radius:2px;margin:14px auto 24px;"></div>
+
+    <!-- Default state -->
+    <div id="betaFormState">
+      <p style="font-size:11px;font-weight:500;color:#C0392B;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:8px;">Beta access</p>
+      <h2 style="font-family:'DM Serif Display',Georgia,serif;font-size:26px;color:#F0EDE6;margin-bottom:8px;line-height:1.2;">Want to try Forged?</h2>
+      <p style="font-size:14px;color:#A8A49C;line-height:1.65;margin-bottom:28px;">The app is live. We're sending access to people who are actually keen — not everyone at once. Fill this in and we'll send you the link.</p>
+
+      <form id="betaForm" name="beta-interest" method="POST" data-netlify="true" onsubmit="handleBetaSubmit(event)">
+        <input type="hidden" name="form-name" value="beta-interest"/>
+
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:12px;font-weight:500;color:#6A6860;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Name</label>
+          <input type="text" name="name" required placeholder="Your first name" style="width:100%;background:#131310;border:0.5px solid rgba(255,255,255,0.12);border-radius:10px;padding:12px 14px;font-size:14px;color:#F0EDE6;font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box;" onfocus="this.style.borderColor='rgba(192,57,43,0.5)'" onblur="this.style.borderColor='rgba(255,255,255,0.12)'"/>
+        </div>
+
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:12px;font-weight:500;color:#6A6860;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Email</label>
+          <input type="email" name="email" required placeholder="you@example.com" style="width:100%;background:#131310;border:0.5px solid rgba(255,255,255,0.12);border-radius:10px;padding:12px 14px;font-size:14px;color:#F0EDE6;font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box;" onfocus="this.style.borderColor='rgba(192,57,43,0.5)'" onblur="this.style.borderColor='rgba(255,255,255,0.12)'"/>
+        </div>
+
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:12px;font-weight:500;color:#6A6860;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">Why are you interested? <span style="color:#3E3E3A;font-weight:400;text-transform:none;letter-spacing:0;">(optional)</span></label>
+          <textarea name="why" rows="3" placeholder="What are you trying to change or track?" style="width:100%;background:#131310;border:0.5px solid rgba(255,255,255,0.12);border-radius:10px;padding:12px 14px;font-size:14px;color:#F0EDE6;font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box;resize:vertical;" onfocus="this.style.borderColor='rgba(192,57,43,0.5)'" onblur="this.style.borderColor='rgba(255,255,255,0.12)'"></textarea>
+        </div>
+
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:12px;font-weight:500;color:#6A6860;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:10px;">Would you be willing to give quick feedback once a week to help improve the app?</label>
+          <div style="display:flex;gap:10px;">
+            <label style="flex:1;display:flex;align-items:center;gap:8px;background:#131310;border:0.5px solid rgba(255,255,255,0.12);border-radius:10px;padding:11px 14px;cursor:pointer;font-size:14px;color:#A8A49C;">
+              <input type="radio" name="feedback" value="yes" style="accent-color:#C0392B;"/> Yes
+            </label>
+            <label style="flex:1;display:flex;align-items:center;gap:8px;background:#131310;border:0.5px solid rgba(255,255,255,0.12);border-radius:10px;padding:11px 14px;cursor:pointer;font-size:14px;color:#A8A49C;">
+              <input type="radio" name="feedback" value="no" style="accent-color:#C0392B;"/> No
+            </label>
+          </div>
+        </div>
+
+        <div style="margin-bottom:28px;">
+          <label style="display:block;font-size:12px;font-weight:500;color:#6A6860;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:10px;">Would you be willing to pay $5/month during beta to access and test the AI features?</label>
+          <div style="display:flex;gap:10px;">
+            <label style="flex:1;display:flex;align-items:center;gap:8px;background:#131310;border:0.5px solid rgba(255,255,255,0.12);border-radius:10px;padding:11px 14px;cursor:pointer;font-size:14px;color:#A8A49C;">
+              <input type="radio" name="pay" value="yes" style="accent-color:#C0392B;"/> Yes
+            </label>
+            <label style="flex:1;display:flex;align-items:center;gap:8px;background:#131310;border:0.5px solid rgba(255,255,255,0.12);border-radius:10px;padding:11px 14px;cursor:pointer;font-size:14px;color:#A8A49C;">
+              <input type="radio" name="pay" value="maybe" style="accent-color:#C0392B;"/> Maybe
+            </label>
+            <label style="flex:1;display:flex;align-items:center;gap:8px;background:#131310;border:0.5px solid rgba(255,255,255,0.12);border-radius:10px;padding:11px 14px;cursor:pointer;font-size:14px;color:#A8A49C;">
+              <input type="radio" name="pay" value="no" style="accent-color:#C0392B;"/> No
+            </label>
+          </div>
+        </div>
+
+        <button type="submit" style="width:100%;padding:14px;border-radius:12px;border:none;background:#C0392B;color:#fff;font-size:15px;font-weight:500;cursor:pointer;font-family:'DM Sans',sans-serif;transition:opacity 0.2s;" onmouseover="this.style.opacity='0.88'" onmouseout="this.style.opacity='1'">
+          Send me the link
+        </button>
+        <button type="button" onclick="closeBetaForm()" style="width:100%;padding:12px;border-radius:12px;border:0.5px solid rgba(255,255,255,0.1);background:none;color:#6A6860;font-size:14px;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:10px;">
+          Maybe later
+        </button>
+      </form>
+    </div>
+
+    <!-- Success state -->
+    <div id="betaSuccessState" style="display:none;text-align:center;padding:20px 0 10px;">
+      <div style="font-size:48px;margin-bottom:16px;">🔥</div>
+      <h2 style="font-family:'DM Serif Display',Georgia,serif;font-size:26px;color:#F0EDE6;margin-bottom:10px;">You're on the list.</h2>
+      <p style="font-size:14px;color:#A8A49C;line-height:1.7;margin-bottom:28px;">We'll send you the link when access opens up. Shouldn't be long.</p>
+      <button onclick="closeBetaForm()" style="padding:13px 28px;border-radius:12px;border:0.5px solid rgba(255,255,255,0.12);background:none;color:#F0EDE6;font-size:14px;cursor:pointer;font-family:'DM Sans',sans-serif;">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  function openBetaForm() {
+    const overlay = document.getElementById('betaOverlay');
+    const sheet = document.getElementById('betaSheet');
+    overlay.style.display = 'flex';
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        sheet.style.transform = 'translateY(0)';
       });
-    }, { threshold: 0.5 });
-    const sbar = document.getElementById('spots-bar');
-    if (sbar) spotsBarObs.observe(sbar);
-  </script>
+    });
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeBetaForm() {
+    const overlay = document.getElementById('betaOverlay');
+    const sheet = document.getElementById('betaSheet');
+    sheet.style.transform = 'translateY(100%)';
+    setTimeout(() => {
+      overlay.style.display = 'none';
+      document.body.style.overflow = '';
+    }, 350);
+  }
+
+  async function handleBetaSubmit(e) {
+    e.preventDefault();
+    const form = document.getElementById('betaForm');
+    const data = new FormData(form);
+
+    try {
+      await fetch('/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams(data).toString()
+      });
+    } catch(err) {
+      // fail silently — still show success
+    }
+
+    document.getElementById('betaFormState').style.display = 'none';
+    document.getElementById('betaSuccessState').style.display = 'block';
+    document.getElementById('betaSheet').scrollTop = 0;
+  }
+</script>
 </body>
 </html>

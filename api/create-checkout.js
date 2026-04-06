@@ -1,10 +1,26 @@
 import Stripe from "stripe";
+import { createClient } from "@supabase/supabase-js";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
 
-  const { userId, email, plan = "monthly" } = req.body || {};
-  if (!userId) return res.status(400).json({ error: "Missing userId" });
+  const { plan = "monthly" } = req.body || {};
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.toLowerCase().startsWith("bearer ")
+    ? authHeader.slice(7).trim()
+    : null;
+  if (!token) return res.status(401).json({ error: "Missing Authorization bearer token" });
+
+  const supabase = createClient(
+    "https://apdmvbzfjuvxworjepze.supabase.co",
+    process.env.SUPABASE_SERVICE_ROLE_KEY
+  );
+  const { data: { user }, error: userErr } = await supabase.auth.getUser(token);
+  if (userErr || !user?.id) {
+    return res.status(401).json({ error: "Invalid session" });
+  }
+  const userId = user.id;
+  const email = user.email || null;
 
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
