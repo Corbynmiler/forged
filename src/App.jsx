@@ -3929,6 +3929,85 @@ function CheckEmailScreen({ email, onBack }) {
   );
 }
 
+// ─── PAYWALL SCREEN ───────────────────────────────────────────────────────────
+function PaywallScreen({ onPaid }) {
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState(null);
+
+  async function handleCheckout() {
+    setLoading(true);
+    setError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("Not signed in");
+      const res = await fetch("/api/create-checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ plan: "monthly" }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.url) throw new Error(json.error || "Could not start checkout");
+      window.location.href = json.url;
+    } catch (err) {
+      setError(err.message || "Something went wrong. Try again.");
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"0 28px" }}>
+      <style>{`
+        @keyframes paywallIn { from { opacity:0; transform:translateY(18px); } to { opacity:1; transform:translateY(0); } }
+      `}</style>
+      <div style={{ width:"100%", maxWidth:360, animation:"paywallIn 0.5s ease both" }}>
+        {/* Wordmark */}
+        <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:32, textAlign:"center", letterSpacing:"0.01em" }}>Forged.</div>
+
+        {/* Card */}
+        <div style={{ background:T.surface, borderRadius:20, border:`0.5px solid ${T.border}`, padding:"32px 28px 28px", textAlign:"center" }}>
+          <div style={{ fontSize:40, marginBottom:18 }}>🔥</div>
+
+          <div style={{ fontSize:11, fontWeight:600, color:T.accent, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:10 }}>
+            Beta access
+          </div>
+
+          <h1 style={{ fontFamily:T.serif, fontSize:26, color:T.text, margin:"0 0 14px", lineHeight:1.2 }}>
+            Forged is in beta.
+          </h1>
+
+          <p style={{ fontSize:14, color:T.sub, lineHeight:1.7, margin:"0 0 28px" }}>
+            Right now, access costs <strong style={{ color:T.text }}>$4.99/month</strong>. You're helping shape what this becomes — and if you're one of the first 100 users, you lock in that price for life once we launch.
+          </p>
+
+          <button
+            onClick={handleCheckout}
+            disabled={loading}
+            style={{ width:"100%", padding:"15px 0", borderRadius:12, border:"none", background:T.accent, color:"#fff", fontSize:15, fontWeight:600, cursor:loading?"not-allowed":"pointer", opacity:loading?0.7:1, fontFamily:T.font, marginBottom:12, transition:"opacity 0.15s" }}
+          >
+            {loading ? "Opening checkout…" : "Unlock beta access — $4.99/month"}
+          </button>
+
+          {error && (
+            <p style={{ fontSize:12, color:"#e05c5c", margin:"0 0 10px", lineHeight:1.5 }}>{error}</p>
+          )}
+
+          <a
+            href="/landing.html"
+            style={{ display:"block", fontSize:13, color:T.muted, textDecoration:"none", padding:"8px 0" }}
+          >
+            Join the waitlist instead →
+          </a>
+        </div>
+
+        <p style={{ fontSize:11, color:T.hint, textAlign:"center", marginTop:20, lineHeight:1.6 }}>
+          Secure checkout via Stripe. Cancel anytime.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ─── ROOT APP ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [onboarded,   setOnboarded]  = useState(null);
@@ -3952,9 +4031,10 @@ export default function App() {
   const [passwordRecovery, setPasswordRecovery]  = useState(false);
   // Tour temporarily disabled — state kept for re-enabling
   const [showShare,   setShowShare]   = useState(false);
-  const [isPro,       setIsPro]       = useState(false);
-  const [coachName,   setCoachName]   = useState("Coach");
-  const [showUpgrade, setShowUpgrade] = useState(false);
+  const [isPro,          setIsPro]          = useState(false);
+  const [coachName,      setCoachName]      = useState("Coach");
+  const [showUpgrade,    setShowUpgrade]    = useState(false);
+  const [checkingPayment,setCheckingPayment]= useState(false);
   const [refCode,     setRefCode]     = useState(null);
   const [authEmail,   setAuthEmail]   = useState(null);
   /** Supabase auth user id when signed in; null when logged out */
@@ -4340,19 +4420,36 @@ export default function App() {
       localStorage.setItem("forged_pending_ref", ref);
     }
     if (params.get("checkout") === "success") {
-      // Clean URL then reload Pro status from DB
+      // Clean URL, then poll until webhook fires (up to ~15s)
       window.history.replaceState({}, "", window.location.pathname);
-      const uid = userIdRef.current;
-      if (uid) {
-        supabase.from("profiles").select("is_pro, is_admin").eq("id", uid).single().then(({ data }) => {
-          if (data && (data.is_pro || data.is_admin)) {
-            setIsPro(true);
-            const id = Date.now();
-            setToasts(t => [...t, { id, msg: "🎉 Thanks for becoming an early supporter!" }]);
-            setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 4000);
-          }
-        });
-      }
+      setCheckingPayment(true);
+      let attempts = 0;
+      const pollId = setInterval(async () => {
+        attempts++;
+        const uid = userIdRef.current;
+        if (!uid) {
+          // Auth not loaded yet — keep waiting up to 15 cycles
+          if (attempts > 15) { setCheckingPayment(false); clearInterval(pollId); }
+          return;
+        }
+        const { data } = await supabase
+          .from("profiles")
+          .select("is_pro, is_admin")
+          .eq("id", uid)
+          .single();
+        if (data?.is_pro || data?.is_admin) {
+          setIsPro(true);
+          setCheckingPayment(false);
+          clearInterval(pollId);
+          const id = Date.now();
+          setToasts(t => [...t, { id, msg: "🎉 Beta access unlocked. Welcome to Forged!" }]);
+          setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 5000);
+        } else if (attempts >= 15) {
+          // Webhook hasn't fired — user lands on paywall with a note
+          setCheckingPayment(false);
+          clearInterval(pollId);
+        }
+      }, 1000);
     }
   }, []);
 
@@ -4460,6 +4557,26 @@ export default function App() {
           syncProfile({ onboarded: true, name: user.name || "", xp: 0 });
         }}
       /></>
+    );
+  }
+
+  // Confirming payment after Stripe redirect — poll until webhook fires
+  if (!loading && !authScreen && accountDataReady && onboarded && checkingPayment) {
+    return (
+      <><style>{CSS}</style>
+      <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16 }}>
+        <div style={{ fontFamily:T.serif, fontSize:22, color:T.text }}>Forged.</div>
+        <div style={{ width:22, height:22, border:`2px solid ${T.border}`, borderTopColor:T.accent, borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
+        <div style={{ fontSize:13, color:T.muted }}>Confirming your payment…</div>
+      </div></>
+    );
+  }
+
+  // Paywall — show for all subscribed-false users after onboarding
+  if (!loading && !authScreen && accountDataReady && onboarded && !isPro) {
+    return (
+      <><style>{CSS}</style>
+      <PaywallScreen onPaid={() => setIsPro(true)} /></>
     );
   }
 

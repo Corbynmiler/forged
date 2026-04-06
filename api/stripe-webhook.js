@@ -46,7 +46,12 @@ export default async function handler(req, res) {
 
     const { error } = await supabase
       .from("profiles")
-      .update({ is_pro: true, updated_at: new Date().toISOString() })
+      .update({
+        is_pro: true,
+        stripe_customer_id: session.customer ?? null,
+        stripe_subscription_id: session.subscription ?? null,
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", userId);
 
     if (error) {
@@ -68,7 +73,7 @@ export default async function handler(req, res) {
       );
       await supabase
         .from("profiles")
-        .update({ is_pro: false, updated_at: new Date().toISOString() })
+        .update({ is_pro: false, stripe_subscription_id: null, updated_at: new Date().toISOString() })
         .eq("id", userId);
       console.log("Pro revoked for userId:", userId);
     }
