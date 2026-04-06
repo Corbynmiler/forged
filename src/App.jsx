@@ -4626,15 +4626,6 @@ export default function App() {
               accountDataLoadedRef.current = false;
               setAccountDataReady(false);
               userIdRef.current = null;
-              // Force a token refresh before querying. This is the main fix for "first load of
-              // the day" — the access token may have expired overnight. refreshSession() ensures
-              // the Supabase client has a fresh JWT before PostgREST queries fire.
-              try {
-                const { error: rfErr } = await supabase.auth.refreshSession();
-                if (rfErr) console.warn("[Forged] INITIAL_SESSION: refreshSession error:", rfErr.message);
-              } catch(rfEx) {
-                console.warn("[Forged] INITIAL_SESSION: refreshSession threw:", rfEx.message);
-              }
               const ok = await loadUserDataWithRetries(session.user.id);
               if (!mounted) return;
               if (ok) setAccountLoadError(false);
