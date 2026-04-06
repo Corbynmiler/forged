@@ -19,36 +19,45 @@ export default async function handler(req, res) {
   const sig = req.headers["stripe-signature"];
   if (!sig) return res.status(400).json({ error: "Missing stripe-signature header" });
 
+  // Support both canonical and variant env var names
+  const stripeKey     = process.env.STRIPE_SECRET_KEY   || process.env.Stripe_Secret_Key_Test;
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || process.env.STRIPE_WEBHOOK_KEY;
+
+  if (!stripeKey || !webhookSecret) {
+    console.error("Missing Stripe env vars — stripeKey:", !!stripeKey, "webhookSecret:", !!webhookSecret);
+    return res.status(500).json({ error: "Stripe not configured" });
+  }
+
   const rawBody = await getRawBody(req);
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+  const stripe  = new Stripe(stripeKey);
 
   let event;
   try {
-    event = stripe.webhooks.constructEvent(rawBody, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
   } catch (err) {
     console.error("Webhook signature verification failed:", err.message);
     return res.status(400).json({ error: `Webhook error: ${err.message}` });
   }
 
+  const supabase = createClient(
+    "https://apdmvbzfjuvxworjepze.supabase.co",
+    process.env.SUPABASE_SERVICE_ROLE_KEY
+  );
+
   if (event.type === "checkout.session.completed") {
     const session = event.data.object;
-    const userId = session.client_reference_id;
+    const userId  = session.client_reference_id;
 
     if (!userId) {
       console.error("No client_reference_id on checkout session", session.id);
-      return res.status(200).json({ received: true }); // still 200 so Stripe doesn't retry
+      return res.status(200).json({ received: true });
     }
-
-    const supabase = createClient(
-      "https://apdmvbzfjuvxworjepze.supabase.co",
-      process.env.SUPABASE_SERVICE_ROLE_KEY
-    );
 
     const { error } = await supabase
       .from("profiles")
       .update({
         is_pro: true,
-        stripe_customer_id: session.customer ?? null,
+        stripe_customer_id:     session.customer     ?? null,
         stripe_subscription_id: session.subscription ?? null,
         updated_at: new Date().toISOString(),
       })
@@ -58,24 +67,31 @@ export default async function handler(req, res) {
       console.error("Supabase update failed for userId", userId, error);
       return res.status(500).json({ error: "DB update failed" });
     }
-
-    console.log("Pro activated for userId:", userId);
+    console.log("Beta access activated for userId:", userId);
   }
 
-  // For subscription cancellations (optional future handling)
   if (event.type === "customer.subscription.deleted") {
     const subscription = event.data.object;
     const userId = subscription.metadata?.userId;
     if (userId) {
-      const supabase = createClient(
-        "https://apdmvbzfjuvxworjepze.supabase.co",
-        process.env.SUPABASE_SERVICE_ROLE_KEY
-      );
       await supabase
         .from("profiles")
         .update({ is_pro: false, stripe_subscription_id: null, updated_at: new Date().toISOString() })
         .eq("id", userId);
-      console.log("Pro revoked for userId:", userId);
+      console.log("Beta access revoked for userId:", userId);
+    }
+  }
+
+  if (event.type === "customer.subscription.updated") {
+    const subscription = event.data.object;
+    const userId = subscription.metadata?.userId;
+    if (userId) {
+      const active = subscription.status === "active" || subscription.status === "trialing";
+      await supabase
+        .from("profiles")
+        .update({ is_pro: active, updated_at: new Date().toISOString() })
+        .eq("id", userId);
+      console.log(`Subscription updated for userId: ${userId} — status: ${subscription.status}`);
     }
   }
 
