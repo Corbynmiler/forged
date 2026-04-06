@@ -2622,40 +2622,7 @@ function HabitsScreen({ habits, onEdit, onDelete, onAdd, onReflect, onCoach, onU
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2v10M2 7h10" stroke={T.muted} strokeWidth="1.5" strokeLinecap="round"/></svg>Add habit
       </button>
 
-      {/* AI Coach card */}
-      <style>{`
-        @keyframes coachPulse {
-          0%,100% { box-shadow: 0 0 0 0 rgba(200,144,42,0); }
-          50% { box-shadow: 0 0 0 8px rgba(200,144,42,0.12); }
-        }
-      `}</style>
-      <div data-tour="coach-card" onClick={isPro ? onCoach : onUpgrade}
-        style={{ margin:"16px 14px 0", background:T.raised, borderRadius:T.r, border:`1px solid rgba(200,144,42,${isPro?"0.4":"0.2"})`, padding:"16px 18px", cursor:"pointer" }}>
-        <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:10 }}>
-          <div style={{ width:42, height:42, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:21, flexShrink:0, animation: isPro ? "coachPulse 3s ease-in-out infinite" : "none" }}>🤖</div>
-          <div style={{ flex:1 }}>
-            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-              <div style={{ fontSize:14, fontWeight:600, color:T.text }}>{coachName || "AI Coach"}</div>
-              {isPro
-                ? <div style={{ display:"flex", alignItems:"center", gap:4 }}><div style={{ width:6, height:6, borderRadius:"50%", background:T.green }}/><div style={{ fontSize:10, color:T.green, fontWeight:500 }}>Active</div></div>
-                : <div style={{ fontSize:9, color:T.gold, background:"rgba(200,144,42,0.15)", border:`0.5px solid rgba(200,144,42,0.3)`, borderRadius:10, padding:"2px 7px", fontWeight:600, letterSpacing:"0.06em", textTransform:"uppercase" }}>Early supporter</div>
-              }
-            </div>
-            <div style={{ fontSize:12, color:T.muted, marginTop:1 }}>
-              {isPro ? "Coaching based on your actual habits & reflections" : "Unlock with early supporter access"}
-            </div>
-          </div>
-          {!isPro && <div style={{ fontSize:16, color:T.hint }}>🔒</div>}
-        </div>
-        {/* Preview bubble */}
-        <div style={{ background:T.surface, borderRadius:"12px 12px 12px 3px", padding:"10px 14px", fontSize:13, color:T.sub, lineHeight:1.6, borderLeft:`2px solid rgba(200,144,42,0.3)`, filter: isPro ? "none" : "blur(0px)" }}>
-          {isPro
-            ? `"What's on your mind? I can see your streaks, reflections, and patterns — ask me anything."`
-            : `"Hey — I can see your habits. I can help you spot patterns, troubleshoot blocks, and figure out what to focus on next."`
-          }
-        </div>
-        {!isPro && <div style={{ marginTop:10, fontSize:11, color:T.gold, textAlign:"center", letterSpacing:"0.04em", fontWeight:500 }}>✦ See early supporter access →</div>}
-      </div>
+      <div style={{ paddingBottom:16 }}></div>
     </div>
   );
 }
@@ -2663,7 +2630,7 @@ function HabitsScreen({ habits, onEdit, onDelete, onAdd, onReflect, onCoach, onU
 
 
 // ─── AI HABIT COACH ──────────────────────────────────────────────────────────
-function buildCoachSystemPrompt(user, habits, coachName) {
+function buildCoachSystemPrompt(user, habits, coachName, screen) {
   const name = user?.name || "there";
   const coach = coachName || "Coach";
   const today = todayStr();
@@ -2714,7 +2681,16 @@ function buildCoachSystemPrompt(user, habits, coachName) {
     return detail;
   }).join("\n\n");
 
+  const screenCtx = {
+    today:    "The user is on the Today screen, viewing their daily habit checklist.",
+    habits:   "The user is on the Habits screen, viewing all their habits and their configurations.",
+    journal:  "The user is on the Journal screen, reviewing past reflections and notes.",
+    insights: "The user is on the Insights screen, seeing stats and streak charts.",
+    profile:  "The user is on the Profile screen.",
+  };
   return `You are ${coach}, a personal habit coach inside Forged, a minimalist habit-tracking app. Your job is to help ${name} understand their habits, spot patterns, troubleshoot blocks, and stay motivated — using their actual data below.
+
+Current screen: ${screenCtx[screen] || "The user is using the app."}
 
 Today: ${today}
 User: ${name}
@@ -2732,7 +2708,7 @@ Guidelines:
 - Never make up data or invent habit details not shown above.`;
 }
 
-function AICoach({ habits, user, isPro, onClose, onUpgrade, coachName }) {
+function AICoach({ habits, user, isPro, onClose, onUpgrade, coachName, currentScreen }) {
   const cName = coachName || "Coach";
   const greeting = `Hey ${user?.name || "there"} 👋 I can see you're working on ${habits.length} habit${habits.length !== 1 ? "s" : ""}. What's on your mind?`;
   const [messages, setMessages] = useState([{ role:"assistant", content:greeting }]);
@@ -2759,7 +2735,7 @@ function AICoach({ habits, user, isPro, onClose, onUpgrade, coachName }) {
         method:"POST",
         headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({
-          system:   buildCoachSystemPrompt(user, habits, cName),
+          system:   buildCoachSystemPrompt(user, habits, cName, currentScreen),
           messages: next.map(m => ({ role:m.role, content:m.content })),
         }),
       });
@@ -2982,53 +2958,163 @@ const FOCUS_OPTIONS = [
   { label:"Something else",       emoji:"✨", habitType:"daily",    name:"My habit",    color:"#C0392B", reflectionPrompt:"How did it go today?" },
 ];
 
-function OnboardingScreen({ onComplete, onSkip }) {
-  const [step, setStep] = useState(0);
-  const [name, setName] = useState("");
-  const [coachNameInput, setCoachNameInput] = useState("");
-  // Multi-select: array of selected labels
-  const [selected, setSelected] = useState([]);
-  const [weightGoal, setWeightGoal] = useState({ start:"", target:"", unit:"kg" });
-  const [limitBudget, setLimitBudget] = useState({ budget:"60", unit:"min", name:"" });
+function buildDemoHabits() {
+  return [
+    {
+      id:"demo-1", name:"Gym", emoji:"🏋️", habitType:"weekly", weeklyTarget:3,
+      color:"#C0392B", streak:4, bestStreak:4, reflection:true,
+      reflectionPrompt:"What felt strong? What needs work?",
+      logs:[
+        { date:daysAgo(1), value:true, note:"" },
+        { date:daysAgo(3), value:true, note:"", reflection:"Bench felt heavy but got through it." },
+        { date:daysAgo(5), value:true, note:"", reflection:"Best squat session in weeks." },
+        { date:daysAgo(8), value:true, note:"" },
+        { date:daysAgo(10), value:true, note:"", reflection:"Low energy — skipped isolation work." },
+        { date:daysAgo(12), value:true, note:"" },
+      ],
+    },
+    {
+      id:"demo-2", name:"Read", emoji:"📚", habitType:"daily",
+      color:"#C8902A", streak:6, bestStreak:11, reflection:true,
+      reflectionPrompt:"What's one idea worth keeping?",
+      logs:[
+        { date:todayStr(), value:true, note:"" },
+        { date:daysAgo(1), value:true, note:"", reflection:"The idea about deep work resonated." },
+        { date:daysAgo(2), value:true, note:"" },
+        { date:daysAgo(3), value:true, note:"", reflection:"Hard to focus but got 20 pages in." },
+        { date:daysAgo(4), value:true, note:"" },
+        { date:daysAgo(5), value:true, note:"" },
+        { date:daysAgo(7), value:true, note:"" },
+        { date:daysAgo(9), value:true, note:"" },
+        { date:daysAgo(11), value:true, note:"" },
+        { date:daysAgo(13), value:true, note:"" },
+      ],
+    },
+    {
+      id:"demo-3", name:"Weight goal", emoji:"⚖️", habitType:"progress",
+      startValue:88, targetValue:82, unit:"kg",
+      color:"#E67E22", streak:0, bestStreak:0, reflection:true,
+      reflectionPrompt:"How many meals today? Energy levels?",
+      logs:[
+        { date:daysAgo(2), value:87.2, note:"", reflection:"3 meals, felt good." },
+        { date:daysAgo(4), value:87.5, note:"" },
+        { date:daysAgo(7), value:87.8, note:"" },
+        { date:daysAgo(10), value:88.1, note:"", reflection:"Had a big dinner." },
+        { date:daysAgo(13), value:88.4, note:"" },
+      ],
+    },
+  ];
+}
 
-  const current = ONBOARD_STEPS[step];
-  const isLast = step === ONBOARD_STEPS.length - 1;
+const HABIT_ANNOTATIONS = {
+  daily: "Daily habits work best when you attach them to something you already do — morning coffee, after lunch, before bed. The streak counter tracks your consecutive days logged. Log it even on bad days; that data matters too.",
+  weekly: "Weekly targets give you flexibility without losing accountability. You have a target number of sessions to hit each week. Log each one after it happens. Missing a day doesn't break anything — missing a week resets the streak.",
+  progress: "Progress habits track a number over time — you log where you actually are today, not where you 'should' be. The trend line shows the real picture. Consistency of logging matters more than the direction of the number.",
+  project: "Build habits track time spent and what you got from it. Log your minutes, a win, and what was hard. Over time you'll see exactly how much you're actually showing up — and what's been getting in the way.",
+  limit: "Limit habits track what you're reducing. Each tap logs one unit against your daily budget. If you go over, log it anyway — that's the data that tells you something real. The goal is honesty, not perfection.",
+};
+
+function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout }) {
+  const [step,            setStep]            = useState(0);
+  const [name,            setName]            = useState("");
+  const [coachNameInput,  setCoachNameInput]  = useState("");
+  const [selected,        setSelected]        = useState([]);
+  const [weightGoal,      setWeightGoal]      = useState({ start:"", target:"", unit:"kg" });
+  const [limitBudget,     setLimitBudget]     = useState({ budget:"60", unit:"min", name:"" });
+  const [builtHabits,     setBuiltHabits]     = useState([]);
+  const [firstLogDone,    setFirstLogDone]    = useState(false);
+  const [firstLogValue,   setFirstLogValue]   = useState("");
+  const [showingPaywall,  setShowingPaywall]  = useState(false);
+  const [showingWaitlist, setShowingWaitlist] = useState(false);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [checkoutError,   setCheckoutError]   = useState(null);
+
+  const current   = ONBOARD_STEPS[step];
+  const isLast    = step === ONBOARD_STEPS.length - 1;
+  const FOCUS_STEP = ONBOARD_STEPS.findIndex(s => s.id === "focus");
+  const COACH_STEP = ONBOARD_STEPS.findIndex(s => s.id === "coach");
+  const INTER_STEP = ONBOARD_STEPS.length;       // virtual step 5
+  const FIRST_STEP = ONBOARD_STEPS.length + 1;   // virtual step 6
+
+  const isVirtual = step >= ONBOARD_STEPS.length;
 
   function toggleFocus(label) {
-    setSelected(prev =>
-      prev.includes(label) ? prev.filter(l => l !== label) : [...prev, label]
-    );
+    setSelected(prev => prev.includes(label) ? prev.filter(l => l !== label) : [...prev, label]);
   }
 
   function buildHabitFromOption(opt, wg, lb) {
     const base = {
       id: Date.now() + Math.random() + "",
-      name: opt.name, emoji: opt.emoji, habitType: opt.habitType,
-      color: opt.color, reflection: true,
-      reflectionPrompt: opt.reflectionPrompt,
-      streak: 0, logs: [],
+      name:opt.name, emoji:opt.emoji, habitType:opt.habitType,
+      color:opt.color, reflection:true, reflectionPrompt:opt.reflectionPrompt,
+      streak:0, bestStreak:0, logs:[],
     };
-    if (opt.habitType === "weekly")   return { ...base, weeklyTarget: opt.weeklyTarget || 3 };
+    if (opt.habitType === "weekly")   return { ...base, weeklyTarget:opt.weeklyTarget || 3 };
     if (opt.habitType === "progress") return { ...base, startValue:parseFloat(wg.start)||70, targetValue:parseFloat(wg.target)||80, unit:wg.unit||"kg" };
     if (opt.habitType === "limit")    return { ...base, name:lb.name||opt.name, dailyBudget:parseInt(lb.budget)||60, unit:lb.unit||"min" };
     return base;
   }
 
+  // Pick the most interesting habit to feature first
+  function pickFirstHabit(habits) {
+    const priority = ["progress","project","weekly","limit","daily"];
+    for (const type of priority) {
+      const found = habits.find(h => h.habitType === type);
+      if (found) return found;
+    }
+    return habits[0];
+  }
+
   function handleContinue() {
     if (step === 1 && !name.trim()) return;
     if (isLast) {
+      // Build habits and move to virtual interstitial step
       const selectedOptions = FOCUS_OPTIONS.filter(o => selected.includes(o.label));
       const habits = selectedOptions.map(opt => buildHabitFromOption(opt, weightGoal, limitBudget));
-      onComplete({ name: name.trim() || "You", habits, coachName: coachNameInput.trim() || "Coach" });
+      setBuiltHabits(habits);
+      setStep(INTER_STEP);
       return;
     }
     setStep(s => s + 1);
   }
 
+  async function handleUnlock() {
+    setCheckoutLoading(true);
+    setCheckoutError(null);
+    // Build log for the first habit
+    const firstHabit = pickFirstHabit(builtHabits);
+    const logEntry = buildFirstLog(firstHabit, firstLogValue);
+    const habitsWithLog = builtHabits.map(h =>
+      h.id === firstHabit.id ? { ...h, logs:[logEntry] } : h
+    );
+    try {
+      await onSaveProgress({ name:name.trim()||"You", habits:habitsWithLog, coachName:coachNameInput.trim()||"Coach" });
+      await onCheckout();
+    } catch(err) {
+      setCheckoutError(err.message || "Something went wrong. Try again.");
+      setCheckoutLoading(false);
+    }
+  }
+
+  function buildFirstLog(habit, rawVal) {
+    const today = todayStr();
+    if (habit.habitType === "daily" || habit.habitType === "weekly") {
+      return { date:today, value:true, note:"" };
+    }
+    if (habit.habitType === "progress") {
+      return { date:today, value:parseFloat(rawVal) || (habit.startValue || 0), note:"" };
+    }
+    if (habit.habitType === "project") {
+      return { date:today, value:{ minutes:parseInt(rawVal)||30, win:null, hardPart:null }, note:"" };
+    }
+    if (habit.habitType === "limit") {
+      return { date:today, value:parseInt(rawVal)||1, note:"" };
+    }
+    return { date:today, value:true, note:"" };
+  }
+
   const hasWeight = selected.includes("Hitting a weight goal");
   const hasLimit  = selected.includes("Reducing something");
-  const FOCUS_STEP = ONBOARD_STEPS.findIndex(s => s.id === "focus");
-  const COACH_STEP = ONBOARD_STEPS.findIndex(s => s.id === "coach");
 
   const styleInp = {
     width:"100%", border:`0.5px solid ${T.borderStrong}`, borderRadius:T.rsm,
@@ -3036,9 +3122,208 @@ function OnboardingScreen({ onComplete, onSkip }) {
     outline:"none", boxSizing:"border-box",
   };
 
+  const wrap = { fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column" };
+
+  // ── Waitlist screen ──────────────────────────────────────────────────────────
+  if (showingWaitlist) {
+    return (
+      <div style={wrap}>
+        <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"0 28px", textAlign:"center" }}>
+          <div style={{ fontSize:48, marginBottom:20 }}>👋</div>
+          <h2 style={{ fontFamily:T.serif, fontSize:26, color:T.text, marginBottom:12, lineHeight:1.2 }}>We'll be in touch.</h2>
+          <p style={{ fontSize:14, color:T.muted, lineHeight:1.7, marginBottom:32, maxWidth:300 }}>
+            Head to the landing page to join the waitlist — we send invites in batches and you'll hear from us soon.
+          </p>
+          <a href="/landing.html"
+            style={{ display:"block", width:"100%", maxWidth:300, padding:"15px 0", borderRadius:12, background:T.surface, border:`0.5px solid ${T.border}`, color:T.sub, fontSize:14, textAlign:"center", textDecoration:"none" }}>
+            Go to landing page →
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Paywall step (after first log) ──────────────────────────────────────────
+  if (showingPaywall) {
+    return (
+      <div style={wrap}>
+        <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"0 28px" }}>
+          <div style={{ width:"100%", maxWidth:360 }}>
+            <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:32, textAlign:"center" }}>Forged.</div>
+            <div style={{ background:T.surface, borderRadius:20, border:`0.5px solid ${T.border}`, padding:"32px 28px 28px", textAlign:"center" }}>
+              <div style={{ fontSize:11, fontWeight:600, color:T.accent, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:14 }}>
+                First entry logged
+              </div>
+              <h1 style={{ fontFamily:T.serif, fontSize:24, color:T.text, margin:"0 0 14px", lineHeight:1.2 }}>
+                You just logged your first entry.
+              </h1>
+              <p style={{ fontSize:14, color:T.sub, lineHeight:1.75, margin:"0 0 28px" }}>
+                That's how simple it is. Beta access is <strong style={{ color:T.text }}>$4.99/month</strong> — you're one of the first people in, and that price locks in for life when we launch.
+              </p>
+              <button
+                onClick={handleUnlock}
+                disabled={checkoutLoading}
+                style={{ width:"100%", padding:"15px 0", borderRadius:12, border:"none", background:T.accent, color:"#fff", fontSize:15, fontWeight:600, cursor:checkoutLoading?"not-allowed":"pointer", opacity:checkoutLoading?0.7:1, fontFamily:T.font, marginBottom:12, transition:"opacity 0.15s" }}
+              >
+                {checkoutLoading ? "Opening checkout…" : "Unlock beta access — $4.99/month"}
+              </button>
+              {checkoutError && <p style={{ fontSize:12, color:"#e05c5c", margin:"0 0 10px", lineHeight:1.5 }}>{checkoutError}</p>}
+              <button onClick={() => setShowingWaitlist(true)}
+                style={{ display:"block", width:"100%", padding:"8px 0", background:"none", border:"none", color:T.muted, fontSize:13, cursor:"pointer" }}>
+                Join the waitlist instead
+              </button>
+            </div>
+            <p style={{ fontSize:11, color:T.hint, textAlign:"center", marginTop:16, lineHeight:1.6 }}>Secure checkout via Stripe. Cancel anytime.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Virtual step 6: first habit ──────────────────────────────────────────────
+  if (step === FIRST_STEP && builtHabits.length > 0) {
+    const firstHabit = pickFirstHabit(builtHabits);
+    const annotation = HABIT_ANNOTATIONS[firstHabit.habitType] || HABIT_ANNOTATIONS.daily;
+    const needsValue = firstHabit.habitType === "progress" || firstHabit.habitType === "project" || firstHabit.habitType === "limit";
+
+    return (
+      <div style={wrap}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"32px 24px 0" }}>
+          <div style={{ display:"flex", gap:6 }}>
+            {[...ONBOARD_STEPS, {},{},{}].map((_, i) => (
+              <div key={i} style={{ width:i===step?20:6, height:6, borderRadius:3, background:i<=step?T.accent:T.surface, transition:"all 0.3s" }}/>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ flex:1, padding:"28px 24px 16px", overflowY:"auto" }}>
+          <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, lineHeight:1.2, marginBottom:6 }}>Your first habit.</div>
+          <div style={{ fontSize:13, color:T.muted, marginBottom:24, lineHeight:1.5 }}>Log your first entry to see how it works.</div>
+
+          {/* Habit card */}
+          <div style={{ background:T.raised, borderRadius:T.r, padding:"18px 20px", marginBottom:16, border:`0.5px solid ${T.border}`, display:"flex", alignItems:"center", gap:14 }}>
+            <div style={{ width:48, height:48, borderRadius:14, background:firstHabit.color+"22", display:"flex", alignItems:"center", justifyContent:"center", fontSize:26, flexShrink:0 }}>
+              {firstHabit.emoji}
+            </div>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:16, fontWeight:600, color:T.text, marginBottom:2 }}>{firstHabit.name}</div>
+              <div style={{ fontSize:12, color:T.muted }}>{HABIT_TYPES[firstHabit.habitType]?.label}</div>
+              {firstHabit.habitType === "weekly" && <div style={{ fontSize:12, color:T.sub, marginTop:2 }}>Target: {firstHabit.weeklyTarget}× per week</div>}
+              {firstHabit.habitType === "progress" && <div style={{ fontSize:12, color:T.sub, marginTop:2 }}>{firstHabit.startValue}{firstHabit.unit} → {firstHabit.targetValue}{firstHabit.unit}</div>}
+              {firstHabit.habitType === "limit" && <div style={{ fontSize:12, color:T.sub, marginTop:2 }}>Budget: {firstHabit.dailyBudget}{firstHabit.unit}/day</div>}
+            </div>
+          </div>
+
+          {/* Coach annotation */}
+          <div style={{ background:"rgba(200,144,42,0.07)", border:`0.5px solid rgba(200,144,42,0.2)`, borderRadius:T.r, padding:"14px 16px", marginBottom:24 }}>
+            <div style={{ display:"flex", gap:10, alignItems:"flex-start" }}>
+              <div style={{ fontSize:18, flexShrink:0, marginTop:1 }}>🤖</div>
+              <div style={{ fontSize:13, color:T.sub, lineHeight:1.65 }}>{annotation}</div>
+            </div>
+          </div>
+
+          {/* Simplified log input */}
+          {needsValue && (
+            <div style={{ marginBottom:16 }}>
+              <div style={{ fontSize:12, color:T.hint, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:8 }}>
+                {firstHabit.habitType === "progress" ? `Today's ${firstHabit.unit || "value"}` :
+                 firstHabit.habitType === "project"  ? "Minutes worked" :
+                 firstHabit.habitType === "limit"    ? `Units used (budget: ${firstHabit.dailyBudget})` : "Value"}
+              </div>
+              {firstHabit.habitType === "project" ? (
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                  {[15,30,45,60,90].map(m => (
+                    <button key={m} onClick={() => setFirstLogValue(String(m))}
+                      style={{ padding:"8px 14px", borderRadius:20, border:`1px solid ${firstLogValue===String(m)?firstHabit.color:T.borderStrong}`, background:firstLogValue===String(m)?firstHabit.color+"22":"none", color:firstLogValue===String(m)?firstHabit.color:T.muted, fontSize:13, cursor:"pointer" }}>
+                      {m}m
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <input
+                  style={{ ...styleInp, fontSize:18, padding:"12px 14px" }}
+                  type="number" step="0.1"
+                  placeholder={firstHabit.habitType === "progress" ? `e.g. ${firstHabit.startValue || 70}` : "0"}
+                  value={firstLogValue}
+                  onChange={e => setFirstLogValue(e.target.value)}
+                  autoFocus
+                />
+              )}
+            </div>
+          )}
+        </div>
+
+        <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
+          <button
+            onClick={() => {
+              if (needsValue && !firstLogValue) return;
+              setFirstLogDone(true);
+              setShowingPaywall(true);
+            }}
+            style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:(needsValue&&!firstLogValue)?T.surface:firstHabit.color, color:(needsValue&&!firstLogValue)?T.muted:"#fff", fontSize:16, fontWeight:500, cursor:"pointer", transition:"all 0.2s" }}
+          >
+            Log your first entry →
+          </button>
+          <button onClick={() => setShowingPaywall(true)}
+            style={{ width:"100%", padding:12, background:"none", border:"none", color:T.hint, fontSize:13, cursor:"pointer", marginTop:6 }}>
+            Skip this step
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Virtual step 5: interstitial ─────────────────────────────────────────────
+  if (step === INTER_STEP) {
+    const count = builtHabits.length;
+    const firstName = name.trim() || "Hey";
+    const firstHabit = builtHabits.length > 0 ? pickFirstHabit(builtHabits) : null;
+
+    return (
+      <div style={wrap}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"32px 24px 0" }}>
+          <div style={{ display:"flex", gap:6 }}>
+            {[...ONBOARD_STEPS, {},{}].map((_, i) => (
+              <div key={i} style={{ width:i===step?20:6, height:6, borderRadius:3, background:i<=step?T.accent:T.surface, transition:"all 0.3s" }}/>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ flex:1, padding:"48px 24px 16px", display:"flex", flexDirection:"column", justifyContent:"center" }}>
+          <div style={{ background:"rgba(200,144,42,0.07)", border:`0.5px solid rgba(200,144,42,0.2)`, borderRadius:T.r, padding:"20px 20px 16px", marginBottom:24 }}>
+            <div style={{ display:"flex", gap:12, alignItems:"center", marginBottom:14 }}>
+              <div style={{ width:40, height:40, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>🤖</div>
+              <div style={{ fontSize:13, fontWeight:500, color:T.text }}>{coachNameInput.trim() || "Coach"}</div>
+            </div>
+            <div style={{ background:T.surface, borderRadius:"12px 12px 12px 3px", padding:"12px 16px", fontSize:14, color:T.text, lineHeight:1.7, borderLeft:`2px solid rgba(200,144,42,0.35)` }}>
+              {firstName}, I've set up {count} habit{count !== 1 ? "s" : ""} based on what you picked. I'll explain what each one means as you go. Let's look at your first one.
+            </div>
+          </div>
+
+          {firstHabit && (
+            <div style={{ background:T.raised, borderRadius:T.rsm, padding:"14px 16px", border:`0.5px solid ${T.border}`, display:"flex", alignItems:"center", gap:12, opacity:0.7 }}>
+              <div style={{ fontSize:24 }}>{firstHabit.emoji}</div>
+              <div>
+                <div style={{ fontSize:14, fontWeight:500, color:T.text }}>{firstHabit.name}</div>
+                <div style={{ fontSize:12, color:T.muted }}>{HABIT_TYPES[firstHabit.habitType]?.label}</div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
+          <button onClick={() => setStep(FIRST_STEP)}
+            style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:500, cursor:"pointer" }}>
+            Show me
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Standard steps 0–4 ───────────────────────────────────────────────────────
   return (
-    <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column" }}>
-      {/* Top bar with skip */}
+    <div style={wrap}>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"32px 24px 0" }}>
         <div style={{ display:"flex", gap:6 }}>
           {ONBOARD_STEPS.map((_, i) => (
@@ -3051,14 +3336,12 @@ function OnboardingScreen({ onComplete, onSkip }) {
         <div style={{ fontFamily:T.serif, fontSize:28, color:T.text, lineHeight:1.2, marginBottom:10 }}>{current.title}</div>
         <div style={{ fontSize:14, color:T.muted, marginBottom:24, lineHeight:1.6 }}>{current.sub}</div>
 
-        {/* Step 0: Welcome body text */}
         {current.body && (
           <div style={{ background:T.raised, borderRadius:T.r, padding:"16px 18px", marginBottom:24, borderLeft:`3px solid ${T.accent}` }}>
             <div style={{ fontSize:13, color:T.sub, lineHeight:1.7 }}>{current.body}</div>
           </div>
         )}
 
-        {/* Step 1: Name */}
         {step === 1 && (
           <input
             style={{ ...styleInp, fontSize:18, padding:"14px 16px", marginBottom:8 }}
@@ -3070,7 +3353,6 @@ function OnboardingScreen({ onComplete, onSkip }) {
           />
         )}
 
-        {/* Step 2: Privacy */}
         {step === 2 && (
           <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
             {[
@@ -3089,14 +3371,13 @@ function OnboardingScreen({ onComplete, onSkip }) {
           </div>
         )}
 
-        {/* Step 3: Coach naming */}
         {step === COACH_STEP && (
           <div>
             <div style={{ background:"rgba(200,144,42,0.08)", border:`0.5px solid rgba(200,144,42,0.25)`, borderRadius:T.r, padding:"16px 18px", marginBottom:20 }}>
               <div style={{ display:"flex", gap:12, alignItems:"center", marginBottom:12 }}>
                 <div style={{ width:44, height:44, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, flexShrink:0 }}>🤖</div>
                 <div>
-                  <div style={{ fontSize:13, fontWeight:500, color:T.text }}>Your coach is part of Forged supporter access</div>
+                  <div style={{ fontSize:13, fontWeight:500, color:T.text }}>Your coach is part of Forged beta access</div>
                   <div style={{ fontSize:11, color:T.gold, marginTop:2 }}>⚡ Early supporter (beta)</div>
                 </div>
               </div>
@@ -3114,12 +3395,11 @@ function OnboardingScreen({ onComplete, onSkip }) {
               autoFocus
             />
             <div style={{ fontSize:11, color:T.hint, marginTop:8, lineHeight:1.6 }}>
-              They'll greet you by name and reference your actual habit data — not generic tips.
+              They'll reference your actual habit data — not generic tips.
             </div>
           </div>
         )}
 
-        {/* Focus step: Multi-select */}
         {step === FOCUS_STEP && (
           <>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:16 }}>
@@ -3140,7 +3420,6 @@ function OnboardingScreen({ onComplete, onSkip }) {
               })}
             </div>
 
-            {/* Weight goal detail */}
             {hasWeight && (
               <div style={{ background:T.raised, borderRadius:T.rsm, padding:14, marginBottom:10 }}>
                 <div style={{ fontSize:11, color:T.hint, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:10 }}>Weight goal</div>
@@ -3152,7 +3431,6 @@ function OnboardingScreen({ onComplete, onSkip }) {
               </div>
             )}
 
-            {/* Limit detail */}
             {hasLimit && (
               <div style={{ background:T.raised, borderRadius:T.rsm, padding:14, marginBottom:10 }}>
                 <div style={{ fontSize:11, color:T.hint, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:10 }}>What are you limiting?</div>
@@ -3166,21 +3444,24 @@ function OnboardingScreen({ onComplete, onSkip }) {
 
             {selected.length > 0 && (
               <div style={{ fontSize:12, color:T.muted, textAlign:"center", marginBottom:4 }}>
-                {selected.length} selected — you can add more habits later
+                {selected.length} selected — you can add more later
               </div>
             )}
           </>
         )}
       </div>
 
-      {/* CTA fixed at bottom */}
       <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
         <button onClick={handleContinue}
           style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:step===FOCUS_STEP&&selected.length===0?T.surface:T.accent, color:step===FOCUS_STEP&&selected.length===0?T.muted:"#fff", fontSize:16, fontWeight:500, cursor:"pointer", transition:"all 0.2s" }}>
           {current.cta}
         </button>
         {step === FOCUS_STEP && (
-          <button onClick={() => onComplete({ name:name.trim()||"You", habits:[], coachName:coachNameInput.trim()||"Coach" })}
+          <button onClick={() => {
+            const habits = [];
+            setBuiltHabits(habits);
+            onComplete({ name:name.trim()||"You", habits, coachName:coachNameInput.trim()||"Coach" });
+          }}
             style={{ width:"100%", padding:12, borderRadius:T.rsm, border:"none", background:"none", color:T.muted, fontSize:14, cursor:"pointer", marginTop:8 }}>
             Skip for now
           </button>
@@ -3441,7 +3722,7 @@ function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
   );
 }
 
-function ProfileScreen({ user, xp, habits, isPro, refCode, onUpdateUser, onResetOnboarding, onSignOut, onShowTour, onUpgrade, coachName, onUpdateCoachName }) {
+function ProfileScreen({ user, xp, habits, isPro, refCode, authEmail, onUpdateUser, onResetOnboarding, onAdminReset, onSignOut, onShowTour, onUpgrade, coachName, onUpdateCoachName }) {
   const [editingName,    setEditingName]    = useState(false);
   const [nameVal,        setNameVal]        = useState(user.name);
   const [editingCoach,   setEditingCoach]   = useState(false);
@@ -3676,6 +3957,17 @@ function ProfileScreen({ user, xp, habits, isPro, refCode, onUpdateUser, onReset
       </div>
 
       {/* Sign out */}
+      {/* Admin dev tools — only shown to admin account */}
+      {authEmail && authEmail.toLowerCase() === "corbyn@forged.app" && (
+        <div style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.rsm, border:`0.5px solid ${T.border}`, padding:"12px 16px" }}>
+          <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:10 }}>Dev tools</div>
+          <button onClick={onAdminReset}
+            style={{ width:"100%", padding:"11px 0", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:"none", color:T.muted, fontSize:13, cursor:"pointer", fontFamily:T.font }}>
+            Replay onboarding from step 1
+          </button>
+        </div>
+      )}
+
       <div data-tour="profile-signout" style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, overflow:"hidden" }}>
         {showSignOutConfirm ? (
           <div style={{ padding:"14px 16px" }}>
@@ -3934,6 +4226,25 @@ function CheckEmailScreen({ email, onBack }) {
   );
 }
 
+// ─── DEMO BANNER ──────────────────────────────────────────────────────────────
+function DemoBanner({ onGetStarted }) {
+  return (
+    <div style={{
+      position:"sticky", top:0, zIndex:200,
+      background:"rgba(192,57,43,0.96)", backdropFilter:"blur(8px)",
+      padding:"10px 18px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:10,
+    }}>
+      <div style={{ fontSize:13, color:"#fff", lineHeight:1.4, flex:1 }}>
+        You're in preview — create an account to start for real.
+      </div>
+      <button onClick={onGetStarted}
+        style={{ background:"#fff", border:"none", borderRadius:20, padding:"7px 16px", fontSize:13, fontWeight:600, color:"#C0392B", cursor:"pointer", flexShrink:0, whiteSpace:"nowrap" }}>
+        Get started
+      </button>
+    </div>
+  );
+}
+
 // ─── WELCOME MODAL (shown once after successful beta payment) ─────────────────
 function WelcomeModal({ onContinue }) {
   return (
@@ -4064,6 +4375,8 @@ export default function App() {
   const [showUpgrade,    setShowUpgrade]    = useState(false);
   const [checkingPayment,setCheckingPayment]= useState(false);
   const [showWelcome,    setShowWelcome]    = useState(false);
+  const [demoMode,       setDemoMode]       = useState(false);
+  const shownDemoRef = useRef(false); // prevent demo re-showing after sign-out
   const [refCode,     setRefCode]     = useState(null);
   const [authEmail,   setAuthEmail]   = useState(null);
   /** Supabase auth user id when signed in; null when logged out */
@@ -4082,6 +4395,7 @@ export default function App() {
 
   // ─── Supabase helpers ──────────────────────────────────────────────────────
   async function syncHabit(habit) {
+    if (demoMode) return;
     const uid = userIdRef.current;
     if (!uid) {
       console.warn("syncHabit: no user id — session not ready yet, skipping save");
@@ -4104,6 +4418,7 @@ export default function App() {
   }
 
   async function syncProfile(updates) {
+    if (demoMode) return;
     const uid = userIdRef.current;
     if (!uid) return;
     await supabase.from("profiles").upsert({ id: uid, ...updates, updated_at: new Date().toISOString() });
@@ -4316,7 +4631,16 @@ export default function App() {
               accountDataLoadedRef.current = false;
               setAccountDataReady(false);
               userIdRef.current = null;
-              if (mounted) setAuthScreen(true);
+              if (mounted) {
+                if (!shownDemoRef.current) {
+                  shownDemoRef.current = true;
+                  setHabits(buildDemoHabits());
+                  setUser({ name:"", avatarUrl:null });
+                  setDemoMode(true);
+                } else {
+                  setAuthScreen(true);
+                }
+              }
             }
           } finally {
             clearTimeout(loadBudgetTimer);
@@ -4331,6 +4655,8 @@ export default function App() {
         if (event === "SIGNED_IN" && session?.user?.id) {
           if (session.user.email && mounted) setAuthEmail(session.user.email);
           setSessionUserId(session.user.id);
+          setDemoMode(false);
+          setHabits([]); // clear demo data before loading real data
           if (accountDataLoadedRef.current && userIdRef.current === session.user.id) {
             if (mounted) { setAuthScreen(false); setPendingEmail(null); setPasswordRecovery(false); }
             return;
@@ -4380,6 +4706,8 @@ export default function App() {
           setRefCode(null);
           setAuthEmail(null);
           localStorage.removeItem('forged_checkout_pending');
+          shownDemoRef.current = true; // after sign-out, go to auth not demo
+          setDemoMode(false);
           if (mounted) { setAuthScreen(true); setLoading(false); }
           return;
         }
@@ -4607,12 +4935,67 @@ export default function App() {
     );
   }
 
+  // Demo mode — show app with seed data before sign-up
+  if (!loading && demoMode) {
+    return (
+      <>
+        <style>{CSS}</style>
+        {toasts.map(t => <Toast key={t.id} msg={t.msg} onDone={() => setToasts(ts => ts.filter(x => x.id !== t.id))}/>)}
+        <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, paddingBottom:80 }}>
+          <DemoBanner onGetStarted={() => { setDemoMode(false); setHabits([]); shownDemoRef.current = true; setAuthScreen(true); }} />
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 18px 8px" }}>
+            <div>
+              <div style={{ fontFamily:T.serif, fontSize:30, color:T.text, letterSpacing:"-0.01em" }}>Forged</div>
+              <div style={{ fontSize:11, color:T.muted, marginTop:1 }}>{fmtDate()}</div>
+            </div>
+            <button onClick={() => { setDemoMode(false); setHabits([]); shownDemoRef.current = true; setAuthScreen(true); }}
+              style={{ display:"flex", alignItems:"center", gap:6, background:"rgba(200,144,42,0.12)", borderRadius:20, padding:"6px 13px", fontSize:13, fontWeight:500, color:T.gold, border:"none", cursor:"pointer" }}>
+              ⚡ 0 xp
+            </button>
+          </div>
+          <TodayScreen habits={habits} xp={0} onTap={handleTap} onUndo={() => {}} onSkip={() => {}} onReflect={() => demoBounce()} onAddNote={() => demoBounce()} onLogZero={() => demoBounce()} onOpenLog={() => demoBounce()} onAdd={handleStartAdd} onXPInfo={() => {}}/>
+          <nav style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:430, maxWidth:"100vw", background:"rgba(26,26,22,0.96)", backdropFilter:"blur(16px)", borderTop:`0.5px solid ${T.border}`, display:"flex", zIndex:100, paddingBottom:6 }}>
+            {[{id:"today",label:"Today"},{id:"journal",label:"Journal"},{id:"insights",label:"Insights"},{id:"habits",label:"Habits"},{id:"profile",label:"Profile"}].map(n => (
+              <button key={n.id} onClick={() => demoBounce()} style={{ flex:1, padding:"10px 4px 6px", border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3, fontSize:10, fontWeight:500, color:n.id==="today"?T.accent:T.muted }}>
+                {n.label}
+              </button>
+            ))}
+          </nav>
+        </div>
+      </>
+    );
+  }
+
   // Show onboarding — only after account data loaded and user is genuinely new.
   if (!loading && !authScreen && accountDataReady && onboarded === false) {
     return (
       <><style>{CSS}</style>
       <OnboardingScreen
         onComplete={completeOnboarding}
+        onSaveProgress={async ({ name, habits, coachName }) => {
+          const uid = userIdRef.current;
+          if (!uid) return;
+          await supabase.from("profiles").upsert({
+            id: uid, name, xp: 0, onboarded: true,
+            coach_name: coachName, updated_at: new Date().toISOString(),
+          });
+          const hRows = habits.map(h => habitToRow(h, uid));
+          if (hRows.length > 0) await supabase.from("habits").upsert(hRows);
+        }}
+        onCheckout={async () => {
+          const { data: { session } } = await supabase.auth.getSession();
+          const token = session?.access_token;
+          if (!token) throw new Error("Not signed in");
+          const res = await fetch("/api/create-checkout", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+            body: JSON.stringify({ plan: "monthly" }),
+          });
+          const json = await res.json();
+          if (!res.ok || !json.url) throw new Error(json.error || "Could not start checkout");
+          localStorage.setItem('forged_checkout_pending', '1');
+          window.location.href = json.url;
+        }}
         onSkip={() => {
           setOnboarded(true);
           syncProfile({ onboarded: true, name: user.name || "", xp: 0 });
@@ -4650,8 +5033,18 @@ export default function App() {
     setFlashes(f => [...f, { id, x, y, text }]);
   }
 
+  // Demo mode: intercept any write action and nudge user to sign up
+  function demoBounce() {
+    if (!demoMode) return false;
+    const id = Date.now();
+    setToasts(t => [...t, { id, msg: "Create a free account to start tracking for real →" }]);
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 4000);
+    return true;
+  }
+
   // Tap handler: daily, weekly, limit
   function handleTap(id, e) {
+    if (demoBounce()) return;
     const r = e.currentTarget.getBoundingClientRect();
     const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
     let tapped = null;
@@ -4786,6 +5179,7 @@ export default function App() {
 
   // Gate adding habits at 5 for free users
   function handleStartAdd() {
+    if (demoBounce()) return;
     if (!isPro && habits.length >= 5) {
       setShowUpgrade(true);
     } else {
@@ -4856,6 +5250,7 @@ export default function App() {
         {screen === "insights" && <InsightsScreen habits={habits} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)}/>}
         {screen === "habits"   && <HabitsScreen   habits={habits} onEdit={setEditId} onDelete={handleDeleteHabit} onAdd={handleStartAdd} onReflect={setReflectId} onCoach={() => setShowCoach(true)} onUpgrade={() => setShowUpgrade(true)} isPro={isPro} coachName={coachName}/>}
         {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} refCode={refCode}
+          authEmail={authEmail}
           onUpgrade={() => setShowUpgrade(true)}
           onUpdateUser={updates => {
             if (updates._clearData) { setHabits([]); setXp(0); setUser(u => ({...u})); return; }
@@ -4868,11 +5263,33 @@ export default function App() {
             });
           }}
           onResetOnboarding={() => setOnboarded(false)}
+          onAdminReset={async () => {
+            if (sessionUserId) {
+              await supabase.from("profiles").update({ onboarded: false }).eq("id", sessionUserId);
+            }
+            setOnboarded(false);
+          }}
           onSignOut={handleSignOut}
           onShowTour={() => { setScreen("today"); setTimeout(() => { setTourSteps(GLOBAL_TOUR); setTourIdx(0); }, 120); }}
           coachName={coachName}
           onUpdateCoachName={name => { setCoachName(name); syncProfile({ coach_name: name }); }}
         />}
+
+        {/* Floating coach button */}
+        <button
+          onClick={() => setShowCoach(true)}
+          title="Ask your coach"
+          style={{
+            position:"fixed", bottom:86, right:18, width:48, height:48,
+            borderRadius:"50%", border:`0.5px solid rgba(200,144,42,0.45)`,
+            background:"rgba(26,26,22,0.94)", backdropFilter:"blur(8px)",
+            color:"#C8902A", fontSize:22, cursor:"pointer", zIndex:98,
+            display:"flex", alignItems:"center", justifyContent:"center",
+            boxShadow:"0 2px 12px rgba(0,0,0,0.35)",
+          }}
+        >
+          ?
+        </button>
 
         {/* Bottom nav */}
         <nav data-tour="nav" style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:430, maxWidth:"100vw", background:"rgba(26,26,22,0.96)", backdropFilter:"blur(16px)", borderTop:`0.5px solid ${T.border}`, display:"flex", zIndex:100, paddingBottom:6 }}>
@@ -4892,7 +5309,7 @@ export default function App() {
       {editId      && editHabit && <EditModal habit={editHabit}          onClose={() => setEditId(null)}    onSave={handleEditSave}/>}
       {logId && logHabit?.habitType === "progress" && <LogProgressModal  habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
       {logId && logHabit?.habitType === "project"  && <LogProjectModal   habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
-      {showCoach   && <AICoach habits={habits} user={user} isPro={isPro} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)} coachName={coachName}/>}
+      {showCoach   && <AICoach habits={habits} user={user} isPro={isPro} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)} coachName={coachName} currentScreen={screen}/>}
       {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} habitCount={habits.length} userId={userIdRef.current} userEmail={authEmail}/>}
       {showShare && <ShareCardModal user={user} habits={habits} xp={xp} onClose={() => setShowShare(false)}/>}
       {showWelcome && <WelcomeModal onContinue={() => setShowWelcome(false)} />}
