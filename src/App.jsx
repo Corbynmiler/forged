@@ -3575,7 +3575,6 @@ function ProfileScreen({ user, xp, habits, isPro, refCode, onUpdateUser, onReset
           )}
         </div>
         <SRow label="Notifications" note="Coming soon" onPress={null}/>
-        <SRow label="Replay app tour" onPress={onShowTour}/>
       </div>
 
       {/* Pro section */}
@@ -3951,8 +3950,7 @@ export default function App() {
   const [authScreen,       setAuthScreen]        = useState(false);
   const [pendingEmail,     setPendingEmail]       = useState(null);
   const [passwordRecovery, setPasswordRecovery]  = useState(false);
-  const [tourSteps, setTourSteps] = useState(null); // null = hidden; array = active tour
-  const [tourIdx,   setTourIdx]   = useState(0);
+  // Tour temporarily disabled — state kept for re-enabling
   const [showShare,   setShowShare]   = useState(false);
   const [isPro,       setIsPro]       = useState(false);
   const [coachName,   setCoachName]   = useState("Coach");
@@ -4378,10 +4376,7 @@ export default function App() {
         await supabase.from("habits").upsert(habitsToSet.map(h => habitToRow(h, uid)));
       }
     }
-    // Show tour for brand-new users
-    if (!localStorage.getItem('forged_tour_done')) {
-      setTimeout(() => { setTourSteps(GLOBAL_TOUR); setTourIdx(0); }, 600);
-    }
+    // Tour disabled — re-enable by restoring tourSteps/tourIdx state and this block
   }
 
   // Show password recovery screen
@@ -4673,20 +4668,9 @@ export default function App() {
                 : screen === "profile" ? user.name : screen.charAt(0).toUpperCase()+screen.slice(1)}
             </div>
           </div>
-          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-            <button
-              onClick={() => {
-                const pageTour = PAGE_TOURS[screen];
-                if (pageTour) { setTourSteps(pageTour); setTourIdx(0); }
-              }}
-              title="Help"
-              style={{ width:30, height:30, borderRadius:"50%", border:`0.5px solid ${T.borderStrong}`, background:"none", color:T.hint, fontSize:14, fontWeight:600, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>
-              ?
-            </button>
-            <button onClick={() => setShowXP(true)} style={{ display:"flex", alignItems:"center", gap:6, background:"rgba(200,144,42,0.12)", borderRadius:20, padding:"6px 13px", fontSize:13, fontWeight:500, color:T.gold, border:"none", cursor:"pointer" }}>
-              ⚡ {xp} xp
-            </button>
-          </div>
+          <button onClick={() => setShowXP(true)} style={{ display:"flex", alignItems:"center", gap:6, background:"rgba(200,144,42,0.12)", borderRadius:20, padding:"6px 13px", fontSize:13, fontWeight:500, color:T.gold, border:"none", cursor:"pointer" }}>
+            ⚡ {xp} xp
+          </button>
         </div>
 
         {screen === "today"    && <TodayScreen    habits={habits} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onReflect={setReflectId} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onAdd={handleStartAdd} onXPInfo={() => setShowXP(true)}/>}
@@ -4733,26 +4717,7 @@ export default function App() {
       {showCoach   && <AICoach habits={habits} user={user} isPro={isPro} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)} coachName={coachName}/>}
       {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} habitCount={habits.length} userId={userIdRef.current} userEmail={authEmail}/>}
       {showShare && <ShareCardModal user={user} habits={habits} xp={xp} onClose={() => setShowShare(false)}/>}
-      {tourSteps && (
-        <TourOverlay
-          steps={tourSteps}
-          stepIdx={tourIdx}
-          onNext={() => {
-            if (tourIdx < tourSteps.length - 1) {
-              setTourIdx(i => i + 1);
-            } else {
-              localStorage.setItem('forged_tour_done', '1');
-              setTourSteps(null);
-              setTourIdx(0);
-            }
-          }}
-          onSkip={() => {
-            localStorage.setItem('forged_tour_done', '1');
-            setTourSteps(null);
-            setTourIdx(0);
-          }}
-        />
-      )}
+      {/* TourOverlay disabled — restore tourSteps state and this block to re-enable */}
     </>
   );
 }
