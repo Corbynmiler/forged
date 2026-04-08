@@ -627,7 +627,7 @@ function MicBtn({ speech, color = T.accent, size = 28 }) {
 // Type a quick note or dictate it, tap ✓ Done to save as a permanent entry.
 // Each Done tap creates a separate note entry — multiple notes per day supported.
 // "Go deeper" opens the full reflection modal.
-function NoteStrip({ habitId, habit, onAddNote, onReflect }) {
+function NoteStrip({ habitId, habit, onAddNote }) {
   const [val, setVal] = useState("");
   const [lastSaved, setLastSaved] = useState("");
 
@@ -652,8 +652,8 @@ function NoteStrip({ habitId, habit, onAddNote, onReflect }) {
         </div>
       )}
       <textarea
-        rows={2} maxLength={280}
-        style={{ width:"100%", border:"none", background:"none", fontSize:13, color:T.text, resize:"none", lineHeight:1.55, minHeight:36, outline:"none" }}
+        rows={4} maxLength={280}
+        style={{ width:"100%", border:"none", background:"none", fontSize:13, color:T.text, resize:"none", lineHeight:1.55, minHeight:74, outline:"none" }}
         placeholder={speech.listening ? "Listening…" : "Quick note…"}
         value={val}
         onChange={e => setVal(e.target.value)}
@@ -664,10 +664,7 @@ function NoteStrip({ habitId, habit, onAddNote, onReflect }) {
         </div>
       )}
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
-        <button onClick={() => onReflect(habitId)}
-          style={{ fontSize:12, color:habit.color+"99", background:"none", border:"none", cursor:"pointer", fontWeight:500, padding:0 }}>
-          Go deeper →
-        </button>
+        <div style={{ marginRight:"auto" }}/>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
           <MicBtn speech={speech} color={habit.color} size={26}/>
           <button onClick={handleDone} disabled={!val.trim() && !speech.interim}
@@ -713,7 +710,7 @@ function PlusBtn({ habit, logged, onClick }) {
 
 // ─── HABIT CARDS ─────────────────────────────────────────────────────────────
 
-function DailyCard({ habit, onTap, onSkip, onReflect, onAddNote }) {
+function DailyCard({ habit, onTap, onSkip, onAddNote }) {
   const tLog  = latestTodayLog(habit);
   const logged = isLoggedToday(habit);
   const isSkip = tLog?.value === "skip";
@@ -742,7 +739,7 @@ function DailyCard({ habit, onTap, onSkip, onReflect, onAddNote }) {
         </div>
       )}
       {logged && !isSkip && <DoneBanner habit={habit}/>}
-      {logged && !isSkip && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote} onReflect={onReflect}/>}
+      {logged && !isSkip && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote}/>}
       {!logged && (
         <div style={{ padding:"0 15px 10px", display:"flex", justifyContent:"flex-end" }}>
           <button onClick={() => onSkip(habit.id)}
@@ -755,7 +752,7 @@ function DailyCard({ habit, onTap, onSkip, onReflect, onAddNote }) {
   );
 }
 
-function WeeklyCard({ habit, onTap, onReflect, onAddNote }) {
+function WeeklyCard({ habit, onTap, onAddNote }) {
   const logged = isLoggedToday(habit);
   const wk = getWeeklyCount(habit);
   const streak = getWeeklyStreak(habit);
@@ -788,12 +785,12 @@ function WeeklyCard({ habit, onTap, onReflect, onAddNote }) {
         </div>
       </div>
       {logged && <DoneBanner habit={habit}/>}
-      {logged && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote} onReflect={onReflect}/>}
+      {logged && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote}/>}
     </div>
   );
 }
 
-function ProgressCard({ habit, onOpenLog, onReflect, onAddNote }) {
+function ProgressCard({ habit, onOpenLog, onAddNote }) {
   const stats = getProgressStats(habit);
   const logged = isLoggedToday(habit);
   const statusText = stats.isComplete
@@ -827,12 +824,12 @@ function ProgressCard({ habit, onOpenLog, onReflect, onAddNote }) {
         </div>
       </div>
       {logged && <DoneBanner habit={habit}/>}
-      {logged && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote} onReflect={onReflect}/>}
+      {logged && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote}/>}
     </div>
   );
 }
 
-function ProjectCard({ habit, onOpenLog, onReflect, onAddNote }) {
+function ProjectCard({ habit, onOpenLog, onAddNote }) {
   const stats = getProjectStats(habit);
   const tLogs = todayLogs(habit);
   const logged = tLogs.length > 0;
@@ -873,12 +870,12 @@ function ProjectCard({ habit, onOpenLog, onReflect, onAddNote }) {
         </div>
       )}
       {logged && <DoneBanner habit={habit}/>}
-      {logged && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote} onReflect={onReflect}/>}
+      {logged && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote}/>}
     </div>
   );
 }
 
-function LimitCard({ habit, onTap, onUndo, onLogZero, onReflect, onAddNote }) {
+function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote }) {
   const todayLogsArr = habit.logs.filter(l => l.date === todayStr() && l.value !== "quicknote");
   const used   = todayLogsArr.reduce((s, l) => s + (typeof l.value === "number" ? l.value : 0), 0);
   const budget = habit.dailyBudget || 60;
@@ -931,7 +928,7 @@ function LimitCard({ habit, onTap, onUndo, onLogZero, onReflect, onAddNote }) {
         </div>
       )}
 
-      {logged && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote} onReflect={onReflect}/>}
+      {logged && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote}/>}
     </div>
   );
 }
@@ -1755,7 +1752,7 @@ function TourOverlay({ steps, stepIdx, onNext, onSkip }) {
 }
 
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
-function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onReflect, onAddNote, onLogZero, onOpenLog, onOpenGoalLog, onAdd, onXPInfo, onCoach, isPro, coachName }) {
+function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote, onLogZero, onOpenLog, onOpenGoalLog, onAdd, onXPInfo, onCoach, isPro, coachName }) {
   const loggedCount = habits.filter(h => isLoggedToday(h)).length;
   const pct = habits.length ? Math.round((loggedCount / habits.length) * 100) : 0;
   const hr = new Date().getHours();
@@ -1795,10 +1792,10 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onReflect,
       {(() => {
         const sections = [
           activeGoals.length > 0 && <><SLabel>Goals</SLabel> {activeGoals.map(g => <TodayGoalCard key={g.id} goal={g} onOpenLog={onOpenGoalLog}/>)}</>,
-          daily.length   > 0 && <><SLabel>Daily</SLabel>          {daily.map(h   => <DailyCard  key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onReflect={onReflect} onAddNote={onAddNote}/>)}</>,
-          limit.length   > 0 && <><SLabel>Limits</SLabel>         {limit.map(h   => <LimitCard  key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onReflect={onReflect} onAddNote={onAddNote}/>)}</>,
-          weekly.length  > 0 && <><SLabel>Weekly targets</SLabel> {weekly.map(h  => <WeeklyCard key={h.id} habit={h} onTap={onTap} onReflect={onReflect} onAddNote={onAddNote}/>)}</>,
-          project.length > 0 && <><SLabel>Build</SLabel>          {project.map(h => <ProjectCard key={h.id} habit={h} onOpenLog={onOpenLog} onReflect={onReflect} onAddNote={onAddNote}/>)}</>,
+          daily.length   > 0 && <><SLabel>Daily</SLabel>          {daily.map(h   => <DailyCard  key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote}/>)}</>,
+          limit.length   > 0 && <><SLabel>Limits</SLabel>         {limit.map(h   => <LimitCard  key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onAddNote={onAddNote}/>)}</>,
+          weekly.length  > 0 && <><SLabel>Weekly targets</SLabel> {weekly.map(h  => <WeeklyCard key={h.id} habit={h} onTap={onTap} onAddNote={onAddNote}/>)}</>,
+          project.length > 0 && <><SLabel>Build</SLabel>          {project.map(h => <ProjectCard key={h.id} habit={h} onOpenLog={onOpenLog} onAddNote={onAddNote}/>)}</>,
         ].filter(Boolean);
         return sections.map((sec, i) =>
           i === 0
@@ -2774,20 +2771,24 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare, onCoach })
 
 // ─── GOAL HELPERS ─────────────────────────────────────────────────────────────
 function getGoalProgress(goal) {
-  const { startValue, targetValue, currentValue } = goal;
-  const direction = goal.direction === "decreasing" || goal.direction === "increasing"
-    ? goal.direction
-    : inferProgressDirection(Number(startValue ?? 0), Number(targetValue ?? 0));
-  const range = Math.abs(targetValue - startValue);
-  if (range === 0) return { pct: 0, toGo: 0, isComplete: false };
-  const moved = direction === "decreasing"
-    ? startValue - currentValue
-    : currentValue - startValue;
-  const clamped = Math.max(0, Math.min(1, moved / range));
-  const toGo = Math.max(0, direction === "decreasing"
-    ? currentValue - targetValue
-    : targetValue - currentValue);
-  return { pct: Math.round(clamped * 100), toGo, isComplete: clamped >= 1, direction, moved, range };
+  const start = Number(goal.startValue);
+  const target = Number(goal.targetValue);
+  const current = Number(goal.currentValue);
+  if (!Number.isFinite(target) || !Number.isFinite(current)) {
+    return { pct: 0, toGo: 0, isComplete: false };
+  }
+  const hasStartBaseline = Number.isFinite(start) && start > 0;
+  let raw = 0;
+  if (hasStartBaseline) {
+    const denom = target - start;
+    raw = denom === 0 ? 0 : (current - start) / denom;
+  } else {
+    raw = target === 0 ? 0 : current / target;
+  }
+  const progress = Math.max(0, Math.min(1, raw));
+  const isComplete = progress >= 1;
+  const toGo = isComplete ? 0 : Math.max(0, Math.abs(target - current));
+  return { pct: Math.round(progress * 100), toGo, isComplete };
 }
 
 function getGoalEntryCount(goal) {
@@ -2795,11 +2796,10 @@ function getGoalEntryCount(goal) {
 }
 
 function getGoalStatusText(goal, stats = getGoalProgress(goal)) {
-  const entries = getGoalEntryCount(goal);
   if (stats.isComplete) return "🎉 Goal reached";
-  if (entries === 0) return "No entries yet";
-  if (stats.pct === 0) return `No net change yet · ${formatWithUnit(stats.toGo, goal.unit)} to target`;
-  return `${formatWithUnit(stats.toGo, goal.unit)} to target · ${stats.pct}% complete`;
+  const currentLabel = formatWithUnit(Number(goal.currentValue ?? 0), goal.unit);
+  const targetLabel = formatWithUnit(Number(goal.targetValue ?? 0), goal.unit);
+  return `${currentLabel} → ${targetLabel} target · ${formatWithUnit(stats.toGo, goal.unit)} to go`;
 }
 
 // ─── LOG GOAL MODAL ───────────────────────────────────────────────────────────
@@ -4951,13 +4951,13 @@ export default function App() {
 
   // ─── Supabase helpers ──────────────────────────────────────────────────────
   async function syncHabit(habit) {
-    if (demoMode) return;
+    if (demoMode) return false;
     const uid = userIdRef.current;
     if (!uid) {
       console.warn("syncHabit: no user id — session not ready yet, skipping save");
       const id = Date.now();
       setToasts(t => [...t, { id, msg: "⚠️ Session loading — please wait a moment and try again" }]);
-      return;
+      return false;
     }
     try {
       const { error } = await supabase.from("habits").upsert(habitToRow(habit, uid));
@@ -4965,23 +4965,39 @@ export default function App() {
         console.error("syncHabit error:", error.message);
         const id = Date.now();
         setToasts(t => [...t, { id, msg: "⚠️ Couldn't save — check your connection" }]);
+        return false;
       }
+      return true;
     } catch (err) {
       console.error("syncHabit exception:", err);
       const id = Date.now();
       setToasts(t => [...t, { id, msg: "⚠️ Couldn't save — check your connection" }]);
+      return false;
     }
   }
 
   async function syncGoal(goal) {
-    if (demoMode) return;
+    if (demoMode) return false;
     const uid = userIdRef.current;
-    if (!uid) return;
+    if (!uid) {
+      const id = Date.now();
+      setToasts(t => [...t, { id, msg: "⚠️ Session loading — please wait a moment and try again" }]);
+      return false;
+    }
     try {
       const { error } = await supabase.from("habits").upsert(goalToRow(goal, uid));
-      if (error) console.error("syncGoal error:", error.message);
+      if (error) {
+        console.error("syncGoal error:", error.message);
+        const id = Date.now();
+        setToasts(t => [...t, { id, msg: "⚠️ Couldn't save goal — check your connection" }]);
+        return false;
+      }
+      return true;
     } catch (err) {
       console.error("syncGoal exception:", err);
+      const id = Date.now();
+      setToasts(t => [...t, { id, msg: "⚠️ Couldn't save goal — check your connection" }]);
+      return false;
     }
   }
 
@@ -5727,109 +5743,96 @@ export default function App() {
   }
 
   // Tap handler: daily, weekly, limit
-  function handleTap(id, e) {
+  async function handleTap(id, e) {
     if (demoBounce()) return;
     const r = e.currentTarget.getBoundingClientRect();
     const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    const base = habits.find(h => h.id === id);
+    if (!base) return;
     let tapped = null;
-    setHabits(prev => prev.map(h => {
-      if (h.id !== id) return h;
-      // Limit: each tap adds tapIncrement units (default 1)
-      if (h.habitType === "limit") {
-        const inc = h.tapIncrement ?? 1;
-        tapped = { ...h, logs:[...h.logs, { date:todayStr(), value:inc, note:"" }] };
-        return tapped;
-      }
-      // Daily / weekly: toggle today
-      const logged = h.logs.some(l => l.date === todayStr());
-      if (logged) {
-        tapped = { ...h, logs:h.logs.filter(l => l.date !== todayStr()) };
-        return tapped;
-      }
-      tapped = { ...h, logs:[...h.logs, { date:todayStr(), value:true, note:"" }] };
-      return tapped;
-    }));
-    if (!tapped) return;
+    if (base.habitType === "limit") {
+      const inc = base.tapIncrement ?? 1;
+      tapped = { ...base, logs:[...base.logs, { date:todayStr(), value:inc, note:"" }] };
+    } else {
+      const logged = base.logs.some(l => l.date === todayStr());
+      tapped = logged
+        ? { ...base, logs: base.logs.filter(l => l.date !== todayStr()) }
+        : { ...base, logs:[...base.logs, { date:todayStr(), value:true, note:"" }] };
+    }
+    const saved = await syncHabit(tapped);
+    if (!saved) return;
+    setHabits(prev => prev.map(h => h.id === id ? tapped : h));
     // Side effects outside the updater
     if (tapped.habitType === "limit") {
       spawnParticles(cx, cy, tapped.color);
       addFlash(cx, cy, "+5 xp");
       setXp(x => x + 5);
     } else {
-      const wasLogged = habits.find(h => h.id === id)?.logs.some(l => l.date === todayStr());
+      const wasLogged = base.logs.some(l => l.date === todayStr());
       if (!wasLogged) { spawnParticles(cx, cy, tapped.color); addFlash(cx, cy, "+10 xp"); setXp(x => x + 10); }
     }
-    syncHabit(tapped);
   }
 
   // Log handler: progress and project
-  function handleLog(id, logData) {
-    let logged = null;
-    setHabits(prev => prev.map(h => {
-      if (h.id !== id) return h;
-      const already = h.logs.some(l => l.date === todayStr());
-      if (h.habitType === "project" || !already) {
-        logged = { isNew: true, updated: { ...h, logs:[...h.logs, { date:todayStr(), ...logData }] } };
-      } else {
-        logged = { isNew: false, updated: { ...h, logs:h.logs.map(l => l.date === todayStr() ? { ...l, ...logData } : l) } };
-      }
-      return logged.updated;
-    }));
-    if (!logged) return;
-    if (logged.isNew) { addFlash(window.innerWidth / 2, 120, "+10 xp"); setXp(x => x + 10); }
-    syncHabit(logged.updated);
+  async function handleLog(id, logData) {
+    const habit = habits.find(h => h.id === id);
+    if (!habit) return;
+    const already = habit.logs.some(l => l.date === todayStr());
+    const isNew = habit.habitType === "project" || !already;
+    const updated = isNew
+      ? { ...habit, logs:[...habit.logs, { date:todayStr(), ...logData }] }
+      : { ...habit, logs: habit.logs.map(l => l.date === todayStr() ? { ...l, ...logData } : l) };
+    const saved = await syncHabit(updated);
+    if (!saved) return;
+    setHabits(prev => prev.map(h => h.id === id ? updated : h));
+    if (isNew) { addFlash(window.innerWidth / 2, 120, "+10 xp"); setXp(x => x + 10); }
   }
 
   // Undo last limit tap: remove the most recent today log for a limit habit
-  function handleUndoLimit(id) {
-    let updated = null;
-    setHabits(prev => prev.map(h => {
-      if (h.id !== id) return h;
-      const lastIdx = [...h.logs].map(l => l.date).lastIndexOf(todayStr());
-      if (lastIdx < 0) return h;
-      const newLogs = h.logs.filter((_, i) => i !== lastIdx);
-      updated = { ...h, logs: newLogs };
-      return updated;
-    }));
-    if (updated) syncHabit(updated);
+  async function handleUndoLimit(id) {
+    const habit = habits.find(h => h.id === id);
+    if (!habit) return;
+    const lastIdx = [...habit.logs].map(l => l.date).lastIndexOf(todayStr());
+    if (lastIdx < 0) return;
+    const updated = { ...habit, logs: habit.logs.filter((_, i) => i !== lastIdx) };
+    const saved = await syncHabit(updated);
+    if (!saved) return;
+    setHabits(prev => prev.map(h => h.id === id ? updated : h));
     addToast("↩ Last tap removed");
   }
 
-  function handleSkipDay(id) {
-    let updated = null;
-    setHabits(prev => prev.map(h => {
-      if (h.id !== id) return h;
-      const withoutToday = h.logs.filter(l => l.date !== todayStr());
-      updated = { ...h, logs:[...withoutToday, { date:todayStr(), value:"skip", note:"" }] };
-      return updated;
-    }));
-    if (updated) syncHabit(updated);
+  async function handleSkipDay(id) {
+    const habit = habits.find(h => h.id === id);
+    if (!habit) return;
+    const withoutToday = habit.logs.filter(l => l.date !== todayStr());
+    const updated = { ...habit, logs:[...withoutToday, { date:todayStr(), value:"skip", note:"" }] };
+    const saved = await syncHabit(updated);
+    if (!saved) return;
+    setHabits(prev => prev.map(h => h.id === id ? updated : h));
     addToast("🛡️ Rest day — streak protected");
   }
 
   // Add a quick note as a standalone log entry — each Done tap creates a separate record
-  function handleAddNote(id, text) {
+  async function handleAddNote(id, text) {
     if (!text.trim()) return;
-    let updated = null;
-    setHabits(prev => prev.map(h => {
-      if (h.id !== id) return h;
-      updated = { ...h, logs: [...h.logs, { date: todayStr(), value: "quicknote", note: text.trim() }] };
-      return updated;
-    }));
-    if (updated) syncHabit(updated);
+    const habit = habits.find(h => h.id === id);
+    if (!habit) return;
+    const updated = { ...habit, logs: [...habit.logs, { date: todayStr(), value: "quicknote", note: text.trim() }] };
+    const saved = await syncHabit(updated);
+    if (!saved) return;
+    setHabits(prev => prev.map(h => h.id === id ? updated : h));
     addToast("✓ Note saved");
   }
 
   // Explicitly log 0 for a limit habit — marks "had none today" as a conscious choice
-  function handleLogZero(id) {
-    let updated = null;
-    setHabits(prev => prev.map(h => {
-      if (h.id !== id) return h;
-      if (h.logs.some(l => l.date === todayStr() && typeof l.value === "number")) return h; // already logged
-      updated = { ...h, logs: [...h.logs, { date: todayStr(), value: 0, note: "" }] };
-      return updated;
-    }));
-    if (updated) syncHabit(updated);
+  async function handleLogZero(id) {
+    const habit = habits.find(h => h.id === id);
+    if (!habit) return;
+    if (habit.logs.some(l => l.date === todayStr() && typeof l.value === "number")) return;
+    const updated = { ...habit, logs: [...habit.logs, { date: todayStr(), value: 0, note: "" }] };
+    const saved = await syncHabit(updated);
+    if (!saved) return;
+    setHabits(prev => prev.map(h => h.id === id ? updated : h));
     addToast("✓ Logged — none today");
   }
 
@@ -5902,20 +5905,20 @@ export default function App() {
     syncGoal(goal);
   }
 
-  function handleLogGoal(id, value, note) {
-    setGoals(prev => prev.map(g => {
-      if (g.id !== id) return g;
-      const newLogs = [...g.logs, { date: todayStr(), value, note: note || "" }];
-      const updated = {
-        ...g,
-        currentValue: value,
-        logs: newLogs,
-        lastLogDate: todayStr(),
-        status: getGoalProgress({ ...g, currentValue: value }).isComplete ? "completed" : g.status,
-      };
-      syncGoal(updated);
-      return updated;
-    }));
+  async function handleLogGoal(id, value, note) {
+    const goal = goals.find(g => g.id === id);
+    if (!goal) return;
+    const newLogs = [...goal.logs, { date: todayStr(), value, note: note || "" }];
+    const updated = {
+      ...goal,
+      currentValue: value,
+      logs: newLogs,
+      lastLogDate: todayStr(),
+      status: getGoalProgress({ ...goal, currentValue: value }).isComplete ? "completed" : goal.status,
+    };
+    const saved = await syncGoal(updated);
+    if (!saved) return;
+    setGoals(prev => prev.map(g => g.id === id ? updated : g));
   }
 
   async function handleDeleteGoal(id) {
