@@ -37,6 +37,65 @@ export function habitToRow(habit, userId) {
   };
 }
 
+// ─── Goal converters ───────────────────────────────────────────────────────────
+// Convert a DB row (habit_type='goal') → an in-app goal object
+export function rowToGoal(row) {
+  const logs = row.logs ?? [];
+  const numericLogs = logs.filter(l => typeof l.value === "number");
+  const startValue = row.start_value ?? 0;
+  const targetValue = row.target_value ?? 0;
+  const currentValue = numericLogs.length > 0
+    ? numericLogs[numericLogs.length - 1].value
+    : startValue;
+  const direction = (row.direction === "decreasing" || targetValue < startValue)
+    ? "decreasing" : "increasing";
+  const lastLogDate = logs.length > 0
+    ? [...logs].sort((a, b) => b.date.localeCompare(a.date))[0].date
+    : null;
+  return {
+    id:          row.id,
+    name:        row.name,
+    emoji:       row.emoji ?? "",
+    unit:        row.unit ?? "",
+    startValue,
+    targetValue,
+    currentValue,
+    direction,
+    targetDate:  row.target_date ?? null,
+    status:      row.goal_status ?? "active",
+    logs,
+    lastLogDate,
+    color:       row.color ?? "#E67E22",
+  };
+}
+
+// Convert an in-app goal object → a DB row
+export function goalToRow(goal, userId) {
+  return {
+    id:                goal.id,
+    user_id:           userId,
+    name:              goal.name,
+    emoji:             goal.emoji ?? "",
+    habit_type:        "goal",
+    color:             goal.color ?? "#E67E22",
+    start_value:       goal.startValue,
+    target_value:      goal.targetValue,
+    unit:              goal.unit ?? null,
+    target_date:       goal.targetDate ?? null,
+    goal_status:       goal.status ?? "active",
+    logs:              goal.logs ?? [],
+    // Required columns with defaults (not used for goals)
+    streak:            0,
+    best_streak:       0,
+    reflection:        false,
+    reflection_prompt: "",
+    weekly_target:     null,
+    daily_budget:      null,
+    tap_increment:     1,
+    updated_at:        new Date().toISOString(),
+  };
+}
+
 // Convert a DB row → an in-app habit object
 export function rowToHabit(row) {
   const startValue = row.start_value ?? undefined;

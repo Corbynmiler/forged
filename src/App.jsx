@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
-import { supabase, habitToRow, rowToHabit } from "./supabase.js";
+import { supabase, habitToRow, rowToHabit, rowToGoal, goalToRow } from "./supabase.js";
 
 // ─── DATE UTILS ───────────────────────────────────────────────────────────────
 const DAYS   = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
@@ -78,7 +78,6 @@ const COLORS = ["#C0392B","#E67E22","#27AE60","#8E44AD","#2980B9","#C8902A","#16
 const HABIT_TYPES = {
   daily:    { label:"Daily habit",    desc:"One tap per day. Simple check-in.",              icon:"✓"  },
   weekly:   { label:"Weekly target",  desc:"Hit a session count each week.",                 icon:"📅" },
-  progress: { label:"Progress goal",  desc:"Track a number climbing toward a target.",       icon:"📈" },
   project:  { label:"Build",           desc:"Log time spent, wins, and what challenged you.", icon:"⚒️" },
   limit:    { label:"Limit / reduce", desc:"Stay under a daily budget.",                     icon:"🎯" },
 };
@@ -1265,13 +1264,6 @@ function AddModal({ onClose, onSave }) {
           <input style={inp} type="number" min="1" max="7" value={weekTarget} onChange={e => setWeekTarget(e.target.value)}/>
         </FG>
       )}
-      {habitType === "progress" && (
-        <div style={{ display:"flex", gap:10, marginBottom:20 }}>
-          <div style={{ flex:1 }}><label style={lbl}>Start value</label><input style={inp} type="number" step="0.1" value={startVal} onChange={e => setStartVal(e.target.value)} placeholder="74.5"/></div>
-          <div style={{ flex:1 }}><label style={lbl}>Target</label><input style={inp} type="number" step="0.1" value={targetVal} onChange={e => setTargetVal(e.target.value)} placeholder="80"/></div>
-          <div style={{ width:68 }}><label style={lbl}>Unit</label><input style={inp} value={unit} onChange={e => setUnit(e.target.value)} placeholder="kg"/></div>
-        </div>
-      )}
       {habitType === "limit" && (
         <div style={{ marginBottom:20 }}>
           <div style={{ display:"flex", gap:10, marginBottom:10 }}>
@@ -1297,11 +1289,6 @@ function AddModal({ onClose, onSave }) {
         if (!name.trim()) return;
         const base = { id:Date.now()+"", name:name.trim(), emoji:emoji||"⭐", habitType, color, reflection, reflectionPrompt:reflPrompt.trim()||null, streak:0, logs:[] };
         if (habitType === "weekly")   onSave({ ...base, weeklyTarget:parseInt(weekTarget)||3 });
-        else if (habitType === "progress") {
-          const start = parseFloat(startVal) || 0;
-          const target = parseFloat(targetVal) || 100;
-          onSave({ ...base, startValue:start, targetValue:target, direction:inferProgressDirection(start, target), unit:unit||"kg" });
-        }
         else if (habitType === "limit") onSave({ ...base, dailyBudget:parseInt(budget)||60, unit:budgetUnit||"min", tapIncrement:parseInt(tapIncrement)||1 });
         else onSave(base);
       }}>Add habit</PBtn>
@@ -1686,11 +1673,10 @@ function TodayScreen({ habits, xp, onTap, onUndo, onSkip, onReflect, onAddNote, 
   const hr = new Date().getHours();
   const greeting = hr < 12 ? "Rise and forge." : hr < 17 ? "Keep the heat up." : "Finish strong.";
   const level = getLevel(xp);
-  const daily    = habits.filter(h => h.habitType === "daily");
-  const limit    = habits.filter(h => h.habitType === "limit");
-  const weekly   = habits.filter(h => h.habitType === "weekly");
-  const progress = habits.filter(h => h.habitType === "progress");
-  const project  = habits.filter(h => h.habitType === "project");
+  const daily   = habits.filter(h => h.habitType === "daily");
+  const limit   = habits.filter(h => h.habitType === "limit");
+  const weekly  = habits.filter(h => h.habitType === "weekly");
+  const project = habits.filter(h => h.habitType === "project");
   if (habits.length === 0) return (
     <div style={{ padding:"48px 28px", textAlign:"center" }}>
       <div style={{ fontSize:48, marginBottom:18 }}>⚒️</div>
@@ -1719,11 +1705,10 @@ function TodayScreen({ habits, xp, onTap, onUndo, onSkip, onReflect, onAddNote, 
       {/* Tour target: wraps only the first non-empty section so the spotlight ring is tight */}
       {(() => {
         const sections = [
-          daily.length    > 0 && <><SLabel>Daily</SLabel>          {daily.map(h    => <DailyCard    key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onReflect={onReflect} onAddNote={onAddNote}/>)}</>,
-          limit.length    > 0 && <><SLabel>Limits</SLabel>         {limit.map(h    => <LimitCard    key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onReflect={onReflect} onAddNote={onAddNote}/>)}</>,
-          weekly.length   > 0 && <><SLabel>Weekly targets</SLabel> {weekly.map(h   => <WeeklyCard   key={h.id} habit={h} onTap={onTap} onReflect={onReflect} onAddNote={onAddNote}/>)}</>,
-          progress.length > 0 && <><SLabel>Progress goals</SLabel> {progress.map(h => <ProgressCard key={h.id} habit={h} onOpenLog={onOpenLog} onReflect={onReflect} onAddNote={onAddNote}/>)}</>,
-          project.length  > 0 && <><SLabel>Build</SLabel>          {project.map(h  => <ProjectCard  key={h.id} habit={h} onOpenLog={onOpenLog} onReflect={onReflect} onAddNote={onAddNote}/>)}</>,
+          daily.length   > 0 && <><SLabel>Daily</SLabel>          {daily.map(h   => <DailyCard  key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onReflect={onReflect} onAddNote={onAddNote}/>)}</>,
+          limit.length   > 0 && <><SLabel>Limits</SLabel>         {limit.map(h   => <LimitCard  key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onReflect={onReflect} onAddNote={onAddNote}/>)}</>,
+          weekly.length  > 0 && <><SLabel>Weekly targets</SLabel> {weekly.map(h  => <WeeklyCard key={h.id} habit={h} onTap={onTap} onReflect={onReflect} onAddNote={onAddNote}/>)}</>,
+          project.length > 0 && <><SLabel>Build</SLabel>          {project.map(h => <ProjectCard key={h.id} habit={h} onOpenLog={onOpenLog} onReflect={onReflect} onAddNote={onAddNote}/>)}</>,
         ].filter(Boolean);
         return sections.map((sec, i) =>
           i === 0
@@ -2447,7 +2432,7 @@ function EntryCard({ entry, onReflect }) {
 }
 
 // ─── INSIGHTS SCREEN ──────────────────────────────────────────────────────────
-function InsightsScreen({ habits, onShowHistory, onShare, onCoach }) {
+function InsightsScreen({ habits, goals = [], onShowHistory, onShare, onCoach }) {
   function IC({ title, children, action, dataTour }) {
     return (
       <div data-tour={dataTour} style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:18 }}>
@@ -2647,35 +2632,39 @@ function InsightsScreen({ habits, onShowHistory, onShare, onCoach }) {
         );
       })}
 
-      {/* Progress goals */}
-      {habits.filter(h => h.habitType === "progress").map(h => {
-        const logs = [...h.logs].sort((a, b) => a.date.localeCompare(b.date));
-        const stats = getProgressStats(h);
-        const statusText = stats.isComplete
-          ? "Goal reached"
-          : stats.isJustStarted
+      {/* Goals */}
+      {goals.filter(g => g.status !== "completed").map(g => {
+        const { pct, isComplete } = getGoalProgress(g);
+        const logs = [...g.logs].filter(l => typeof l.value === "number").sort((a, b) => a.date.localeCompare(b.date));
+        const statusText = isComplete
+          ? "Goal reached!"
+          : g.currentValue === g.startValue
             ? "Just started"
-            : `${formatWithUnit(stats.toGo, h.unit)} to go`;
+            : `${formatWithUnit(Math.abs(g.targetValue - g.currentValue), g.unit)} to go`;
         return (
-          <IC key={h.id} title={`${h.emoji} ${h.name} — progress`}>
+          <IC key={g.id} title={`${g.emoji} ${g.name} — goal`}>
             <div style={{ display:"flex", justifyContent:"space-between", marginBottom:8 }}>
-              <span style={{ fontSize:13, color:T.muted }}>Current: <strong style={{ color:h.color }}>{formatWithUnit(stats.current, h.unit)}</strong></span>
-              <span style={{ fontSize:13, color:T.muted }}>Target: <strong style={{ color:T.text }}>{formatWithUnit(stats.target, h.unit)}</strong></span>
+              <span style={{ fontSize:13, color:T.muted }}>Current: <strong style={{ color:g.color }}>{formatWithUnit(g.currentValue, g.unit)}</strong></span>
+              <span style={{ fontSize:13, color:T.muted }}>Target: <strong style={{ color:T.text }}>{formatWithUnit(g.targetValue, g.unit)}</strong></span>
             </div>
             <div style={{ height:8, background:T.surface, borderRadius:4, overflow:"hidden", marginBottom:6 }}>
-              <div style={{ height:"100%", borderRadius:4, background:stats.isComplete ? T.goldBright : h.color, width:`${stats.pct}%`, transition:"width 0.5s ease" }}/>
+              <div style={{ height:"100%", borderRadius:4, background:isComplete ? T.goldBright : g.color, width:`${pct * 100}%`, transition:"width 0.5s ease" }}/>
             </div>
-            <div style={{ fontSize:11, color:stats.isComplete ? T.gold : T.muted, marginBottom:16, textAlign:"center" }}>{statusText}</div>
-            <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Recent measurements</div>
-            {logs.slice(-6).reverse().map((l, i) => (
-              <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderTop:`0.5px solid ${T.border}` }}>
-                <span style={{ fontSize:11, color:h.color+"99", fontWeight:500 }}>{fmtEntryDate(l.date)}</span>
-                <div style={{ display:"flex", alignItems:"baseline", gap:4 }}>
-                  <span style={{ fontSize:15, color:T.text, fontWeight:500 }}>{l.value}</span>
-                  <span style={{ fontSize:11, color:T.muted }}>{h.unit}</span>
-                </div>
-              </div>
-            ))}
+            <div style={{ fontSize:11, color:isComplete ? T.gold : T.muted, marginBottom:16, textAlign:"center" }}>{statusText}</div>
+            {logs.length > 0 && (
+              <>
+                <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Recent measurements</div>
+                {logs.slice(-6).reverse().map((l, i) => (
+                  <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderTop:`0.5px solid ${T.border}` }}>
+                    <span style={{ fontSize:11, color:g.color+"99", fontWeight:500 }}>{fmtEntryDate(l.date)}</span>
+                    <div style={{ display:"flex", alignItems:"baseline", gap:4 }}>
+                      <span style={{ fontSize:15, color:T.text, fontWeight:500 }}>{l.value}</span>
+                      <span style={{ fontSize:11, color:T.muted }}>{g.unit}</span>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
           </IC>
         );
       })}
@@ -2696,23 +2685,240 @@ function InsightsScreen({ habits, onShowHistory, onShare, onCoach }) {
   );
 }
 
+// ─── GOAL HELPERS ─────────────────────────────────────────────────────────────
+function getGoalProgress(goal) {
+  const { startValue, targetValue, currentValue, direction } = goal;
+  const range = Math.abs(targetValue - startValue);
+  if (range === 0) return { pct: 0, toGo: 0, isComplete: false };
+  const moved = direction === "decreasing"
+    ? startValue - currentValue
+    : currentValue - startValue;
+  const clamped = Math.max(0, Math.min(1, moved / range));
+  const toGo = Math.max(0, direction === "decreasing"
+    ? currentValue - targetValue
+    : targetValue - currentValue);
+  return { pct: Math.round(clamped * 100), toGo, isComplete: clamped >= 1 };
+}
+
+// ─── LOG GOAL MODAL ───────────────────────────────────────────────────────────
+function LogGoalModal({ goal, onClose, onLog }) {
+  const [val,  setVal]  = useState("");
+  const [note, setNote] = useState("");
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:4 }}>{goal.emoji} {goal.name}</div>
+      <div style={{ fontSize:13, color:T.muted, marginBottom:22 }}>
+        Now: <strong style={{ color:goal.color }}>{goal.currentValue}{goal.unit}</strong>
+        {" → "}Goal: <strong style={{ color:T.text }}>{goal.targetValue}{goal.unit}</strong>
+      </div>
+      <FG label={`Current ${goal.unit || "value"}`}>
+        <input style={inp} type="number" step="any" placeholder={`e.g. ${goal.currentValue}`}
+          value={val} onChange={e => setVal(e.target.value)} autoFocus/>
+      </FG>
+      <FG label="Note (optional)" mb={0}>
+        <input style={inp} placeholder="Optional note" value={note} onChange={e => setNote(e.target.value)} maxLength={140}/>
+      </FG>
+      <PBtn onClick={() => { if (!val) return; onLog(goal.id, parseFloat(val), note); onClose(); }}>Log it</PBtn>
+      <GBtn onClick={onClose}>Cancel</GBtn>
+    </Modal>
+  );
+}
+
+// ─── ADD GOAL MODAL ───────────────────────────────────────────────────────────
+function AddGoalModal({ onClose, onSave }) {
+  const [name,       setName]       = useState("");
+  const [emoji,      setEmoji]      = useState("");
+  const [unit,       setUnit]       = useState("");
+  const [startVal,   setStartVal]   = useState("");
+  const [targetVal,  setTargetVal]  = useState("");
+  const [targetDate, setTargetDate] = useState("");
+
+  const start  = parseFloat(startVal);
+  const target = parseFloat(targetVal);
+  const hasValues = !isNaN(start) && !isNaN(target) && start !== target;
+  const direction = hasValues && target < start ? "decreasing" : "increasing";
+  const canSave = name.trim() && hasValues;
+
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, marginBottom:4 }}>Set a goal</div>
+      <div style={{ fontSize:13, color:T.muted, marginBottom:22 }}>Track an outcome with a target number.</div>
+
+      <div style={{ display:"flex", gap:10, marginBottom:20 }}>
+        <div style={{ flex:1 }}>
+          <label style={lbl}>Goal name</label>
+          <input style={inp} value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Lose weight" maxLength={40} autoFocus/>
+        </div>
+        <div>
+          <label style={lbl}>Emoji</label>
+          <input style={{ ...inp, fontSize:22, textAlign:"center", width:60 }} value={emoji} onChange={e => setEmoji(e.target.value)} placeholder="🎯" maxLength={2}/>
+        </div>
+      </div>
+
+      <FG label="What are you tracking? (unit)">
+        <input style={inp} value={unit} onChange={e => setUnit(e.target.value)} placeholder="e.g. kg, $, km, hours" maxLength={20}/>
+      </FG>
+
+      <div style={{ display:"flex", gap:10, marginBottom:20 }}>
+        <div style={{ flex:1 }}>
+          <label style={lbl}>Starting value</label>
+          <input style={inp} type="number" step="any" value={startVal} onChange={e => setStartVal(e.target.value)} placeholder="74.5"/>
+        </div>
+        <div style={{ flex:1 }}>
+          <label style={lbl}>Target value</label>
+          <input style={inp} type="number" step="any" value={targetVal} onChange={e => setTargetVal(e.target.value)} placeholder="80"/>
+        </div>
+      </div>
+
+      {hasValues && (
+        <div style={{ marginBottom:20, padding:"10px 14px", background:T.surface, borderRadius:T.rsm, border:`0.5px solid ${T.border}`, fontSize:12, color:T.muted }}>
+          Direction inferred: <strong style={{ color:T.text }}>{direction === "decreasing" ? "↓ decreasing" : "↑ increasing"}</strong>
+          {unit ? ` (${start}${unit} → ${target}${unit})` : ""}
+        </div>
+      )}
+
+      <FG label="Target date (optional)" mb={20}>
+        <input style={inp} type="date" value={targetDate} onChange={e => setTargetDate(e.target.value)}/>
+      </FG>
+
+      <PBtn onClick={() => {
+        if (!canSave) return;
+        onSave({
+          id: Date.now() + "",
+          name: name.trim(),
+          emoji: emoji || "🎯",
+          unit: unit.trim(),
+          startValue: start,
+          targetValue: target,
+          currentValue: start,
+          direction,
+          targetDate: targetDate || null,
+          status: "active",
+          logs: [],
+          color: "#E67E22",
+        });
+        onClose();
+      }}>Set goal</PBtn>
+      <GBtn onClick={onClose}>Cancel</GBtn>
+    </Modal>
+  );
+}
+
+// ─── GOAL CARD ────────────────────────────────────────────────────────────────
+function GoalCard({ goal, onLog, onComplete, onDelete }) {
+  const { pct, toGo, isComplete } = getGoalProgress(goal);
+  const [showMenu, setShowMenu] = useState(false);
+
+  return (
+    <div style={{ margin:"0 14px 10px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${isComplete ? "rgba(39,174,96,0.4)" : T.border}`, overflow:"hidden" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px 10px" }}>
+        <div style={{ width:40, height:40, borderRadius:11, background:goal.color+"20", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>{goal.emoji}</div>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{goal.name}</div>
+          <div style={{ fontSize:12, color:T.muted, marginTop:1 }}>
+            <strong style={{ color:goal.color }}>{goal.currentValue}{goal.unit}</strong>
+            {" → "}<strong style={{ color:T.text }}>{goal.targetValue}{goal.unit}</strong>
+          </div>
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          {!isComplete && (
+            <button onClick={() => onLog(goal.id)}
+              style={{ fontSize:12, color:goal.color, background:"none", border:`0.5px solid ${goal.color+"55"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>
+              Log
+            </button>
+          )}
+          <button onClick={() => setShowMenu(m => !m)}
+            style={{ fontSize:18, color:T.hint, background:"none", border:"none", cursor:"pointer", lineHeight:1, padding:"2px 4px" }}>
+            ···
+          </button>
+        </div>
+      </div>
+
+      {/* Progress bar */}
+      <div style={{ padding:"0 15px 4px" }}>
+        <div style={{ height:5, background:T.surface, borderRadius:3, overflow:"hidden", marginBottom:6 }}>
+          <div style={{ height:"100%", borderRadius:3, background:isComplete ? T.green : goal.color, width:`${pct}%`, transition:"width 0.4s ease" }}/>
+        </div>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div style={{ fontSize:11, color:isComplete ? T.green : T.muted, fontWeight:isComplete ? 500 : 400 }}>
+            {isComplete ? "✓ Goal reached" : `${toGo.toLocaleString()}${goal.unit} to go · ${pct}%`}
+          </div>
+          {goal.lastLogDate && (
+            <div style={{ fontSize:10, color:T.hint }}>
+              Last: {fmtEntryDate(goal.lastLogDate)}
+            </div>
+          )}
+          {goal.targetDate && (
+            <div style={{ fontSize:10, color:T.hint, marginLeft:8 }}>
+              By {fmtEntryDate(goal.targetDate)}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Inline menu */}
+      {showMenu && (
+        <div style={{ borderTop:`0.5px solid ${T.border}`, padding:"8px 15px 10px", display:"flex", gap:8 }}>
+          {!isComplete && (
+            <button onClick={() => { onComplete(goal.id); setShowMenu(false); }}
+              style={{ fontSize:12, color:T.green, background:"none", border:`0.5px solid ${T.green+"44"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer" }}>
+              Mark done
+            </button>
+          )}
+          <button onClick={() => { onDelete(goal.id); setShowMenu(false); }}
+            style={{ fontSize:12, color:"#e74c3c", background:"none", border:`0.5px solid rgba(231,76,60,0.3)`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer" }}>
+            Delete
+          </button>
+          <button onClick={() => setShowMenu(false)}
+            style={{ fontSize:12, color:T.muted, background:"none", border:"none", cursor:"pointer", marginLeft:"auto" }}>
+            Cancel
+          </button>
+        </div>
+      )}
+      <div style={{ height:6 }}/>
+    </div>
+  );
+}
+
+// ─── ADD ACTION SHEET ─────────────────────────────────────────────────────────
+function AddActionSheet({ onAddHabit, onAddGoal, onClose }) {
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:300, display:"flex", alignItems:"flex-end", justifyContent:"center" }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ width:430, maxWidth:"100vw", background:T.raised, borderRadius:"20px 20px 0 0", padding:"20px 16px 40px" }}>
+        <div style={{ width:36, height:4, borderRadius:2, background:T.border, margin:"0 auto 20px" }}/>
+        <button onClick={onAddHabit} style={{ display:"flex", alignItems:"center", gap:14, width:"100%", padding:"14px 16px", borderRadius:T.r, border:`0.5px solid ${T.borderStrong}`, background:T.surface, marginBottom:10, cursor:"pointer", textAlign:"left" }}>
+          <span style={{ fontSize:22 }}>⚒️</span>
+          <div>
+            <div style={{ fontSize:15, fontWeight:500, color:T.text }}>Add a habit</div>
+            <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>Daily, weekly, build, or limit — repeating behaviours</div>
+          </div>
+        </button>
+        <button onClick={onAddGoal} style={{ display:"flex", alignItems:"center", gap:14, width:"100%", padding:"14px 16px", borderRadius:T.r, border:`0.5px solid ${T.borderStrong}`, background:T.surface, marginBottom:10, cursor:"pointer", textAlign:"left" }}>
+          <span style={{ fontSize:22 }}>🎯</span>
+          <div>
+            <div style={{ fontSize:15, fontWeight:500, color:T.text }}>Set a goal</div>
+            <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>An outcome with a target number — track your progress</div>
+          </div>
+        </button>
+        <button onClick={onClose} style={{ width:"100%", padding:"13px", borderRadius:T.rsm, border:"none", background:T.surface, color:T.muted, fontSize:14, cursor:"pointer", marginTop:4 }}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
 // ─── HABITS SCREEN ────────────────────────────────────────────────────────────
-function HabitsScreen({ habits, onEdit, onDelete, onAdd, onReflect, onCoach, onUpgrade, isPro, coachName }) {
+function HabitsScreen({ habits, goals = [], onEdit, onDelete, onAdd, onReflect, onCoach, onUpgrade, isPro, coachName, onLogGoal, onDeleteGoal, onCompleteGoal }) {
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [completedOpen, setCompletedOpen] = useState(false);
   const grouped = Object.fromEntries(Object.keys(HABIT_TYPES).map(k => [k, habits.filter(h => h.habitType === k)]));
+  const activeGoals    = goals.filter(g => g.status !== "completed");
+  const completedGoals = goals.filter(g => g.status === "completed");
+
   function DetailRow({ h }) {
     if (h.habitType === "project") {
       const s = getProjectStats(h);
       return <div style={{ padding:"0 15px 14px", display:"flex", gap:8 }}><Stat label="total hrs" value={s.totalHours} color={h.color}/><Stat label="wins" value={s.wins} color={T.green}/><Stat label="hard parts" value={s.hard} color={T.amber}/></div>;
-    }
-    if (h.habitType === "progress") {
-      const stats = getProgressStats(h);
-      const statusText = stats.isComplete
-        ? "Goal reached"
-        : stats.isJustStarted
-          ? "Just started"
-          : `${formatWithUnit(stats.toGo, h.unit)} to go`;
-      return <div style={{ padding:"0 15px 14px" }}><div style={{ height:5, background:T.surface, borderRadius:3, overflow:"hidden" }}><div style={{ height:"100%", borderRadius:3, background:stats.isComplete ? T.goldBright : h.color, width:`${stats.pct}%` }}/></div><div style={{ fontSize:11, color:T.muted, marginTop:5 }}>{formatWithUnit(stats.current, h.unit)} / {formatWithUnit(stats.target, h.unit)} · {statusText}</div></div>;
     }
     if (h.habitType === "weekly") {
       const wk = getWeeklyCount(h), pct = Math.min(100, Math.round((wk / h.weeklyTarget) * 100));
@@ -2725,8 +2931,32 @@ function HabitsScreen({ habits, onEdit, onDelete, onAdd, onReflect, onCoach, onU
     <div>
       <div style={{ padding:"16px 18px 10px" }}>
         <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>Your habits</div>
-        <div style={{ fontSize:13, color:T.muted, marginTop:3 }}>{habits.length} active</div>
+        <div style={{ fontSize:13, color:T.muted, marginTop:3 }}>{habits.length} habit{habits.length !== 1 ? "s" : ""}{goals.length > 0 ? ` · ${activeGoals.length} goal${activeGoals.length !== 1 ? "s" : ""}` : ""}</div>
       </div>
+
+      {/* Goals section */}
+      {(activeGoals.length > 0 || completedGoals.length > 0) && (
+        <div>
+          <SLabel>Goals</SLabel>
+          {activeGoals.map(g => (
+            <GoalCard key={g.id} goal={g} onLog={() => onLogGoal(g.id)} onComplete={() => onCompleteGoal(g.id)} onDelete={() => onDeleteGoal(g.id)} />
+          ))}
+          {completedGoals.length > 0 && (
+            <div style={{ margin:"0 14px 10px" }}>
+              <button onClick={() => setCompletedOpen(o => !o)}
+                style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", background:"none", border:`0.5px solid ${T.border}`, borderRadius:T.r, padding:"10px 14px", cursor:"pointer", color:T.muted, fontSize:13 }}>
+                <span>Completed goals ({completedGoals.length})</span>
+                <span style={{ fontSize:10, transform: completedOpen ? "rotate(180deg)" : "none", display:"inline-block", transition:"transform 0.2s" }}>▼</span>
+              </button>
+              {completedOpen && completedGoals.map(g => (
+                <GoalCard key={g.id} goal={g} onLog={() => onLogGoal(g.id)} onComplete={() => onCompleteGoal(g.id)} onDelete={() => onDeleteGoal(g.id)} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Habits section */}
       {Object.entries(grouped).filter(([, arr]) => arr.length > 0).map(([type, arr]) => (
         <div key={type}>
           <SLabel>{HABIT_TYPES[type]?.label}</SLabel>
@@ -2769,8 +2999,9 @@ function HabitsScreen({ habits, onEdit, onDelete, onAdd, onReflect, onCoach, onU
           ))}
         </div>
       ))}
+
       <button data-tour="habits-add" onClick={onAdd} style={{ margin:"8px 14px 0", width:"calc(100% - 28px)", border:`1px dashed ${T.borderStrong}`, background:"none", borderRadius:T.r, padding:14, fontSize:13, color:T.muted, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2v10M2 7h10" stroke={T.muted} strokeWidth="1.5" strokeLinecap="round"/></svg>Add habit
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2v10M2 7h10" stroke={T.muted} strokeWidth="1.5" strokeLinecap="round"/></svg>Add habit or goal
       </button>
 
       <div style={{ paddingBottom:16 }}></div>
@@ -4559,12 +4790,16 @@ export default function App() {
   const [onboarded,   setOnboarded]  = useState(null);
   const [user,        setUser]        = useState({ name:"", avatarUrl:null });
   const [habits,      setHabits]     = useState([]);
+  const [goals,       setGoals]      = useState([]);
   const [screen,      setScreen]     = useState("today");
   const [xp,          setXp]         = useState(0);
   const [particles,   setParticles]  = useState([]);
   const [flashes,     setFlashes]    = useState([]);
   const [toasts,      setToasts]     = useState([]);
   const [showAdd,     setShowAdd]    = useState(false);
+  const [showAddGoal,    setShowAddGoal]    = useState(false);
+  const [showAddChoice,  setShowAddChoice]  = useState(false);
+  const [logGoalId,      setLogGoalId]      = useState(null);
   const [showXP,      setShowXP]     = useState(false);
   const [showHistory, setShowHistory]= useState(false);
   const [showCoach,   setShowCoach]  = useState(false);
@@ -4625,6 +4860,18 @@ export default function App() {
       console.error("syncHabit exception:", err);
       const id = Date.now();
       setToasts(t => [...t, { id, msg: "⚠️ Couldn't save — check your connection" }]);
+    }
+  }
+
+  async function syncGoal(goal) {
+    if (demoMode) return;
+    const uid = userIdRef.current;
+    if (!uid) return;
+    try {
+      const { error } = await supabase.from("habits").upsert(goalToRow(goal, uid));
+      if (error) console.error("syncGoal error:", error.message);
+    } catch (err) {
+      console.error("syncGoal exception:", err);
     }
   }
 
@@ -4741,7 +4988,26 @@ export default function App() {
 
       if (isOnboarded === null) isOnboarded = false;
       setOnboarded(isOnboarded);
-      if (rows) setHabits(rows.map(rowToHabit));
+
+      if (rows) {
+        const goalRows     = rows.filter(r => r.habit_type === "goal");
+        const progressRows = rows.filter(r => r.habit_type === "progress");
+        const habitRows    = rows.filter(r => r.habit_type !== "goal" && r.habit_type !== "progress");
+
+        // Migrate legacy progress habits → goals (fire-and-forget DB update)
+        if (progressRows.length > 0) {
+          const progressIds = progressRows.map(r => r.id);
+          supabase.from("habits")
+            .update({ habit_type: "goal", goal_status: "active", updated_at: new Date().toISOString() })
+            .in("id", progressIds)
+            .then(({ error }) => {
+              if (error) console.error("[Forged] progress→goal migration failed:", error.message);
+            });
+        }
+
+        setGoals([...goalRows, ...progressRows].map(rowToGoal));
+        setHabits(habitRows.map(rowToHabit));
+      }
 
       userIdRef.current = uid;
       accountDataLoadedRef.current = true;
@@ -5457,7 +5723,10 @@ export default function App() {
   // Gate adding habits at 5 for free users
   function handleStartAdd() {
     if (demoBounce()) return;
-    if (!isPro && habits.length >= 5) {
+    // On Habits screen, show choice sheet (habit or goal). On other screens, go straight to habit.
+    if (screen === "habits") {
+      setShowAddChoice(true);
+    } else if (!isPro && habits.length >= 5) {
       setShowUpgrade(true);
     } else {
       setShowAdd(true);
@@ -5484,6 +5753,44 @@ export default function App() {
       const { data: rows } = await supabase.from("habits").select("*").eq("user_id", uid).order("created_at");
       if (rows) setHabits(rows.map(rowToHabit));
     }
+  }
+
+  function handleAddGoal(goal) {
+    setGoals(prev => [...prev, goal]);
+    setShowAddGoal(false);
+    syncGoal(goal);
+  }
+
+  function handleLogGoal(id, value, note) {
+    setGoals(prev => prev.map(g => {
+      if (g.id !== id) return g;
+      const newLogs = [...g.logs, { date: todayStr(), value, note: note || "" }];
+      const updated = {
+        ...g,
+        currentValue: value,
+        logs: newLogs,
+        lastLogDate: todayStr(),
+        status: getGoalProgress({ ...g, currentValue: value }).isComplete ? "completed" : g.status,
+      };
+      syncGoal(updated);
+      return updated;
+    }));
+  }
+
+  async function handleDeleteGoal(id) {
+    const uid = userIdRef.current;
+    if (!uid) return;
+    setGoals(prev => prev.filter(g => g.id !== id));
+    await supabase.from("habits").delete().eq("id", id).eq("user_id", uid);
+  }
+
+  function handleCompleteGoal(id) {
+    setGoals(prev => prev.map(g => {
+      if (g.id !== id) return g;
+      const updated = { ...g, status: "completed" };
+      syncGoal(updated);
+      return updated;
+    }));
   }
 
   async function handleSignOut() {
@@ -5524,8 +5831,8 @@ export default function App() {
 
         {screen === "today"    && <TodayScreen    habits={habits} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onReflect={setReflectId} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onAdd={handleStartAdd} onXPInfo={() => setShowXP(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)} isPro={isPro} coachName={coachName}/>}
         {screen === "journal"  && <JournalScreen habits={habits} onReflect={setReflectId} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
-        {screen === "insights" && <InsightsScreen habits={habits} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
-        {screen === "habits"   && <HabitsScreen   habits={habits} onEdit={setEditId} onDelete={handleDeleteHabit} onAdd={handleStartAdd} onReflect={setReflectId} onCoach={() => setShowCoach(true)} onUpgrade={() => setShowUpgrade(true)} isPro={isPro} coachName={coachName}/>}
+        {screen === "insights" && <InsightsScreen habits={habits} goals={goals} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
+        {screen === "habits"   && <HabitsScreen   habits={habits} goals={goals} onEdit={setEditId} onDelete={handleDeleteHabit} onAdd={handleStartAdd} onReflect={setReflectId} onCoach={() => setShowCoach(true)} onUpgrade={() => setShowUpgrade(true)} isPro={isPro} coachName={coachName} onLogGoal={id => setLogGoalId(id)} onDeleteGoal={handleDeleteGoal} onCompleteGoal={handleCompleteGoal}/>}
         {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} refCode={refCode}
           authEmail={authEmail}
           onUpgrade={() => setShowUpgrade(true)}
@@ -5574,12 +5881,14 @@ export default function App() {
       </div>
 
       {/* Modals */}
-      {showAdd     && <AddModal     onClose={() => setShowAdd(false)}    onSave={handleAddHabit}/>}
-      {showXP      && <XPModal      xp={xp}                              onClose={() => setShowXP(false)}/>}
-      {showHistory && <HistoryModal habits={habits} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onClose={() => setShowHistory(false)}/>}
-      {reflectId   && <ReflectModal habit={reflectHabit}                 onClose={() => setReflectId(null)} onSave={handleSaveReflection}/>}
-      {editId      && editHabit && <EditModal habit={editHabit}          onClose={() => setEditId(null)}    onSave={handleEditSave}/>}
-      {logId && logHabit?.habitType === "progress" && <LogProgressModal  habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
+      {showAdd       && <AddModal      onClose={() => setShowAdd(false)}     onSave={handleAddHabit}/>}
+      {showAddGoal   && <AddGoalModal  onClose={() => setShowAddGoal(false)} onSave={handleAddGoal}/>}
+      {showAddChoice && <AddActionSheet onAddHabit={() => { setShowAddChoice(false); setShowAdd(true); }} onAddGoal={() => { setShowAddChoice(false); setShowAddGoal(true); }} onClose={() => setShowAddChoice(false)}/>}
+      {logGoalId     && (() => { const g = goals.find(x => x.id === logGoalId); return g ? <LogGoalModal goal={g} onClose={() => setLogGoalId(null)} onLog={(id, val, note) => { handleLogGoal(id, val, note); setLogGoalId(null); }}/> : null; })()}
+      {showXP        && <XPModal       xp={xp}                               onClose={() => setShowXP(false)}/>}
+      {showHistory   && <HistoryModal  habits={habits} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onClose={() => setShowHistory(false)}/>}
+      {reflectId     && <ReflectModal  habit={reflectHabit}                  onClose={() => setReflectId(null)} onSave={handleSaveReflection}/>}
+      {editId        && editHabit && <EditModal habit={editHabit}             onClose={() => setEditId(null)}    onSave={handleEditSave}/>}
       {logId && logHabit?.habitType === "project"  && <LogProjectModal   habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
       {showCoach   && <AICoach habits={habits} user={user} isPro={isPro} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)} coachName={coachName} currentScreen={screen}/>}
       {showUpgrade && <BetaPaywallModal onClose={() => setShowUpgrade(false)}/>}
