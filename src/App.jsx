@@ -142,6 +142,11 @@ function formatWithUnit(value, unit) {
   const n = formatProgressNumber(value);
   return unit ? `${n} ${unit}` : n;
 }
+function truncateText(text, max = 72) {
+  const s = String(text ?? "").trim();
+  if (s.length <= max) return s;
+  return `${s.slice(0, Math.max(0, max - 1)).trimEnd()}...`;
+}
 function getProgressStats(h) {
   const start = Number(h.startValue ?? 0);
   const target = Number(h.targetValue ?? start);
@@ -417,7 +422,7 @@ function Ring({ pct, size = 88 }) {
   );
 }
 function SLabel({ children }) {
-  return <div style={{ padding:"4px 18px 8px", fontSize:10, fontWeight:500, letterSpacing:"0.08em", color:T.hint, textTransform:"uppercase" }}>{children}</div>;
+  return <div style={{ padding:"6px 18px 8px", fontSize:11, fontWeight:600, letterSpacing:"0.08em", color:T.sub, textTransform:"uppercase" }}>{children}</div>;
 }
 function Stat({ label, value, color }) {
   return (
@@ -835,6 +840,11 @@ function ProjectCard({ habit, onOpenLog, onReflect, onAddNote }) {
   const dailyBuildTarget = habit.dailyTargetMinutes ?? 60;
   const buildStreak = getBuildStreak(habit);
   const lastWin = [...habit.logs].filter(l => l.value?.win).pop();
+  const buildMeta = logged
+    ? `${todayMins}/${dailyBuildTarget} min today${tLogs.length > 1 ? ` (${tLogs.length} sessions)` : ""}${buildStreak > 0 ? ` · 🔥 ${buildStreak} day streak` : ""}`
+    : `Tap + to log a session${buildStreak > 0 ? ` · 🔥 ${buildStreak} day streak` : ""}`;
+  const buildMetaDisplay = truncateText(buildMeta, 68);
+  const latestWinDisplay = truncateText(lastWin?.value?.win || "", 96);
   const tLog = tLogs[tLogs.length - 1];
   return (
     <div className="rc" style={cardStyle(logged, habit)}>
@@ -842,11 +852,8 @@ function ProjectCard({ habit, onOpenLog, onReflect, onAddNote }) {
         <IconBox habit={habit} logged={logged}/>
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{habit.name}</div>
-          <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>
-            {logged
-              ? `${todayMins}/${dailyBuildTarget} min today${tLogs.length > 1 ? ` (${tLogs.length} sessions)` : ""}`
-              : "Tap + to log a session"}
-            {buildStreak > 0 ? ` · 🔥 ${buildStreak} day streak` : ""}
+          <div title={buildMeta} style={{ fontSize:12, color:T.muted, marginTop:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+            {buildMetaDisplay}
           </div>
         </div>
         <PlusBtn habit={habit} logged={logged} onClick={() => onOpenLog(habit.id)}/>
@@ -860,7 +867,9 @@ function ProjectCard({ habit, onOpenLog, onReflect, onAddNote }) {
       {lastWin && (
         <div style={{ margin:"0 15px 14px", background:T.surface, borderRadius:T.rsm, padding:"10px 12px" }}>
           <div style={{ fontSize:10, color:T.green, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:4 }}>Latest win</div>
-          <div style={{ fontSize:13, color:T.sub }}>{lastWin.value.win}</div>
+          <div title={lastWin.value.win} style={{ fontSize:12, color:T.sub, lineHeight:1.5 }}>
+            {latestWinDisplay}
+          </div>
         </div>
       )}
       {logged && <DoneBanner habit={habit}/>}
