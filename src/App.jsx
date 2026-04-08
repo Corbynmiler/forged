@@ -4392,7 +4392,11 @@ export default function App() {
   const lastResumeDataFetchRef = useRef(0);
   const mountTimeRef = useRef(Date.now());
   const initialAuthHandledRef = useRef(false);
+  const lastSignedInUidRef = useRef(null);
   const noteDebounceRef = useRef({});
+  const retryLoadPromiseRef = useRef(null);
+  const retryLoadUidRef = useRef(null);
+  const debugLog = useCallback(() => {}, []);
 
   // ─── Supabase helpers ──────────────────────────────────────────────────────
   async function syncHabit(habit) {
@@ -4443,41 +4447,83 @@ export default function App() {
     // Mutex: skip if already loading this uid
     if (loadingUidRef.current === uid) return false;
     loadingUidRef.current = uid;
+    // #region agent log
+    debugLog("H2", "App.jsx:loadUserData:start", "loadUserData start", {
+      uidPrefix: uid?.slice(0, 8) || null,
+      loadingUidPrefix: loadingUidRef.current?.slice(0, 8) || null,
+      sessionUserIdPrefix: sessionUserId?.slice(0, 8) || null,
+    });
+    // #endregion
     try {
-      // Verify session is fully settled before querying.
-      // Chrome can fire INITIAL_SESSION before the PostgREST client
-      // has internalized the token, causing 401s on the first query.
-      try {
-        const { data: sd, error: sErr } = await supabase.auth.getSession();
-        if (sErr) console.warn("[Forged] loadUserData: getSession error:", sErr.message);
-        if (!sd?.session?.user?.id) {
-          console.warn("[Forged] loadUserData: no valid session, aborting");
-          loadingUidRef.current = null;
-          return false;
-        }
-        if (sd.session.user.id !== uid) {
-          console.warn("[Forged] loadUserData: session uid mismatch — expected", uid?.slice(0,8), "got", sd.session.user.id?.slice(0,8));
-          loadingUidRef.current = null;
-          return false;
-        }
-      } catch(sEx) {
-        console.warn("[Forged] loadUserData: getSession threw:", sEx.message);
-      }
+      // #region agent log
+      debugLog("H2", "App.jsx:loadUserData:precheck-skipped", "skip explicit getSession precheck to avoid auth lock contention", {
+        uidPrefix: uid?.slice(0, 8) || null,
+      });
+      // #endregion
 
       const FETCH_MS = 12000;
-      const queryPromise = Promise.all([
-        supabase.from("profiles").select("*").eq("id", uid).single(),
-        supabase.from("habits").select("*").eq("user_id", uid).order("created_at"),
-      ]);
-      const timeoutPromise = new Promise((_, rej) =>
-        setTimeout(() => rej(new Error("loadUserData_timeout")), FETCH_MS)
-      );
+      // #region agent log
+      debugLog("H3", "App.jsx:loadUserData:query-start", "starting profile/habits query race", {
+        fetchTimeoutMs: FETCH_MS,
+        precheckGetSessionTimedOut: false,
+        uidPrefix: uid?.slice(0, 8) || null,
+      });
+      // #endregion
+      async function runQueryWithTimeout(label, queryFactory) {
+        const startedMs = Date.now();
+        const aborter = new AbortController();
+        let timeoutId = null;
+        const queryPromise = queryFactory(aborter.signal);
+        const timeoutPromise = new Promise((_, rej) => {
+          timeoutId = setTimeout(() => {
+            aborter.abort();
+            // #region agent log
+            debugLog("H7", `App.jsx:loadUserData:${label}-query-timeout-fired`, `${label} query timeout fired; aborting in-flight request`, {
+              elapsedMs: Date.now() - startedMs,
+              timeoutMs: FETCH_MS,
+            });
+            // #endregion
+            rej(new Error(`${label}_timeout`));
+          }, FETCH_MS);
+        });
+        try {
+          return await Promise.race([queryPromise, timeoutPromise]);
+        } finally {
+          if (timeoutId != null) clearTimeout(timeoutId);
+        }
+      }
 
-      let profileRes, habitsRes;
+      let profileRes;
+      let habitsRes;
       try {
-        [profileRes, habitsRes] = await Promise.race([queryPromise, timeoutPromise]);
+        profileRes = await runQueryWithTimeout("profile", (signal) =>
+          supabase.from("profiles").select("*").eq("id", uid).single().abortSignal(signal)
+        );
+        // #region agent log
+        debugLog("H7", "App.jsx:loadUserData:profile-query-settled", "profile query settled", {
+          errorCode: profileRes?.error?.code || null,
+          hasData: !!profileRes?.data,
+        });
+        // #endregion
+
+        habitsRes = await runQueryWithTimeout("habits", (signal) =>
+          supabase.from("habits").select("*").eq("user_id", uid).order("created_at").abortSignal(signal)
+        );
+        // #region agent log
+        debugLog("H7", "App.jsx:loadUserData:habits-query-settled", "habits query settled", {
+          errorCode: habitsRes?.error?.code || null,
+          rows: Array.isArray(habitsRes?.data) ? habitsRes.data.length : null,
+        });
+        // #endregion
       } catch (err) {
         console.error("loadUserData: fetch failed —", err.message);
+        // #region agent log
+        debugLog("H3", "App.jsx:loadUserData:query-fail", "profile/habits query stage failed", {
+          error: err?.message || "unknown",
+          precheckGetSessionTimedOut: false,
+          uidPrefix: uid?.slice(0, 8) || null,
+        });
+        // #endregion
         accountDataLoadedRef.current = false;
         setAccountDataReady(false);
         return false;
@@ -4485,6 +4531,16 @@ export default function App() {
 
       const { data: profile, error: pErr } = profileRes;
       const { data: rows,    error: hErr  } = habitsRes;
+      // #region agent log
+      debugLog("H3", "App.jsx:loadUserData:query-result", "profile/habits query result", {
+        profileErrorCode: pErr?.code || null,
+        profileErrorMsg: pErr?.message || null,
+        habitsErrorCode: hErr?.code || null,
+        habitsErrorMsg: hErr?.message || null,
+        habitsCount: Array.isArray(rows) ? rows.length : null,
+        profileFound: !!profile,
+      });
+      // #endregion
 
       const profileFailed = pErr && pErr.code !== "PGRST116";
       const habitsFailed  = hErr != null;
@@ -4540,6 +4596,13 @@ export default function App() {
       userIdRef.current = uid;
       accountDataLoadedRef.current = true;
       setAccountDataReady(true);
+      // #region agent log
+      debugLog("H3", "App.jsx:loadUserData:success", "loadUserData success", {
+        uidPrefix: uid?.slice(0, 8) || null,
+        habitsCount: Array.isArray(rows) ? rows.length : null,
+        onboarded: isOnboarded,
+      });
+      // #endregion
       return true;
     } catch (err) {
       console.error("loadUserData exception:", err);
@@ -4551,18 +4614,69 @@ export default function App() {
     }
   }
 
-  async function loadUserDataWithRetries(uid) {
+  async function loadUserDataWithRetries(uid, source = "unknown") {
+    if (retryLoadPromiseRef.current && retryLoadUidRef.current === uid) {
+      // #region agent log
+      debugLog("H8", "App.jsx:loadUserDataWithRetries:coalesced", "coalescing onto existing retry pipeline", {
+        uidPrefix: uid?.slice(0, 8) || null,
+        source,
+        existingUidPrefix: retryLoadUidRef.current?.slice(0, 8) || null,
+      });
+      // #endregion
+      return retryLoadPromiseRef.current;
+    }
+
+    retryLoadUidRef.current = uid;
+    retryLoadPromiseRef.current = (async () => {
     // 300ms initial settle lets Chrome fully propagate the auth token
     // to the PostgREST client before the first query fires.
     // Subsequent retries use exponential backoff.
     const backoffs = [300, 1500, 3000, 6000, 10000];
+    // #region agent log
+    debugLog("H8", "App.jsx:loadUserDataWithRetries:start", "loadUserDataWithRetries start", {
+      uidPrefix: uid?.slice(0, 8) || null,
+      source,
+      attempts: backoffs.length,
+    });
+    // #endregion
     for (let attempt = 0; attempt < backoffs.length; attempt++) {
       await new Promise(r => setTimeout(r, backoffs[attempt]));
+      // #region agent log
+      debugLog("H8", "App.jsx:loadUserDataWithRetries:attempt", "loadUserDataWithRetries attempt", {
+        uidPrefix: uid?.slice(0, 8) || null,
+        source,
+        attempt,
+        waitMs: backoffs[attempt],
+      });
+      // #endregion
       if (attempt > 0) console.log(`[Forged] loadUserData retry ${attempt}/${backoffs.length - 1}`);
-      if (await loadUserData(uid)) return true;
+      if (await loadUserData(uid)) {
+        // #region agent log
+        debugLog("H8", "App.jsx:loadUserDataWithRetries:success", "loadUserDataWithRetries success", {
+          uidPrefix: uid?.slice(0, 8) || null,
+          source,
+          attempt,
+        });
+        // #endregion
+        return true;
+      }
     }
     console.error("[Forged] loadUserDataWithRetries: all attempts failed for uid", uid?.slice(0, 8));
+    // #region agent log
+    debugLog("H8", "App.jsx:loadUserDataWithRetries:failed", "loadUserDataWithRetries exhausted attempts", {
+      uidPrefix: uid?.slice(0, 8) || null,
+      source,
+    });
+    // #endregion
     return false;
+    })();
+
+    try {
+      return await retryLoadPromiseRef.current;
+    } finally {
+      retryLoadPromiseRef.current = null;
+      retryLoadUidRef.current = null;
+    }
   }
 
   async function retryAccountDataLoad() {
@@ -4573,7 +4687,7 @@ export default function App() {
     try {
       const { error: refErr } = await supabase.auth.refreshSession();
       if (refErr) console.warn("retryAccountDataLoad: refreshSession —", refErr.message);
-      const ok = await loadUserDataWithRetries(sessionUserId);
+      const ok = await loadUserDataWithRetries(sessionUserId, "manual-retry");
       if (!ok) setAccountLoadError(true);
     } finally {
       clearTimeout(retryBudget);
@@ -4592,8 +4706,29 @@ export default function App() {
     let mounted = true;
 
     // If INITIAL_SESSION never fires, fall back to auth (don't guess signed-in without data).
-    const bailout = setTimeout(() => {
+    const bailout = setTimeout(async () => {
       if (!mounted || initialAuthHandledRef.current) return;
+      // #region agent log
+      debugLog("H1", "App.jsx:auth-bailout", "INITIAL_SESSION did not fire within budget", {
+        lastSignedInUidPrefix: lastSignedInUidRef.current?.slice(0, 8) || null,
+      });
+      // #endregion
+      if (lastSignedInUidRef.current) {
+        initialAuthHandledRef.current = true;
+        const uid = lastSignedInUidRef.current;
+        setSessionUserId(uid);
+        setAccountLoadError(false);
+        accountDataLoadedRef.current = false;
+        setAccountDataReady(false);
+        userIdRef.current = null;
+        const ok = await loadUserDataWithRetries(uid, "BAILOUT_SIGNED_IN_FALLBACK");
+        if (!mounted) return;
+        if (!ok) setAccountLoadError(true);
+        else setAccountLoadError(false);
+        setAuthScreen(false);
+        setLoading(false);
+        return;
+      }
       console.warn("Auth: INITIAL_SESSION did not fire within 12s");
       setAuthScreen(true);
       setLoading(false);
@@ -4601,12 +4736,27 @@ export default function App() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return;
+      // #region agent log
+      debugLog("H1", "App.jsx:onAuthStateChange:event", "auth event fired", {
+        event,
+        hasSession: !!session,
+        sessionUidPrefix: session?.user?.id?.slice(0, 8) || null,
+        accountDataLoaded: accountDataLoadedRef.current,
+        loadingUidPrefix: loadingUidRef.current?.slice(0, 8) || null,
+      });
+      // #endregion
       try {
 
         // ── Initial session ───────────────────────────────────────────────
         // Do not leave the loading screen until profile/habits load succeeds (or we show retry).
         if (event === "INITIAL_SESSION") {
           clearTimeout(bailout);
+          // #region agent log
+          debugLog("H1", "App.jsx:onAuthStateChange:INITIAL_SESSION", "handling INITIAL_SESSION", {
+            hasSession: !!session,
+            sessionUidPrefix: session?.user?.id?.slice(0, 8) || null,
+          });
+          // #endregion
           // If profile/habits hang (blocked network / wrong origin), never leave the user on a dead spinner.
           const LOAD_BUDGET_MS = 32000;
           const loadBudgetTimer = setTimeout(() => {
@@ -4626,12 +4776,22 @@ export default function App() {
               accountDataLoadedRef.current = false;
               setAccountDataReady(false);
               userIdRef.current = null;
-              const ok = await loadUserDataWithRetries(session.user.id);
+              const ok = await loadUserDataWithRetries(session.user.id, "INITIAL_SESSION");
               if (!mounted) return;
               if (ok) setAccountLoadError(false);
               else setAccountLoadError(true);
               setAuthScreen(false);
             } else {
+              // #region agent log
+              const { data: lateSessionData, error: lateSessionErr } = await supabase.auth.getSession();
+              debugLog("H6", "App.jsx:onAuthStateChange:INITIAL_SESSION-null-probe", "INITIAL_SESSION had no session; immediate getSession probe", {
+                initialEventHadSession: !!session,
+                probeError: lateSessionErr?.message || null,
+                probeHasSession: !!lateSessionData?.session,
+                probeSessionUidPrefix: lateSessionData?.session?.user?.id?.slice(0, 8) || null,
+                shownDemoAlready: shownDemoRef.current,
+              });
+              // #endregion
               setSessionUserId(null);
               setAccountLoadError(false);
               accountDataLoadedRef.current = false;
@@ -4639,11 +4799,21 @@ export default function App() {
               userIdRef.current = null;
               if (mounted) {
                 if (!shownDemoRef.current) {
+                  // #region agent log
+                  debugLog("H6", "App.jsx:onAuthStateChange:enter-demo", "entering demo mode after INITIAL_SESSION null", {
+                    reason: "initial-session-null-first-load",
+                  });
+                  // #endregion
                   shownDemoRef.current = true;
                   setHabits(buildDemoHabits());
                   setUser({ name:"", avatarUrl:null });
                   setDemoMode(true);
                 } else {
+                  // #region agent log
+                  debugLog("H6", "App.jsx:onAuthStateChange:enter-auth-screen", "showing auth screen after INITIAL_SESSION null (demo already shown before)", {
+                    reason: "initial-session-null-demo-already-shown",
+                  });
+                  // #endregion
                   setAuthScreen(true);
                 }
               }
@@ -4659,6 +4829,24 @@ export default function App() {
         // Supabase fires SIGNED_IN immediately after INITIAL_SESSION for existing sessions.
         // We must not interfere with an in-progress INITIAL_SESSION load.
         if (event === "SIGNED_IN" && session?.user?.id) {
+          lastSignedInUidRef.current = session.user.id;
+          // #region agent log
+          debugLog("H1", "App.jsx:onAuthStateChange:SIGNED_IN-enter", "SIGNED_IN event received", {
+            sessionUidPrefix: session.user.id?.slice(0, 8) || null,
+            initialHandled: initialAuthHandledRef.current,
+          });
+          // #endregion
+          if (!initialAuthHandledRef.current) {
+            if (session.user.email && mounted) setAuthEmail(session.user.email);
+            setSessionUserId(session.user.id);
+            setAuthScreen(false);
+            // #region agent log
+            debugLog("H1", "App.jsx:onAuthStateChange:SIGNED_IN-defer", "deferring SIGNED_IN load until INITIAL_SESSION/bailout fallback", {
+              sessionUidPrefix: session.user.id?.slice(0, 8) || null,
+            });
+            // #endregion
+            return;
+          }
           if (session.user.email && mounted) setAuthEmail(session.user.email);
           setSessionUserId(session.user.id);
 
@@ -4671,6 +4859,12 @@ export default function App() {
           // interfere. The in-progress loader will finish and set all state correctly. If we let
           // this handler continue it will hit the mutex on every retry and conclude with an error.
           if (loadingUidRef.current === session.user.id) {
+            // #region agent log
+            debugLog("H1", "App.jsx:onAuthStateChange:SIGNED_IN-skip", "SIGNED_IN skipped because load in progress", {
+              sessionUidPrefix: session.user.id?.slice(0, 8) || null,
+              loadingUidPrefix: loadingUidRef.current?.slice(0, 8) || null,
+            });
+            // #endregion
             if (mounted) { setAuthScreen(false); setPendingEmail(null); setPasswordRecovery(false); setDemoMode(false); }
             return;
           }
@@ -4690,7 +4884,7 @@ export default function App() {
             setAccountLoadError(true);
           }, 32000);
           try {
-            const ok = await loadUserDataWithRetries(session.user.id);
+            const ok = await loadUserDataWithRetries(session.user.id, "SIGNED_IN");
             if (mounted) {
               setAuthScreen(false);
               setPendingEmail(null);
@@ -4732,6 +4926,15 @@ export default function App() {
         // After idle, JWT renews but PostgREST may have failed earlier; reload if data never loaded.
         if (event === "TOKEN_REFRESHED" && session?.user?.id) {
           if (session.user.email && mounted) setAuthEmail(session.user.email);
+          if (loadingUidRef.current === session.user.id) {
+            // #region agent log
+            debugLog("H1", "App.jsx:onAuthStateChange:TOKEN_REFRESHED-skip", "TOKEN_REFRESHED skipped because same uid load is already in progress", {
+              sessionUidPrefix: session.user.id?.slice(0, 8) || null,
+              loadingUidPrefix: loadingUidRef.current?.slice(0, 8) || null,
+            });
+            // #endregion
+            return;
+          }
           if (!accountDataLoadedRef.current) {
             setLoading(true);
             const tokenBudget = setTimeout(() => {
@@ -4741,7 +4944,7 @@ export default function App() {
               setAccountLoadError(true);
             }, 32000);
             try {
-              const ok = await loadUserDataWithRetries(session.user.id);
+              const ok = await loadUserDataWithRetries(session.user.id, "TOKEN_REFRESHED");
               if (mounted) {
                 setAuthScreen(false);
                 if (!ok) setAccountLoadError(true);
@@ -4775,13 +4978,42 @@ export default function App() {
     function runResumeLoad() {
       // Ignore visibilitychange that Chrome fires on initial page load (<5s since mount)
       const now = Date.now();
-      if (now - mountTimeRef.current < 5000) return;
-      if (now - lastResumeDataFetchRef.current < 5000) return;
+      if (now - mountTimeRef.current < 5000) {
+        // #region agent log
+        debugLog("H4", "App.jsx:runResumeLoad:skip-mount", "runResumeLoad skipped due to initial mount guard", {
+          msSinceMount: now - mountTimeRef.current,
+        });
+        // #endregion
+        return;
+      }
+      if (now - lastResumeDataFetchRef.current < 5000) {
+        // #region agent log
+        debugLog("H4", "App.jsx:runResumeLoad:skip-throttle", "runResumeLoad skipped due to throttle guard", {
+          msSinceLastResume: now - lastResumeDataFetchRef.current,
+        });
+        // #endregion
+        return;
+      }
       lastResumeDataFetchRef.current = now;
       (async () => {
         const { data: { session } } = await supabase.auth.getSession();
+        // #region agent log
+        debugLog("H4", "App.jsx:runResumeLoad:session", "runResumeLoad session check", {
+          hasSession: !!session,
+          sessionUidPrefix: session?.user?.id?.slice(0, 8) || null,
+        });
+        // #endregion
         if (!session?.user?.id) return;
-        await loadUserDataWithRetries(session.user.id);
+        if (loadingUidRef.current === session.user.id) {
+          // #region agent log
+          debugLog("H4", "App.jsx:runResumeLoad:skip-loading", "runResumeLoad skipped because same uid is currently loading", {
+            sessionUidPrefix: session.user.id?.slice(0, 8) || null,
+            loadingUidPrefix: loadingUidRef.current?.slice(0, 8) || null,
+          });
+          // #endregion
+          return;
+        }
+        await loadUserDataWithRetries(session.user.id, "resume");
       })();
     }
     function onVisible() {
@@ -4798,6 +5030,28 @@ export default function App() {
       window.removeEventListener("pageshow", onPageShow);
     };
   }, []);
+
+  useEffect(() => {
+    let uiGate = "main";
+    if (!loading && authScreen) uiGate = "auth";
+    else if (loading) uiGate = "loading";
+    else if (!loading && !authScreen && sessionUserId && accountLoadError) uiGate = "account-load-error";
+    else if (!loading && !authScreen && sessionUserId && !accountDataReady && !accountLoadError) uiGate = "signed-in-waiting-data";
+    else if (!loading && demoMode) uiGate = "demo";
+    // #region agent log
+    debugLog("H5", "App.jsx:ui-gate", "render gate snapshot", {
+      uiGate,
+      loading,
+      authScreen,
+      demoMode,
+      sessionUidPrefix: sessionUserId?.slice(0, 8) || null,
+      accountDataReady,
+      accountLoadError,
+      onboarded,
+      habitsCount: habits.length,
+    });
+    // #endregion
+  }, [loading, authScreen, demoMode, sessionUserId, accountDataReady, accountLoadError, onboarded, habits.length, debugLog]);
 
   // Sync XP to profile whenever it changes (after init)
   const xpInitRef = useRef(false);
