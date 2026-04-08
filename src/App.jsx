@@ -109,7 +109,7 @@ function latestTodayLog(h) {
   return tl.length ? tl[tl.length - 1] : null;
 }
 function getWeeklyCount(h) {
-  return h.logs.filter(l => l.date >= currentWeekStart()).length;
+  return h.logs.filter(l => l.date >= currentWeekStart() && l.value === true).length;
 }
 function getLatestValue(h) {
   if (!h.logs.length) return h.startValue ?? 0;
@@ -183,13 +183,35 @@ function getProjectStats(h) {
   };
 }
 // ── Live streak calculations (computed from logs — never stale) ───────────────
+function hasRestDay(h, dateStr) {
+  return h.logs.some(l => l.date === dateStr && l.value === "skip");
+}
+function hasDailyCompletion(h, dateStr) {
+  return h.logs.some(l => l.date === dateStr && l.value === true);
+}
+function getLimitDayTotal(h, dateStr) {
+  const dayLogs = h.logs.filter(l => l.date === dateStr && typeof l.value === "number");
+  if (!dayLogs.length) return null;
+  return dayLogs.reduce((s, l) => s + l.value, 0);
+}
+function getBuildDayMinutes(h, dateStr) {
+  const dayLogs = h.logs.filter(l => l.date === dateStr);
+  const mins = dayLogs.reduce((s, l) => s + (l.value?.minutes || 0), 0);
+  return mins;
+}
+function qualifiesBuildDay(h, dateStr) {
+  // Default build target is 60 minutes/day unless a custom target exists.
+  const targetMins = h.dailyTargetMinutes ?? h.dailyTarget ?? h.targetMinutes ?? 60;
+  return getBuildDayMinutes(h, dateStr) >= targetMins;
+}
 // Daily: count consecutive days going back from today where a log exists.
 // If today isn't logged yet the day isn't over, so we start from yesterday.
 function getDailyStreak(h) {
-  const startDay = isLoggedToday(h) ? 0 : 1;
+  const startDay = (hasDailyCompletion(h, todayStr()) || hasRestDay(h, todayStr())) ? 0 : 1;
   let streak = 0;
   for (let d = startDay; d <= 365; d++) {
-    if (h.logs.some(l => l.date === daysAgo(d))) streak++;
+    const dateStr = daysAgo(d);
+    if (hasDailyCompletion(h, dateStr) || hasRestDay(h, dateStr)) streak++;
     else break;
   }
   return streak;
@@ -198,23 +220,23 @@ function getDailyStreak(h) {
 // Not logging at all breaks the streak — it incentivises the daily check-in.
 // Logging 0 counts as a perfect day (you consciously chose not to use any).
 function getLimitStreak(h) {
-  const startDay = isLoggedToday(h) ? 0 : 1;
+  const todayTotal = getLimitDayTotal(h, todayStr());
+  const startDay = (todayTotal != null && todayTotal <= (h.dailyBudget || Infinity)) ? 0 : 1;
   let streak = 0;
   for (let d = startDay; d <= 365; d++) {
-    const dayLogs = h.logs.filter(l => l.date === daysAgo(d));
-    if (!dayLogs.length) break;                              // missed — streak over
-    const total = dayLogs.reduce((s, l) => s + (l.value || 0), 0);
+    const total = getLimitDayTotal(h, daysAgo(d));
+    if (total == null) break; // missed — streak over
     if (total <= (h.dailyBudget || Infinity)) streak++;
     else break;
   }
   return streak;
 }
-// Project/progress: count consecutive days with at least one session logged.
-function getSessionStreak(h) {
-  const startDay = isLoggedToday(h) ? 0 : 1;
+// Build/project: count consecutive days where build minutes hit the daily target.
+function getBuildStreak(h) {
+  const startDay = qualifiesBuildDay(h, todayStr()) ? 0 : 1;
   let streak = 0;
   for (let d = startDay; d <= 365; d++) {
-    if (h.logs.some(l => l.date === daysAgo(d))) streak++;
+    if (qualifiesBuildDay(h, daysAgo(d))) streak++;
     else break;
   }
   return streak;
@@ -223,7 +245,8 @@ function getSessionStreak(h) {
 function getStreak(h) {
   if (h.habitType === "weekly")  return getWeeklyStreak(h);
   if (h.habitType === "limit")   return getLimitStreak(h);
-  if (h.habitType === "project" || h.habitType === "progress") return getSessionStreak(h);
+  if (h.habitType === "project") return getBuildStreak(h);
+  if (h.habitType === "progress") return 0; // progress/outcome uses milestone logic, not streaks
   return getDailyStreak(h); // daily (default)
 }
 function getWeeklyStreak(h) {
@@ -235,7 +258,7 @@ function getWeeklyStreak(h) {
     const monBack   = daysSinceMon + w * 7;
     const weekStart = daysAgo(monBack);
     const weekEnd   = daysAgo(Math.max(0, monBack - 6));
-    const count = h.logs.filter(l => l.date >= weekStart && l.date <= weekEnd).length;
+    const count = h.logs.filter(l => l.date >= weekStart && l.date <= weekEnd && l.value === true).length;
     if (count >= h.weeklyTarget) streak++;
     else if (w > 0) break; // partial current week doesn't break streak
   }
@@ -263,11 +286,31 @@ function getCompletionRate(h) {
     const ideal = h.weeklyTarget * 4;
     return Math.min(100, Math.round((recent.length / ideal) * 100));
   }
-  // Build/project: ~5 active days per week is the benchmark (20/28 days)
-  if (h.habitType === "project")  return Math.min(100, Math.round((recent.length / 20) * 100));
+  // Build/project: count days where build target was met.
+  if (h.habitType === "project") {
+    const daysMet = Array.from({ length: 28 }, (_, i) => i)
+      .map(i => daysAgo(i))
+      .filter(ds => qualifiesBuildDay(h, ds))
+      .length;
+    return Math.min(100, Math.round((daysMet / 28) * 100));
+  }
   if (h.habitType === "progress") return Math.min(100, Math.round((recent.length / 14) * 100));
-  // Daily & limit: logged out of 28 calendar days
-  return Math.min(100, Math.round((recent.length / 28) * 100));
+  if (h.habitType === "limit") {
+    const goodDays = Array.from({ length: 28 }, (_, i) => i)
+      .map(i => daysAgo(i))
+      .filter(ds => {
+        const total = getLimitDayTotal(h, ds);
+        return total != null && total <= (h.dailyBudget || Infinity);
+      })
+      .length;
+    return Math.min(100, Math.round((goodDays / 28) * 100));
+  }
+  // Daily: completed or protected rest day out of 28
+  const doneDays = Array.from({ length: 28 }, (_, i) => i)
+    .map(i => daysAgo(i))
+    .filter(ds => hasDailyCompletion(h, ds) || hasRestDay(h, ds))
+    .length;
+  return Math.min(100, Math.round((doneDays / 28) * 100));
 }
 function get7DayActivity(h) {
   return Array.from({length:7}, (_, i) => h.logs.some(l => l.date === daysAgo(6 - i)) ? 1 : 0);
@@ -789,6 +832,8 @@ function ProjectCard({ habit, onOpenLog, onReflect, onAddNote }) {
   const tLogs = todayLogs(habit);
   const logged = tLogs.length > 0;
   const todayMins = tLogs.reduce((s, l) => s + (l.value?.minutes || 0), 0);
+  const dailyBuildTarget = habit.dailyTargetMinutes ?? 60;
+  const buildStreak = getBuildStreak(habit);
   const lastWin = [...habit.logs].filter(l => l.value?.win).pop();
   const tLog = tLogs[tLogs.length - 1];
   return (
@@ -799,9 +844,9 @@ function ProjectCard({ habit, onOpenLog, onReflect, onAddNote }) {
           <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{habit.name}</div>
           <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>
             {logged
-              ? `${todayMins} min today${tLogs.length > 1 ? ` (${tLogs.length} sessions)` : ""}`
+              ? `${todayMins}/${dailyBuildTarget} min today${tLogs.length > 1 ? ` (${tLogs.length} sessions)` : ""}`
               : "Tap + to log a session"}
-            {getStreak(habit) > 0 ? ` · 🔥 ${getStreak(habit)}` : ""}
+            {buildStreak > 0 ? ` · 🔥 ${buildStreak} day streak` : ""}
           </div>
         </div>
         <PlusBtn habit={habit} logged={logged} onClick={() => onOpenLog(habit.id)}/>
@@ -883,13 +928,10 @@ function LimitCard({ habit, onTap, onUndo, onLogZero, onReflect, onAddNote }) {
 }
 
 function TodayGoalCard({ goal, onOpenLog }) {
-  const { pct, toGo, isComplete } = getGoalProgress(goal);
+  const stats = getGoalProgress(goal);
+  const { pct, isComplete } = stats;
   const loggedToday = goal.logs?.some(l => l.date === todayStr()) || false;
-  const statusText = isComplete
-    ? "Goal reached"
-    : pct === 0
-      ? "Just started"
-      : `${toGo.toLocaleString()}${goal.unit || ""} to go`;
+  const statusText = getGoalStatusText(goal, stats);
   return (
     <div className="rc" style={{ margin:"0 14px 10px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${loggedToday ? goal.color+"66" : T.border}`, overflow:"hidden" }}>
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
@@ -2673,13 +2715,10 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare, onCoach })
 
       {/* Goals */}
       {goals.filter(g => g.status !== "completed").map(g => {
-        const { pct, isComplete } = getGoalProgress(g);
+        const stats = getGoalProgress(g);
+        const { pct, isComplete } = stats;
         const logs = [...g.logs].filter(l => typeof l.value === "number").sort((a, b) => a.date.localeCompare(b.date));
-        const statusText = isComplete
-          ? "Goal reached!"
-          : g.currentValue === g.startValue
-            ? "Just started"
-            : `${formatWithUnit(Math.abs(g.targetValue - g.currentValue), g.unit)} to go`;
+        const statusText = getGoalStatusText(g, stats);
         return (
           <IC key={g.id} title={`${g.emoji} ${g.name} — goal`}>
             <div style={{ display:"flex", justifyContent:"space-between", marginBottom:8 }}>
@@ -2687,7 +2726,7 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare, onCoach })
               <span style={{ fontSize:13, color:T.muted }}>Target: <strong style={{ color:T.text }}>{formatWithUnit(g.targetValue, g.unit)}</strong></span>
             </div>
             <div style={{ height:8, background:T.surface, borderRadius:4, overflow:"hidden", marginBottom:6 }}>
-              <div style={{ height:"100%", borderRadius:4, background:isComplete ? T.goldBright : g.color, width:`${pct * 100}%`, transition:"width 0.5s ease" }}/>
+              <div style={{ height:"100%", borderRadius:4, background:isComplete ? T.goldBright : g.color, width:`${pct}%`, transition:"width 0.5s ease" }}/>
             </div>
             <div style={{ fontSize:11, color:isComplete ? T.gold : T.muted, marginBottom:16, textAlign:"center" }}>{statusText}</div>
             {logs.length > 0 && (
@@ -2726,7 +2765,10 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare, onCoach })
 
 // ─── GOAL HELPERS ─────────────────────────────────────────────────────────────
 function getGoalProgress(goal) {
-  const { startValue, targetValue, currentValue, direction } = goal;
+  const { startValue, targetValue, currentValue } = goal;
+  const direction = goal.direction === "decreasing" || goal.direction === "increasing"
+    ? goal.direction
+    : inferProgressDirection(Number(startValue ?? 0), Number(targetValue ?? 0));
   const range = Math.abs(targetValue - startValue);
   if (range === 0) return { pct: 0, toGo: 0, isComplete: false };
   const moved = direction === "decreasing"
@@ -2736,7 +2778,19 @@ function getGoalProgress(goal) {
   const toGo = Math.max(0, direction === "decreasing"
     ? currentValue - targetValue
     : targetValue - currentValue);
-  return { pct: Math.round(clamped * 100), toGo, isComplete: clamped >= 1 };
+  return { pct: Math.round(clamped * 100), toGo, isComplete: clamped >= 1, direction, moved, range };
+}
+
+function getGoalEntryCount(goal) {
+  return (goal.logs || []).filter(l => typeof l.value === "number").length;
+}
+
+function getGoalStatusText(goal, stats = getGoalProgress(goal)) {
+  const entries = getGoalEntryCount(goal);
+  if (stats.isComplete) return "🎉 Goal reached";
+  if (entries === 0) return "No entries yet";
+  if (stats.pct === 0) return `No net change yet · ${formatWithUnit(stats.toGo, goal.unit)} to target`;
+  return `${formatWithUnit(stats.toGo, goal.unit)} to target · ${stats.pct}% complete`;
 }
 
 // ─── LOG GOAL MODAL ───────────────────────────────────────────────────────────
@@ -2845,8 +2899,11 @@ function AddGoalModal({ onClose, onSave }) {
 
 // ─── GOAL CARD ────────────────────────────────────────────────────────────────
 function GoalCard({ goal, onLog, onComplete, onDelete }) {
-  const { pct, toGo, isComplete } = getGoalProgress(goal);
+  const stats = getGoalProgress(goal);
+  const { pct, isComplete } = stats;
+  const statusText = getGoalStatusText(goal, stats);
   const [showMenu, setShowMenu] = useState(false);
+  const achievedDate = goal.logs?.filter(l => typeof l.value === "number").sort((a, b) => a.date.localeCompare(b.date)).at(-1)?.date || goal.lastLogDate || null;
 
   return (
     <div style={{ margin:"0 14px 10px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${isComplete ? "rgba(39,174,96,0.4)" : T.border}`, overflow:"hidden" }}>
@@ -2880,7 +2937,7 @@ function GoalCard({ goal, onLog, onComplete, onDelete }) {
         </div>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
           <div style={{ fontSize:11, color:isComplete ? T.green : T.muted, fontWeight:isComplete ? 500 : 400 }}>
-            {isComplete ? "✓ Goal reached" : `${toGo.toLocaleString()}${goal.unit} to go · ${pct}%`}
+            {isComplete ? "🎉 Goal reached — great work!" : statusText}
           </div>
           {goal.lastLogDate && (
             <div style={{ fontSize:10, color:T.hint }}>
@@ -2893,6 +2950,11 @@ function GoalCard({ goal, onLog, onComplete, onDelete }) {
             </div>
           )}
         </div>
+        {isComplete && (
+          <div style={{ marginTop:8, fontSize:11, color:T.green, background:"rgba(39,174,96,0.10)", border:`0.5px solid rgba(39,174,96,0.28)`, borderRadius:T.rsm, padding:"6px 8px" }}>
+            Milestone unlocked{achievedDate ? ` · achieved ${fmtEntryDate(achievedDate)}` : ""} ✨
+          </div>
+        )}
       </div>
 
       {/* Inline menu */}
@@ -3428,11 +3490,11 @@ function buildDemoHabits() {
 }
 
 const HABIT_ANNOTATIONS = {
-  daily: "Daily habits work best when you attach them to something you already do — morning coffee, after lunch, before bed. The streak counter tracks your consecutive days logged. Log it even on bad days; that data matters too.",
+  daily: "Daily habits work best when you attach them to something you already do — morning coffee, after lunch, before bed. The streak counter tracks consecutive completed days (or protected rest days).",
   weekly: "Weekly targets give you flexibility without losing accountability. You have a target number of sessions to hit each week. Log each one after it happens. Missing a day doesn't break anything — missing a week resets the streak.",
   progress: "Progress habits track a number over time — you log where you actually are today, not where you 'should' be. The trend line shows the real picture. Consistency of logging matters more than the direction of the number.",
-  project: "Build habits track time spent and what you got from it. Log your minutes, a win, and what was hard. Over time you'll see exactly how much you're actually showing up — and what's been getting in the way.",
-  limit: "Limit habits track what you're reducing. Each tap logs one unit against your daily budget. If you go over, log it anyway — that's the data that tells you something real. The goal is honesty, not perfection.",
+  project: "Build habits track time spent and what you got from it. Log your minutes, a win, and what was hard. Streaks increase only on days you hit your daily build target.",
+  limit: "Limit habits track what you're reducing. Each tap logs one unit against your daily budget. Streaks increase only on days you log and stay at or under your limit.",
 };
 
 function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout }) {
