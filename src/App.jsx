@@ -1602,7 +1602,7 @@ function TourOverlay({ steps, stepIdx, onNext, onSkip }) {
 }
 
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
-function TodayScreen({ habits, xp, onTap, onUndo, onSkip, onReflect, onAddNote, onLogZero, onOpenLog, onAdd, onXPInfo }) {
+function TodayScreen({ habits, xp, onTap, onUndo, onSkip, onReflect, onAddNote, onLogZero, onOpenLog, onAdd, onXPInfo, onCoach, isPro, coachName }) {
   const loggedCount = habits.filter(h => isLoggedToday(h)).length;
   const pct = habits.length ? Math.round((loggedCount / habits.length) * 100) : 0;
   const hr = new Date().getHours();
@@ -1657,6 +1657,27 @@ function TodayScreen({ habits, xp, onTap, onUndo, onSkip, onReflect, onAddNote, 
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2v10M2 7h10" stroke={T.muted} strokeWidth="1.5" strokeLinecap="round"/></svg>
         Add habit
       </button>
+
+      {/* Coach card */}
+      {habits.length > 0 && (() => {
+        const contextLine = loggedCount === 0
+          ? "Nothing logged yet today — want to think through what's in the way?"
+          : loggedCount === habits.length
+          ? `You've logged all ${habits.length} habits today — want to reflect on how it went?`
+          : `You've logged ${loggedCount} of ${habits.length} habits today — want to talk through the rest?`;
+        return (
+          <button onClick={onCoach}
+            style={{ margin:"12px 14px 4px", width:"calc(100% - 28px)", background:"rgba(200,144,42,0.06)", border:`0.5px solid rgba(200,144,42,0.28)`, borderRadius:T.r, padding:"14px 16px", cursor:"pointer", display:"flex", alignItems:"center", gap:14, textAlign:"left", boxSizing:"border-box" }}>
+            <div style={{ width:36, height:36, borderRadius:10, background:"rgba(200,144,42,0.12)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>🤖</div>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:13, fontWeight:500, color:T.text, marginBottom:3 }}>Ask your habit coach anything</div>
+              <div style={{ fontSize:12, color:T.muted, lineHeight:1.5 }}>{contextLine}</div>
+            </div>
+            <div style={{ fontSize:16, color:"rgba(200,144,42,0.5)", flexShrink:0 }}>›</div>
+          </button>
+        );
+      })()}
+      <div style={{ height:16 }}/>
     </div>
   );
 }
@@ -1867,7 +1888,7 @@ function HabitDayCard({ habit, logs, onReflect }) {
 }
 
 // ─── JOURNAL SCREEN ───────────────────────────────────────────────────────────
-function JournalScreen({ habits, onReflect, journalUserId, isPro, onUpgrade }) {
+function JournalScreen({ habits, onReflect, journalUserId, isPro, onUpgrade, onCoach }) {
   const [filter, setFilter] = useState("all");
   const [viewMode, setViewMode] = useState("day"); // "day" | "week" | "month"
   const [monthOffset, setMonthOffset] = useState(0);
@@ -2285,6 +2306,17 @@ function JournalScreen({ habits, onReflect, journalUserId, isPro, onUpgrade }) {
           </div>
         </div>
       )}
+
+      {/* Coach card */}
+      <button onClick={onCoach}
+        style={{ margin:"4px 14px 16px", width:"calc(100% - 28px)", background:"rgba(200,144,42,0.06)", border:`0.5px solid rgba(200,144,42,0.28)`, borderRadius:T.r, padding:"14px 16px", cursor:"pointer", display:"flex", alignItems:"center", gap:14, textAlign:"left", boxSizing:"border-box" }}>
+        <div style={{ width:36, height:36, borderRadius:10, background:"rgba(200,144,42,0.12)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>🤖</div>
+        <div style={{ flex:1 }}>
+          <div style={{ fontSize:13, fontWeight:500, color:T.text, marginBottom:3 }}>Want help reflecting on what you've written?</div>
+          <div style={{ fontSize:12, color:T.muted, lineHeight:1.5 }}>Your coach can help you find patterns and meaning in your journal.</div>
+        </div>
+        <div style={{ fontSize:16, color:"rgba(200,144,42,0.5)", flexShrink:0 }}>›</div>
+      </button>
     </div>
   );
 }
@@ -2337,7 +2369,7 @@ function EntryCard({ entry, onReflect }) {
 }
 
 // ─── INSIGHTS SCREEN ──────────────────────────────────────────────────────────
-function InsightsScreen({ habits, onShowHistory, onShare }) {
+function InsightsScreen({ habits, onShowHistory, onShare, onCoach }) {
   function IC({ title, children, action, dataTour }) {
     return (
       <div data-tour={dataTour} style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:18 }}>
@@ -2566,6 +2598,19 @@ function InsightsScreen({ habits, onShowHistory, onShare }) {
           </IC>
         );
       })}
+
+      {/* Coach patterns card — locked teaser */}
+      <button onClick={onCoach}
+        style={{ margin:"4px 14px 16px", width:"calc(100% - 28px)", background:"rgba(200,144,42,0.06)", border:`0.5px solid rgba(200,144,42,0.28)`, borderRadius:T.r, padding:"18px 18px", cursor:"pointer", display:"flex", alignItems:"flex-start", gap:14, textAlign:"left", boxSizing:"border-box" }}>
+        <div style={{ width:38, height:38, borderRadius:10, background:"rgba(200,144,42,0.12)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:19, flexShrink:0, marginTop:1 }}>🤖</div>
+        <div style={{ flex:1 }}>
+          <div style={{ fontSize:13, fontWeight:600, color:T.text, marginBottom:4 }}>Your coach spotted patterns this week</div>
+          <div style={{ fontSize:12, color:T.muted, lineHeight:1.6 }}>Unlock to see connections between your habits and what your data actually means.</div>
+          <div style={{ marginTop:10, display:"inline-flex", alignItems:"center", gap:5, fontSize:11, fontWeight:600, color:T.gold, background:"rgba(200,144,42,0.12)", padding:"4px 12px", borderRadius:20 }}>
+            🔒 Unlock
+          </div>
+        </div>
+      </button>
     </div>
   );
 }
@@ -5388,9 +5433,9 @@ export default function App() {
           </button>
         </div>
 
-        {screen === "today"    && <TodayScreen    habits={habits} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onReflect={setReflectId} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onAdd={handleStartAdd} onXPInfo={() => setShowXP(true)}/>}
-        {screen === "journal"  && <JournalScreen habits={habits} onReflect={setReflectId} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)}/>}
-        {screen === "insights" && <InsightsScreen habits={habits} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)}/>}
+        {screen === "today"    && <TodayScreen    habits={habits} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onReflect={setReflectId} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onAdd={handleStartAdd} onXPInfo={() => setShowXP(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)} isPro={isPro} coachName={coachName}/>}
+        {screen === "journal"  && <JournalScreen habits={habits} onReflect={setReflectId} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
+        {screen === "insights" && <InsightsScreen habits={habits} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
         {screen === "habits"   && <HabitsScreen   habits={habits} onEdit={setEditId} onDelete={handleDeleteHabit} onAdd={handleStartAdd} onReflect={setReflectId} onCoach={() => setShowCoach(true)} onUpgrade={() => setShowUpgrade(true)} isPro={isPro} coachName={coachName}/>}
         {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} refCode={refCode}
           authEmail={authEmail}
@@ -5413,15 +5458,15 @@ export default function App() {
           onUpdateCoachName={name => { setCoachName(name); syncProfile({ coach_name: name }); }}
         />}
 
-        {/* Floating coach button */}
+        {/* Floating help button — general help, not AI coach */}
         <button
-          onClick={() => setShowCoach(true)}
-          title="Ask your coach"
+          onClick={() => window.open("mailto:corbyn.miller2000@gmail.com?subject=Forged%20Help&body=Hey%2C%20I%20need%20help%20with%3A%0A%0A", "_blank")}
+          title="Get help"
           style={{
             position:"fixed", bottom:86, right:18, width:48, height:48,
-            borderRadius:"50%", border:`0.5px solid rgba(200,144,42,0.45)`,
+            borderRadius:"50%", border:`0.5px solid ${T.border}`,
             background:"rgba(26,26,22,0.94)", backdropFilter:"blur(8px)",
-            color:"#C8902A", fontSize:22, cursor:"pointer", zIndex:98,
+            color:T.muted, fontSize:20, cursor:"pointer", zIndex:98,
             display:"flex", alignItems:"center", justifyContent:"center",
             boxShadow:"0 2px 12px rgba(0,0,0,0.35)",
           }}
