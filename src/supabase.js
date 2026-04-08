@@ -39,6 +39,12 @@ export function habitToRow(habit, userId) {
 
 // Convert a DB row → an in-app habit object
 export function rowToHabit(row) {
+  const startValue = row.start_value ?? undefined;
+  const targetValue = row.target_value ?? undefined;
+  const inferredDirection =
+    typeof startValue === "number" && typeof targetValue === "number" && targetValue < startValue
+      ? "decreasing"
+      : "increasing";
   return {
     id:               row.id,
     name:             row.name,
@@ -49,8 +55,9 @@ export function rowToHabit(row) {
     reflection:       row.reflection,
     reflectionPrompt: row.reflection_prompt,
     weeklyTarget:     row.weekly_target  ?? undefined,
-    startValue:       row.start_value    ?? undefined,
-    targetValue:      row.target_value   ?? undefined,
+    startValue,
+    targetValue,
+    direction:        row.direction === "decreasing" || row.direction === "increasing" ? row.direction : inferredDirection,
     unit:             row.unit           ?? undefined,
     dailyBudget:      row.daily_budget   ?? undefined,
     tapIncrement:     row.tap_increment  ?? 1,

@@ -124,6 +124,54 @@ function getLatestValue(h) {
   const last = sorted.at(-1);
   return typeof last.value === "number" ? last.value : (h.startValue ?? 0);
 }
+function inferProgressDirection(startValue, targetValue) {
+  return targetValue < startValue ? "decreasing" : "increasing";
+}
+function resolveProgressDirection(h) {
+  if (h.direction === "decreasing" || h.direction === "increasing") return h.direction;
+  return inferProgressDirection(Number(h.startValue ?? 0), Number(h.targetValue ?? 0));
+}
+function clamp01(n) {
+  return Math.max(0, Math.min(1, n));
+}
+function formatProgressNumber(value) {
+  if (!Number.isFinite(value)) return "0";
+  const rounded = Math.round(value * 100) / 100;
+  return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+}
+function formatWithUnit(value, unit) {
+  const n = formatProgressNumber(value);
+  return unit ? `${n} ${unit}` : n;
+}
+function getProgressStats(h) {
+  const start = Number(h.startValue ?? 0);
+  const target = Number(h.targetValue ?? start);
+  const latest = Number(getLatestValue(h));
+  const current = Number.isFinite(latest) ? latest : start;
+  const direction = resolveProgressDirection(h);
+  const denom = direction === "decreasing" ? start - target : target - start;
+  let rawProgress = 0;
+  if (denom > 0) {
+    rawProgress = direction === "decreasing"
+      ? (start - current) / denom
+      : (current - start) / denom;
+  } else if (current === target) {
+    rawProgress = 1;
+  }
+  const progress = clamp01(rawProgress);
+  const toGo = Math.max(0, direction === "decreasing" ? current - target : target - current);
+  return {
+    start,
+    target,
+    current,
+    direction,
+    progress,
+    pct: Math.round(progress * 100),
+    toGo,
+    isComplete: progress >= 1,
+    isJustStarted: progress <= 0,
+  };
+}
 function getProjectStats(h) {
   const ws = currentWeekStart();
   const total = h.logs.reduce((s, l) => s + (l.value?.minutes || 0), 0);
@@ -699,11 +747,13 @@ function WeeklyCard({ habit, onTap, onReflect, onAddNote }) {
 }
 
 function ProgressCard({ habit, onOpenLog, onReflect, onAddNote }) {
-  const latest = getLatestValue(habit);
-  const range = habit.targetValue - habit.startValue;
-  const pct = range > 0 ? Math.min(100, Math.round(((latest - habit.startValue) / range) * 100)) : 0;
+  const stats = getProgressStats(habit);
   const logged = isLoggedToday(habit);
-  const tLog = latestTodayLog(habit);
+  const statusText = stats.isComplete
+    ? "Goal reached"
+    : stats.isJustStarted
+      ? "Just started"
+      : `${formatWithUnit(stats.toGo, habit.unit)} to go`;
   return (
     <div className="rc" style={cardStyle(logged, habit)}>
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
@@ -711,22 +761,22 @@ function ProgressCard({ habit, onOpenLog, onReflect, onAddNote }) {
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{habit.name}</div>
           <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>
-            <span style={{ color:habit.color, fontWeight:500 }}>{latest}{habit.unit}</span>
+            <span style={{ color:habit.color, fontWeight:500 }}>{formatWithUnit(stats.current, habit.unit)}</span>
             {" → "}
-            <span>{habit.targetValue}{habit.unit}</span>
-            <span style={{ marginLeft:6, color:T.hint }}>{(habit.targetValue - latest).toFixed(1)}{habit.unit} to go</span>
+            <span>{formatWithUnit(stats.target, habit.unit)}</span>
+            <span style={{ marginLeft:6, color:stats.isComplete ? T.gold : T.hint }}>{statusText}</span>
           </div>
         </div>
         <PlusBtn habit={habit} logged={logged} onClick={() => onOpenLog(habit.id)}/>
       </div>
       <div style={{ padding:"0 15px 14px" }}>
         <div style={{ height:6, background:T.surface, borderRadius:3, overflow:"hidden", marginBottom:6 }}>
-          <div style={{ height:"100%", borderRadius:3, background:habit.color, width:`${pct}%`, transition:"width 0.6s ease" }}/>
+          <div style={{ height:"100%", borderRadius:3, background:stats.isComplete ? T.goldBright : habit.color, width:`${stats.pct}%`, transition:"width 0.6s ease" }}/>
         </div>
         <div style={{ display:"flex", justifyContent:"space-between" }}>
-          <span style={{ fontSize:10, color:T.hint }}>{habit.startValue}{habit.unit}</span>
-          <span style={{ fontSize:11, color:habit.color, fontWeight:500 }}>{pct}%</span>
-          <span style={{ fontSize:10, color:T.hint }}>{habit.targetValue}{habit.unit}</span>
+          <span style={{ fontSize:10, color:T.hint }}>{formatWithUnit(stats.start, habit.unit)}</span>
+          <span style={{ fontSize:11, color:stats.isComplete ? T.gold : habit.color, fontWeight:500 }}>{statusText}</span>
+          <span style={{ fontSize:10, color:T.hint }}>{formatWithUnit(stats.target, habit.unit)}</span>
         </div>
       </div>
       {logged && <DoneBanner habit={habit}/>}
@@ -1017,11 +1067,29 @@ function EditModal({ habit, onClose, onSave }) {
   const [budgetUnit,  setBudgetUnit]  = useState(habit.unit || "min");
   const [increment,   setIncrement]   = useState(String(habit.tapIncrement ?? 1));
   const meta = TYPE_META[habit.habitType] || TYPE_META.daily;
+  const draftStart = habit.habitType === "progress" ? Number(startVal || habit.startValue || 0) : 0;
+  const draftTarget = habit.habitType === "progress" ? Number(targetVal || habit.targetValue || 0) : 0;
+  const draftDirection = inferProgressDirection(draftStart, draftTarget);
+  const progressStats = habit.habitType === "progress" ? getProgressStats({ ...habit, startValue: draftStart, targetValue: draftTarget, direction: draftDirection }) : null;
+  const progressStatusText = progressStats
+    ? (progressStats.isComplete
+      ? "Goal reached"
+      : progressStats.isJustStarted
+        ? "Just started"
+        : `${formatWithUnit(progressStats.toGo, unit || habit.unit)} to go`)
+    : "";
 
   function save() {
     const updates = { name:name.trim()||habit.name, emoji:emoji||habit.emoji, color, reflection, reflectionPrompt:reflPrompt.trim()||null };
     if (habit.habitType === "weekly")   updates.weeklyTarget = parseInt(weekTarget) || habit.weeklyTarget;
-    if (habit.habitType === "progress") { updates.startValue = parseFloat(startVal)||habit.startValue; updates.targetValue = parseFloat(targetVal)||habit.targetValue; updates.unit = unit||habit.unit; }
+    if (habit.habitType === "progress") {
+      const nextStart = parseFloat(startVal);
+      const nextTarget = parseFloat(targetVal);
+      updates.startValue = Number.isFinite(nextStart) ? nextStart : habit.startValue;
+      updates.targetValue = Number.isFinite(nextTarget) ? nextTarget : habit.targetValue;
+      updates.direction = inferProgressDirection(updates.startValue ?? 0, updates.targetValue ?? 0);
+      updates.unit = unit||habit.unit;
+    }
     if (habit.habitType === "limit")    { updates.dailyBudget = parseInt(budget)||habit.dailyBudget; updates.unit = budgetUnit||habit.unit; updates.tapIncrement = parseInt(increment)||1; }
     onSave(habit.id, updates);
     onClose();
@@ -1079,7 +1147,13 @@ function EditModal({ habit, onClose, onSave }) {
               </div>
             </div>
           </FG>
-          <div style={{ fontSize:11, color:T.hint }}>Currently at <strong style={{ color:habit.color }}>{getLatestValue(habit)}{habit.unit}</strong> · {habit.logs.length} measurements</div>
+          <div style={{ fontSize:11, color:T.hint, lineHeight:1.6 }}>
+            Current: <strong style={{ color:habit.color }}>{formatWithUnit(progressStats.current, unit || habit.unit)}</strong>{" · "}
+            Target: <strong style={{ color:T.text }}>{formatWithUnit(progressStats.target, unit || habit.unit)}</strong>{" · "}
+            <span style={{ color:progressStats.isComplete ? T.gold : T.hint }}>{progressStatusText}</span>{" · "}
+            Direction: <strong style={{ color:T.sub }}>{draftDirection}</strong>{" · "}
+            {habit.logs.length} measurements
+          </div>
         </div>
       )}
       {habit.habitType === "project" && (
@@ -1223,7 +1297,11 @@ function AddModal({ onClose, onSave }) {
         if (!name.trim()) return;
         const base = { id:Date.now()+"", name:name.trim(), emoji:emoji||"⭐", habitType, color, reflection, reflectionPrompt:reflPrompt.trim()||null, streak:0, logs:[] };
         if (habitType === "weekly")   onSave({ ...base, weeklyTarget:parseInt(weekTarget)||3 });
-        else if (habitType === "progress") onSave({ ...base, startValue:parseFloat(startVal)||0, targetValue:parseFloat(targetVal)||100, unit:unit||"kg" });
+        else if (habitType === "progress") {
+          const start = parseFloat(startVal) || 0;
+          const target = parseFloat(targetVal) || 100;
+          onSave({ ...base, startValue:start, targetValue:target, direction:inferProgressDirection(start, target), unit:unit||"kg" });
+        }
         else if (habitType === "limit") onSave({ ...base, dailyBudget:parseInt(budget)||60, unit:budgetUnit||"min", tapIncrement:parseInt(tapIncrement)||1 });
         else onSave(base);
       }}>Add habit</PBtn>
@@ -2572,19 +2650,22 @@ function InsightsScreen({ habits, onShowHistory, onShare, onCoach }) {
       {/* Progress goals */}
       {habits.filter(h => h.habitType === "progress").map(h => {
         const logs = [...h.logs].sort((a, b) => a.date.localeCompare(b.date));
-        const latest = getLatestValue(h);
-        const range = h.targetValue - h.startValue;
-        const pct = range > 0 ? Math.min(100, Math.round(((latest - h.startValue) / range) * 100)) : 0;
+        const stats = getProgressStats(h);
+        const statusText = stats.isComplete
+          ? "Goal reached"
+          : stats.isJustStarted
+            ? "Just started"
+            : `${formatWithUnit(stats.toGo, h.unit)} to go`;
         return (
           <IC key={h.id} title={`${h.emoji} ${h.name} — progress`}>
             <div style={{ display:"flex", justifyContent:"space-between", marginBottom:8 }}>
-              <span style={{ fontSize:13, color:T.muted }}>Now: <strong style={{ color:h.color }}>{latest}{h.unit}</strong></span>
-              <span style={{ fontSize:13, color:T.muted }}>Goal: <strong style={{ color:T.text }}>{h.targetValue}{h.unit}</strong></span>
+              <span style={{ fontSize:13, color:T.muted }}>Current: <strong style={{ color:h.color }}>{formatWithUnit(stats.current, h.unit)}</strong></span>
+              <span style={{ fontSize:13, color:T.muted }}>Target: <strong style={{ color:T.text }}>{formatWithUnit(stats.target, h.unit)}</strong></span>
             </div>
             <div style={{ height:8, background:T.surface, borderRadius:4, overflow:"hidden", marginBottom:6 }}>
-              <div style={{ height:"100%", borderRadius:4, background:h.color, width:`${pct}%`, transition:"width 0.5s ease" }}/>
+              <div style={{ height:"100%", borderRadius:4, background:stats.isComplete ? T.goldBright : h.color, width:`${stats.pct}%`, transition:"width 0.5s ease" }}/>
             </div>
-            <div style={{ fontSize:11, color:T.muted, marginBottom:16, textAlign:"center" }}>{pct}% · {(h.targetValue - latest).toFixed(1)}{h.unit} remaining</div>
+            <div style={{ fontSize:11, color:stats.isComplete ? T.gold : T.muted, marginBottom:16, textAlign:"center" }}>{statusText}</div>
             <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Recent measurements</div>
             {logs.slice(-6).reverse().map((l, i) => (
               <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderTop:`0.5px solid ${T.border}` }}>
@@ -2625,9 +2706,13 @@ function HabitsScreen({ habits, onEdit, onDelete, onAdd, onReflect, onCoach, onU
       return <div style={{ padding:"0 15px 14px", display:"flex", gap:8 }}><Stat label="total hrs" value={s.totalHours} color={h.color}/><Stat label="wins" value={s.wins} color={T.green}/><Stat label="hard parts" value={s.hard} color={T.amber}/></div>;
     }
     if (h.habitType === "progress") {
-      const latest = getLatestValue(h), range = h.targetValue - h.startValue;
-      const pct = range > 0 ? Math.min(100, Math.round(((latest - h.startValue) / range) * 100)) : 0;
-      return <div style={{ padding:"0 15px 14px" }}><div style={{ height:5, background:T.surface, borderRadius:3, overflow:"hidden" }}><div style={{ height:"100%", borderRadius:3, background:h.color, width:`${pct}%` }}/></div><div style={{ fontSize:11, color:T.muted, marginTop:5 }}>{pct}% · {latest}{h.unit} of {h.targetValue}{h.unit}</div></div>;
+      const stats = getProgressStats(h);
+      const statusText = stats.isComplete
+        ? "Goal reached"
+        : stats.isJustStarted
+          ? "Just started"
+          : `${formatWithUnit(stats.toGo, h.unit)} to go`;
+      return <div style={{ padding:"0 15px 14px" }}><div style={{ height:5, background:T.surface, borderRadius:3, overflow:"hidden" }}><div style={{ height:"100%", borderRadius:3, background:stats.isComplete ? T.goldBright : h.color, width:`${stats.pct}%` }}/></div><div style={{ fontSize:11, color:T.muted, marginTop:5 }}>{formatWithUnit(stats.current, h.unit)} / {formatWithUnit(stats.target, h.unit)} · {statusText}</div></div>;
     }
     if (h.habitType === "weekly") {
       const wk = getWeeklyCount(h), pct = Math.min(100, Math.round((wk / h.weeklyTarget) * 100));
@@ -3116,7 +3201,11 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout }) {
       streak:0, bestStreak:0, logs:[],
     };
     if (opt.habitType === "weekly")   return { ...base, weeklyTarget:opt.weeklyTarget || 3 };
-    if (opt.habitType === "progress") return { ...base, startValue:parseFloat(wg.start)||70, targetValue:parseFloat(wg.target)||80, unit:wg.unit||"kg" };
+    if (opt.habitType === "progress") {
+      const start = parseFloat(wg.start)||70;
+      const target = parseFloat(wg.target)||80;
+      return { ...base, startValue:start, targetValue:target, direction:inferProgressDirection(start, target), unit:wg.unit||"kg" };
+    }
     if (opt.habitType === "limit")    return { ...base, name:lb.name||opt.name, dailyBudget:parseInt(lb.budget)||60, unit:lb.unit||"min" };
     return base;
   }
