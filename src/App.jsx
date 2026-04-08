@@ -882,6 +882,43 @@ function LimitCard({ habit, onTap, onUndo, onLogZero, onReflect, onAddNote }) {
   );
 }
 
+function TodayGoalCard({ goal, onOpenLog }) {
+  const { pct, toGo, isComplete } = getGoalProgress(goal);
+  const loggedToday = goal.logs?.some(l => l.date === todayStr()) || false;
+  const statusText = isComplete
+    ? "Goal reached"
+    : pct === 0
+      ? "Just started"
+      : `${toGo.toLocaleString()}${goal.unit || ""} to go`;
+  return (
+    <div className="rc" style={{ margin:"0 14px 10px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${loggedToday ? goal.color+"66" : T.border}`, overflow:"hidden" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
+        <div style={{ width:40, height:40, borderRadius:11, background:goal.color+"20", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>{goal.emoji}</div>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{goal.name}</div>
+          <div style={{ fontSize:12, color:T.muted, marginTop:1 }}>
+            <strong style={{ color:goal.color }}>{goal.currentValue}{goal.unit}</strong>
+            {" → "}
+            <strong style={{ color:T.text }}>{goal.targetValue}{goal.unit}</strong>
+            <span style={{ marginLeft:6, color:isComplete ? T.green : T.hint }}>{statusText}</span>
+          </div>
+        </div>
+        {!isComplete && (
+          <button onClick={() => onOpenLog(goal.id)}
+            style={{ fontSize:12, color:goal.color, background:"none", border:`0.5px solid ${goal.color+"55"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>
+            Log
+          </button>
+        )}
+      </div>
+      <div style={{ padding:"0 15px 14px" }}>
+        <div style={{ height:5, background:T.surface, borderRadius:3, overflow:"hidden" }}>
+          <div style={{ height:"100%", borderRadius:3, background:isComplete ? T.green : goal.color, width:`${pct}%`, transition:"width 0.4s ease" }}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── LOG MODALS ───────────────────────────────────────────────────────────────
 function LogProgressModal({ habit, onClose, onLog }) {
   const [val, setVal] = useState("");
@@ -1667,25 +1704,26 @@ function TourOverlay({ steps, stepIdx, onNext, onSkip }) {
 }
 
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
-function TodayScreen({ habits, xp, onTap, onUndo, onSkip, onReflect, onAddNote, onLogZero, onOpenLog, onAdd, onXPInfo, onCoach, isPro, coachName }) {
+function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onReflect, onAddNote, onLogZero, onOpenLog, onOpenGoalLog, onAdd, onXPInfo, onCoach, isPro, coachName }) {
   const loggedCount = habits.filter(h => isLoggedToday(h)).length;
   const pct = habits.length ? Math.round((loggedCount / habits.length) * 100) : 0;
   const hr = new Date().getHours();
   const greeting = hr < 12 ? "Rise and forge." : hr < 17 ? "Keep the heat up." : "Finish strong.";
   const level = getLevel(xp);
+  const activeGoals = goals.filter(g => g.status !== "completed");
   const daily   = habits.filter(h => h.habitType === "daily");
   const limit   = habits.filter(h => h.habitType === "limit");
   const weekly  = habits.filter(h => h.habitType === "weekly");
   const project = habits.filter(h => h.habitType === "project");
-  if (habits.length === 0) return (
+  if (habits.length === 0 && activeGoals.length === 0) return (
     <div style={{ padding:"48px 28px", textAlign:"center" }}>
       <div style={{ fontSize:48, marginBottom:18 }}>⚒️</div>
       <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, marginBottom:10 }}>Nothing forged yet.</div>
       <div style={{ fontSize:14, color:T.muted, lineHeight:1.75, marginBottom:28 }}>
-        Add your first habit and start building something that lasts.
+        Add your first habit or goal and start building something that lasts.
       </div>
       <button onClick={onAdd} style={{ padding:"14px 32px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:15, fontWeight:500, cursor:"pointer" }}>
-        Add your first habit
+        Add your first habit or goal
       </button>
     </div>
   );
@@ -1705,6 +1743,7 @@ function TodayScreen({ habits, xp, onTap, onUndo, onSkip, onReflect, onAddNote, 
       {/* Tour target: wraps only the first non-empty section so the spotlight ring is tight */}
       {(() => {
         const sections = [
+          activeGoals.length > 0 && <><SLabel>Goals</SLabel> {activeGoals.map(g => <TodayGoalCard key={g.id} goal={g} onOpenLog={onOpenGoalLog}/>)}</>,
           daily.length   > 0 && <><SLabel>Daily</SLabel>          {daily.map(h   => <DailyCard  key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onReflect={onReflect} onAddNote={onAddNote}/>)}</>,
           limit.length   > 0 && <><SLabel>Limits</SLabel>         {limit.map(h   => <LimitCard  key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onReflect={onReflect} onAddNote={onAddNote}/>)}</>,
           weekly.length  > 0 && <><SLabel>Weekly targets</SLabel> {weekly.map(h  => <WeeklyCard key={h.id} habit={h} onTap={onTap} onReflect={onReflect} onAddNote={onAddNote}/>)}</>,
@@ -1718,7 +1757,7 @@ function TodayScreen({ habits, xp, onTap, onUndo, onSkip, onReflect, onAddNote, 
       })()}
       <button data-tour="today-add" onClick={onAdd} style={{ margin:"8px 14px 0", width:"calc(100% - 28px)", border:`1px dashed ${T.borderStrong}`, background:"none", borderRadius:T.r, padding:14, fontSize:13, color:T.muted, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2v10M2 7h10" stroke={T.muted} strokeWidth="1.5" strokeLinecap="round"/></svg>
-        Add habit
+        Add habit or goal
       </button>
 
       {/* Coach card */}
@@ -5515,7 +5554,7 @@ export default function App() {
               ⚡ 0 xp
             </button>
           </div>
-          <TodayScreen habits={habits} xp={0} onTap={handleTap} onUndo={() => {}} onSkip={() => {}} onReflect={() => demoBounce()} onAddNote={() => demoBounce()} onLogZero={() => demoBounce()} onOpenLog={() => demoBounce()} onAdd={handleStartAdd} onXPInfo={() => {}}/>
+          <TodayScreen habits={habits} goals={goals} xp={0} onTap={handleTap} onUndo={() => {}} onSkip={() => {}} onReflect={() => demoBounce()} onAddNote={() => demoBounce()} onLogZero={() => demoBounce()} onOpenLog={() => demoBounce()} onOpenGoalLog={() => demoBounce()} onAdd={handleStartAdd} onXPInfo={() => {}}/>
           <nav style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:430, maxWidth:"100vw", background:"rgba(26,26,22,0.96)", backdropFilter:"blur(16px)", borderTop:`0.5px solid ${T.border}`, display:"flex", zIndex:100, paddingBottom:6 }}>
             {[{id:"today",label:"Today"},{id:"journal",label:"Journal"},{id:"insights",label:"Insights"},{id:"habits",label:"Habits"},{id:"profile",label:"Profile"}].map(n => (
               <button key={n.id} onClick={() => demoBounce()} style={{ flex:1, padding:"10px 4px 6px", border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3, fontSize:10, fontWeight:500, color:n.id==="today"?T.accent:T.muted }}>
@@ -5860,7 +5899,7 @@ export default function App() {
           </button>
         </div>
 
-        {screen === "today"    && <TodayScreen    habits={habits} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onReflect={setReflectId} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onAdd={handleStartAdd} onXPInfo={() => setShowXP(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)} isPro={isPro} coachName={coachName}/>}
+        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onReflect={setReflectId} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onAdd={handleStartAdd} onXPInfo={() => setShowXP(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)} isPro={isPro} coachName={coachName}/>}
         {screen === "journal"  && <JournalScreen habits={habits} onReflect={setReflectId} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
         {screen === "insights" && <InsightsScreen habits={habits} goals={goals} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
         {screen === "habits"   && <HabitsScreen   habits={habits} goals={goals} onEdit={setEditId} onDelete={handleDeleteHabit} onAdd={handleStartAdd} onReflect={setReflectId} onCoach={() => setShowCoach(true)} onUpgrade={() => setShowUpgrade(true)} isPro={isPro} coachName={coachName} onLogGoal={id => setLogGoalId(id)} onDeleteGoal={handleDeleteGoal} onCompleteGoal={handleCompleteGoal}/>}
