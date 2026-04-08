@@ -5054,15 +5054,28 @@ export default function App() {
   }
 
   async function retryAccountDataLoad() {
-    if (!sessionUserId) return;
     setAccountLoadError(false);
     setLoading(true);
     const retryBudget = setTimeout(() => setLoading(false), 32000);
     try {
+      const { data: { session: preRefreshSession }, error: preSessionErr } = await supabase.auth.getSession();
+      if (preSessionErr) console.warn("retryAccountDataLoad: getSession —", preSessionErr.message);
+      const initialUid = preRefreshSession?.user?.id || sessionUserId;
+      if (!initialUid) {
+        setAuthScreen(true);
+        return;
+      }
+      setSessionUserId(initialUid);
+      if (preRefreshSession?.user?.email) setAuthEmail(preRefreshSession.user.email);
+
       const { error: refErr } = await supabase.auth.refreshSession();
       if (refErr) console.warn("retryAccountDataLoad: refreshSession —", refErr.message);
-      const ok = await loadUserDataWithRetries(sessionUserId, "manual-retry");
+      const { data: { session: postRefreshSession }, error: postSessionErr } = await supabase.auth.getSession();
+      if (postSessionErr) console.warn("retryAccountDataLoad: post-refresh getSession —", postSessionErr.message);
+      const retryUid = postRefreshSession?.user?.id || initialUid;
+      const ok = await loadUserDataWithRetries(retryUid, "manual-retry");
       if (!ok) setAccountLoadError(true);
+      else setAuthScreen(false);
     } finally {
       clearTimeout(retryBudget);
       setLoading(false);
@@ -5136,6 +5149,24 @@ export default function App() {
               else setAccountLoadError(true);
               setAuthScreen(false);
             } else {
+              // Mobile browsers can transiently emit INITIAL_SESSION(null) before storage hydration settles.
+              // Probe once synchronously before routing to demo/auth to avoid unnecessary sign-in prompts.
+              const { data: { session: lateSession }, error: lateSessionErr } = await supabase.auth.getSession();
+              if (lateSessionErr) console.warn("Auth: INITIAL_SESSION null probe getSession —", lateSessionErr.message);
+              if (lateSession?.user?.id) {
+                if (lateSession.user.email) setAuthEmail(lateSession.user.email);
+                setSessionUserId(lateSession.user.id);
+                setAccountLoadError(false);
+                accountDataLoadedRef.current = false;
+                setAccountDataReady(false);
+                userIdRef.current = null;
+                const ok = await loadUserDataWithRetries(lateSession.user.id, "INITIAL_SESSION_NULL_PROBE");
+                if (!mounted) return;
+                if (ok) setAccountLoadError(false);
+                else setAccountLoadError(true);
+                setAuthScreen(false);
+                return;
+              }
               setSessionUserId(null);
               setAccountLoadError(false);
               accountDataLoadedRef.current = false;
