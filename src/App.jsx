@@ -1303,7 +1303,6 @@ function HabitGrid({ habit }) {
 }
 function HistoryModal({ habits, onClose, isPro, onUpgrade }) {
   const [selected, setSelected] = useState(habits[0]?.id || null);
-  const [showBeta, setShowBeta] = useState(false);
   const habit = habits.find(h => h.id === selected);
   const cutoff = daysAgo(6); // free users see last 7 days
 
@@ -1342,12 +1341,11 @@ function HistoryModal({ habits, onClose, isPro, onUpgrade }) {
             <div style={{ fontSize:20 }}>🔒</div>
             <div style={{ fontSize:13, color:T.text, fontWeight:500, textAlign:"center" }}>Full history will be part of early supporter access</div>
             <div style={{ fontSize:12, color:T.muted, textAlign:"center" }}>You have {habit.logs.filter(l => l.date < cutoff).length} older logs waiting</div>
-            <button onClick={() => setShowBeta(true)}
-              style={{ marginTop:6, padding:"9px 20px", borderRadius:T.rsm, border:"none", background:"rgba(200,144,42,0.2)", color:T.gold, fontSize:13, fontWeight:600, cursor:"pointer" }}>
-              I want early supporter access →
+            <button onClick={onUpgrade}
+              style={{ marginTop:6, padding:"9px 20px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:13, fontWeight:600, cursor:"pointer" }}>
+              Unlock beta access →
             </button>
           </div>
-          {showBeta && <BetaModal onClose={() => setShowBeta(false)}/>}
         </div>
       )}
       <GBtn onClick={onClose}>Close</GBtn>
@@ -1869,7 +1867,7 @@ function HabitDayCard({ habit, logs, onReflect }) {
 }
 
 // ─── JOURNAL SCREEN ───────────────────────────────────────────────────────────
-function JournalScreen({ habits, onReflect, journalUserId }) {
+function JournalScreen({ habits, onReflect, journalUserId, isPro, onUpgrade }) {
   const [filter, setFilter] = useState("all");
   const [viewMode, setViewMode] = useState("day"); // "day" | "week" | "month"
   const [monthOffset, setMonthOffset] = useState(0);
@@ -2033,7 +2031,30 @@ function JournalScreen({ habits, onReflect, journalUserId }) {
         ))}
       </div>
 
-      {viewMode === "month" && (
+      {viewMode === "month" && !isPro && (
+        <div style={{ position:"relative", margin:"0 14px 16px", borderRadius:T.r, overflow:"hidden" }}>
+          {/* Blurred skeleton calendar */}
+          <div style={{ filter:"blur(5px)", pointerEvents:"none", userSelect:"none", opacity:0.4, padding:"16px 0" }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4 }}>
+              {Array.from({length:35}).map((_, i) => (
+                <div key={i} style={{ aspectRatio:"1", borderRadius:8, background:T.surface, border:`1px solid ${T.border}` }}/>
+              ))}
+            </div>
+          </div>
+          {/* Lock overlay */}
+          <div style={{ position:"absolute", inset:0, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:8, padding:"0 24px", textAlign:"center", background:"rgba(14,14,14,0.80)", backdropFilter:"blur(2px)", borderRadius:T.r }}>
+            <div style={{ fontSize:22 }}>🔒</div>
+            <div style={{ fontSize:14, fontWeight:500, color:T.text }}>Calendar view is a beta feature</div>
+            <div style={{ fontSize:12, color:T.muted, lineHeight:1.6 }}>Core logging is free. Full history and calendar are part of beta access.</div>
+            <button onClick={onUpgrade}
+              style={{ marginTop:6, padding:"10px 22px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:13, fontWeight:600, cursor:"pointer" }}>
+              Unlock beta access →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {viewMode === "month" && isPro && (
         <div style={{ padding:"0 14px" }}>
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
             <button type="button" onClick={() => { setMonthOffset(o => o + 1); setSelectedDay(null); }}
@@ -4245,6 +4266,58 @@ function DemoBanner({ onGetStarted }) {
   );
 }
 
+// ─── BETA PAYWALL MODAL ───────────────────────────────────────────────────────
+// Shown inline when a free user hits a gated feature. Never blocks the whole app.
+function BetaPaywallModal({ onClose }) {
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState(null);
+
+  async function handleCheckout() {
+    setLoading(true);
+    setError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("Not signed in");
+      const res = await fetch("/api/create-checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ plan: "monthly" }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.url) throw new Error(json.error || "Could not start checkout");
+      localStorage.setItem('forged_checkout_pending', '1');
+      window.location.href = json.url;
+    } catch (err) {
+      setError(err.message || "Something went wrong. Try again.");
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.82)", zIndex:500, display:"flex", alignItems:"center", justifyContent:"center", padding:"0 24px" }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ background:T.raised, borderRadius:20, border:`0.5px solid ${T.border}`, padding:"36px 28px 28px", maxWidth:360, width:"100%", textAlign:"center" }}>
+        <h2 style={{ fontFamily:T.serif, fontSize:24, color:T.text, margin:"0 0 14px", lineHeight:1.2 }}>
+          This is a beta feature.
+        </h2>
+        <p style={{ fontSize:14, color:T.sub, lineHeight:1.75, margin:"0 0 28px" }}>
+          Core logging is free. The AI coach, full history, and pattern insights are part of beta access — <strong style={{ color:T.text }}>$4.99/month</strong>. Your price locks in for life when we launch.
+        </p>
+        {error && <div style={{ fontSize:13, color:T.accent, marginBottom:12 }}>{error}</div>}
+        <button onClick={handleCheckout} disabled={loading}
+          style={{ width:"100%", padding:"15px 0", borderRadius:12, border:"none", background:T.accent, color:"#fff", fontSize:15, fontWeight:600, cursor:loading?"not-allowed":"pointer", opacity:loading?0.7:1, fontFamily:T.font, marginBottom:12, transition:"opacity 0.15s" }}>
+          {loading ? "Opening checkout…" : "Unlock beta access — $4.99/month"}
+        </button>
+        <button onClick={onClose}
+          style={{ background:"none", border:"none", color:T.muted, fontSize:14, cursor:"pointer", padding:"4px 0" }}>
+          Maybe later
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── WELCOME MODAL (shown once after successful beta payment) ─────────────────
 function WelcomeModal({ onContinue }) {
   return (
@@ -5094,14 +5167,6 @@ export default function App() {
     );
   }
 
-  // Paywall — show for all subscribed-false users after onboarding
-  if (!loading && !authScreen && accountDataReady && onboarded && !isPro) {
-    return (
-      <><style>{CSS}</style>
-      <PaywallScreen onPaid={() => setIsPro(true)} /></>
-    );
-  }
-
   function spawnParticles(cx, cy, color) {
     const id = Date.now();
     setParticles(p => [...p, ...Array.from({length:10}, (_, i) => ({ id:id+i, x:cx, y:cy, color, angle:(i/10)*360, dist:24+Math.random()*20 }))]);
@@ -5324,7 +5389,7 @@ export default function App() {
         </div>
 
         {screen === "today"    && <TodayScreen    habits={habits} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onReflect={setReflectId} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onAdd={handleStartAdd} onXPInfo={() => setShowXP(true)}/>}
-        {screen === "journal"  && <JournalScreen habits={habits} onReflect={setReflectId} journalUserId={sessionUserId}/>}
+        {screen === "journal"  && <JournalScreen habits={habits} onReflect={setReflectId} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)}/>}
         {screen === "insights" && <InsightsScreen habits={habits} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)}/>}
         {screen === "habits"   && <HabitsScreen   habits={habits} onEdit={setEditId} onDelete={handleDeleteHabit} onAdd={handleStartAdd} onReflect={setReflectId} onCoach={() => setShowCoach(true)} onUpgrade={() => setShowUpgrade(true)} isPro={isPro} coachName={coachName}/>}
         {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} refCode={refCode}
@@ -5383,7 +5448,7 @@ export default function App() {
       {logId && logHabit?.habitType === "progress" && <LogProgressModal  habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
       {logId && logHabit?.habitType === "project"  && <LogProjectModal   habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
       {showCoach   && <AICoach habits={habits} user={user} isPro={isPro} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)} coachName={coachName} currentScreen={screen}/>}
-      {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} habitCount={habits.length} userId={userIdRef.current} userEmail={authEmail}/>}
+      {showUpgrade && <BetaPaywallModal onClose={() => setShowUpgrade(false)}/>}
       {showShare && <ShareCardModal user={user} habits={habits} xp={xp} onClose={() => setShowShare(false)}/>}
       {showWelcome && <WelcomeModal onContinue={() => setShowWelcome(false)} />}
       {/* TourOverlay disabled — restore tourSteps state and this block to re-enable */}
