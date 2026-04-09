@@ -83,11 +83,11 @@ const HABIT_TYPES = {
 };
 
 const XP_LEVELS = [
-  { min:0,    label:"Unforged",  color:T.muted   },
-  { min:500,  label:"Kindling",  color:"#C8902A" },
-  { min:1500, label:"Tempered",  color:"#E67E22" },
-  { min:3000, label:"Hardened",  color:"#C0392B" },
-  { min:6000, label:"Forged",    color:"#F5C842" },
+  { min:0,    label:"Unforged",  color:"#B8B6AC", meaning:"Just getting started" },
+  { min:500,  label:"Kindling",  color:"#C8902A", meaning:"The habit is catching" },
+  { min:1500, label:"Tempered",  color:"#E67E22", meaning:"Consistency is building" },
+  { min:3000, label:"Hardened",  color:"#C0392B", meaning:"This is becoming who you are" },
+  { min:6000, label:"Forged",    color:"#F5C842", meaning:"Identity-level commitment" },
 ];
 function getLevel(xp) {
   return XP_LEVELS.reduce((acc, l) => xp >= l.min ? l : acc, XP_LEVELS[0]);
@@ -1300,31 +1300,157 @@ function AddModal({ onClose, onSave }) {
 // ─── XP MODAL ─────────────────────────────────────────────────────────────────
 function XPModal({ xp, onClose }) {
   const level = getLevel(xp);
-  const next  = nextLevel(xp);
-  const pct   = next ? Math.round(((xp - level.min) / (next.min - level.min)) * 100) : 100;
+  const next = nextLevel(xp);
+  const span = next ? Math.max(1, next.min - level.min) : 1;
+  const pct = next ? Math.round(((xp - level.min) / span) * 100) : 100;
+  const gap = next ? next.min - xp : 0;
+
   return (
     <Modal onClose={onClose}>
-      <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, marginBottom:4 }}>What is XP?</div>
-      <div style={{ fontSize:13, color:T.muted, marginBottom:22, lineHeight:1.7 }}>
-        XP is your consistency score. Every habit you log earns 10 XP. Limit habits earn 5 XP per tap. It doesn't unlock anything — it's just proof of how much you've shown up.{" "}
-        At 1–2 habits a day you'll hit Kindling in ~2 months, Tempered in ~6, Hardened in a year, Forged in 2 years of consistent logging.
-      </div>
-      <div style={{ background:T.surface, borderRadius:T.rsm, padding:16, marginBottom:20 }}>
-        <div style={{ fontSize:11, color:T.hint, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:8 }}>Your level</div>
-        <div style={{ fontSize:22, fontWeight:500, color:level.color, marginBottom:4 }}>{level.label}</div>
-        <div style={{ fontSize:13, color:T.muted, marginBottom:12 }}>{xp} xp{next ? ` · ${next.min - xp} to next level` : " · max level"}</div>
-        <div style={{ height:6, background:T.raised, borderRadius:3, overflow:"hidden" }}>
-          <div style={{ height:"100%", borderRadius:3, background:level.color, width:`${pct}%`, transition:"width 0.6s ease" }}/>
+      <div style={{ marginTop:-4, paddingBottom:4 }}>
+        <p
+          style={{
+            fontSize:12, color:T.goldBright, letterSpacing:"0.06em", textTransform:"uppercase",
+            fontWeight:600, margin:"0 0 22px", textAlign:"center", lineHeight:1.4,
+          }}
+        >
+          XP is proof you showed up.
+        </p>
+
+        {/* Hero — current rank */}
+        <div
+          style={{
+            background:`linear-gradient(165deg, rgba(18,18,16,0.98) 0%, ${T.bg} 55%, rgba(12,12,10,1) 100%)`,
+            border:`1px solid ${T.borderMid}`,
+            borderRadius:T.r,
+            padding:"24px 18px 22px",
+            marginBottom:20,
+            boxShadow:"inset 0 1px 0 rgba(255,255,255,0.05), 0 12px 40px rgba(0,0,0,0.35)",
+          }}
+        >
+          <div
+            style={{
+              fontFamily:T.serif, fontSize:34, fontWeight:700, color:level.color, lineHeight:1.05,
+              letterSpacing:"-0.02em", textShadow:`0 0 48px ${level.color}33`,
+            }}
+          >
+            {level.label}
+          </div>
+          <div style={{ fontSize:14, color:T.sub, marginTop:10, lineHeight:1.55, maxWidth:320 }}>
+            {level.meaning}
+          </div>
+
+          <div style={{ marginTop:22, fontSize:14, color:T.text, fontWeight:500, lineHeight:1.5 }}>
+            {next ? (
+              <>
+                <span style={{ color:level.color, fontVariantNumeric:"tabular-nums" }}>{xp} xp</span>
+                <span style={{ color:T.hint }}> — </span>
+                <span style={{ color:T.sub }}>{gap} to </span>
+                <span style={{ color:next.color, fontWeight:600 }}>{next.label}</span>
+              </>
+            ) : (
+              <>
+                <span style={{ color:level.color, fontVariantNumeric:"tabular-nums" }}>{xp} xp</span>
+                <span style={{ color:T.hint }}> — </span>
+                <span style={{ color:T.goldBright, fontWeight:600 }}>Peak rank</span>
+              </>
+            )}
+          </div>
+          <div
+            style={{
+              height:12, background:T.bg, borderRadius:8, overflow:"hidden", marginTop:14,
+              border:`1px solid ${T.border}`, boxShadow:"inset 0 2px 6px rgba(0,0,0,0.45)",
+            }}
+          >
+            <div
+              style={{
+                height:"100%", borderRadius:7,
+                background: next
+                  ? `linear-gradient(90deg, ${level.color}, ${next.color})`
+                  : `linear-gradient(90deg, ${level.color}, ${T.goldBright})`,
+                width:`${pct}%`, maxWidth:"100%", transition:"width 0.65s ease",
+                boxShadow:`0 0 16px ${level.color}55`,
+              }}
+            />
+          </div>
         </div>
-      </div>
-      {XP_LEVELS.map((l, i) => (
-        <div key={i} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 0", borderTop:i>0?`0.5px solid ${T.border}`:"none" }}>
-          <div style={{ width:10, height:10, borderRadius:"50%", background:l.color, flexShrink:0 }}/>
-          <div style={{ flex:1, fontSize:13, color:xp>=l.min?T.text:T.muted }}>{l.label}</div>
-          <div style={{ fontSize:12, color:T.hint }}>{l.min} xp</div>
+
+        <div
+          style={{
+            fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.12em",
+            fontWeight:600, marginBottom:10, paddingLeft:2,
+          }}
+        >
+          Ranks
         </div>
-      ))}
-      <GBtn onClick={onClose}>Got it</GBtn>
+        <div
+          style={{
+            border:`1px solid ${T.borderMid}`, borderRadius:T.r, overflow:"hidden",
+            background:T.bg, marginBottom:18, boxShadow:"inset 0 1px 0 rgba(255,255,255,0.03)",
+          }}
+        >
+          {XP_LEVELS.map((l, i) => {
+            const isCurrent = l.min === level.min;
+            const isFuture = xp < l.min;
+            return (
+              <div
+                key={l.min}
+                style={{
+                  display:"flex", gap:14, padding:"14px 14px 14px 11px",
+                  borderTop: i > 0 ? `1px solid ${T.border}` : "none",
+                  opacity: isFuture ? 0.4 : 1,
+                  background: isCurrent ? `${l.color}12` : "transparent",
+                  borderLeft: isCurrent ? `3px solid ${l.color}` : "3px solid transparent",
+                  boxShadow: isCurrent ? `inset 0 0 36px ${l.color}0D` : "none",
+                }}
+              >
+                <div
+                  style={{
+                    width:12, height:12, borderRadius:"50%", background:l.color, flexShrink:0, marginTop:4,
+                    boxShadow: isFuture ? "none" : `0 0 10px ${l.color}55`,
+                    opacity: isFuture ? 0.55 : 1,
+                  }}
+                />
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:10 }}>
+                    <span
+                      style={{
+                        fontSize:15,
+                        fontWeight: isCurrent ? 600 : 500,
+                        color: isFuture ? T.hint : T.text,
+                        letterSpacing:"-0.01em",
+                      }}
+                    >
+                      {l.label}
+                      {isCurrent ? (
+                        <span style={{ marginLeft:8, fontSize:10, fontWeight:600, color:l.color, letterSpacing:"0.08em", textTransform:"uppercase" }}>
+                          Now
+                        </span>
+                      ) : null}
+                    </span>
+                    <span
+                      style={{
+                        fontSize:11, color:T.hint, fontVariantNumeric:"tabular-nums", flexShrink:0,
+                      }}
+                    >
+                      {l.min.toLocaleString()} xp
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      fontSize:12, color: isFuture ? T.hint : T.sub, marginTop:5, lineHeight:1.45,
+                    }}
+                  >
+                    {l.meaning}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <GBtn onClick={onClose}>Close</GBtn>
+      </div>
     </Modal>
   );
 }
@@ -1793,7 +1919,7 @@ function BetaModal({ onClose }) {
 // ─── JOURNAL DAY SECTION ──────────────────────────────────────────────────────
 // One section per date in the list view. Today is expanded by default.
 // Past days collapse into a single row showing a snapshot.
-function DaySection({ date, dayHabits, onReflect }) {
+function DaySection({ date, dayHabits, onReflect, onDeleteLogEntry }) {
   const isToday = date === todayStr();
   const [open, setOpen] = useState(isToday);
 
@@ -1824,7 +1950,7 @@ function DaySection({ date, dayHabits, onReflect }) {
 
       {/* Expanded content */}
       {open && dayHabits.map(({ habit, logs, entryKey }) => (
-        <HabitDayCard key={entryKey || habit.id} habit={habit} logs={logs} onReflect={onReflect}/>
+        <HabitDayCard key={entryKey || habit.id} habit={habit} logs={logs} onReflect={onReflect} onDeleteLogEntry={onDeleteLogEntry}/>
       ))}
     </div>
   );
@@ -1854,8 +1980,33 @@ function MissedDaySection({ date, note, onEdit, onClear }) {
   );
 }
 
+function formatJournalLogLine(habit, log) {
+  const note = log.note?.trim();
+  const noteSuffix = note ? ` · ${truncateText(note, 48)}` : "";
+  if (log.value === "skip") return `Skipped${noteSuffix}`;
+  if (log.value === "quicknote") return note || "Quick note";
+  if (habit.habitType === "goal" && typeof log.value === "number") return `${formatWithUnit(log.value, habit.unit)}${noteSuffix}`;
+  if (habit.habitType === "project" && log.value && typeof log.value === "object" && "minutes" in log.value) {
+    return `${log.value.minutes ?? 0} min session${noteSuffix}`;
+  }
+  if (log.value === true) {
+    if (habit.habitType === "weekly") return `Weekly session ✓${noteSuffix}`;
+    return `Done ✓${noteSuffix}`;
+  }
+  if (typeof log.value === "number") return `${formatWithUnit(log.value, habit.unit)}${noteSuffix}`;
+  if (log.reflection) return `Reflection · ${truncateText(log.reflection, 72)}${noteSuffix}`;
+  if (log.value && typeof log.value === "object") {
+    if (log.value.win) return `Win · ${truncateText(log.value.win, 56)}`;
+    if (log.value.hardPart) return `Hard part · ${truncateText(log.value.hardPart, 56)}`;
+  }
+  if (log.value == null && note) return note;
+  return note || "Entry";
+}
+
 // Card showing one habit's full activity for a single day
-function HabitDayCard({ habit, logs, onReflect }) {
+function HabitDayCard({ habit, logs, onReflect, onDeleteLogEntry }) {
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
   const nonNote = logs.filter(l => l.value !== "quicknote");
   const notes   = logs.filter(l => l.value === "quicknote" || (l.note && l.note.trim()));
   const uniqueNotes = [...new Set(notes.map(l => l.note).filter(Boolean))];
@@ -1889,7 +2040,19 @@ function HabitDayCard({ habit, logs, onReflect }) {
   const hardParts  = nonNote.filter(l => l.value?.hardPart).map(l => l.value.hardPart);
   const reflection = nonNote.map(l => l.reflection).filter(Boolean).join(" ");
 
+  async function confirmDeleteEntry() {
+    if (!pendingDelete || !onDeleteLogEntry || deleting) return;
+    setDeleting(true);
+    try {
+      const ok = await onDeleteLogEntry(habit, pendingDelete);
+      if (ok) setPendingDelete(null);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
+    <>
     <div style={{ margin:"0 14px 8px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, overflow:"hidden" }}>
       {/* Habit header */}
       <div style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 14px 8px", borderBottom:`0.5px solid ${T.border}` }}>
@@ -1897,6 +2060,31 @@ function HabitDayCard({ habit, logs, onReflect }) {
         <span style={{ fontSize:13, fontWeight:500, color:habit.color }}>{habit.name}</span>
         <span style={{ marginLeft:"auto", fontSize:11, color:T.hint }}>{summaryLine()}</span>
       </div>
+
+      {/* Per-entry rows (Journal) — delete removes one log; XP is not adjusted */}
+      {logs.length > 0 && onDeleteLogEntry ? (
+        <div style={{ borderBottom:`0.5px solid ${T.border}` }}>
+          <div style={{ padding:"8px 14px 4px", fontSize:10, fontWeight:600, color:T.hint, textTransform:"uppercase", letterSpacing:"0.06em" }}>Entries</div>
+          {logs.map((log, i) => (
+            <div
+              key={`${log.date}-${i}-${typeof log.value === "object" ? JSON.stringify(log.value) : String(log.value)}`}
+              style={{ display:"flex", alignItems:"flex-start", gap:8, padding:"8px 14px", borderTop:`0.5px solid ${T.border}` }}
+            >
+              <div style={{ flex:1, fontSize:13, color:T.text, lineHeight:1.5, minWidth:0 }}>{formatJournalLogLine(habit, log)}</div>
+              <button
+                type="button"
+                aria-label="Delete this log entry"
+                disabled={deleting}
+                onClick={() => setPendingDelete(log)}
+                style={{
+                  flexShrink:0, width:32, height:32, marginTop:-4, border:"none", borderRadius:8, cursor:deleting ? "default" : "pointer",
+                  background:"transparent", color:T.hint, fontSize:18, lineHeight:1, display:"flex", alignItems:"center", justifyContent:"center",
+                }}
+              >×</button>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       {/* Wins */}
       {wins.map((w, i) => (
@@ -1940,11 +2128,23 @@ function HabitDayCard({ habit, logs, onReflect }) {
         </div>
       )}
     </div>
+
+    {pendingDelete && onDeleteLogEntry ? (
+      <Modal onClose={() => { if (!deleting) setPendingDelete(null); }}>
+        <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:8 }}>Delete this entry?</div>
+        <div style={{ fontSize:14, color:T.muted, lineHeight:1.55, marginBottom:22 }}>
+          This removes the log from your journal and history. Your XP will stay the same.
+        </div>
+        <PBtn color="#9B2C2C" onClick={confirmDeleteEntry}>{deleting ? "Deleting…" : "Delete"}</PBtn>
+        <GBtn onClick={() => { if (!deleting) setPendingDelete(null); }}>Cancel</GBtn>
+      </Modal>
+    ) : null}
+    </>
   );
 }
 
 // ─── JOURNAL SCREEN ───────────────────────────────────────────────────────────
-function JournalScreen({ habits, goals = [], onReflect, journalUserId, isPro, onUpgrade, onCoach }) {
+function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, journalUserId, isPro, onUpgrade, onCoach }) {
   const [filter, setFilter] = useState("all");
   const [viewMode, setViewMode] = useState("day"); // "day" | "week" | "month"
   const [monthOffset, setMonthOffset] = useState(0);
@@ -2081,6 +2281,7 @@ function JournalScreen({ habits, goals = [], onReflect, journalUserId, isPro, on
           date={date}
           dayHabits={hasLog ? Object.values(allByDate[date]) : []}
           onReflect={onReflect}
+          onDeleteLogEntry={onDeleteJournalLog}
         />
       );
     }
@@ -2244,7 +2445,7 @@ function JournalScreen({ habits, goals = [], onReflect, journalUserId, isPro, on
                 )}
                 {hasSelEntries ? (
                   selHabits.map(({ habit, logs, entryKey }) => (
-                    <HabitDayCard key={entryKey || habit.id} habit={habit} logs={logs} onReflect={onReflect}/>
+                    <HabitDayCard key={entryKey || habit.id} habit={habit} logs={logs} onReflect={onReflect} onDeleteLogEntry={onDeleteJournalLog}/>
                   ))
                 ) : (
                   <div style={{ padding:"0 0 8px" }}>
@@ -2721,6 +2922,20 @@ function getGoalProgress(goal) {
   const isComplete = progress >= 1;
   const toGo = isComplete ? 0 : Math.max(0, Math.abs(target - current));
   return { pct: Math.round(progress * 100), toGo, isComplete };
+}
+
+/** Recompute goal fields after removing log rows (current value = last numeric log, or start). */
+function goalStateAfterLogRemoval(goal, nextLogs) {
+  const numericLogs = nextLogs.filter(l => typeof l.value === "number");
+  const currentValue = numericLogs.length > 0
+    ? numericLogs[numericLogs.length - 1].value
+    : Number(goal.startValue ?? 0);
+  const lastLogDate = nextLogs.length > 0
+    ? [...nextLogs].sort((a, b) => b.date.localeCompare(a.date))[0].date
+    : null;
+  const stats = getGoalProgress({ ...goal, currentValue, logs: nextLogs });
+  const status = stats.isComplete ? "completed" : "active";
+  return { ...goal, logs: nextLogs, currentValue, lastLogDate, status };
 }
 
 function getGoalEntryCount(goal) {
@@ -4965,6 +5180,7 @@ export default function App() {
   const [authEmail,   setAuthEmail]   = useState(null);
   /** Supabase auth user id when signed in; null when logged out */
   const [sessionUserId, setSessionUserId] = useState(null);
+  const [xpAwardedDates, setXpAwardedDates] = useState(() => new Set());
   /** True only after profile/habits load succeeded for this session (never true while data is missing) */
   const [accountDataReady, setAccountDataReady] = useState(false);
   /** Load failed after retries — show retry UI while session still valid */
@@ -4979,6 +5195,23 @@ export default function App() {
   const noteDebounceRef = useRef({});
   const retryLoadPromiseRef = useRef(null);
   const retryLoadUidRef = useRef(null);
+
+  // XP anti-abuse guard: once a habit earns XP for a specific day, toggling
+  // it off/on again that day should never mint extra XP.
+  useEffect(() => {
+    setXpAwardedDates(new Set());
+  }, [sessionUserId]);
+
+  useEffect(() => {
+    const today = todayStr();
+    setXpAwardedDates(prev => {
+      const next = new Set(prev);
+      habits.forEach(h => {
+        if (h.logs.some(l => l.date === today && l.value === true)) next.add(`${h.id}:${today}`);
+      });
+      return next.size === prev.size ? prev : next;
+    });
+  }, [habits]);
 
   // ─── Supabase helpers ──────────────────────────────────────────────────────
   async function syncHabit(habit) {
@@ -5795,16 +6028,38 @@ export default function App() {
     setHabits(prev => prev.map(h => h.id === id ? tapped : h));
     // Side effects outside the updater
     if (tapped.habitType === "limit") {
-      spawnParticles(cx, cy, tapped.color);
-      addFlash(cx, cy, "+5 xp");
-      setXp(x => x + 5);
+      const today = todayStr();
+      const checkinKey = `limit:${id}:${today}`;
+      const hadNumericToday = base.logs.some(l => l.date === today && typeof l.value === "number");
+      const canAward = !hadNumericToday && !xpAwardedDates.has(checkinKey);
+      if (canAward) {
+        spawnParticles(cx, cy, tapped.color);
+        addFlash(cx, cy, "+10 xp");
+        setXp(x => x + 10);
+        setXpAwardedDates(prev => {
+          const next = new Set(prev);
+          next.add(checkinKey);
+          return next;
+        });
+      }
     } else {
-      const wasLogged = base.logs.some(l => l.date === todayStr());
-      if (!wasLogged) { spawnParticles(cx, cy, tapped.color); addFlash(cx, cy, "+10 xp"); setXp(x => x + 10); }
+      const today = todayStr();
+      const awardKey = `${id}:${today}`;
+      const alreadyEarnedToday = xpAwardedDates.has(awardKey) || base.logs.some(l => l.date === today && l.value === true);
+      if (!alreadyEarnedToday) {
+        spawnParticles(cx, cy, tapped.color);
+        addFlash(cx, cy, "+10 xp");
+        setXp(x => x + 10);
+        setXpAwardedDates(prev => {
+          const next = new Set(prev);
+          next.add(awardKey);
+          return next;
+        });
+      }
     }
   }
 
-  // Log handler: progress and project
+  // Log handler: project
   async function handleLog(id, logData) {
     const habit = habits.find(h => h.id === id);
     if (!habit) return;
@@ -5816,7 +6071,38 @@ export default function App() {
     const saved = await syncHabit(updated);
     if (!saved) return;
     setHabits(prev => prev.map(h => h.id === id ? updated : h));
-    if (isNew) { addFlash(window.innerWidth / 2, 120, "+10 xp"); setXp(x => x + 10); }
+    if (habit.habitType === "project") {
+      const today = todayStr();
+      const firstKey = `project-first:${id}:${today}`;
+      const bonusKey = `project-target:${id}:${today}`;
+      const targetMins = habit.dailyTargetMinutes ?? habit.dailyTarget ?? habit.targetMinutes ?? 60;
+      const prevMins = habit.logs.filter(l => l.date === today).reduce((s, l) => s + (l.value?.minutes || 0), 0);
+      const nextMins = updated.logs.filter(l => l.date === today).reduce((s, l) => s + (l.value?.minutes || 0), 0);
+      let xpGain = 0;
+      let earnedFirst = false;
+      let earnedBonus = false;
+      if (prevMins === 0 && !xpAwardedDates.has(firstKey)) {
+        xpGain += 10;
+        earnedFirst = true;
+      }
+      if (prevMins < targetMins && nextMins >= targetMins && !xpAwardedDates.has(bonusKey)) {
+        xpGain += 10;
+        earnedBonus = true;
+      }
+      if (xpGain > 0) {
+        addFlash(window.innerWidth / 2, 120, `+${xpGain} xp`);
+        setXp(x => x + xpGain);
+        setXpAwardedDates(prev => {
+          const next = new Set(prev);
+          if (earnedFirst) next.add(firstKey);
+          if (earnedBonus) next.add(bonusKey);
+          return next;
+        });
+      }
+    } else if (isNew) {
+      addFlash(window.innerWidth / 2, 120, "+10 xp");
+      setXp(x => x + 10);
+    }
   }
 
   // Undo last limit tap: remove the most recent today log for a limit habit
@@ -5859,11 +6145,22 @@ export default function App() {
   async function handleLogZero(id) {
     const habit = habits.find(h => h.id === id);
     if (!habit) return;
-    if (habit.logs.some(l => l.date === todayStr() && typeof l.value === "number")) return;
+    const today = todayStr();
+    if (habit.logs.some(l => l.date === today && typeof l.value === "number")) return;
     const updated = { ...habit, logs: [...habit.logs, { date: todayStr(), value: 0, note: "" }] };
     const saved = await syncHabit(updated);
     if (!saved) return;
     setHabits(prev => prev.map(h => h.id === id ? updated : h));
+    const checkinKey = `limit:${id}:${today}`;
+    if (!xpAwardedDates.has(checkinKey)) {
+      addFlash(window.innerWidth / 2, 120, "+10 xp");
+      setXp(x => x + 10);
+      setXpAwardedDates(prev => {
+        const next = new Set(prev);
+        next.add(checkinKey);
+        return next;
+      });
+    }
     addToast("✓ Logged — none today");
   }
 
@@ -5964,6 +6261,26 @@ export default function App() {
     const saved = await syncGoal(updated);
     if (!saved) return;
     setGoals(prev => prev.map(g => g.id === id ? updated : g));
+    const today = todayStr();
+    const awardKey = `goal:${id}:${today}`;
+    if (xpAwardedDates.has(awardKey)) return;
+    const prevValue = Number(goal.currentValue);
+    const nextValue = Number(value);
+    if (!Number.isFinite(prevValue) || !Number.isFinite(nextValue)) return;
+    if (nextValue === prevValue) return;
+    const target = Number(goal.targetValue);
+    const prevDist = Math.abs(target - prevValue);
+    const nextDist = Math.abs(target - nextValue);
+    const xpGain = nextDist < prevDist ? 15 : 5;
+    if (xpGain > 0) {
+      addFlash(window.innerWidth / 2, 120, `+${xpGain} xp`);
+      setXp(x => x + xpGain);
+      setXpAwardedDates(prev => {
+        const next = new Set(prev);
+        next.add(awardKey);
+        return next;
+      });
+    }
   }
 
   async function handleDeleteGoal(id) {
@@ -5997,6 +6314,35 @@ export default function App() {
     }
     setGoals(prev => prev.map(g => g.id === id ? updated : g));
     addToast("✓ Goal updated");
+  }
+
+  /** Remove one log row from a habit or goal (Journal). XP is unchanged. */
+  async function handleDeleteJournalLogEntry(entity, logEntry) {
+    const isGoal = entity.habitType === "goal";
+    const id = entity.id;
+    if (isGoal) {
+      const g = goals.find(x => x.id === id);
+      if (!g) return false;
+      const idx = g.logs.indexOf(logEntry);
+      if (idx === -1) return false;
+      const nextLogs = g.logs.filter((_, i) => i !== idx);
+      const updated = goalStateAfterLogRemoval(g, nextLogs);
+      const saved = await syncGoal(updated);
+      if (!saved) return false;
+      setGoals(prev => prev.map(x => x.id === id ? updated : x));
+      addToast("✓ Entry removed");
+      return true;
+    }
+    const h = habits.find(x => x.id === id);
+    if (!h) return false;
+    const idx = h.logs.indexOf(logEntry);
+    if (idx === -1) return false;
+    const updated = { ...h, logs: h.logs.filter((_, i) => i !== idx) };
+    const saved = await syncHabit(updated);
+    if (!saved) return false;
+    setHabits(prev => prev.map(x => x.id === id ? updated : x));
+    addToast("✓ Entry removed");
+    return true;
   }
 
   async function handleSignOut() {
@@ -6036,7 +6382,7 @@ export default function App() {
         </div>
 
         {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onReflect={setReflectId} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={id => setEditGoalId(id)} onCompleteGoal={handleCompleteGoal} onXPInfo={() => setShowXP(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)} isPro={isPro} coachName={coachName}/>}
-        {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
+        {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
         {screen === "insights" && <InsightsScreen habits={habits} goals={goals} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
         {screen === "habits"   && <HabitsScreen   habits={habits} goals={goals} onEdit={setEditId} onDelete={handleDeleteHabit} onAdd={handleStartAdd} onReflect={setReflectId} onCoach={() => setShowCoach(true)} onUpgrade={() => setShowUpgrade(true)} isPro={isPro} coachName={coachName} onEditGoal={id => setEditGoalId(id)} onDeleteGoal={handleDeleteGoal} onCompleteGoal={handleCompleteGoal}/>}
         {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} refCode={refCode}
