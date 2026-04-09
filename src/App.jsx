@@ -1111,7 +1111,11 @@ function EditModal({ habit, onClose, onSave }) {
       {/* Type-specific section */}
       {habit.habitType === "daily" && (
         <div style={{ background:T.surface, borderRadius:T.rsm, padding:14, marginBottom:20 }}>
-          <div style={{ fontSize:13, color:T.muted }}>One tap per day. Currently on a <strong style={{ color:T.text }}>{getDailyStreak(habit)}-day streak</strong>.</div>
+          <div style={{ fontSize:13, color:T.muted }}>
+            {getDailyStreak(habit) > 0
+              ? <>One tap per day. Currently on a <strong style={{ color:T.text }}>{getDailyStreak(habit)}-day streak</strong>.</>
+              : "One tap per day. No active streak yet."}
+          </div>
         </div>
       )}
       {habit.habitType === "weekly" && (
@@ -1626,12 +1630,15 @@ function TourOverlay({ steps, stepIdx, onNext, onSkip }) {
 
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
 function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote, onLogZero, onOpenLog, onOpenGoalLog, onXPInfo, onCoach, isPro, coachName }) {
-  const loggedCount = habits.filter(h => isLoggedToday(h)).length;
-  const pct = habits.length ? Math.round((loggedCount / habits.length) * 100) : 0;
+  const activeGoals = goals.filter(g => g.status !== "completed");
+  const loggedHabitsCount = habits.filter(h => isLoggedToday(h)).length;
+  const loggedGoalsCount = activeGoals.filter(g => (g.logs || []).some(l => l.date === todayStr())).length;
+  const totalTrackables = habits.length + activeGoals.length;
+  const loggedCount = loggedHabitsCount + loggedGoalsCount;
+  const pct = totalTrackables ? Math.round((loggedCount / totalTrackables) * 100) : 0;
   const hr = new Date().getHours();
   const greeting = hr < 12 ? "Rise and forge." : hr < 17 ? "Keep the heat up." : "Finish strong.";
   const level = getLevel(xp);
-  const activeGoals = goals.filter(g => g.status !== "completed");
   const daily   = habits.filter(h => h.habitType === "daily");
   const limit   = habits.filter(h => h.habitType === "limit");
   const weekly  = habits.filter(h => h.habitType === "weekly");
@@ -1655,7 +1662,7 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
         <Ring pct={pct}/>
         <div style={{ flex:1 }}>
           <div style={{ fontFamily:T.serif, fontSize:20, color:T.text, marginBottom:4 }}>{pct === 100 ? "Forged for today." : greeting}</div>
-          <div style={{ fontSize:13, color:T.muted }}>{loggedCount} of {habits.length} logged</div>
+          <div style={{ fontSize:13, color:T.muted }}>{loggedCount} of {totalTrackables} logged</div>
           <button onClick={onXPInfo} style={{ marginTop:10, display:"inline-flex", alignItems:"center", gap:5, fontSize:11, fontWeight:500, padding:"3px 10px", borderRadius:12, background:"rgba(200,144,42,0.15)", color:T.gold, border:"none", cursor:"pointer" }}>
             ⚡ {xp} xp · {level.label}
           </button>
@@ -1680,9 +1687,9 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
       {habits.length > 0 && (() => {
         const contextLine = loggedCount === 0
           ? "Nothing logged yet today — want to think through what's in the way?"
-          : loggedCount === habits.length
-          ? `You've logged all ${habits.length} habits today — want to reflect on how it went?`
-          : `You've logged ${loggedCount} of ${habits.length} habits today — want to talk through the rest?`;
+          : loggedCount === totalTrackables
+          ? `You've logged all ${totalTrackables} items today — want to reflect on how it went?`
+          : `You've logged ${loggedCount} of ${totalTrackables} items today — want to talk through the rest?`;
         return (
           <button onClick={onCoach}
             style={{ margin:"12px 14px 4px", width:"calc(100% - 28px)", background:"rgba(200,144,42,0.06)", border:`0.5px solid rgba(200,144,42,0.28)`, borderRadius:T.r, padding:"14px 16px", cursor:"pointer", display:"flex", alignItems:"center", gap:14, textAlign:"left", boxSizing:"border-box" }}>
@@ -1790,8 +1797,8 @@ function DaySection({ date, dayHabits, onReflect }) {
       )}
 
       {/* Expanded content */}
-      {open && dayHabits.map(({ habit, logs }) => (
-        <HabitDayCard key={habit.id} habit={habit} logs={logs} onReflect={onReflect}/>
+      {open && dayHabits.map(({ habit, logs, entryKey }) => (
+        <HabitDayCard key={entryKey || habit.id} habit={habit} logs={logs} onReflect={onReflect}/>
       ))}
     </div>
   );
@@ -1829,6 +1836,11 @@ function HabitDayCard({ habit, logs, onReflect }) {
 
   // Summary line based on habit type
   function summaryLine() {
+    if (habit.habitType === "goal") {
+      const latest = nonNote.slice(-1)[0];
+      const value = typeof latest?.value === "number" ? latest.value : (habit.currentValue ?? 0);
+      return `${formatWithUnit(value, habit.unit)} logged`;
+    }
     if (habit.habitType === "project") {
       const mins = nonNote.reduce((s, l) => s + (l.value?.minutes || 0), 0);
       const sessions = nonNote.length;
@@ -1893,7 +1905,7 @@ function HabitDayCard({ habit, logs, onReflect }) {
       ))}
 
       {/* Add reflection prompt if none yet */}
-      {!reflection && (
+      {!reflection && habit.habitType !== "goal" && (
         <div style={{ padding:"8px 14px" }}>
           <button onClick={() => onReflect(habit.id)}
             style={{ fontSize:12, color:habit.color+"99", background:"none", border:"none", cursor:"pointer", fontWeight:500, padding:0 }}>
@@ -1906,7 +1918,7 @@ function HabitDayCard({ habit, logs, onReflect }) {
 }
 
 // ─── JOURNAL SCREEN ───────────────────────────────────────────────────────────
-function JournalScreen({ habits, onReflect, journalUserId, isPro, onUpgrade, onCoach }) {
+function JournalScreen({ habits, goals = [], onReflect, journalUserId, isPro, onUpgrade, onCoach }) {
   const [filter, setFilter] = useState("all");
   const [viewMode, setViewMode] = useState("day"); // "day" | "week" | "month"
   const [monthOffset, setMonthOffset] = useState(0);
@@ -1951,16 +1963,32 @@ function JournalScreen({ habits, onReflect, journalUserId, isPro, onUpgrade, onC
 
   const allByDate = {};
   habits.forEach(h => {
-    const hLogs = filter === "all" || filter === h.id ? h.logs : [];
+    const entryKey = `habit:${h.id}`;
+    const hLogs = filter === "all" || filter === entryKey ? h.logs : [];
     hLogs.forEach(l => {
       if (!allByDate[l.date]) allByDate[l.date] = {};
-      if (!allByDate[l.date][h.id]) allByDate[l.date][h.id] = { habit: h, logs: [] };
-      allByDate[l.date][h.id].logs.push(l);
+      if (!allByDate[l.date][entryKey]) allByDate[l.date][entryKey] = { habit: h, logs: [], entryKey };
+      allByDate[l.date][entryKey].logs.push(l);
+    });
+  });
+  goals.forEach(g => {
+    const entryKey = `goal:${g.id}`;
+    const gLogs = (filter === "all" || filter === entryKey)
+      ? (g.logs || []).filter(l => typeof l.value === "number")
+      : [];
+    const goalAsEntry = { ...g, habitType: "goal", reflection: false };
+    gLogs.forEach(l => {
+      if (!allByDate[l.date]) allByDate[l.date] = {};
+      if (!allByDate[l.date][entryKey]) allByDate[l.date][entryKey] = { habit: goalAsEntry, logs: [], entryKey };
+      allByDate[l.date][entryKey].logs.push(l);
     });
   });
   const dates = Object.keys(allByDate).sort((a, b) => b.localeCompare(a));
 
-  const allLogDatesRaw = habits.flatMap(h => h.logs.map(l => l.date)).filter(Boolean).sort();
+  const allLogDatesRaw = [
+    ...habits.flatMap(h => h.logs.map(l => l.date)),
+    ...goals.flatMap(g => (g.logs || []).filter(l => typeof l.value === "number").map(l => l.date)),
+  ].filter(Boolean).sort();
   const firstLogDate  = allLogDatesRaw[0] || null;
   const firstLogYear  = firstLogDate ? parseInt(firstLogDate.split("-")[0], 10) : null;
   const firstLogMonth = firstLogDate ? parseInt(firstLogDate.split("-")[1], 10) - 1 : null;
@@ -2058,7 +2086,7 @@ function JournalScreen({ habits, onReflect, journalUserId, isPro, onUpgrade, onC
       </div>
 
       <div data-tour="journal-filters" style={{ display:"flex", gap:6, padding:"0 16px 14px", overflowX:"auto", WebkitOverflowScrolling:"touch" }}>
-        {[{ id:"all", name:"All", emoji:"", color:T.accent }, ...habits.map(h => ({ id:h.id, name:h.name, emoji:h.emoji, color:h.color }))].map(f => (
+        {[{ id:"all", name:"All", emoji:"", color:T.accent }, ...habits.map(h => ({ id:`habit:${h.id}`, name:h.name, emoji:h.emoji, color:h.color })), ...goals.map(g => ({ id:`goal:${g.id}`, name:g.name, emoji:g.emoji, color:g.color }))].map(f => (
           <button key={f.id} type="button" onClick={() => { setFilter(f.id); setSelectedDay(null); }}
             style={{ padding:"5px 12px", borderRadius:20, whiteSpace:"nowrap", flexShrink:0,
               border:`0.5px solid ${filter === f.id ? f.color : T.borderStrong}`,
@@ -2185,8 +2213,8 @@ function JournalScreen({ habits, onReflect, journalUserId, isPro, onUpgrade, onC
                   </div>
                 )}
                 {hasSelEntries ? (
-                  selHabits.map(({ habit, logs }) => (
-                    <HabitDayCard key={habit.id} habit={habit} logs={logs} onReflect={onReflect}/>
+                  selHabits.map(({ habit, logs, entryKey }) => (
+                    <HabitDayCard key={entryKey || habit.id} habit={habit} logs={logs} onReflect={onReflect}/>
                   ))
                 ) : (
                   <div style={{ padding:"0 0 8px" }}>
@@ -2458,6 +2486,7 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare, onCoach })
           const cur  = getStreak(h);
           const best = getBestStreak(h);
           const act  = get7DayActivity(h);
+          const hasAnyLogs = h.logs.some(l => l.value !== "quicknote");
           return (
             <div key={h.id} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14 }}>
               <span style={{ fontSize:20, width:24, flexShrink:0 }}>{h.emoji}</span>
@@ -2470,8 +2499,8 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare, onCoach })
                 </div>
               </div>
               <div style={{ textAlign:"right", flexShrink:0 }}>
-                <div style={{ fontSize:16, fontWeight:600, color:cur > 0 ? h.color : T.hint }}>
-                  {cur > 0 ? `🔥 ${cur}` : "—"}
+                <div style={{ fontSize:16, fontWeight:600, color:hasAnyLogs ? (cur > 0 ? h.color : T.muted) : T.hint }}>
+                  {hasAnyLogs ? (cur > 0 ? `🔥 ${cur}` : "0") : "—"}
                 </div>
                 {best > cur && best > 1 && (
                   <div style={{ fontSize:10, color:T.hint, marginTop:1 }}>best {best}</div>
@@ -2577,8 +2606,8 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare, onCoach })
                 <div style={{ fontSize:10, color:T.green, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Wins log</div>
                 {[...h.logs].filter(l => l.value?.win).reverse().slice(0, 5).map((l, i) => (
                   <div key={i} style={{ display:"flex", gap:10, padding:"9px 0", borderTop:`0.5px solid ${T.border}`, alignItems:"flex-start" }}>
-                    <span style={{ fontSize:10, color:h.color+"99", flexShrink:0, width:80, marginTop:2, fontWeight:500 }}>{l.date}</span>
-                    <span style={{ fontSize:13, color:T.text, lineHeight:1.5 }}>{l.value.win}</span>
+                    <span style={{ fontSize:10, color:h.color+"99", flexShrink:0, width:80, marginTop:2, fontWeight:500 }}>{fmtEntryDate(l.date)}</span>
+                    <span title={l.value.win} style={{ fontSize:13, color:T.text, lineHeight:1.5 }}>{truncateText(l.value.win, 120)}</span>
                   </div>
                 ))}
               </>
@@ -4217,7 +4246,7 @@ function ProfileScreen({ user, xp, habits, isPro, refCode, authEmail, onUpdateUs
   const pct   = next ? Math.round(((xp - level.min) / (next.min - level.min)) * 100) : 100;
   const totalLogs        = habits.reduce((s, h) => s + h.logs.length, 0);
   const totalReflections = habits.reduce((s, h) => s + h.logs.filter(l => l.reflection).length, 0);
-  const bestStreak       = Math.max(0, ...habits.map(h => getStreak(h)));
+  const bestStreak       = Math.max(0, ...habits.map(h => getBestStreak(h)));
 
   const isEmoji = user.avatarUrl && !user.avatarUrl.startsWith("http");
   const isImage = user.avatarUrl && user.avatarUrl.startsWith("http");
@@ -5972,7 +6001,7 @@ export default function App() {
         </div>
 
         {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onReflect={setReflectId} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onXPInfo={() => setShowXP(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)} isPro={isPro} coachName={coachName}/>}
-        {screen === "journal"  && <JournalScreen habits={habits} onReflect={setReflectId} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
+        {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
         {screen === "insights" && <InsightsScreen habits={habits} goals={goals} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
         {screen === "habits"   && <HabitsScreen   habits={habits} goals={goals} onEdit={setEditId} onDelete={handleDeleteHabit} onAdd={handleStartAdd} onReflect={setReflectId} onCoach={() => setShowCoach(true)} onUpgrade={() => setShowUpgrade(true)} isPro={isPro} coachName={coachName} onEditGoal={id => setEditGoalId(id)} onDeleteGoal={handleDeleteGoal} onCompleteGoal={handleCompleteGoal}/>}
         {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} refCode={refCode}
