@@ -710,6 +710,7 @@ function DailyCard({ habit, onTap, onSkip, onAddNote }) {
   const tLog  = latestTodayLog(habit);
   const logged = isLoggedToday(habit);
   const isSkip = tLog?.value === "skip";
+  const streak = getStreak(habit);
   return (
     <div className="rc" style={cardStyle(logged && !isSkip, habit)}>
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
@@ -717,7 +718,7 @@ function DailyCard({ habit, onTap, onSkip, onAddNote }) {
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{habit.name}</div>
           <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>
-            Daily{getStreak(habit) > 0 ? ` · 🔥 ${getStreak(habit)} days` : ""}
+            Daily{streak > 0 ? ` · 🔥 ${streak}` : ""}
           </div>
         </div>
         {isSkip
@@ -762,7 +763,7 @@ function WeeklyCard({ habit, onTap, onAddNote }) {
           <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{habit.name}</div>
           <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>
             {wk}/{habit.weeklyTarget} sessions this week
-            {streak > 0 ? ` · 🔥 ${streak} wk streak` : ""}
+            {streak > 0 ? ` · 🔥 ${streak}` : ""}
           </div>
         </div>
         <CheckBtn logged={logged} habit={habit} onClick={e => onTap(habit.id, e)}/>
@@ -890,13 +891,14 @@ function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote }) {
   );
 }
 
-function TodayGoalCard({ goal, onOpenLog }) {
+function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete }) {
   const stats = getGoalProgress(goal);
   const { pct, isComplete } = stats;
   const loggedToday = goal.logs?.some(l => l.date === todayStr()) || false;
   const statusText = getGoalStatusText(goal, stats);
+  const [showMenu, setShowMenu] = useState(false);
   return (
-    <div className="rc" style={{ margin:"0 14px 10px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${loggedToday ? goal.color+"66" : T.border}`, overflow:"hidden" }}>
+    <div className="rc" style={{ margin:"0 14px 10px", background:loggedToday ? `${goal.color}0D` : T.raised, borderRadius:T.r, border:`0.5px solid ${loggedToday ? goal.color+"66" : T.border}`, overflow:"hidden" }}>
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
         <div style={{ width:40, height:40, borderRadius:11, background:goal.color+"20", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>{goal.emoji}</div>
         <div style={{ flex:1, minWidth:0 }}>
@@ -908,18 +910,42 @@ function TodayGoalCard({ goal, onOpenLog }) {
             <span style={{ marginLeft:6, color:isComplete ? T.green : T.hint }}>{statusText}</span>
           </div>
         </div>
-        {!isComplete && (
-          <button onClick={() => onOpenLog(goal.id)}
-            style={{ fontSize:12, color:goal.color, background:"none", border:`0.5px solid ${goal.color+"55"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>
-            Log
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          {!isComplete && (
+            <button onClick={() => onOpenLog(goal.id)}
+              style={{ fontSize:12, color:goal.color, background:"none", border:`0.5px solid ${goal.color+"55"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>
+              Log
+            </button>
+          )}
+          <button onClick={() => setShowMenu(m => !m)}
+            style={{ fontSize:18, color:T.hint, background:"none", border:"none", cursor:"pointer", lineHeight:1, padding:"2px 4px" }}>
+            ···
           </button>
-        )}
+        </div>
       </div>
       <div style={{ padding:"0 15px 14px" }}>
         <div style={{ height:5, background:T.surface, borderRadius:3, overflow:"hidden" }}>
           <div style={{ height:"100%", borderRadius:3, background:isComplete ? T.green : goal.color, width:`${pct}%`, transition:"width 0.4s ease" }}/>
         </div>
       </div>
+      {showMenu && (
+        <div style={{ borderTop:`0.5px solid ${T.border}`, padding:"8px 15px 10px", display:"flex", gap:8 }}>
+          {!isComplete && (
+            <button onClick={() => { onComplete(goal.id); setShowMenu(false); }}
+              style={{ fontSize:12, color:T.green, background:"none", border:`0.5px solid ${T.green+"44"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer" }}>
+              Mark complete
+            </button>
+          )}
+          <button onClick={() => { onEdit(goal.id); setShowMenu(false); }}
+            style={{ fontSize:12, color:goal.color, background:"none", border:`0.5px solid ${goal.color+"55"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer" }}>
+            Edit
+          </button>
+          <button onClick={() => setShowMenu(false)}
+            style={{ fontSize:12, color:T.muted, background:"none", border:"none", cursor:"pointer", marginLeft:"auto" }}>
+            Cancel
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1629,7 +1655,7 @@ function TourOverlay({ steps, stepIdx, onNext, onSkip }) {
 }
 
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
-function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote, onLogZero, onOpenLog, onOpenGoalLog, onXPInfo, onCoach, isPro, coachName }) {
+function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote, onLogZero, onOpenLog, onOpenGoalLog, onEditGoal, onCompleteGoal, onXPInfo, onCoach, isPro, coachName }) {
   const activeGoals = goals.filter(g => g.status !== "completed");
   const loggedHabitsCount = habits.filter(h => isLoggedToday(h)).length;
   const loggedGoalsCount = activeGoals.filter(g => (g.logs || []).some(l => l.date === todayStr())).length;
@@ -1671,7 +1697,7 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
       {/* Tour target: wraps only the first non-empty section so the spotlight ring is tight */}
       {(() => {
         const sections = [
-          activeGoals.length > 0 && <><SLabel>Goals</SLabel> {activeGoals.map(g => <TodayGoalCard key={g.id} goal={g} onOpenLog={onOpenGoalLog}/>)}</>,
+          activeGoals.length > 0 && <><SLabel>Goals</SLabel> {activeGoals.map(g => <TodayGoalCard key={g.id} goal={g} onOpenLog={onOpenGoalLog} onEdit={onEditGoal} onComplete={onCompleteGoal}/>)}</>,
           daily.length   > 0 && <><SLabel>Daily</SLabel>          {daily.map(h   => <DailyCard  key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote}/>)}</>,
           limit.length   > 0 && <><SLabel>Limits</SLabel>         {limit.map(h   => <LimitCard  key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onAddNote={onAddNote}/>)}</>,
           weekly.length  > 0 && <><SLabel>Weekly targets</SLabel> {weekly.map(h  => <WeeklyCard key={h.id} habit={h} onTap={onTap} onAddNote={onAddNote}/>)}</>,
@@ -1984,6 +2010,10 @@ function JournalScreen({ habits, goals = [], onReflect, journalUserId, isPro, on
     });
   });
   const dates = Object.keys(allByDate).sort((a, b) => b.localeCompare(a));
+  const loggedDaysCount = new Set([
+    ...habits.flatMap(h => h.logs.filter(l => l.value !== "quicknote" && l.value !== "skip").map(l => l.date)),
+    ...goals.flatMap(g => (g.logs || []).filter(l => typeof l.value === "number").map(l => l.date)),
+  ]).size;
 
   const allLogDatesRaw = [
     ...habits.flatMap(h => h.logs.map(l => l.date)),
@@ -2065,7 +2095,7 @@ function JournalScreen({ habits, goals = [], onReflect, journalUserId, isPro, on
         <div>
           <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>Journal</div>
           <div style={{ fontSize:13, color:T.muted, marginTop:3 }}>
-            {dates.length} days logged
+            {loggedDaysCount} days logged
             {missedCount > 0 ? <span> · {missedCount} missed marked</span> : null}
           </div>
         </div>
@@ -2429,7 +2459,9 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare, onCoach })
   }
 
   // ── Summary stats ──────────────────────────────────────────────────────────
-  const allRealLogs = habits.flatMap(h => h.logs.filter(l => l.value !== "quicknote" && l.value !== "skip"));
+  const habitRealLogs = habits.flatMap(h => h.logs.filter(l => l.value !== "quicknote" && l.value !== "skip"));
+  const goalRealLogs = goals.flatMap(g => (g.logs || []).filter(l => typeof l.value === "number"));
+  const allRealLogs = [...habitRealLogs, ...goalRealLogs];
   const totalDaysLogged = new Set(allRealLogs.map(l => l.date)).size;
   const allLogDates = habits.flatMap(h => h.logs.map(l => l.date)).filter(Boolean).sort();
   const firstLogDate = allLogDates[0] || null;
@@ -2438,6 +2470,7 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare, onCoach })
     : null;
   const longestBestStreak = habits.reduce((best, h) => Math.max(best, getBestStreak(h)), 0);
   const totalLogsEver = allRealLogs.length;
+  const totalTracked = habits.length + goals.length;
 
   // Most consistent habit (highest 28-day completion rate)
   const mostConsistent = habits.length
@@ -2474,7 +2507,7 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare, onCoach })
 
       {/* Summary stats row */}
       <div data-tour="insights-stats" style={{ margin:"0 14px 12px", display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8 }}>
-        <Stat label="habits" value={habits.length}/>
+        <Stat label="tracked" value={totalTracked}/>
         <Stat label="days logged" value={totalDaysLogged} color={T.text}/>
         <Stat label="best streak" value={longestBestStreak > 0 ? `🔥${longestBestStreak}` : "—"} color={T.gold}/>
         <Stat label="total logs" value={totalLogsEver}/>
@@ -2557,7 +2590,7 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare, onCoach })
       {/* 28-day completion rate */}
       <IC title="28-day completion rate">
         <div style={{ fontSize:11, color:T.hint, marginBottom:14, lineHeight:1.55 }}>
-          How often you hit your goal. Daily = out of 28 days. Weekly = 4 weeks at target. Progress = 14 measurements.
+          How often you hit your target. Daily = out of 28 days. Weekly = 4 weeks at target.
         </div>
         {[...habits].sort((a, b) => getCompletionRate(b) - getCompletionRate(a)).map(h => {
           const rate = getCompletionRate(h);
@@ -2621,6 +2654,8 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare, onCoach })
         const stats = getGoalProgress(g);
         const { pct, isComplete } = stats;
         const logs = [...g.logs].filter(l => typeof l.value === "number").sort((a, b) => a.date.localeCompare(b.date));
+        const logsByDay = Array.from(new Map(logs.map(l => [l.date, l])).values());
+        const recentMeasurements = logsByDay.slice(-6).reverse();
         const statusText = getGoalStatusText(g, stats);
         return (
           <IC key={g.id} title={`${g.emoji} ${g.name} — goal`}>
@@ -2635,7 +2670,7 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare, onCoach })
             {logs.length > 0 && (
               <>
                 <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Recent measurements</div>
-                {logs.slice(-6).reverse().map((l, i) => (
+                {recentMeasurements.map((l, i) => (
                   <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderTop:`0.5px solid ${T.border}` }}>
                     <span style={{ fontSize:11, color:g.color+"99", fontWeight:500 }}>{fmtEntryDate(l.date)}</span>
                     <div style={{ display:"flex", alignItems:"baseline", gap:4 }}>
@@ -5637,7 +5672,7 @@ export default function App() {
               ⚡ 0 xp
             </button>
           </div>
-          <TodayScreen habits={habits} goals={goals} xp={0} onTap={handleTap} onUndo={() => {}} onSkip={() => {}} onReflect={() => demoBounce()} onAddNote={() => demoBounce()} onLogZero={() => demoBounce()} onOpenLog={() => demoBounce()} onOpenGoalLog={() => demoBounce()} onXPInfo={() => {}}/>
+          <TodayScreen habits={habits} goals={goals} xp={0} onTap={handleTap} onUndo={() => {}} onSkip={() => {}} onReflect={() => demoBounce()} onAddNote={() => demoBounce()} onLogZero={() => demoBounce()} onOpenLog={() => demoBounce()} onOpenGoalLog={() => demoBounce()} onEditGoal={() => demoBounce()} onCompleteGoal={() => demoBounce()} onXPInfo={() => {}}/>
           <nav style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:430, maxWidth:"100vw", background:"rgba(26,26,22,0.96)", backdropFilter:"blur(16px)", borderTop:`0.5px solid ${T.border}`, display:"flex", zIndex:100, paddingBottom:6 }}>
             {[{id:"today",label:"Today"},{id:"journal",label:"Journal"},{id:"insights",label:"Insights"},{id:"habits",label:"Habits"},{id:"profile",label:"Profile"}].map(n => (
               <button key={n.id} onClick={() => demoBounce()} style={{ flex:1, padding:"10px 4px 6px", border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3, fontSize:10, fontWeight:500, color:n.id==="today"?T.accent:T.muted }}>
@@ -6000,7 +6035,7 @@ export default function App() {
           </button>
         </div>
 
-        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onReflect={setReflectId} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onXPInfo={() => setShowXP(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)} isPro={isPro} coachName={coachName}/>}
+        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onReflect={setReflectId} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={id => setEditGoalId(id)} onCompleteGoal={handleCompleteGoal} onXPInfo={() => setShowXP(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)} isPro={isPro} coachName={coachName}/>}
         {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
         {screen === "insights" && <InsightsScreen habits={habits} goals={goals} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
         {screen === "habits"   && <HabitsScreen   habits={habits} goals={goals} onEdit={setEditId} onDelete={handleDeleteHabit} onAdd={handleStartAdd} onReflect={setReflectId} onCoach={() => setShowCoach(true)} onUpgrade={() => setShowUpgrade(true)} isPro={isPro} coachName={coachName} onEditGoal={id => setEditGoalId(id)} onDeleteGoal={handleDeleteGoal} onCompleteGoal={handleCompleteGoal}/>}
