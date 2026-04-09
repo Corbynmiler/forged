@@ -111,6 +111,9 @@ function latestTodayLog(h) {
 function getWeeklyCount(h) {
   return h.logs.filter(l => l.date >= currentWeekStart() && l.value === true).length;
 }
+function getTotalSessionLogsCount(h) {
+  return h.logs.filter(l => l.value === true).length;
+}
 function getLatestValue(h) {
   if (!h.logs.length) return h.startValue ?? 0;
   const sorted = [...h.logs].sort((a, b) => a.date.localeCompare(b.date));
@@ -249,6 +252,35 @@ function getStreak(h) {
   if (h.habitType === "project") return getBuildStreak(h);
   return getDailyStreak(h); // daily (default)
 }
+
+/** Subtitle suffix for habit cards — hides misleading 🔥 1 when the streak is only "today" with no prior day. */
+function getHabitCardStreakSuffix(h) {
+  const streak = getStreak(h);
+  if (streak <= 0) return "";
+  if (h.habitType === "limit") {
+    return ` · 🔥 ${streak} day streak`;
+  }
+  if (streak > 1) return ` · 🔥 ${streak}`;
+  if (h.habitType === "daily") {
+    const t = todayStr();
+    const y = daysAgo(1);
+    const todayOk = hasDailyCompletion(h, t) || hasRestDay(h, t);
+    const yestOk = hasDailyCompletion(h, y) || hasRestDay(h, y);
+    if (todayOk && !yestOk) return " · Started today";
+    return " · 🔥 1";
+  }
+  if (h.habitType === "weekly") {
+    return " · Started this week";
+  }
+  if (h.habitType === "project") {
+    const todayOk = qualifiesBuildDay(h, todayStr());
+    const yestOk = qualifiesBuildDay(h, daysAgo(1));
+    if (todayOk && !yestOk) return " · Started today";
+    return " · 🔥 1";
+  }
+  return " · 🔥 1";
+}
+
 function getWeeklyStreak(h) {
   // Count consecutive Mon–Sun calendar weeks where sessions >= target.
   // Week 0 = current week. A partial current week never breaks the streak.
@@ -623,27 +655,34 @@ function MicBtn({ speech, color = T.accent, size = 28 }) {
 // "Go deeper" opens the full reflection modal.
 function NoteStrip({ habitId, habit, onAddNote }) {
   const [val, setVal] = useState("");
-  const [lastSaved, setLastSaved] = useState("");
+  const [savedFlash, setSavedFlash] = useState(false);
 
   const speech = useSpeechInput(text =>
     setVal(p => p.trim() ? p + " " + text : text)
   );
 
-  function handleDone() {
-    if (!val.trim()) return;
-    speech.listening && speech.toggle(); // stop recording if active
-    onAddNote(habitId, val.trim());
-    setLastSaved(val.trim());
+  useEffect(() => {
+    if (!savedFlash) return;
+    const t = setTimeout(() => setSavedFlash(false), 2200);
+    return () => clearTimeout(t);
+  }, [savedFlash]);
+
+  async function handleDone() {
+    const draft = val.trim() || (speech.interim?.trim() ?? "");
+    if (!draft) return;
+    if (speech.listening) speech.toggle();
+    const ok = await onAddNote(habitId, draft);
+    if (!ok) return;
     setVal("");
+    setSavedFlash(true);
   }
+
+  const hasDraft = !!(val.trim() || speech.interim?.trim());
 
   return (
     <div style={{ borderTop:`0.5px solid ${T.border}`, padding:"10px 15px 12px", display:"flex", flexDirection:"column", gap:7 }}>
-      {lastSaved && (
-        <div style={{ fontSize:12, color:T.muted, fontStyle:"italic", borderLeft:`2px solid ${habit.color}44`, paddingLeft:8, lineHeight:1.5 }}>
-          <span style={{ fontSize:10, color:T.hint, display:"block", marginBottom:2 }}>Saved ✓</span>
-          {lastSaved}
-        </div>
+      {savedFlash && (
+        <div style={{ fontSize:12, color:T.green, fontWeight:500 }}>Note saved</div>
       )}
       <textarea
         rows={4} maxLength={280}
@@ -661,10 +700,12 @@ function NoteStrip({ habitId, habit, onAddNote }) {
         <div style={{ marginRight:"auto" }}/>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
           <MicBtn speech={speech} color={habit.color} size={26}/>
-          <button onClick={handleDone} disabled={!val.trim() && !speech.interim}
-            style={{ fontSize:12, color:val.trim()?T.text:T.hint, background:val.trim()?habit.color+"22":"none", border:`0.5px solid ${val.trim()?habit.color+"55":T.border}`, borderRadius:T.rsm, padding:"4px 12px", cursor:val.trim()?"pointer":"default", fontWeight:500, transition:"all 0.15s" }}>
-            ✓ Done
-          </button>
+          {(hasDraft || speech.listening) && (
+            <button type="button" onClick={handleDone} disabled={!hasDraft}
+              style={{ fontSize:12, color:hasDraft?T.text:T.hint, background:hasDraft?habit.color+"22":"none", border:`0.5px solid ${hasDraft?habit.color+"55":T.border}`, borderRadius:T.rsm, padding:"4px 12px", cursor:hasDraft?"pointer":"not-allowed", fontWeight:500, transition:"all 0.15s", opacity:hasDraft?1:0.65 }}>
+              ✓ Done
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -708,7 +749,6 @@ function DailyCard({ habit, onTap, onSkip, onAddNote }) {
   const tLog  = latestTodayLog(habit);
   const logged = isLoggedToday(habit);
   const isSkip = tLog?.value === "skip";
-  const streak = getStreak(habit);
   const [restOpen, setRestOpen] = useState(false);
   const [restWhy, setRestWhy] = useState("");
   useEffect(() => {
@@ -724,7 +764,7 @@ function DailyCard({ habit, onTap, onSkip, onAddNote }) {
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{habit.name}</div>
           <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>
-            Daily{streak > 0 ? ` · 🔥 ${streak}` : ""}
+            Daily{getHabitCardStreakSuffix(habit)}
           </div>
         </div>
         {isSkip
@@ -789,7 +829,6 @@ function DailyCard({ habit, onTap, onSkip, onAddNote }) {
 function WeeklyCard({ habit, onTap, onAddNote }) {
   const logged = isLoggedToday(habit);
   const wk = getWeeklyCount(habit);
-  const streak = getWeeklyStreak(habit);
   const pct = Math.min(100, Math.round((wk / habit.weeklyTarget) * 100));
   const tLog = latestTodayLog(habit);
   return (
@@ -800,7 +839,7 @@ function WeeklyCard({ habit, onTap, onAddNote }) {
           <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{habit.name}</div>
           <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>
             {wk}/{habit.weeklyTarget} sessions this week
-            {streak > 0 ? ` · 🔥 ${streak}` : ""}
+            {getHabitCardStreakSuffix(habit)}
           </div>
         </div>
         <CheckBtn logged={logged} habit={habit} onClick={e => onTap(habit.id, e)}/>
@@ -830,11 +869,22 @@ function ProjectCard({ habit, onOpenLog, onAddNote }) {
   const logged = tLogs.length > 0;
   const todayMins = tLogs.reduce((s, l) => s + (l.value?.minutes || 0), 0);
   const dailyBuildTarget = habit.dailyTargetMinutes ?? 60;
-  const buildStreak = getBuildStreak(habit);
+  const streakPhrase = (() => {
+    const s = getBuildStreak(habit);
+    if (s <= 0) return "";
+    if (s > 1) return ` · 🔥 ${s} day streak`;
+    const todayOk = qualifiesBuildDay(habit, todayStr());
+    const yestOk = qualifiesBuildDay(habit, daysAgo(1));
+    if (todayOk && !yestOk) return " · Started today";
+    return " · 🔥 1 day streak";
+  })();
   const lastWin = [...habit.logs].filter(l => l.value?.win).pop();
+  const sessionsSuffix = tLogs.length > 1 ? ` (${tLogs.length} sessions)` : "";
   const buildMeta = logged
-    ? `${todayMins}/${dailyBuildTarget} min today${tLogs.length > 1 ? ` (${tLogs.length} sessions)` : ""}${buildStreak > 0 ? ` · 🔥 ${buildStreak} day streak` : ""}`
-    : `Tap + to log a session${buildStreak > 0 ? ` · 🔥 ${buildStreak} day streak` : ""}`;
+    ? todayMins > dailyBuildTarget
+      ? `${todayMins} min today (goal: ${dailyBuildTarget})${sessionsSuffix}${streakPhrase}`
+      : `${todayMins}/${dailyBuildTarget} min today${sessionsSuffix}${streakPhrase}`
+    : `Tap + to log a session${streakPhrase}`;
   const buildMetaDisplay = truncateText(buildMeta, 68);
   const latestWinDisplay = truncateText(lastWin?.value?.win || "", 96);
   const tLog = tLogs[tLogs.length - 1];
@@ -880,7 +930,6 @@ function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote }) {
   // Distinguish: explicitly logged (any numeric entry today) vs truly not logged at all
   const logged   = todayLogsArr.length > 0;
   const inc      = habit.tapIncrement ?? 1;
-  const limitStreak = getLimitStreak(habit);
   return (
     <div className="rc" style={{ ...cardStyle(false, habit), borderColor:over?T.accent+"66":T.border, background:over?`${T.accent}0A`:T.raised }}>
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
@@ -888,7 +937,7 @@ function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote }) {
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{habit.name}</div>
           <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>
-            Limit{limitStreak > 0 ? ` · 🔥 ${limitStreak} day streak` : ""}{inc > 1 ? ` · +${inc} per tap` : ""}
+            Limit{getHabitCardStreakSuffix(habit)}{inc > 1 ? ` · +${inc} per tap` : ""}
           </div>
         </div>
         <div style={{ display:"flex", gap:6, flexShrink:0 }}>
@@ -931,7 +980,8 @@ function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote }) {
 
 function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete }) {
   const stats = getGoalProgress(goal);
-  const { pct, isComplete } = stats;
+  const { isComplete } = stats;
+  const barFillPct = goalBarFillWidthPct(stats);
   const loggedToday = goal.logs?.some(l => l.date === todayStr()) || false;
   const statusText = getGoalStatusText(goal, stats);
   const [showMenu, setShowMenu] = useState(false);
@@ -963,7 +1013,7 @@ function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete }) {
       </div>
       <div style={{ padding:"0 15px 14px" }}>
         <div style={{ height:5, background:T.surface, borderRadius:3, overflow:"hidden" }}>
-          <div style={{ height:"100%", borderRadius:3, background:isComplete ? T.green : goal.color, width:`${pct}%`, transition:"width 0.4s ease" }}/>
+          <div style={{ height:"100%", borderRadius:3, background:isComplete ? T.green : goal.color, width:`${barFillPct}%`, transition:"width 0.4s ease" }}/>
         </div>
       </div>
       {showMenu && (
@@ -2900,7 +2950,8 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare, onCoach })
       {/* Goals */}
       {goals.filter(g => g.status !== "completed").map(g => {
         const stats = getGoalProgress(g);
-        const { pct, isComplete } = stats;
+        const { isComplete } = stats;
+        const barFillPct = goalBarFillWidthPct(stats);
         const logs = [...g.logs].filter(l => typeof l.value === "number").sort((a, b) => a.date.localeCompare(b.date));
         const logsByDay = Array.from(new Map(logs.map(l => [l.date, l])).values());
         const recentMeasurements = logsByDay.slice(-6).reverse();
@@ -2912,7 +2963,7 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare, onCoach })
               <span style={{ fontSize:13, color:T.muted }}>Target: <strong style={{ color:T.text }}>{formatWithUnit(g.targetValue, g.unit)}</strong></span>
             </div>
             <div style={{ height:8, background:T.surface, borderRadius:4, overflow:"hidden", marginBottom:6 }}>
-              <div style={{ height:"100%", borderRadius:4, background:isComplete ? T.goldBright : g.color, width:`${pct}%`, transition:"width 0.5s ease" }}/>
+              <div style={{ height:"100%", borderRadius:4, background:isComplete ? T.goldBright : g.color, width:`${barFillPct}%`, transition:"width 0.5s ease" }}/>
             </div>
             <div style={{ fontSize:11, color:isComplete ? T.gold : T.muted, marginBottom:16, textAlign:"center" }}>{statusText}</div>
             {logs.length > 0 && (
@@ -2969,6 +3020,12 @@ function getGoalProgress(goal) {
   const isComplete = progress >= 1;
   const toGo = isComplete ? 0 : Math.max(0, Math.abs(target - current));
   return { pct: Math.round(progress * 100), toGo, isComplete };
+}
+
+/** Goal bar fill width only — label text still uses real `pct`. */
+function goalBarFillWidthPct(stats) {
+  if (stats.isComplete) return 100;
+  return Math.max(stats.pct, 9);
 }
 
 /** Recompute goal fields after removing log rows (current value = last numeric log, or start). */
@@ -3203,7 +3260,8 @@ function EditGoalModal({ goal, onClose, onSave }) {
 // ─── GOAL CARD ────────────────────────────────────────────────────────────────
 function GoalCard({ goal, onEdit, onComplete, onDelete }) {
   const stats = getGoalProgress(goal);
-  const { pct, isComplete } = stats;
+  const { isComplete } = stats;
+  const barFillPct = goalBarFillWidthPct(stats);
   const statusText = getGoalStatusText(goal, stats);
   const [showMenu, setShowMenu] = useState(false);
   const achievedDate = goal.logs?.filter(l => typeof l.value === "number").sort((a, b) => a.date.localeCompare(b.date)).at(-1)?.date || goal.lastLogDate || null;
@@ -3234,7 +3292,7 @@ function GoalCard({ goal, onEdit, onComplete, onDelete }) {
       {/* Progress bar */}
       <div style={{ padding:"0 15px 4px" }}>
         <div style={{ height:5, background:T.surface, borderRadius:3, overflow:"hidden", marginBottom:6 }}>
-          <div style={{ height:"100%", borderRadius:3, background:isComplete ? T.green : goal.color, width:`${pct}%`, transition:"width 0.4s ease" }}/>
+          <div style={{ height:"100%", borderRadius:3, background:isComplete ? T.green : goal.color, width:`${barFillPct}%`, transition:"width 0.4s ease" }}/>
         </div>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
           <div style={{ fontSize:11, color:isComplete ? T.green : T.muted, fontWeight:isComplete ? 500 : 400 }}>
@@ -3370,7 +3428,9 @@ function HabitsScreen({ habits, goals = [], onEdit, onDelete, onAdd, onReflect, 
                   <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{h.name}</div>
                   <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>
                     {getStreak(h)>0?`🔥 ${getStreak(h)} · `:""}
-                    {new Set(h.logs.filter(l=>l.value!=="quicknote").map(l=>l.date)).size} days logged
+                    {h.habitType === "weekly"
+                      ? `${getWeeklyCount(h)} this week · ${getTotalSessionLogsCount(h)} total logged`
+                      : `${new Set(h.logs.filter(l=>l.value!=="quicknote").map(l=>l.date)).size} days logged`}
                   </div>
                 </div>
                 {confirmDelete === h.id ? (
@@ -6170,14 +6230,14 @@ export default function App() {
 
   // Add a quick note as a standalone log entry — each Done tap creates a separate record
   async function handleAddNote(id, text) {
-    if (!text.trim()) return;
+    if (!text.trim()) return false;
     const habit = habits.find(h => h.id === id);
-    if (!habit) return;
+    if (!habit) return false;
     const updated = { ...habit, logs: [...habit.logs, { date: todayStr(), value: "quicknote", note: text.trim() }] };
     const saved = await syncHabit(updated);
-    if (!saved) return;
+    if (!saved) return false;
     setHabits(prev => prev.map(h => h.id === id ? updated : h));
-    addToast("✓ Note saved");
+    return true;
   }
 
   // Explicitly log 0 for a limit habit — marks "had none today" as a conscious choice
