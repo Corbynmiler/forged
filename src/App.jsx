@@ -2761,7 +2761,7 @@ function AddGoalModal({ onClose, onSave }) {
       <PBtn onClick={() => {
         if (!canSave) return;
         onSave({
-          id: Date.now() + "",
+          id: String(Date.now()),
           name: name.trim(),
           emoji: emoji || "🎯",
           unit: unit.trim(),

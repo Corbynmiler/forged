@@ -12,11 +12,20 @@ export const supabase = createClient(
   }
 );
 
+function normalizeId(rawId) {
+  const s = String(rawId ?? "").trim();
+  if (!s) return s;
+  // If id looks numeric with a decimal suffix (e.g. "1774676710924.7695"),
+  // keep only the integer part so Postgres bigint-compatible ids don't 400.
+  if (/^\d+\.\d+$/.test(s)) return s.split(".")[0];
+  return s;
+}
+
 // ─── Shape converters ──────────────────────────────────────────────────────────
 // Convert an in-app habit object → a DB row
 export function habitToRow(habit, userId) {
   return {
-    id:                habit.id,
+    id:                normalizeId(habit.id),
     user_id:           userId,
     name:              habit.name,
     emoji:             habit.emoji ?? "",
@@ -72,7 +81,7 @@ export function rowToGoal(row) {
 // Convert an in-app goal object → a DB row
 export function goalToRow(goal, userId) {
   return {
-    id:                goal.id,
+    id:                normalizeId(goal.id),
     user_id:           userId,
     name:              goal.name,
     emoji:             goal.emoji ?? "",
