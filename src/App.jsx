@@ -2781,8 +2781,101 @@ function AddGoalModal({ onClose, onSave }) {
   );
 }
 
+// ─── EDIT GOAL MODAL ───────────────────────────────────────────────────────────
+function EditGoalModal({ goal, onClose, onSave }) {
+  const [name,       setName]       = useState(goal.name || "");
+  const [emoji,      setEmoji]      = useState(goal.emoji || "");
+  const [unit,       setUnit]       = useState(goal.unit || "");
+  const [startVal,   setStartVal]   = useState(String(goal.startValue ?? ""));
+  const [targetVal,  setTargetVal]  = useState(String(goal.targetValue ?? ""));
+  const [currentVal, setCurrentVal] = useState(String(goal.currentValue ?? ""));
+  const [targetDate, setTargetDate] = useState(goal.targetDate || "");
+  const [color,      setColor]      = useState(goal.color || "#E67E22");
+
+  const start = parseFloat(startVal);
+  const target = parseFloat(targetVal);
+  const current = parseFloat(currentVal);
+  const hasCore = Number.isFinite(start) && Number.isFinite(target) && start !== target;
+  const hasCurrent = Number.isFinite(current);
+  const canSave = name.trim() && hasCore && hasCurrent;
+  const direction = hasCore && target < start ? "decreasing" : "increasing";
+
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, marginBottom:4 }}>Edit goal</div>
+      <div style={{ fontSize:13, color:T.muted, marginBottom:22 }}>Update values and targeting for this goal.</div>
+
+      <div style={{ display:"flex", gap:10, marginBottom:20 }}>
+        <div style={{ flex:1 }}>
+          <label style={lbl}>Goal name</label>
+          <input style={inp} value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Gain weight" maxLength={40} autoFocus/>
+        </div>
+        <div>
+          <label style={lbl}>Emoji</label>
+          <input style={{ ...inp, fontSize:22, textAlign:"center", width:60 }} value={emoji} onChange={e => setEmoji(e.target.value)} placeholder="🎯" maxLength={2}/>
+        </div>
+      </div>
+
+      <FG label="What are you tracking? (unit)">
+        <input style={inp} value={unit} onChange={e => setUnit(e.target.value)} placeholder="e.g. kg, $, km, hours" maxLength={20}/>
+      </FG>
+
+      <div style={{ display:"flex", gap:10, marginBottom:20 }}>
+        <div style={{ flex:1 }}>
+          <label style={lbl}>Starting value</label>
+          <input style={inp} type="number" step="any" value={startVal} onChange={e => setStartVal(e.target.value)} placeholder="74.5"/>
+        </div>
+        <div style={{ flex:1 }}>
+          <label style={lbl}>Target value</label>
+          <input style={inp} type="number" step="any" value={targetVal} onChange={e => setTargetVal(e.target.value)} placeholder="80"/>
+        </div>
+      </div>
+
+      <FG label={`Current ${unit || "value"}`}>
+        <input style={inp} type="number" step="any" value={currentVal} onChange={e => setCurrentVal(e.target.value)} placeholder={`e.g. ${goal.currentValue}`}/>
+      </FG>
+
+      {hasCore && (
+        <div style={{ marginBottom:20, padding:"10px 14px", background:T.surface, borderRadius:T.rsm, border:`0.5px solid ${T.border}`, fontSize:12, color:T.muted }}>
+          Direction inferred: <strong style={{ color:T.text }}>{direction === "decreasing" ? "↓ decreasing" : "↑ increasing"}</strong>
+          {unit ? ` (${start}${unit} → ${target}${unit})` : ""}
+        </div>
+      )}
+
+      <FG label="Target date (optional)" mb={20}>
+        <input style={inp} type="date" value={targetDate} onChange={e => setTargetDate(e.target.value)}/>
+      </FG>
+
+      <div style={{ marginBottom:20 }}>
+        <label style={lbl}>Color</label>
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+          {COLORS.map(c => <div key={c} onClick={() => setColor(c)} style={{ width:28, height:28, borderRadius:"50%", background:c, cursor:"pointer", outline:color===c?`2.5px solid ${c}`:"none", outlineOffset:2 }}/>)}
+        </div>
+      </div>
+
+      <PBtn onClick={() => {
+        if (!canSave) return;
+        onSave(goal.id, {
+          name: name.trim(),
+          emoji: emoji || "🎯",
+          unit: unit.trim(),
+          startValue: start,
+          targetValue: target,
+          currentValue: current,
+          direction,
+          targetDate: targetDate || null,
+          color,
+          status: getGoalProgress({ ...goal, startValue: start, targetValue: target, currentValue: current, direction }).isComplete ? "completed" : "active",
+        });
+        onClose();
+      }}>Save goal</PBtn>
+      <GBtn onClick={onClose}>Cancel</GBtn>
+    </Modal>
+  );
+}
+
 // ─── GOAL CARD ────────────────────────────────────────────────────────────────
-function GoalCard({ goal, onLog, onComplete, onDelete }) {
+function GoalCard({ goal, onEdit, onComplete, onDelete }) {
   const stats = getGoalProgress(goal);
   const { pct, isComplete } = stats;
   const statusText = getGoalStatusText(goal, stats);
@@ -2801,12 +2894,10 @@ function GoalCard({ goal, onLog, onComplete, onDelete }) {
           </div>
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          {!isComplete && (
-            <button onClick={() => onLog(goal.id)}
-              style={{ fontSize:12, color:goal.color, background:"none", border:`0.5px solid ${goal.color+"55"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>
-              Log
-            </button>
-          )}
+          <button onClick={() => onEdit(goal.id)}
+            style={{ fontSize:12, color:goal.color, background:"none", border:`0.5px solid ${goal.color+"55"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>
+            Edit
+          </button>
           <button onClick={() => setShowMenu(m => !m)}
             style={{ fontSize:18, color:T.hint, background:"none", border:"none", cursor:"pointer", lineHeight:1, padding:"2px 4px" }}>
             ···
@@ -2847,7 +2938,7 @@ function GoalCard({ goal, onLog, onComplete, onDelete }) {
           {!isComplete && (
             <button onClick={() => { onComplete(goal.id); setShowMenu(false); }}
               style={{ fontSize:12, color:T.green, background:"none", border:`0.5px solid ${T.green+"44"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer" }}>
-              Mark done
+              Complete goal
             </button>
           )}
           <button onClick={() => { onDelete(goal.id); setShowMenu(false); }}
@@ -2893,7 +2984,7 @@ function AddActionSheet({ onAddHabit, onAddGoal, onClose }) {
 }
 
 // ─── HABITS SCREEN ────────────────────────────────────────────────────────────
-function HabitsScreen({ habits, goals = [], onEdit, onDelete, onAdd, onReflect, onCoach, onUpgrade, isPro, coachName, onLogGoal, onDeleteGoal, onCompleteGoal }) {
+function HabitsScreen({ habits, goals = [], onEdit, onDelete, onAdd, onReflect, onCoach, onUpgrade, isPro, coachName, onEditGoal, onDeleteGoal, onCompleteGoal }) {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [completedOpen, setCompletedOpen] = useState(false);
   const grouped = Object.fromEntries(Object.keys(HABIT_TYPES).map(k => [k, habits.filter(h => h.habitType === k)]));
@@ -2924,7 +3015,7 @@ function HabitsScreen({ habits, goals = [], onEdit, onDelete, onAdd, onReflect, 
         <div>
           <SLabel>Goals</SLabel>
           {activeGoals.map(g => (
-            <GoalCard key={g.id} goal={g} onLog={() => onLogGoal(g.id)} onComplete={() => onCompleteGoal(g.id)} onDelete={() => onDeleteGoal(g.id)} />
+            <GoalCard key={g.id} goal={g} onEdit={() => onEditGoal(g.id)} onComplete={() => onCompleteGoal(g.id)} onDelete={() => onDeleteGoal(g.id)} />
           ))}
           {completedGoals.length > 0 && (
             <div style={{ margin:"0 14px 10px" }}>
@@ -2934,7 +3025,7 @@ function HabitsScreen({ habits, goals = [], onEdit, onDelete, onAdd, onReflect, 
                 <span style={{ fontSize:10, transform: completedOpen ? "rotate(180deg)" : "none", display:"inline-block", transition:"transform 0.2s" }}>▼</span>
               </button>
               {completedOpen && completedGoals.map(g => (
-                <GoalCard key={g.id} goal={g} onLog={() => onLogGoal(g.id)} onComplete={() => onCompleteGoal(g.id)} onDelete={() => onDeleteGoal(g.id)} />
+                <GoalCard key={g.id} goal={g} onEdit={() => onEditGoal(g.id)} onComplete={() => onCompleteGoal(g.id)} onDelete={() => onDeleteGoal(g.id)} />
               ))}
             </div>
           )}
@@ -4785,6 +4876,7 @@ export default function App() {
   const [showAddGoal,    setShowAddGoal]    = useState(false);
   const [showAddChoice,  setShowAddChoice]  = useState(false);
   const [logGoalId,      setLogGoalId]      = useState(null);
+  const [editGoalId,     setEditGoalId]     = useState(null);
   const [showXP,      setShowXP]     = useState(false);
   const [showHistory, setShowHistory]= useState(false);
   const [showCoach,   setShowCoach]  = useState(false);
@@ -5830,6 +5922,19 @@ export default function App() {
     addToast("✓ Goal completed");
   }
 
+  async function handleEditGoalSave(id, updates) {
+    const goal = goals.find(g => g.id === id);
+    if (!goal) return;
+    const updated = { ...goal, ...updates };
+    const saved = await syncGoal(updated);
+    if (!saved) {
+      addToast("⚠️ Couldn't update goal — check your connection");
+      return;
+    }
+    setGoals(prev => prev.map(g => g.id === id ? updated : g));
+    addToast("✓ Goal updated");
+  }
+
   async function handleSignOut() {
     // onAuthStateChange will fire SIGNED_OUT and handle all state resets
     await supabase.auth.signOut();
@@ -5869,7 +5974,7 @@ export default function App() {
         {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onReflect={setReflectId} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onXPInfo={() => setShowXP(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)} isPro={isPro} coachName={coachName}/>}
         {screen === "journal"  && <JournalScreen habits={habits} onReflect={setReflectId} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
         {screen === "insights" && <InsightsScreen habits={habits} goals={goals} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
-        {screen === "habits"   && <HabitsScreen   habits={habits} goals={goals} onEdit={setEditId} onDelete={handleDeleteHabit} onAdd={handleStartAdd} onReflect={setReflectId} onCoach={() => setShowCoach(true)} onUpgrade={() => setShowUpgrade(true)} isPro={isPro} coachName={coachName} onLogGoal={id => setLogGoalId(id)} onDeleteGoal={handleDeleteGoal} onCompleteGoal={handleCompleteGoal}/>}
+        {screen === "habits"   && <HabitsScreen   habits={habits} goals={goals} onEdit={setEditId} onDelete={handleDeleteHabit} onAdd={handleStartAdd} onReflect={setReflectId} onCoach={() => setShowCoach(true)} onUpgrade={() => setShowUpgrade(true)} isPro={isPro} coachName={coachName} onEditGoal={id => setEditGoalId(id)} onDeleteGoal={handleDeleteGoal} onCompleteGoal={handleCompleteGoal}/>}
         {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} refCode={refCode}
           authEmail={authEmail}
           onUpgrade={() => setShowUpgrade(true)}
@@ -5922,6 +6027,7 @@ export default function App() {
       {showAddGoal   && <AddGoalModal  onClose={() => setShowAddGoal(false)} onSave={handleAddGoal}/>}
       {showAddChoice && <AddActionSheet onAddHabit={() => { setShowAddChoice(false); setShowAdd(true); }} onAddGoal={() => { setShowAddChoice(false); setShowAddGoal(true); }} onClose={() => setShowAddChoice(false)}/>}
       {logGoalId     && (() => { const g = goals.find(x => x.id === logGoalId); return g ? <LogGoalModal goal={g} onClose={() => setLogGoalId(null)} onLog={(id, val, note) => { handleLogGoal(id, val, note); setLogGoalId(null); }}/> : null; })()}
+      {editGoalId    && (() => { const g = goals.find(x => x.id === editGoalId); return g ? <EditGoalModal goal={g} onClose={() => setEditGoalId(null)} onSave={handleEditGoalSave}/> : null; })()}
       {showXP        && <XPModal       xp={xp}                               onClose={() => setShowXP(false)}/>}
       {showHistory   && <HistoryModal  habits={habits} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onClose={() => setShowHistory(false)}/>}
       {reflectId     && <ReflectModal  habit={reflectHabit}                  onClose={() => setReflectId(null)} onSave={handleSaveReflection}/>}
