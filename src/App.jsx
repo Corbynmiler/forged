@@ -6076,37 +6076,20 @@ export default function App() {
     const saved = await syncHabit(tapped);
     if (!saved) return;
     setHabits(prev => prev.map(h => h.id === id ? tapped : h));
-    // Side effects outside the updater
-    if (tapped.habitType === "limit") {
-      const today = todayStr();
-      const checkinKey = `limit:${id}:${today}`;
-      const logsForXp = base.logs.filter(l => !(l.date === today && l.value === 0));
-      const hadNumericToday = logsForXp.some(l => l.date === today && typeof l.value === "number" && l.value !== 0);
-      const canAward = !hadNumericToday && !xpAwardedDates.has(checkinKey);
-      if (canAward) {
-        spawnParticles(cx, cy, tapped.color);
-        addFlash(cx, cy, "+10 xp");
-        setXp(x => x + 10);
-        setXpAwardedDates(prev => {
-          const next = new Set(prev);
-          next.add(checkinKey);
-          return next;
-        });
-      }
-    } else {
-      const today = todayStr();
-      const awardKey = `${id}:${today}`;
-      const alreadyEarnedToday = xpAwardedDates.has(awardKey) || base.logs.some(l => l.date === today && l.value === true);
-      if (!alreadyEarnedToday) {
-        spawnParticles(cx, cy, tapped.color);
-        addFlash(cx, cy, "+10 xp");
-        setXp(x => x + 10);
-        setXpAwardedDates(prev => {
-          const next = new Set(prev);
-          next.add(awardKey);
-          return next;
-        });
-      }
+    // Limit + taps never award XP or celebration — usage logging is not rewarded.
+    if (tapped.habitType === "limit") return;
+    const today = todayStr();
+    const awardKey = `${id}:${today}`;
+    const alreadyEarnedToday = xpAwardedDates.has(awardKey) || base.logs.some(l => l.date === today && l.value === true);
+    if (!alreadyEarnedToday) {
+      spawnParticles(cx, cy, tapped.color);
+      addFlash(cx, cy, "+10 xp");
+      setXp(x => x + 10);
+      setXpAwardedDates(prev => {
+        const next = new Set(prev);
+        next.add(awardKey);
+        return next;
+      });
     }
   }
 
@@ -6221,13 +6204,13 @@ export default function App() {
     const saved = await syncHabit(updated);
     if (!saved) return;
     setHabits(prev => prev.map(h => h.id === id ? updated : h));
-    const checkinKey = `limit:${id}:${today}`;
-    if (!xpAwardedDates.has(checkinKey)) {
-      addFlash(window.innerWidth / 2, 120, "+10 xp");
-      setXp(x => x + 10);
+    const noneTodayXpKey = `limit-none:${id}:${today}`;
+    if (!xpAwardedDates.has(noneTodayXpKey)) {
+      addFlash(window.innerWidth / 2, 120, "+15 xp");
+      setXp(x => x + 15);
       setXpAwardedDates(prev => {
         const next = new Set(prev);
-        next.add(checkinKey);
+        next.add(noneTodayXpKey);
         return next;
       });
     }
