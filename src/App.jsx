@@ -87,6 +87,11 @@ function saveJournalMissedMap(userId, map) {
   } catch { /* ignore quota */ }
 }
 
+/** Date is in missed map but user has not added a note/reason yet (whitespace-only counts as empty). */
+function missedDayNeedsNote(missedMap, dateStr) {
+  return Object.prototype.hasOwnProperty.call(missedMap, dateStr) && !(String(missedMap[dateStr] ?? "").trim());
+}
+
 // ─── DESIGN TOKENS ────────────────────────────────────────────────────────────
 const T = {
   bg:"#0F0F0D", surface:"#1A1A16", raised:"#222220",
@@ -2108,21 +2113,22 @@ function DaySection({ date, dayHabits, onReflect, onDeleteLogEntry }) {
 // Missed day (marked by user, optional note) — list / week views
 function MissedDaySection({ date, note, onEdit, onClear }) {
   const label = fmtEntryDate(date);
+  const hasNote = !!(note && note.trim());
   return (
-    <div style={{ margin:"0 14px 10px", background:"rgba(230,126,34,0.10)", borderRadius:T.r, border:"0.5px solid rgba(230,126,34,0.38)", overflow:"hidden", boxShadow:"0 0 0 1px rgba(230,126,34,0.06) inset" }}>
-      <div style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px", borderBottom:note?.trim() ? `0.5px solid ${T.border}` : "none" }}>
-        <span style={{ fontSize:18, lineHeight:1, color:T.amber, fontWeight:700 }} title="No habit logs this day">?</span>
+    <div style={{ margin:"0 14px 10px", background:hasNote ? "rgba(230,126,34,0.06)" : "rgba(230,126,34,0.10)", borderRadius:T.r, border:`0.5px solid ${hasNote ? "rgba(230,126,34,0.22)" : "rgba(230,126,34,0.38)"}`, overflow:"hidden", boxShadow:hasNote ? "none" : "0 0 0 1px rgba(230,126,34,0.06) inset" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px", borderBottom:hasNote ? `0.5px solid ${T.border}` : "none" }}>
+        <span style={{ fontSize:18, lineHeight:1, color:hasNote ? T.muted : T.amber, fontWeight:700 }} title={hasNote ? "Marked missed — reason saved" : "Add a short reason for this missed day"}>{hasNote ? "✓" : "?"}</span>
         <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ fontSize:12, fontWeight:600, color:T.amber }}>Missed — needs fill-in</div>
-          <div style={{ fontSize:11, color:T.muted, marginTop:2, lineHeight:1.4 }}>{label} · Tap Edit to add context, or Clear if you logged elsewhere.</div>
+          <div style={{ fontSize:12, fontWeight:600, color:hasNote ? T.sub : T.amber }}>{hasNote ? "Missed — noted" : "Missed — add a note"}</div>
+          <div style={{ fontSize:11, color:T.muted, marginTop:2, lineHeight:1.4 }}>{label} · {hasNote ? "Edit to change, or Clear if you logged on Today." : "Tap Edit to say why (travel, rest…), or Clear if you logged elsewhere."}</div>
         </div>
         <button type="button" onClick={onEdit} style={{ fontSize:11, color:T.amber, background:"rgba(230,126,34,0.12)", border:`0.5px solid rgba(230,126,34,0.35)`, borderRadius:T.rsm, padding:"5px 10px", cursor:"pointer", fontWeight:600 }}>Edit</button>
         <button type="button" onClick={onClear} style={{ fontSize:11, color:T.hint, background:"none", border:"none", cursor:"pointer" }}>Clear</button>
       </div>
-      {note?.trim() ? (
+      {hasNote ? (
         <div style={{ padding:"10px 14px" }}>
           <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:4 }}>Note</div>
-          <div style={{ fontSize:13, color:T.sub, lineHeight:1.55 }}>{note}</div>
+          <div style={{ fontSize:13, color:T.sub, lineHeight:1.55 }}>{note.trim()}</div>
         </div>
       ) : null}
     </div>
@@ -2448,13 +2454,14 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
 
   const tStr = todayStr();
   const missedDatesList = Object.keys(missedMap).sort((a, b) => b.localeCompare(a));
+  const missedNeedNoteCount = missedDatesList.filter(d => missedDayNeedsNote(missedMap, d)).length;
+  const missedMarkedCount = missedDatesList.length;
   const mergedDatesSet = new Set([...dates, ...missedDatesList]);
   const mergedDesc = [...mergedDatesSet].sort((a, b) => b.localeCompare(a));
   const hasJournalRows = mergedDatesSet.size > 0;
   // Today always first; remaining days newest → oldest (ISO date sort)
   const sortedDatesDesc = hasJournalRows ? [tStr, ...mergedDesc.filter(d => d !== tStr)] : [];
   const weekKeysDesc = [...new Set(sortedDatesDesc.map(d => weekStartFor(d)))].sort((a, b) => b.localeCompare(a));
-  const missedCount = missedDatesList.length;
 
   useEffect(() => {
     if (selectedDay == null) { setMonthMissedDraft(""); return; }
@@ -2498,8 +2505,10 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
           <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>Journal</div>
           <div style={{ fontSize:13, color:T.muted, marginTop:3 }}>
             {loggedDaysCount} days logged
-            {missedCount > 0 ? (
-              <span> · <span style={{ color:T.amber, fontWeight:600 }}>? {missedCount} need fill-in</span> (marked missed)</span>
+            {missedNeedNoteCount > 0 ? (
+              <span> · <span style={{ color:T.amber, fontWeight:600 }}>? {missedNeedNoteCount} missed day{missedNeedNoteCount !== 1 ? "s" : ""} need a note</span></span>
+            ) : missedMarkedCount > 0 ? (
+              <span> · <span style={{ color:T.muted }}>{missedMarkedCount} marked missed (all noted)</span></span>
             ) : null}
           </div>
         </div>
@@ -2576,6 +2585,7 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
             <span>● logged</span>
             <span style={{ color:"rgba(230,126,34,0.9)", fontWeight:600 }}>? no log</span>
             <span style={{ color:T.amber, fontWeight:600 }}>✕ missed</span>
+            <span style={{ color:T.muted, fontWeight:500 }}>✓ missed + noted</span>
           </div>
 
           <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4, marginBottom:16 }}>
@@ -2588,6 +2598,7 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
               const isSelected = selectedDay === day;
               const isJourneyStart = firstLogDate === ds;
               const isMissed = Object.prototype.hasOwnProperty.call(missedMap, ds);
+              const missedNeedsNote = isMissed && missedDayNeedsNote(missedMap, ds);
               const canMarkMissed = !!(firstLogDate && ds >= firstLogDate && ds < tStr && !hasEntries);
               const isOpenDay = canMarkMissed && !isMissed;
               const habitColors = hasEntries ? [...new Set(entryDays[day].map(e => e.habitColor))].slice(0, 3) : [];
@@ -2611,15 +2622,19 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
                   }}>
                   <span style={{
                     fontSize:11,
-                    color:isToday ? T.accent : isJourneyStart ? T.gold : hasEntries ? T.text : isMissed ? T.amber : T.muted,
-                    fontWeight:isToday || isJourneyStart || isMissed ? 500 : 400,
+                    color:isToday ? T.accent : isJourneyStart ? T.gold : hasEntries ? T.text : isMissed ? (missedNeedsNote ? T.amber : T.muted) : T.muted,
+                    fontWeight:isToday || isJourneyStart || (isMissed && missedNeedsNote) ? 500 : 400,
                   }}>{day}</span>
                   {hasEntries ? (
                     <div style={{ display:"flex", gap:2 }}>
                       {habitColors.map((c, ci) => <div key={ci} style={{ width:4, height:4, borderRadius:"50%", background:c }}/>)}
                     </div>
                   ) : isMissed ? (
-                    <div title="Marked missed" style={{ fontSize:9, fontWeight:700, color:T.amber, width:15, height:15, borderRadius:"50%", background:"rgba(230,126,34,0.22)", display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>✕</div>
+                    missedNeedsNote ? (
+                      <div title="Missed — add a note" style={{ fontSize:10, fontWeight:800, color:T.amber, width:16, height:16, borderRadius:"50%", background:"rgba(230,126,34,0.28)", display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>?</div>
+                    ) : (
+                      <div title="Missed (noted)" style={{ fontSize:9, fontWeight:700, color:T.muted, width:15, height:15, borderRadius:"50%", background:"rgba(106,104,96,0.2)", display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>✓</div>
+                    )
                   ) : isJourneyStart ? (
                     <div style={{ fontSize:7, color:T.gold }}>✦</div>
                   ) : isOpenDay ? (
@@ -2741,7 +2756,8 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
               .filter(d => weekStartFor(d) === ws)
               .sort((a, b) => b.localeCompare(a));
             const expanded = openWeeks.has(ws);
-            const missedInWeek = daysInWeek.filter(d => Object.prototype.hasOwnProperty.call(missedMap, d)).length;
+            const missedNeedNoteInWeek = daysInWeek.filter(d => missedDayNeedsNote(missedMap, d)).length;
+            const missedMarkedInWeek = daysInWeek.filter(d => Object.prototype.hasOwnProperty.call(missedMap, d)).length;
             const openDaysInWeek = daysInWeek.filter(d => {
               const hasLog = allByDate[d] && Object.keys(allByDate[d]).length > 0;
               return !!(firstLogDate && d >= firstLogDate && d < tStr && !hasLog && !Object.prototype.hasOwnProperty.call(missedMap, d));
@@ -2758,10 +2774,13 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
                   <span style={{ fontSize:12, fontWeight:600, color:T.text, textAlign:"left", lineHeight:1.35 }}>
                     Week · {fmtWeekRange(ws)}
                     <span style={{ fontWeight:400, color:T.muted, marginLeft:8 }}>({daysInWeek.length})</span>
-                    {missedInWeek > 0 ? (
-                      <span style={{ display:"block", fontSize:10, fontWeight:600, color:T.amber, marginTop:3 }}>? {missedInWeek} missed mark{missedInWeek !== 1 ? "s" : ""} · review below</span>
+                    {missedNeedNoteInWeek > 0 ? (
+                      <span style={{ display:"block", fontSize:10, fontWeight:600, color:T.amber, marginTop:3 }}>? {missedNeedNoteInWeek} missed day{missedNeedNoteInWeek !== 1 ? "s" : ""} need a note · expand below</span>
                     ) : null}
-                    {missedInWeek === 0 && openDaysInWeek > 0 ? (
+                    {missedNeedNoteInWeek === 0 && missedMarkedInWeek > 0 ? (
+                      <span style={{ display:"block", fontSize:10, fontWeight:500, color:T.muted, marginTop:3 }}>{missedMarkedInWeek} marked missed (noted)</span>
+                    ) : null}
+                    {missedMarkedInWeek === 0 && openDaysInWeek > 0 ? (
                       <span style={{ display:"block", fontSize:10, fontWeight:500, color:"rgba(230,126,34,0.75)", marginTop:3 }}>? {openDaysInWeek} day{openDaysInWeek !== 1 ? "s" : ""} with no log — check Month or Today</span>
                     ) : null}
                   </span>
