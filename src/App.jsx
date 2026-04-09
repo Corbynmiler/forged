@@ -1036,12 +1036,12 @@ function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete }) {
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
           {!isComplete && (
-            <button onClick={() => onOpenLog(goal.id)}
+            <button type="button" onClick={(e) => { e.stopPropagation(); onOpenLog(goal.id); }}
               style={{ fontSize:12, color:goal.color, background:"none", border:`0.5px solid ${goal.color+"55"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>
               Log
             </button>
           )}
-          <button onClick={() => setShowMenu(m => !m)}
+          <button type="button" onClick={(e) => { e.stopPropagation(); setShowMenu(m => !m); }}
             style={{ fontSize:18, color:T.hint, background:"none", border:"none", cursor:"pointer", lineHeight:1, padding:"2px 4px" }}>
             ···
           </button>
@@ -1058,16 +1058,16 @@ function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete }) {
       {showMenu && (
         <div style={{ borderTop:`0.5px solid ${T.border}`, padding:"8px 15px 10px", display:"flex", gap:8 }}>
           {!isComplete && (
-            <button onClick={() => { onComplete(goal.id); setShowMenu(false); }}
+            <button type="button" onClick={(e) => { e.stopPropagation(); onComplete(goal.id); setShowMenu(false); }}
               style={{ fontSize:12, color:T.green, background:"none", border:`0.5px solid ${T.green+"44"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer" }}>
               Mark complete
             </button>
           )}
-          <button onClick={() => { onEdit(goal.id); setShowMenu(false); }}
+          <button type="button" onClick={(e) => { e.stopPropagation(); onEdit(goal.id); setShowMenu(false); }}
             style={{ fontSize:12, color:goal.color, background:"none", border:`0.5px solid ${goal.color+"55"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer" }}>
             Edit
           </button>
-          <button onClick={() => setShowMenu(false)}
+          <button type="button" onClick={(e) => { e.stopPropagation(); setShowMenu(false); }}
             style={{ fontSize:12, color:T.muted, background:"none", border:"none", cursor:"pointer", marginLeft:"auto" }}>
             Cancel
           </button>
@@ -1221,7 +1221,7 @@ function ReflectModal({ habit, onClose, onSave }) {
 const TYPE_META = {
   daily:    { bg:"#27AE6018", text:"#27AE60", label:"Daily habit"    },
   weekly:   { bg:"#C0392B18", text:"#C0392B", label:"Weekly target"  },
-  project:  { bg:"#2980B918", text:"#2980B9", label:"Project habit"  },
+  project:  { bg:"#2980B918", text:"#2980B9", label:"Build"          },
   limit:    { bg:"#8E44AD18", text:"#8E44AD", label:"Limit / reduce" },
 };
 function EditModal({ habit, onClose, onSave }) {
@@ -1236,6 +1236,7 @@ function EditModal({ habit, onClose, onSave }) {
   const [increment,   setIncrement]   = useState(String(habit.tapIncrement ?? 1));
   const [dailyTargetMins, setDailyTargetMins] = useState(String(habit.dailyTargetMinutes ?? 60));
   const meta = TYPE_META[habit.habitType] || TYPE_META.daily;
+  const typePillLabel = HABIT_TYPES[habit.habitType]?.label || meta.label;
 
   function save() {
     const updates = { name:name.trim()||habit.name, emoji:emoji||habit.emoji, color, reflection, reflectionPrompt:reflPrompt.trim()||null };
@@ -1248,8 +1249,11 @@ function EditModal({ habit, onClose, onSave }) {
 
   return (
     <Modal onClose={onClose}>
-      <div style={{ display:"inline-flex", alignItems:"center", background:meta.bg, borderRadius:20, padding:"4px 12px", marginBottom:14 }}>
-        <span style={{ fontSize:11, fontWeight:500, color:meta.text }}>{meta.label}</span>
+      <div style={{ display:"inline-flex", alignItems:"center", background:meta.bg, borderRadius:20, padding:"4px 12px", marginBottom:8 }}>
+        <span style={{ fontSize:11, fontWeight:500, color:meta.text }}>{typePillLabel}</span>
+      </div>
+      <div style={{ fontSize:11, color:T.hint, marginBottom:16, lineHeight:1.45, maxWidth:320 }}>
+        Type can&apos;t be changed after creation — delete and recreate if you need a different kind.
       </div>
       <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:20 }}>Edit habit</div>
       <div style={{ display:"flex", gap:10, marginBottom:20 }}>
@@ -1323,6 +1327,10 @@ function EditModal({ habit, onClose, onSave }) {
           <input style={inp} value={reflPrompt} onChange={e => setReflPrompt(e.target.value)}
             placeholder={habit.reflectionPrompt || "What do you want to remember from today?"}/>
         )}
+      </div>
+      <div style={{ fontSize:11, color:T.hint, lineHeight:1.5, marginBottom:18, padding:"12px 14px", background:T.surface, borderRadius:T.rsm, border:`0.5px solid ${T.border}` }}>
+        <span style={{ color:T.sub, fontWeight:600 }}>XP</span>
+        {" — "}Your total lives on your account (⚡ in the header or Profile). XP is awarded when you log; habits don&apos;t store their own XP field to edit here.
       </div>
       <PBtn color={habit.color} onClick={save}>Save changes</PBtn>
       <GBtn onClick={onClose}>Cancel</GBtn>
@@ -3317,11 +3325,11 @@ function GoalCard({ goal, onEdit, onComplete, onDelete }) {
           </div>
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          <button onClick={() => onEdit(goal.id)}
+          <button type="button" onClick={(e) => { e.stopPropagation(); onEdit(goal.id); }}
             style={{ fontSize:12, color:goal.color, background:"none", border:`0.5px solid ${goal.color+"55"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>
             Edit
           </button>
-          <button onClick={() => setShowMenu(m => !m)}
+          <button type="button" onClick={(e) => { e.stopPropagation(); setShowMenu(m => !m); }}
             style={{ fontSize:18, color:T.hint, background:"none", border:"none", cursor:"pointer", lineHeight:1, padding:"2px 4px" }}>
             ···
           </button>
@@ -3359,16 +3367,16 @@ function GoalCard({ goal, onEdit, onComplete, onDelete }) {
       {showMenu && (
         <div style={{ borderTop:`0.5px solid ${T.border}`, padding:"8px 15px 10px", display:"flex", gap:8 }}>
           {!isComplete && (
-            <button onClick={() => { onComplete(goal.id); setShowMenu(false); }}
+            <button type="button" onClick={(e) => { e.stopPropagation(); onComplete(goal.id); setShowMenu(false); }}
               style={{ fontSize:12, color:T.green, background:"none", border:`0.5px solid ${T.green+"44"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer" }}>
               Complete goal
             </button>
           )}
-          <button onClick={() => { onDelete(goal.id); setShowMenu(false); }}
+          <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(goal.id); setShowMenu(false); }}
             style={{ fontSize:12, color:"#e74c3c", background:"none", border:`0.5px solid rgba(231,76,60,0.3)`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer" }}>
             Delete
           </button>
-          <button onClick={() => setShowMenu(false)}
+          <button type="button" onClick={(e) => { e.stopPropagation(); setShowMenu(false); }}
             style={{ fontSize:12, color:T.muted, background:"none", border:"none", cursor:"pointer", marginLeft:"auto" }}>
             Cancel
           </button>
@@ -3438,7 +3446,7 @@ function HabitsScreen({ habits, goals = [], onEdit, onDelete, onAdd, onReflect, 
         <div>
           <SLabel>Goals</SLabel>
           {activeGoals.map(g => (
-            <GoalCard key={g.id} goal={g} onEdit={() => onEditGoal(g.id)} onComplete={() => onCompleteGoal(g.id)} onDelete={() => onDeleteGoal(g.id)} />
+            <GoalCard key={g.id} goal={g} onEdit={onEditGoal} onComplete={() => onCompleteGoal(g.id)} onDelete={() => onDeleteGoal(g.id)} />
           ))}
           {completedGoals.length > 0 && (
             <div style={{ margin:"0 14px 10px" }}>
@@ -3448,7 +3456,7 @@ function HabitsScreen({ habits, goals = [], onEdit, onDelete, onAdd, onReflect, 
                 <span style={{ fontSize:10, transform: completedOpen ? "rotate(180deg)" : "none", display:"inline-block", transition:"transform 0.2s" }}>▼</span>
               </button>
               {completedOpen && completedGoals.map(g => (
-                <GoalCard key={g.id} goal={g} onEdit={() => onEditGoal(g.id)} onComplete={() => onCompleteGoal(g.id)} onDelete={() => onDeleteGoal(g.id)} />
+                <GoalCard key={g.id} goal={g} onEdit={onEditGoal} onComplete={() => onCompleteGoal(g.id)} onDelete={() => onDeleteGoal(g.id)} />
               ))}
             </div>
           )}
@@ -3485,7 +3493,7 @@ function HabitsScreen({ habits, goals = [], onEdit, onDelete, onAdd, onReflect, 
                   </>
                 ) : (
                   <>
-                    <button onClick={() => onEdit(h.id)} style={{ fontSize:12, color:h.color, background:"none", border:`0.5px solid ${h.color+"44"}`, borderRadius:T.rsm, padding:"4px 10px", cursor:"pointer", fontWeight:500, marginRight:6 }}>Edit</button>
+                    <button type="button" onClick={(e) => { e.stopPropagation(); onEdit(h.id); }} style={{ fontSize:12, color:h.color, background:"none", border:`0.5px solid ${h.color+"44"}`, borderRadius:T.rsm, padding:"4px 10px", cursor:"pointer", fontWeight:500, marginRight:6 }}>Edit</button>
                     <button onClick={() => setConfirmDelete(h.id)} style={{ fontSize:18, color:T.hint, background:"none", border:"none", cursor:"pointer" }}>×</button>
                   </>
                 )}
@@ -6533,10 +6541,10 @@ export default function App() {
           </button>
         </div>
 
-        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onReflect={setReflectId} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={id => setEditGoalId(id)} onCompleteGoal={handleCompleteGoal} onXPInfo={() => setShowXP(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)} isPro={isPro} coachName={coachName}/>}
+        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onReflect={setReflectId} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={id => { setEditId(null); setEditGoalId(id); }} onCompleteGoal={handleCompleteGoal} onXPInfo={() => setShowXP(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)} isPro={isPro} coachName={coachName}/>}
         {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
         {screen === "insights" && <InsightsScreen habits={habits} goals={goals} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
-        {screen === "habits"   && <HabitsScreen   habits={habits} goals={goals} onEdit={setEditId} onDelete={handleDeleteHabit} onAdd={handleStartAdd} onReflect={setReflectId} onCoach={() => setShowCoach(true)} onUpgrade={() => setShowUpgrade(true)} isPro={isPro} coachName={coachName} onEditGoal={id => setEditGoalId(id)} onDeleteGoal={handleDeleteGoal} onCompleteGoal={handleCompleteGoal}/>}
+        {screen === "habits"   && <HabitsScreen   habits={habits} goals={goals} onEdit={id => { setEditGoalId(null); setEditId(id); }} onDelete={handleDeleteHabit} onAdd={handleStartAdd} onReflect={setReflectId} onCoach={() => setShowCoach(true)} onUpgrade={() => setShowUpgrade(true)} isPro={isPro} coachName={coachName} onEditGoal={id => { setEditId(null); setEditGoalId(id); }} onDeleteGoal={handleDeleteGoal} onCompleteGoal={handleCompleteGoal}/>}
         {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} refCode={refCode}
           authEmail={authEmail}
           onUpgrade={() => setShowUpgrade(true)}
