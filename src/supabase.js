@@ -13,12 +13,8 @@ export const supabase = createClient(
 );
 
 function normalizeId(rawId) {
-  const s = String(rawId ?? "").trim();
-  if (!s) return s;
-  // If id looks numeric with a decimal suffix (e.g. "1774676710924.7695"),
-  // keep only the integer part so Postgres bigint-compatible ids don't 400.
-  if (/^\d+\.\d+$/.test(s)) return s.split(".")[0];
-  return s;
+  if (!rawId) return rawId;
+  return String(rawId).replace(".", "_");
 }
 
 // ─── Shape converters ──────────────────────────────────────────────────────────
