@@ -37,6 +37,7 @@ export function habitToRow(habit, userId) {
     daily_budget:      habit.dailyBudget   ?? null,
     tap_increment:     habit.tapIncrement  ?? 1,
     best_streak:       habit.bestStreak    ?? 0,
+    daily_target_minutes: habit.dailyTargetMinutes ?? 60,
     logs:              habit.logs ?? [],
     updated_at:        new Date().toISOString(),
   };
@@ -97,6 +98,7 @@ export function goalToRow(goal, userId) {
     weekly_target:     null,
     daily_budget:      null,
     tap_increment:     1,
+    daily_target_minutes: null,
     updated_at:        new Date().toISOString(),
   };
 }
@@ -130,6 +132,7 @@ export function rowToHabit(row) {
     dailyBudget:      row.daily_budget   ?? undefined,
     tapIncrement:     row.tap_increment  ?? 1,
     bestStreak:       row.best_streak    ?? 0,
+    dailyTargetMinutes: row.daily_target_minutes ?? 60,
     logs:             row.logs ?? [],
   };
 }

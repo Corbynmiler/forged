@@ -203,8 +203,7 @@ function getBuildDayMinutes(h, dateStr) {
   return mins;
 }
 function qualifiesBuildDay(h, dateStr) {
-  // Default build target is 60 minutes/day unless a custom target exists.
-  const targetMins = h.dailyTargetMinutes ?? h.dailyTarget ?? h.targetMinutes ?? 60;
+  const targetMins = h.dailyTargetMinutes ?? 60;
   return getBuildDayMinutes(h, dateStr) >= targetMins;
 }
 // Daily: count consecutive days going back from today where a log exists.
@@ -1146,12 +1145,14 @@ function EditModal({ habit, onClose, onSave }) {
   const [budget,      setBudget]      = useState(String(habit.dailyBudget || 60));
   const [budgetUnit,  setBudgetUnit]  = useState(habit.unit || "min");
   const [increment,   setIncrement]   = useState(String(habit.tapIncrement ?? 1));
+  const [dailyTargetMins, setDailyTargetMins] = useState(String(habit.dailyTargetMinutes ?? 60));
   const meta = TYPE_META[habit.habitType] || TYPE_META.daily;
 
   function save() {
     const updates = { name:name.trim()||habit.name, emoji:emoji||habit.emoji, color, reflection, reflectionPrompt:reflPrompt.trim()||null };
     if (habit.habitType === "weekly")   updates.weeklyTarget = parseInt(weekTarget) || habit.weeklyTarget;
     if (habit.habitType === "limit")    { updates.dailyBudget = parseInt(budget)||habit.dailyBudget; updates.unit = budgetUnit||habit.unit; updates.tapIncrement = parseInt(increment)||1; }
+    if (habit.habitType === "project")  updates.dailyTargetMinutes = Math.max(1, parseInt(dailyTargetMins, 10) || (habit.dailyTargetMinutes ?? 60));
     onSave(habit.id, updates);
     onClose();
   }
@@ -1196,9 +1197,9 @@ function EditModal({ habit, onClose, onSave }) {
       )}
       {habit.habitType === "project" && (
         <div style={{ background:T.surface, borderRadius:T.rsm, padding:14, marginBottom:20 }}>
-          <div style={{ fontSize:13, color:T.muted, lineHeight:1.6, marginBottom:8 }}>
-            Logs time, wins, and hard parts per session. No single daily target — just keep showing up.
-          </div>
+          <FG label="Daily session target (min)" mb={8}>
+            <input style={inp} type="number" min="1" max="1440" value={dailyTargetMins} onChange={e => setDailyTargetMins(e.target.value)}/>
+          </FG>
           {(() => { const s = getProjectStats(habit); return <div style={{ fontSize:11, color:T.hint }}>{s.totalHours} hrs across {habit.logs.length} sessions · {s.wins} wins logged</div>; })()}
         </div>
       )}
@@ -1256,6 +1257,7 @@ function AddModal({ onClose, onSave }) {
   const [budget,      setBudget]      = useState("60");
   const [budgetUnit,  setBudgetUnit]  = useState("min");
   const [tapIncrement, setTapIncrement] = useState("1");
+  const [buildDailyTarget, setBuildDailyTarget] = useState("60");
 
   if (step === "type") return (
     <Modal onClose={onClose}>
@@ -1315,6 +1317,11 @@ function AddModal({ onClose, onSave }) {
           </div>
         </div>
       )}
+      {habitType === "project" && (
+        <FG label="Daily session target (min)" mb={12}>
+          <input style={inp} type="number" min="1" max="1440" value={buildDailyTarget} onChange={e => setBuildDailyTarget(e.target.value)}/>
+        </FG>
+      )}
       <div style={{ marginBottom:20 }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:reflection?12:0 }}>
           <label style={{ ...lbl, margin:0 }}>Reflection prompt</label>
@@ -1329,6 +1336,7 @@ function AddModal({ onClose, onSave }) {
         const base = { id:Date.now()+"", name:name.trim(), emoji:emoji||"⭐", habitType, color, reflection, reflectionPrompt:reflPrompt.trim()||null, streak:0, logs:[] };
         if (habitType === "weekly")   onSave({ ...base, weeklyTarget:parseInt(weekTarget)||3 });
         else if (habitType === "limit") onSave({ ...base, dailyBudget:parseInt(budget)||60, unit:budgetUnit||"min", tapIncrement:parseInt(tapIncrement)||1 });
+        else if (habitType === "project") onSave({ ...base, dailyTargetMinutes: Math.max(1, parseInt(buildDailyTarget, 10) || 60) });
         else onSave(base);
       }}>Add habit</PBtn>
       <GBtn onClick={() => setStep("type")}>Back</GBtn>
@@ -3786,7 +3794,7 @@ const HABIT_ANNOTATIONS = {
   daily: "Daily habits work best when you attach them to something you already do — morning coffee, after lunch, before bed. The streak counter tracks consecutive completed days (or protected rest days).",
   weekly: "Weekly targets give you flexibility without losing accountability. You have a target number of sessions to hit each week. Log each one after it happens. Missing a day doesn't break anything — missing a week resets the streak.",
   progress: "Progress habits track a number over time — you log where you actually are today, not where you 'should' be. The trend line shows the real picture. Consistency of logging matters more than the direction of the number.",
-  project: "Build habits track time spent and what you got from it. Log your minutes, a win, and what was hard. Streaks increase only on days you hit your daily build target.",
+  project: "Build habits track time spent and what you got from it. Log your minutes, a win, and what was hard. Set a daily minute target (default 60) — streaks count days you hit it, and crossing it can earn bonus XP.",
   limit: "Limit habits track what you're reducing. Each tap logs one unit against your daily budget. Streaks increase only on days you log and stay at or under your limit.",
 };
 
@@ -3832,6 +3840,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout }) {
       return { ...base, startValue:start, targetValue:target, direction:inferProgressDirection(start, target), unit:wg.unit||"kg" };
     }
     if (opt.habitType === "limit")    return { ...base, name:lb.name||opt.name, dailyBudget:parseInt(lb.budget)||60, unit:lb.unit||"min" };
+    if (opt.habitType === "project")  return { ...base, dailyTargetMinutes: 60 };
     return base;
   }
 
@@ -6117,7 +6126,7 @@ export default function App() {
       const today = todayStr();
       const firstKey = `project-first:${id}:${today}`;
       const bonusKey = `project-target:${id}:${today}`;
-      const targetMins = habit.dailyTargetMinutes ?? habit.dailyTarget ?? habit.targetMinutes ?? 60;
+      const targetMins = habit.dailyTargetMinutes ?? 60;
       const prevMins = habit.logs.filter(l => l.date === today).reduce((s, l) => s + (l.value?.minutes || 0), 0);
       const nextMins = updated.logs.filter(l => l.date === today).reduce((s, l) => s + (l.value?.minutes || 0), 0);
       let xpGain = 0;
@@ -6147,13 +6156,17 @@ export default function App() {
     }
   }
 
-  // Undo last limit tap: remove the most recent today log for a limit habit
+  // Undo last limit tap: remove the most recent *numeric* log for today (never quicknotes / skip strings)
   async function handleUndoLimit(id) {
     const habit = habits.find(h => h.id === id);
     if (!habit) return;
-    const lastIdx = [...habit.logs].map(l => l.date).lastIndexOf(todayStr());
-    if (lastIdx < 0) return;
-    const updated = { ...habit, logs: habit.logs.filter((_, i) => i !== lastIdx) };
+    const today = todayStr();
+    const numericToday = habit.logs
+      .map((l, i) => ({ l, i }))
+      .filter(({ l }) => l.date === today && typeof l.value === "number");
+    if (!numericToday.length) return;
+    const removeIdx = numericToday[numericToday.length - 1].i;
+    const updated = { ...habit, logs: habit.logs.filter((_, i) => i !== removeIdx) };
     const saved = await syncHabit(updated);
     if (!saved) return;
     setHabits(prev => prev.map(h => h.id === id ? updated : h));
