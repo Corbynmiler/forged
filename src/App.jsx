@@ -20,6 +20,31 @@ function parseLocal(str) {
 function fmtDate(d = new Date()) {
   return `${DAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}`;
 }
+/** e.g. "Thursday, April 9" — Today screen subheader */
+function fmtDateLong(d = new Date()) {
+  return d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+}
+/** Goal deadline chip: "May 31" or "Jan 15, 2027" if not this calendar year */
+function fmtGoalDueHuman(dateStr) {
+  if (!dateStr) return "";
+  const d = parseLocal(dateStr);
+  const y = d.getFullYear();
+  const thisYear = new Date().getFullYear();
+  const mon = MONTHS[d.getMonth()];
+  const day = d.getDate();
+  return y !== thisYear ? `${mon} ${day}, ${y}` : `${mon} ${day}`;
+}
+function goalTodayDeadlineLine(goal, stats, isComplete) {
+  const due = goal.targetDate ? `Due ${fmtGoalDueHuman(goal.targetDate)}` : "";
+  if (isComplete) {
+    return due ? `${due} · reached` : "";
+  }
+  const toGo = stats.toGo > 0 ? `${formatWithUnit(stats.toGo, goal.unit)} to go` : "";
+  if (due && toGo) return `${due} · ${toGo}`;
+  if (due) return due;
+  if (toGo) return toGo;
+  return "";
+}
 function weekStartFor(dateStr) {
   const d = parseLocal(dateStr), day = d.getDay();
   d.setDate(d.getDate() - day + (day === 0 ? -6 : 1));
@@ -930,14 +955,24 @@ function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote }) {
   // Distinguish: explicitly logged (any numeric entry today) vs truly not logged at all
   const logged   = todayLogsArr.length > 0;
   const inc      = habit.tapIncrement ?? 1;
+  const unitSuffix = habit.unit && habit.unit !== "logged" ? ` ${habit.unit}` : "";
+  const limitMetaColor = logged ? (over ? T.accent : T.green) : T.hint;
   return (
     <div className="rc" style={{ ...cardStyle(false, habit), borderColor:over?T.accent+"66":T.border, background:over?`${T.accent}0A`:T.raised }}>
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
         <IconBox habit={habit} logged={false}/>
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{habit.name}</div>
-          <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>
-            Limit{getHabitCardStreakSuffix(habit)}{inc > 1 ? ` · +${inc} per tap` : ""}
+          <div style={{ fontSize:12, marginTop:2, lineHeight:1.4 }}>
+            {logged ? (
+              <span style={{ color: limitMetaColor, fontWeight:500 }}>{used}/{budget} today{unitSuffix}</span>
+            ) : (
+              <span style={{ color: T.hint }}>
+                Limit <span style={{ color: T.muted, fontWeight:500 }}>{budget}{unitSuffix}</span>
+                <span style={{ color: T.hint }}> · not logged yet</span>
+              </span>
+            )}
+            <span style={{ color: T.muted }}>{getHabitCardStreakSuffix(habit)}{inc > 1 ? ` · +${inc} per tap` : ""}</span>
           </div>
         </div>
         <div style={{ display:"flex", gap:6, flexShrink:0 }}>
@@ -964,7 +999,7 @@ function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote }) {
         /* Distinct "not logged" state — greyed out, with an explicit "None today" option */
         <div style={{ padding:"0 15px 14px", display:"flex", alignItems:"center", gap:10 }}>
           <div style={{ height:6, flex:1, background:T.surface, borderRadius:3, opacity:0.3 }}/>
-          <span style={{ fontSize:12, color:T.hint, flexShrink:0 }}>– not logged</span>
+          <span style={{ fontSize:11, color:T.hint, flexShrink:0, textAlign:"right", maxWidth:"42%" }}>Under limit once you log · or mark none</span>
           <button onClick={() => onLogZero(habit.id)}
             title="Mark that you had none today"
             style={{ fontSize:11, color:T.muted, background:"none", border:`0.5px solid ${T.border}`, borderRadius:T.rsm, padding:"3px 9px", cursor:"pointer", flexShrink:0, whiteSpace:"nowrap" }}>
@@ -984,6 +1019,7 @@ function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete }) {
   const barFillPct = goalBarFillWidthPct(stats);
   const loggedToday = goal.logs?.some(l => l.date === todayStr()) || false;
   const statusText = getGoalStatusText(goal, stats);
+  const deadlineLine = goalTodayDeadlineLine(goal, stats, isComplete);
   const [showMenu, setShowMenu] = useState(false);
   return (
     <div className="rc" style={{ margin:"0 14px 10px", background:loggedToday ? `${goal.color}0D` : T.raised, borderRadius:T.r, border:`0.5px solid ${loggedToday ? goal.color+"66" : T.border}`, overflow:"hidden" }}>
@@ -1015,6 +1051,9 @@ function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete }) {
         <div style={{ height:5, background:T.surface, borderRadius:3, overflow:"hidden" }}>
           <div style={{ height:"100%", borderRadius:3, background:isComplete ? T.green : goal.color, width:`${barFillPct}%`, transition:"width 0.4s ease" }}/>
         </div>
+        {deadlineLine ? (
+          <div style={{ fontSize:11, color:T.sub, marginTop:7, lineHeight:1.45 }}>{deadlineLine}</div>
+        ) : null}
       </div>
       {showMenu && (
         <div style={{ borderTop:`0.5px solid ${T.border}`, padding:"8px 15px 10px", display:"flex", gap:8 }}>
@@ -6483,9 +6522,9 @@ export default function App() {
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"22px 18px 8px" }}>
           <div>
             <div style={{ fontFamily:T.serif, fontSize:30, color:T.text, letterSpacing:"-0.01em" }}>Forged</div>
-            <div style={{ fontSize:11, color:T.muted, marginTop:1 }}>
+            <div style={{ fontSize:12, color:T.muted, marginTop:1, lineHeight:1.35 }}>
               {screen === "today"
-                ? <>{user.name && <span style={{ color:T.sub }}>{user.name} · </span>}{fmtDate()}</>
+                ? fmtDateLong()
                 : screen === "profile" ? user.name : screen.charAt(0).toUpperCase()+screen.slice(1)}
             </div>
           </div>
