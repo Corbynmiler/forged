@@ -76,10 +76,10 @@ const T = {
 const COLORS = ["#C0392B","#E67E22","#27AE60","#8E44AD","#2980B9","#C8902A","#16A085","#D4537E"];
 
 const HABIT_TYPES = {
-  daily:    { label:"Daily habit",    desc:"One tap per day. Simple check-in.",              icon:"✓"  },
-  weekly:   { label:"Weekly target",  desc:"Hit a session count each week.",                 icon:"📅" },
-  project:  { label:"Build",           desc:"Log time spent, wins, and what challenged you.", icon:"⚒️" },
-  limit:    { label:"Limit / reduce", desc:"Stay under a daily budget.",                     icon:"🎯" },
+  daily:    { label:"Daily habit",    desc:"One tap per day (e.g. meditate, read, cold shower).",      icon:"✓"  },
+  weekly:   { label:"Weekly target",  desc:"Hit a session count each week (e.g. gym 4x, run 3x).",     icon:"📅" },
+  project:  { label:"Build",          desc:"Log time spent and progress (e.g. side project, learning a skill).", icon:"⚒️" },
+  limit:    { label:"Limit / reduce", desc:"Stay under a daily budget (e.g. screen time, alcohol, spending).",   icon:"🎯" },
 };
 
 const XP_LEVELS = [
@@ -114,17 +114,15 @@ function getWeeklyCount(h) {
 function getLatestValue(h) {
   if (!h.logs.length) return h.startValue ?? 0;
   const sorted = [...h.logs].sort((a, b) => a.date.localeCompare(b.date));
-  // For numeric progress goals (e.g. weight), ignore non-numeric entries like quick notes
-  if (h.habitType === "progress") {
-    const numeric = sorted.filter(l => typeof l.value === "number");
-    if (numeric.length) return numeric.at(-1).value;
-    return h.startValue ?? 0;
-  }
-  const last = sorted.at(-1);
-  return typeof last.value === "number" ? last.value : (h.startValue ?? 0);
+  const numeric = sorted.filter(l => typeof l.value === "number");
+  if (numeric.length) return numeric.at(-1).value;
+  return h.startValue ?? 0;
 }
 function inferProgressDirection(startValue, targetValue) {
   return targetValue < startValue ? "decreasing" : "increasing";
+}
+function isLegacyProgressType(type) {
+  return type === "progress";
 }
 function resolveProgressDirection(h) {
   if (h.direction === "decreasing" || h.direction === "increasing") return h.direction;
@@ -251,7 +249,6 @@ function getStreak(h) {
   if (h.habitType === "weekly")  return getWeeklyStreak(h);
   if (h.habitType === "limit")   return getLimitStreak(h);
   if (h.habitType === "project") return getBuildStreak(h);
-  if (h.habitType === "progress") return 0; // progress/outcome uses milestone logic, not streaks
   return getDailyStreak(h); // daily (default)
 }
 function getWeeklyStreak(h) {
@@ -299,7 +296,6 @@ function getCompletionRate(h) {
       .length;
     return Math.min(100, Math.round((daysMet / 28) * 100));
   }
-  if (h.habitType === "progress") return Math.min(100, Math.round((recent.length / 14) * 100));
   if (h.habitType === "limit") {
     const goodDays = Array.from({ length: 28 }, (_, i) => i)
       .map(i => daysAgo(i))
@@ -790,45 +786,6 @@ function WeeklyCard({ habit, onTap, onAddNote }) {
   );
 }
 
-function ProgressCard({ habit, onOpenLog, onAddNote }) {
-  const stats = getProgressStats(habit);
-  const logged = isLoggedToday(habit);
-  const statusText = stats.isComplete
-    ? "Goal reached"
-    : stats.isJustStarted
-      ? "Just started"
-      : `${formatWithUnit(stats.toGo, habit.unit)} to go`;
-  return (
-    <div className="rc" style={cardStyle(logged, habit)}>
-      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
-        <IconBox habit={habit} logged={logged}/>
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{habit.name}</div>
-          <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>
-            <span style={{ color:habit.color, fontWeight:500 }}>{formatWithUnit(stats.current, habit.unit)}</span>
-            {" → "}
-            <span>{formatWithUnit(stats.target, habit.unit)}</span>
-            <span style={{ marginLeft:6, color:stats.isComplete ? T.gold : T.hint }}>{statusText}</span>
-          </div>
-        </div>
-        <PlusBtn habit={habit} logged={logged} onClick={() => onOpenLog(habit.id)}/>
-      </div>
-      <div style={{ padding:"0 15px 14px" }}>
-        <div style={{ height:6, background:T.surface, borderRadius:3, overflow:"hidden", marginBottom:6 }}>
-          <div style={{ height:"100%", borderRadius:3, background:stats.isComplete ? T.goldBright : habit.color, width:`${stats.pct}%`, transition:"width 0.6s ease" }}/>
-        </div>
-        <div style={{ display:"flex", justifyContent:"space-between" }}>
-          <span style={{ fontSize:10, color:T.hint }}>{formatWithUnit(stats.start, habit.unit)}</span>
-          <span style={{ fontSize:11, color:stats.isComplete ? T.gold : habit.color, fontWeight:500 }}>{statusText}</span>
-          <span style={{ fontSize:10, color:T.hint }}>{formatWithUnit(stats.target, habit.unit)}</span>
-        </div>
-      </div>
-      {logged && <DoneBanner habit={habit}/>}
-      {logged && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote}/>}
-    </div>
-  );
-}
-
 function ProjectCard({ habit, onOpenLog, onAddNote }) {
   const stats = getProjectStats(habit);
   const tLogs = todayLogs(habit);
@@ -968,28 +925,6 @@ function TodayGoalCard({ goal, onOpenLog }) {
 }
 
 // ─── LOG MODALS ───────────────────────────────────────────────────────────────
-function LogProgressModal({ habit, onClose, onLog }) {
-  const [val, setVal] = useState("");
-  const [note, setNote] = useState("");
-  const latest = getLatestValue(habit);
-  return (
-    <Modal onClose={onClose}>
-      <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:4 }}>{habit.emoji} {habit.name}</div>
-      <div style={{ fontSize:13, color:T.muted, marginBottom:22 }}>
-        Now: <strong style={{ color:habit.color }}>{latest}{habit.unit}</strong>{" → "}Goal: <strong style={{ color:T.text }}>{habit.targetValue}{habit.unit}</strong>
-      </div>
-      <FG label={`Today's ${habit.unit}`}>
-        <input style={inp} type="number" step="0.1" placeholder={`e.g. ${latest}`} value={val} onChange={e => setVal(e.target.value)} autoFocus/>
-      </FG>
-      <FG label="Note (optional)" mb={0}>
-        <input style={inp} placeholder="e.g. 3 meals + shake today" value={note} onChange={e => setNote(e.target.value)} maxLength={140}/>
-      </FG>
-      <PBtn onClick={() => { if (!val) return; onLog(habit.id, { value:parseFloat(val), note }); onClose(); }}>Log it</PBtn>
-      <GBtn onClick={onClose}>Cancel</GBtn>
-    </Modal>
-  );
-}
-
 function LogProjectModal({ habit, onClose, onLog }) {
   const [minutes, setMinutes] = useState("");
   const [win,  setWin]  = useState("");
@@ -1133,7 +1068,6 @@ function ReflectModal({ habit, onClose, onSave }) {
 const TYPE_META = {
   daily:    { bg:"#27AE6018", text:"#27AE60", label:"Daily habit"    },
   weekly:   { bg:"#C0392B18", text:"#C0392B", label:"Weekly target"  },
-  progress: { bg:"#E67E2218", text:"#E67E22", label:"Progress goal"  },
   project:  { bg:"#2980B918", text:"#2980B9", label:"Project habit"  },
   limit:    { bg:"#8E44AD18", text:"#8E44AD", label:"Limit / reduce" },
 };
@@ -1144,36 +1078,14 @@ function EditModal({ habit, onClose, onSave }) {
   const [reflection,  setReflection]  = useState(habit.reflection ?? true);
   const [reflPrompt,  setReflPrompt]  = useState(habit.reflectionPrompt || "");
   const [weekTarget,  setWeekTarget]  = useState(String(habit.weeklyTarget || 3));
-  const [startVal,    setStartVal]    = useState(String(habit.startValue || ""));
-  const [targetVal,   setTargetVal]   = useState(String(habit.targetValue || ""));
-  const [unit,        setUnit]        = useState(habit.unit || "");
   const [budget,      setBudget]      = useState(String(habit.dailyBudget || 60));
   const [budgetUnit,  setBudgetUnit]  = useState(habit.unit || "min");
   const [increment,   setIncrement]   = useState(String(habit.tapIncrement ?? 1));
   const meta = TYPE_META[habit.habitType] || TYPE_META.daily;
-  const draftStart = habit.habitType === "progress" ? Number(startVal || habit.startValue || 0) : 0;
-  const draftTarget = habit.habitType === "progress" ? Number(targetVal || habit.targetValue || 0) : 0;
-  const draftDirection = inferProgressDirection(draftStart, draftTarget);
-  const progressStats = habit.habitType === "progress" ? getProgressStats({ ...habit, startValue: draftStart, targetValue: draftTarget, direction: draftDirection }) : null;
-  const progressStatusText = progressStats
-    ? (progressStats.isComplete
-      ? "Goal reached"
-      : progressStats.isJustStarted
-        ? "Just started"
-        : `${formatWithUnit(progressStats.toGo, unit || habit.unit)} to go`)
-    : "";
 
   function save() {
     const updates = { name:name.trim()||habit.name, emoji:emoji||habit.emoji, color, reflection, reflectionPrompt:reflPrompt.trim()||null };
     if (habit.habitType === "weekly")   updates.weeklyTarget = parseInt(weekTarget) || habit.weeklyTarget;
-    if (habit.habitType === "progress") {
-      const nextStart = parseFloat(startVal);
-      const nextTarget = parseFloat(targetVal);
-      updates.startValue = Number.isFinite(nextStart) ? nextStart : habit.startValue;
-      updates.targetValue = Number.isFinite(nextTarget) ? nextTarget : habit.targetValue;
-      updates.direction = inferProgressDirection(updates.startValue ?? 0, updates.targetValue ?? 0);
-      updates.unit = unit||habit.unit;
-    }
     if (habit.habitType === "limit")    { updates.dailyBudget = parseInt(budget)||habit.dailyBudget; updates.unit = budgetUnit||habit.unit; updates.tapIncrement = parseInt(increment)||1; }
     onSave(habit.id, updates);
     onClose();
@@ -1211,33 +1123,6 @@ function EditModal({ habit, onClose, onSave }) {
             </div>
           </FG>
           <div style={{ fontSize:11, color:T.hint }}>{habit.logs.length} total sessions logged</div>
-        </div>
-      )}
-      {habit.habitType === "progress" && (
-        <div style={{ background:T.surface, borderRadius:T.rsm, padding:14, marginBottom:20 }}>
-          <FG label="Goal" mb={10}>
-            <div style={{ display:"flex", gap:8 }}>
-              <div style={{ flex:1 }}>
-                <div style={{ fontSize:10, color:T.hint, marginBottom:5 }}>START</div>
-                <input style={inp} type="number" step="0.1" value={startVal} onChange={e => setStartVal(e.target.value)}/>
-              </div>
-              <div style={{ flex:1 }}>
-                <div style={{ fontSize:10, color:T.hint, marginBottom:5 }}>TARGET</div>
-                <input style={inp} type="number" step="0.1" value={targetVal} onChange={e => setTargetVal(e.target.value)}/>
-              </div>
-              <div style={{ width:68 }}>
-                <div style={{ fontSize:10, color:T.hint, marginBottom:5 }}>UNIT</div>
-                <input style={inp} value={unit} onChange={e => setUnit(e.target.value)}/>
-              </div>
-            </div>
-          </FG>
-          <div style={{ fontSize:11, color:T.hint, lineHeight:1.6 }}>
-            Current: <strong style={{ color:habit.color }}>{formatWithUnit(progressStats.current, unit || habit.unit)}</strong>{" · "}
-            Target: <strong style={{ color:T.text }}>{formatWithUnit(progressStats.target, unit || habit.unit)}</strong>{" · "}
-            <span style={{ color:progressStats.isComplete ? T.gold : T.hint }}>{progressStatusText}</span>{" · "}
-            Direction: <strong style={{ color:T.sub }}>{draftDirection}</strong>{" · "}
-            {habit.logs.length} measurements
-          </div>
         </div>
       )}
       {habit.habitType === "project" && (
@@ -1529,12 +1414,6 @@ const GLOBAL_TOUR = [
     pad: 6,
   },
   {
-    target: "[data-tour='today-add']",
-    title: "Adding habits",
-    body: "Tap here to add a new habit. You can choose daily habits, weekly targets, progress goals, limits, or project timers — each type tracks differently.",
-    pad: 6,
-  },
-  {
     target: "[data-tour='nav']",
     title: "Five screens, one app",
     body: "Today logs habits. Journal stores reflections. Insights shows patterns. Habits lets you manage everything. Profile tracks your XP and account.",
@@ -1554,12 +1433,6 @@ const PAGE_TOURS = {
       target: "[data-tour='today-first-section']",
       title: "Logging habits",
       body: "Tap the circle to log. Tap again or hold for options — reflect on the day, skip it, add a quick note, or undo a log.",
-      pad: 6,
-    },
-    {
-      target: "[data-tour='today-add']",
-      title: "Add a habit",
-      body: "Daily habit, weekly target, progress goal, limit, or project timer. Pick the type that fits what you're actually trying to track.",
       pad: 6,
     },
   ],
@@ -1752,7 +1625,7 @@ function TourOverlay({ steps, stepIdx, onNext, onSkip }) {
 }
 
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
-function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote, onLogZero, onOpenLog, onOpenGoalLog, onAdd, onXPInfo, onCoach, isPro, coachName }) {
+function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote, onLogZero, onOpenLog, onOpenGoalLog, onXPInfo, onCoach, isPro, coachName }) {
   const loggedCount = habits.filter(h => isLoggedToday(h)).length;
   const pct = habits.length ? Math.round((loggedCount / habits.length) * 100) : 0;
   const hr = new Date().getHours();
@@ -1803,11 +1676,6 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
             : <div key={i}>{sec}</div>
         );
       })()}
-      <button data-tour="today-add" onClick={onAdd} style={{ margin:"8px 14px 0", width:"calc(100% - 28px)", border:`1px dashed ${T.borderStrong}`, background:"none", borderRadius:T.r, padding:14, fontSize:13, color:T.muted, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2v10M2 7h10" stroke={T.muted} strokeWidth="1.5" strokeLinecap="round"/></svg>
-        Add habit or goal
-      </button>
-
       {/* Coach card */}
       {habits.length > 0 && (() => {
         const contextLine = loggedCount === 0
@@ -1971,7 +1839,7 @@ function HabitDayCard({ habit, logs, onReflect }) {
       return `${total} ${habit.unit || "logged"} of ${habit.dailyBudget} limit`;
     }
     if (habit.habitType === "weekly") return `${nonNote.length} session${nonNote.length!==1?"s":""}`;
-    if (habit.habitType === "progress") {
+    if (isLegacyProgressType(habit.habitType)) {
       const latest = nonNote.slice(-1)[0];
       return latest ? `${latest.value}${habit.unit}` : "logged";
     }
@@ -2797,9 +2665,16 @@ function getGoalEntryCount(goal) {
 
 function getGoalStatusText(goal, stats = getGoalProgress(goal)) {
   if (stats.isComplete) return "🎉 Goal reached";
-  const currentLabel = formatWithUnit(Number(goal.currentValue ?? 0), goal.unit);
-  const targetLabel = formatWithUnit(Number(goal.targetValue ?? 0), goal.unit);
-  return `${currentLabel} → ${targetLabel} target · ${formatWithUnit(stats.toGo, goal.unit)} to go`;
+  const start = Number(goal.startValue ?? 0);
+  const current = Number(goal.currentValue ?? 0);
+  const target = Number(goal.targetValue ?? 0);
+  const direction = target < start ? "decreasing" : "increasing";
+  const isWrongDirection = direction === "increasing" ? current < start : current > start;
+  if (isWrongDirection) {
+    const awayFromStart = Math.abs(start - current);
+    return `${formatWithUnit(awayFromStart, goal.unit)} ${direction === "increasing" ? "below" : "above"} start · ${formatWithUnit(stats.toGo, goal.unit)} to target`;
+  }
+  return `${stats.pct}% there · ${formatWithUnit(stats.toGo, goal.unit)} to go`;
 }
 
 // ─── LOG GOAL MODAL ───────────────────────────────────────────────────────────
@@ -3001,7 +2876,7 @@ function AddActionSheet({ onAddHabit, onAddGoal, onClose }) {
           <span style={{ fontSize:22 }}>⚒️</span>
           <div>
             <div style={{ fontSize:15, fontWeight:500, color:T.text }}>Add a habit</div>
-            <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>Daily, weekly, build, or limit — repeating behaviours</div>
+            <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>Daily check-ins, weekly targets, build habits, or limit/reduce tracking</div>
           </div>
         </button>
         <button onClick={onAddGoal} style={{ display:"flex", alignItems:"center", gap:14, width:"100%", padding:"14px 16px", borderRadius:T.r, border:`0.5px solid ${T.borderStrong}`, background:T.surface, marginBottom:10, cursor:"pointer", textAlign:"left" }}>
@@ -3139,7 +3014,7 @@ function buildCoachSystemPrompt(user, habits, coachName, screen) {
       const weekCount = getWeeklyCount(h);
       detail += `, ${weekCount}/${h.weeklyTarget} sessions this week`;
     }
-    if (h.habitType === "progress") {
+    if (isLegacyProgressType(h.habitType)) {
       detail += `, current: ${getLatestValue(h)}${h.unit || ""}, target: ${h.targetValue}${h.unit || ""}`;
     }
     if (h.habitType === "project") {
@@ -3542,7 +3417,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout }) {
       streak:0, bestStreak:0, logs:[],
     };
     if (opt.habitType === "weekly")   return { ...base, weeklyTarget:opt.weeklyTarget || 3 };
-    if (opt.habitType === "progress") {
+    if (isLegacyProgressType(opt.habitType)) {
       const start = parseFloat(wg.start)||70;
       const target = parseFloat(wg.target)||80;
       return { ...base, startValue:start, targetValue:target, direction:inferProgressDirection(start, target), unit:wg.unit||"kg" };
@@ -3597,7 +3472,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout }) {
     if (habit.habitType === "daily" || habit.habitType === "weekly") {
       return { date:today, value:true, note:"" };
     }
-    if (habit.habitType === "progress") {
+    if (isLegacyProgressType(habit.habitType)) {
       return { date:today, value:parseFloat(rawVal) || (habit.startValue || 0), note:"" };
     }
     if (habit.habitType === "project") {
@@ -3680,7 +3555,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout }) {
   if (step === FIRST_STEP && builtHabits.length > 0) {
     const firstHabit = pickFirstHabit(builtHabits);
     const annotation = HABIT_ANNOTATIONS[firstHabit.habitType] || HABIT_ANNOTATIONS.daily;
-    const needsValue = firstHabit.habitType === "progress" || firstHabit.habitType === "project" || firstHabit.habitType === "limit";
+    const needsValue = isLegacyProgressType(firstHabit.habitType) || firstHabit.habitType === "project" || firstHabit.habitType === "limit";
 
     return (
       <div style={wrap}>
@@ -3705,7 +3580,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout }) {
               <div style={{ fontSize:16, fontWeight:600, color:T.text, marginBottom:2 }}>{firstHabit.name}</div>
               <div style={{ fontSize:12, color:T.muted }}>{HABIT_TYPES[firstHabit.habitType]?.label}</div>
               {firstHabit.habitType === "weekly" && <div style={{ fontSize:12, color:T.sub, marginTop:2 }}>Target: {firstHabit.weeklyTarget}× per week</div>}
-              {firstHabit.habitType === "progress" && <div style={{ fontSize:12, color:T.sub, marginTop:2 }}>{firstHabit.startValue}{firstHabit.unit} → {firstHabit.targetValue}{firstHabit.unit}</div>}
+              {isLegacyProgressType(firstHabit.habitType) && <div style={{ fontSize:12, color:T.sub, marginTop:2 }}>{firstHabit.startValue}{firstHabit.unit} → {firstHabit.targetValue}{firstHabit.unit}</div>}
               {firstHabit.habitType === "limit" && <div style={{ fontSize:12, color:T.sub, marginTop:2 }}>Budget: {firstHabit.dailyBudget}{firstHabit.unit}/day</div>}
             </div>
           </div>
@@ -3722,7 +3597,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout }) {
           {needsValue && (
             <div style={{ marginBottom:16 }}>
               <div style={{ fontSize:12, color:T.hint, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:8 }}>
-                {firstHabit.habitType === "progress" ? `Today's ${firstHabit.unit || "value"}` :
+                {isLegacyProgressType(firstHabit.habitType) ? `Today's ${firstHabit.unit || "value"}` :
                  firstHabit.habitType === "project"  ? "Minutes worked" :
                  firstHabit.habitType === "limit"    ? `Units used (budget: ${firstHabit.dailyBudget})` : "Value"}
               </div>
@@ -3739,7 +3614,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout }) {
                 <input
                   style={{ ...styleInp, fontSize:18, padding:"12px 14px" }}
                   type="number" step="0.1"
-                  placeholder={firstHabit.habitType === "progress" ? `e.g. ${firstHabit.startValue || 70}` : "0"}
+                  placeholder={isLegacyProgressType(firstHabit.habitType) ? `e.g. ${firstHabit.startValue || 70}` : "0"}
                   value={firstLogValue}
                   onChange={e => setFirstLogValue(e.target.value)}
                   autoFocus
@@ -5641,7 +5516,7 @@ export default function App() {
               ⚡ 0 xp
             </button>
           </div>
-          <TodayScreen habits={habits} goals={goals} xp={0} onTap={handleTap} onUndo={() => {}} onSkip={() => {}} onReflect={() => demoBounce()} onAddNote={() => demoBounce()} onLogZero={() => demoBounce()} onOpenLog={() => demoBounce()} onOpenGoalLog={() => demoBounce()} onAdd={handleStartAdd} onXPInfo={() => {}}/>
+          <TodayScreen habits={habits} goals={goals} xp={0} onTap={handleTap} onUndo={() => {}} onSkip={() => {}} onReflect={() => demoBounce()} onAddNote={() => demoBounce()} onLogZero={() => demoBounce()} onOpenLog={() => demoBounce()} onOpenGoalLog={() => demoBounce()} onXPInfo={() => {}}/>
           <nav style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:430, maxWidth:"100vw", background:"rgba(26,26,22,0.96)", backdropFilter:"blur(16px)", borderTop:`0.5px solid ${T.border}`, display:"flex", zIndex:100, paddingBottom:6 }}>
             {[{id:"today",label:"Today"},{id:"journal",label:"Journal"},{id:"insights",label:"Insights"},{id:"habits",label:"Habits"},{id:"profile",label:"Profile"}].map(n => (
               <button key={n.id} onClick={() => demoBounce()} style={{ flex:1, padding:"10px 4px 6px", border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3, fontSize:10, fontWeight:500, color:n.id==="today"?T.accent:T.muted }}>
@@ -5837,30 +5712,34 @@ export default function App() {
   }
 
   // Reflection: save to most recent today log, or create standalone entry
-  function handleSaveReflection(id, text) {
-    let reflected = null;
-    setHabits(prev => prev.map(h => {
-      if (h.id !== id) return h;
-      const logs = [...h.logs];
-      const idx = logs.map(l => l.date).lastIndexOf(todayStr());
-      if (idx >= 0) { logs[idx] = { ...logs[idx], reflection:text }; }
-      else { logs.push({ date:todayStr(), value:null, note:"", reflection:text }); }
-      reflected = { ...h, logs };
-      return reflected;
-    }));
-    if (reflected) syncHabit(reflected);
+  async function handleSaveReflection(id, text) {
+    const habit = habits.find(h => h.id === id);
+    if (!habit) return;
+    const logs = [...habit.logs];
+    const idx = logs.map(l => l.date).lastIndexOf(todayStr());
+    if (idx >= 0) logs[idx] = { ...logs[idx], reflection:text };
+    else logs.push({ date:todayStr(), value:null, note:"", reflection:text });
+    const reflected = { ...habit, logs };
+    const saved = await syncHabit(reflected);
+    if (!saved) {
+      addToast("⚠️ Couldn't save reflection — check your connection");
+      return;
+    }
+    setHabits(prev => prev.map(h => h.id === id ? reflected : h));
     addToast("✓ Reflection saved");
   }
 
   // Edit save
-  function handleEditSave(id, updates) {
-    let edited = null;
-    setHabits(prev => prev.map(h => {
-      if (h.id !== id) return h;
-      edited = { ...h, ...updates };
-      return edited;
-    }));
-    if (edited) syncHabit(edited);
+  async function handleEditSave(id, updates) {
+    const habit = habits.find(h => h.id === id);
+    if (!habit) return;
+    const edited = { ...habit, ...updates };
+    const saved = await syncHabit(edited);
+    if (!saved) {
+      addToast("⚠️ Couldn't update habit — check your connection");
+      return;
+    }
+    setHabits(prev => prev.map(h => h.id === id ? edited : h));
     addToast("✓ Habit updated");
   }
 
@@ -5878,10 +5757,15 @@ export default function App() {
   }
 
   // Add a new habit
-  function handleAddHabit(h) {
+  async function handleAddHabit(h) {
+    const saved = await syncHabit(h);
+    if (!saved) {
+      addToast("⚠️ Couldn't add habit — check your connection");
+      return;
+    }
     setHabits(p => [...p, h]);
     setShowAdd(false);
-    syncHabit(h);
+    addToast("✓ Habit added");
   }
 
   // Delete a habit — optimistic remove, restore from DB on failure
@@ -5899,10 +5783,15 @@ export default function App() {
     }
   }
 
-  function handleAddGoal(goal) {
+  async function handleAddGoal(goal) {
+    const saved = await syncGoal(goal);
+    if (!saved) {
+      addToast("⚠️ Couldn't add goal — check your connection");
+      return;
+    }
     setGoals(prev => [...prev, goal]);
     setShowAddGoal(false);
-    syncGoal(goal);
+    addToast("✓ Goal added");
   }
 
   async function handleLogGoal(id, value, note) {
@@ -5928,13 +5817,17 @@ export default function App() {
     await supabase.from("habits").delete().eq("id", id).eq("user_id", uid);
   }
 
-  function handleCompleteGoal(id) {
-    setGoals(prev => prev.map(g => {
-      if (g.id !== id) return g;
-      const updated = { ...g, status: "completed" };
-      syncGoal(updated);
-      return updated;
-    }));
+  async function handleCompleteGoal(id) {
+    const goal = goals.find(g => g.id === id);
+    if (!goal) return;
+    const updated = { ...goal, status: "completed" };
+    const saved = await syncGoal(updated);
+    if (!saved) {
+      addToast("⚠️ Couldn't complete goal — check your connection");
+      return;
+    }
+    setGoals(prev => prev.map(g => g.id === id ? updated : g));
+    addToast("✓ Goal completed");
   }
 
   async function handleSignOut() {
@@ -5973,7 +5866,7 @@ export default function App() {
           </button>
         </div>
 
-        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onReflect={setReflectId} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onAdd={handleStartAdd} onXPInfo={() => setShowXP(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)} isPro={isPro} coachName={coachName}/>}
+        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onReflect={setReflectId} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onXPInfo={() => setShowXP(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)} isPro={isPro} coachName={coachName}/>}
         {screen === "journal"  && <JournalScreen habits={habits} onReflect={setReflectId} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
         {screen === "insights" && <InsightsScreen habits={habits} goals={goals} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
         {screen === "habits"   && <HabitsScreen   habits={habits} goals={goals} onEdit={setEditId} onDelete={handleDeleteHabit} onAdd={handleStartAdd} onReflect={setReflectId} onCoach={() => setShowCoach(true)} onUpgrade={() => setShowUpgrade(true)} isPro={isPro} coachName={coachName} onLogGoal={id => setLogGoalId(id)} onDeleteGoal={handleDeleteGoal} onCompleteGoal={handleCompleteGoal}/>}

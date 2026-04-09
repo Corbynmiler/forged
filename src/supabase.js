@@ -98,6 +98,10 @@ export function goalToRow(goal, userId) {
 
 // Convert a DB row → an in-app habit object
 export function rowToHabit(row) {
+  // Legacy safety: old "progress" rows are now goals.
+  if (row.habit_type === "progress") {
+    return rowToGoal({ ...row, habit_type: "goal" });
+  }
   const startValue = row.start_value ?? undefined;
   const targetValue = row.target_value ?? undefined;
   const inferredDirection =
