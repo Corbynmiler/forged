@@ -711,6 +711,14 @@ function DailyCard({ habit, onTap, onSkip, onAddNote }) {
   const logged = isLoggedToday(habit);
   const isSkip = tLog?.value === "skip";
   const streak = getStreak(habit);
+  const [restOpen, setRestOpen] = useState(false);
+  const [restWhy, setRestWhy] = useState("");
+  useEffect(() => {
+    if (logged) {
+      setRestOpen(false);
+      setRestWhy("");
+    }
+  }, [logged]);
   return (
     <div className="rc" style={cardStyle(logged && !isSkip, habit)}>
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
@@ -730,19 +738,50 @@ function DailyCard({ habit, onTap, onSkip, onAddNote }) {
         }
       </div>
       {isSkip && (
-        <div style={{ margin:"0 15px 12px", background:"rgba(106,104,96,0.15)", borderRadius:T.rsm, padding:"8px 12px", display:"flex", alignItems:"center", gap:8 }}>
-          <span style={{ fontSize:16 }}>🛡️</span>
-          <span style={{ fontSize:12, fontWeight:500, color:T.muted }}>Rest day — streak protected</span>
+        <div style={{ margin:"0 15px 12px", background:"rgba(106,104,96,0.15)", borderRadius:T.rsm, padding:"8px 12px", display:"flex", flexDirection:"column", gap:6 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:16 }}>🛡️</span>
+            <span style={{ fontSize:12, fontWeight:500, color:T.muted }}>Rest day — streak protected</span>
+          </div>
+          {tLog?.note?.trim() ? (
+            <div style={{ fontSize:12, color:T.sub, lineHeight:1.5, paddingLeft:24, fontStyle:"italic" }}>{tLog.note.trim()}</div>
+          ) : null}
         </div>
       )}
       {logged && !isSkip && <DoneBanner habit={habit}/>}
       {logged && !isSkip && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote}/>}
       {!logged && (
-        <div style={{ padding:"0 15px 10px", display:"flex", justifyContent:"flex-end" }}>
-          <button onClick={() => onSkip(habit.id)}
-            style={{ fontSize:12, color:T.hint, background:"none", border:"none", cursor:"pointer", display:"flex", alignItems:"center", gap:4 }}>
-            🛡️ Rest day
-          </button>
+        <div style={{ padding:"0 15px 12px" }}>
+          {restOpen ? (
+            <div style={{ borderRadius:T.rsm, border:`0.5px solid ${T.borderMid}`, background:T.surface, padding:"12px 12px 10px" }}>
+              <label style={{ display:"block", fontSize:12, fontWeight:500, color:T.text, marginBottom:6 }}>Why a rest day? <span style={{ fontWeight:400, color:T.hint }}>(optional)</span></label>
+              <textarea
+                value={restWhy}
+                onChange={e => setRestWhy(e.target.value)}
+                placeholder="Travel, recovery, life got busy…"
+                rows={2}
+                maxLength={200}
+                style={{ width:"100%", boxSizing:"border-box", resize:"vertical", borderRadius:8, border:`0.5px solid ${T.border}`, background:T.raised, color:T.text, fontSize:13, padding:10, fontFamily:T.font, lineHeight:1.45, marginBottom:10 }}
+              />
+              <div style={{ display:"flex", gap:8, justifyContent:"flex-end", flexWrap:"wrap" }}>
+                <button type="button" onClick={() => { setRestOpen(false); setRestWhy(""); }}
+                  style={{ fontSize:12, color:T.muted, background:"none", border:`0.5px solid ${T.border}`, borderRadius:T.rsm, padding:"8px 14px", cursor:"pointer" }}>
+                  Cancel
+                </button>
+                <button type="button" onClick={() => { onSkip(habit.id, restWhy.trim()); setRestOpen(false); setRestWhy(""); }}
+                  style={{ fontSize:12, fontWeight:600, color:"#1a1208", background:T.amber, border:"none", borderRadius:T.rsm, padding:"8px 16px", cursor:"pointer" }}>
+                  Confirm rest day
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display:"flex", justifyContent:"flex-end" }}>
+              <button type="button" onClick={() => { setRestOpen(true); setRestWhy(""); }}
+                style={{ fontSize:12, color:T.hint, background:"none", border:"none", cursor:"pointer", display:"flex", alignItems:"center", gap:4 }}>
+                🛡️ Rest day
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -6015,8 +6054,10 @@ export default function App() {
     if (!base) return;
     let tapped = null;
     if (base.habitType === "limit") {
+      const today = todayStr();
       const inc = base.tapIncrement ?? 1;
-      tapped = { ...base, logs:[...base.logs, { date:todayStr(), value:inc, note:"" }] };
+      const logsWithoutNoneToday = base.logs.filter(l => !(l.date === today && l.value === 0));
+      tapped = { ...base, logs:[...logsWithoutNoneToday, { date:today, value:inc, note:"" }] };
     } else {
       const logged = base.logs.some(l => l.date === todayStr());
       tapped = logged
@@ -6030,7 +6071,8 @@ export default function App() {
     if (tapped.habitType === "limit") {
       const today = todayStr();
       const checkinKey = `limit:${id}:${today}`;
-      const hadNumericToday = base.logs.some(l => l.date === today && typeof l.value === "number");
+      const logsForXp = base.logs.filter(l => !(l.date === today && l.value === 0));
+      const hadNumericToday = logsForXp.some(l => l.date === today && typeof l.value === "number" && l.value !== 0);
       const canAward = !hadNumericToday && !xpAwardedDates.has(checkinKey);
       if (canAward) {
         spawnParticles(cx, cy, tapped.color);
@@ -6118,11 +6160,12 @@ export default function App() {
     addToast("↩ Last tap removed");
   }
 
-  async function handleSkipDay(id) {
+  async function handleSkipDay(id, note = "") {
     const habit = habits.find(h => h.id === id);
     if (!habit) return;
-    const withoutToday = habit.logs.filter(l => l.date !== todayStr());
-    const updated = { ...habit, logs:[...withoutToday, { date:todayStr(), value:"skip", note:"" }] };
+    const today = todayStr();
+    const withoutToday = habit.logs.filter(l => l.date !== today);
+    const updated = { ...habit, logs:[...withoutToday, { date:today, value:"skip", note: note || "" }] };
     const saved = await syncHabit(updated);
     if (!saved) return;
     setHabits(prev => prev.map(h => h.id === id ? updated : h));
@@ -6146,8 +6189,22 @@ export default function App() {
     const habit = habits.find(h => h.id === id);
     if (!habit) return;
     const today = todayStr();
-    if (habit.logs.some(l => l.date === today && typeof l.value === "number")) return;
-    const updated = { ...habit, logs: [...habit.logs, { date: todayStr(), value: 0, note: "" }] };
+    const todayNumeric = habit.logs.filter(l => l.date === today && typeof l.value === "number");
+    if (todayNumeric.some(l => l.value === 0)) return;
+    const usageToday = todayNumeric.filter(l => l.value !== 0);
+    let nextLogs;
+    if (usageToday.length > 0) {
+      const used = usageToday.reduce((s, l) => s + l.value, 0);
+      const unit = habit.unit?.trim();
+      const amountLabel = unit ? `${used} ${unit}` : String(used);
+      const ok = window.confirm(`You've already logged ${amountLabel} today. Mark as none instead?`);
+      if (!ok) return;
+      nextLogs = habit.logs.filter(l => !(l.date === today && typeof l.value === "number"));
+      nextLogs = [...nextLogs, { date: today, value: 0, note: "" }];
+    } else {
+      nextLogs = [...habit.logs, { date: today, value: 0, note: "" }];
+    }
+    const updated = { ...habit, logs: nextLogs };
     const saved = await syncHabit(updated);
     if (!saved) return;
     setHabits(prev => prev.map(h => h.id === id ? updated : h));
