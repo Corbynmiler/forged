@@ -218,12 +218,11 @@ function getDailyStreak(h) {
   }
   return streak;
 }
-// Limit: consecutive days where the user came back AND logged under their budget.
-// Not logging at all breaks the streak — it incentivises the daily check-in.
-// Logging 0 counts as a perfect day (you consciously chose not to use any).
+// Limit: consecutive completed days (yesterday backward) where the user logged and stayed under budget.
+// Today is never counted — the streak updates only after a full day is done.
+// Not logging breaks the streak; logging 0 counts as a perfect day.
 function getLimitStreak(h) {
-  const todayTotal = getLimitDayTotal(h, todayStr());
-  const startDay = (todayTotal != null && todayTotal <= (h.dailyBudget || Infinity)) ? 0 : 1;
+  const startDay = 1;
   let streak = 0;
   for (let d = startDay; d <= 365; d++) {
     const total = getLimitDayTotal(h, daysAgo(d));
@@ -881,6 +880,7 @@ function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote }) {
   // Distinguish: explicitly logged (any numeric entry today) vs truly not logged at all
   const logged   = todayLogsArr.length > 0;
   const inc      = habit.tapIncrement ?? 1;
+  const limitStreak = getLimitStreak(habit);
   return (
     <div className="rc" style={{ ...cardStyle(false, habit), borderColor:over?T.accent+"66":T.border, background:over?`${T.accent}0A`:T.raised }}>
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
@@ -888,7 +888,7 @@ function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote }) {
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{habit.name}</div>
           <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>
-            Limit{getLimitStreak(habit) > 0 ? ` · 🔥 ${getLimitStreak(habit)}` : ""}{inc > 1 ? ` · +${inc} per tap` : ""}
+            Limit{limitStreak > 0 ? ` · 🔥 ${limitStreak} day streak` : ""}{inc > 1 ? ` · +${inc} per tap` : ""}
           </div>
         </div>
         <div style={{ display:"flex", gap:6, flexShrink:0 }}>
