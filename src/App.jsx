@@ -104,7 +104,7 @@ const HABIT_TYPES = {
   daily:    { label:"Daily habit",    desc:"One tap per day (e.g. meditate, read, cold shower).",      icon:"✓"  },
   weekly:   { label:"Weekly target",  desc:"Hit a session count each week (e.g. gym 4x, run 3x).",     icon:"📅" },
   project:  { label:"Build",          desc:"Log time spent and progress (e.g. side project, learning a skill).", icon:"⚒️" },
-  limit:    { label:"Limit / reduce", desc:"Stay under a daily budget (e.g. screen time, alcohol, spending).",   icon:"🎯" },
+  limit:    { label:"Limit / reduce", desc:"Stay under a daily cap (drinks, snacks, screen time). For “reach X kg” or savings targets, use Set a goal — that’s an outcome, not a daily cap.",   icon:"🎯" },
 };
 
 const XP_LEVELS = [
@@ -1415,9 +1415,14 @@ function AddModal({ onClose, onSave }) {
         </div>
       )}
       {habitType === "project" && (
-        <FG label="Daily session target (min)" mb={12}>
-          <input style={inp} type="number" min="1" max="1440" value={buildDailyTarget} onChange={e => setBuildDailyTarget(e.target.value)}/>
-        </FG>
+        <div style={{ marginBottom:20 }}>
+          <div style={{ marginBottom:12, padding:"12px 14px", background:T.surface, borderRadius:T.rsm, border:`0.5px solid ${T.border}`, fontSize:12, color:T.muted, lineHeight:1.55 }}>
+            <strong style={{ color:T.text }}>What you’ll track:</strong> minutes <strong style={{ color:T.text }}>today</strong>, total time <strong style={{ color:T.text }}>this week</strong> and <strong style={{ color:T.text }}>all-time</strong>, plus optional <strong style={{ color:T.text }}>wins</strong> and <strong style={{ color:T.text }}>hard parts</strong> when you log a session.
+          </div>
+          <FG label="Daily session target (min)" mb={0}>
+            <input style={inp} type="number" min="1" max="1440" value={buildDailyTarget} onChange={e => setBuildDailyTarget(e.target.value)}/>
+          </FG>
+        </div>
       )}
       <div style={{ marginBottom:20 }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:reflection?12:0 }}>
@@ -2104,14 +2109,14 @@ function DaySection({ date, dayHabits, onReflect, onDeleteLogEntry }) {
 function MissedDaySection({ date, note, onEdit, onClear }) {
   const label = fmtEntryDate(date);
   return (
-    <div style={{ margin:"0 14px 10px", background:"rgba(230,126,34,0.08)", borderRadius:T.r, border:"0.5px solid rgba(230,126,34,0.28)", overflow:"hidden" }}>
-      <div style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 14px", borderBottom:note?.trim() ? `0.5px solid ${T.border}` : "none" }}>
-        <span style={{ fontSize:14 }}>✕</span>
-        <div style={{ flex:1 }}>
-          <div style={{ fontSize:12, fontWeight:600, color:T.amber }}>Missed</div>
-          <div style={{ fontSize:12, color:T.muted, marginTop:1 }}>{label}</div>
+    <div style={{ margin:"0 14px 10px", background:"rgba(230,126,34,0.10)", borderRadius:T.r, border:"0.5px solid rgba(230,126,34,0.38)", overflow:"hidden", boxShadow:"0 0 0 1px rgba(230,126,34,0.06) inset" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px", borderBottom:note?.trim() ? `0.5px solid ${T.border}` : "none" }}>
+        <span style={{ fontSize:18, lineHeight:1, color:T.amber, fontWeight:700 }} title="No habit logs this day">?</span>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:12, fontWeight:600, color:T.amber }}>Missed — needs fill-in</div>
+          <div style={{ fontSize:11, color:T.muted, marginTop:2, lineHeight:1.4 }}>{label} · Tap Edit to add context, or Clear if you logged elsewhere.</div>
         </div>
-        <button type="button" onClick={onEdit} style={{ fontSize:11, color:T.amber, background:"none", border:"none", cursor:"pointer", fontWeight:500 }}>Edit</button>
+        <button type="button" onClick={onEdit} style={{ fontSize:11, color:T.amber, background:"rgba(230,126,34,0.12)", border:`0.5px solid rgba(230,126,34,0.35)`, borderRadius:T.rsm, padding:"5px 10px", cursor:"pointer", fontWeight:600 }}>Edit</button>
         <button type="button" onClick={onClear} style={{ fontSize:11, color:T.hint, background:"none", border:"none", cursor:"pointer" }}>Clear</button>
       </div>
       {note?.trim() ? (
@@ -2147,13 +2152,32 @@ function formatJournalLogLine(habit, log) {
   return note || "Entry";
 }
 
+function limitJournalMergedNotes(logs) {
+  const seen = new Set();
+  const out = [];
+  for (const l of logs) {
+    if (l.value === "quicknote") {
+      const t = (l.note || "").trim();
+      if (t && !seen.has(t)) { seen.add(t); out.push(t); }
+    } else if (typeof l.value === "number") {
+      const t = (l.note || "").trim();
+      if (t && !seen.has(t)) { seen.add(t); out.push(t); }
+    }
+  }
+  return out;
+}
+
 // Card showing one habit's full activity for a single day
 function HabitDayCard({ habit, logs, onReflect, onDeleteLogEntry }) {
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [showLimitTaps, setShowLimitTaps] = useState(false);
   const nonNote = logs.filter(l => l.value !== "quicknote");
   const notes   = logs.filter(l => l.value === "quicknote" || (l.note && l.note.trim()));
   const uniqueNotes = [...new Set(notes.map(l => l.note).filter(Boolean))];
+  const isLimit = habit.habitType === "limit";
+  const limitTapCount = isLimit ? nonNote.filter(l => typeof l.value === "number").length : 0;
+  const limitMergedNotes = isLimit ? limitJournalMergedNotes(logs) : [];
 
   // Summary line based on habit type
   function summaryLine() {
@@ -2205,10 +2229,43 @@ function HabitDayCard({ habit, logs, onReflect, onDeleteLogEntry }) {
         <span style={{ marginLeft:"auto", fontSize:11, color:T.hint }}>{summaryLine()}</span>
       </div>
 
+      {/* Limit habits: one daily summary; expand for per-tap delete */}
+      {isLimit && logs.length > 0 && onDeleteLogEntry && !showLimitTaps ? (
+        <div style={{ borderBottom:`0.5px solid ${T.border}`, padding:"12px 14px" }}>
+          <div style={{ fontSize:12, color:T.sub, lineHeight:1.55 }}>
+            <strong style={{ color:T.text }}>Day summary</strong>
+            {" — "}
+            {limitTapCount === 0
+              ? (logs.some(l => l.value === "quicknote") ? "Quick note only — expand taps to view or delete." : "No + taps logged today.")
+              : `${limitTapCount} tap${limitTapCount !== 1 ? "s" : ""} · ${nonNote.reduce((s, l) => s + (typeof l.value === "number" ? l.value : 0), 0)} / ${habit.dailyBudget ?? "—"} ${habit.unit || ""}`.trim()}
+          </div>
+          {limitMergedNotes.length > 0 && (
+            <div style={{ marginTop:10 }}>
+              <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:4 }}>Notes</div>
+              {limitMergedNotes.map((t, i) => (
+                <div key={i} style={{ fontSize:13, color:T.text, lineHeight:1.5, fontStyle:"italic", marginTop:i ? 6 : 0 }}>{t}</div>
+              ))}
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowLimitTaps(true)}
+            style={{ marginTop:12, fontSize:11, color:habit.color, background:"none", border:"none", cursor:"pointer", fontWeight:500, padding:0 }}
+          >
+            Show individual taps (to delete one) →
+          </button>
+        </div>
+      ) : null}
+
       {/* Per-entry rows (Journal) — delete removes one log; XP is not adjusted */}
-      {logs.length > 0 && onDeleteLogEntry ? (
+      {logs.length > 0 && onDeleteLogEntry && (!isLimit || showLimitTaps) ? (
         <div style={{ borderBottom:`0.5px solid ${T.border}` }}>
-          <div style={{ padding:"8px 14px 4px", fontSize:10, fontWeight:600, color:T.hint, textTransform:"uppercase", letterSpacing:"0.06em" }}>Entries</div>
+          <div style={{ padding:"8px 14px 4px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
+            <span style={{ fontSize:10, fontWeight:600, color:T.hint, textTransform:"uppercase", letterSpacing:"0.06em" }}>{isLimit ? "Each tap" : "Entries"}</span>
+            {isLimit && showLimitTaps ? (
+              <button type="button" onClick={() => setShowLimitTaps(false)} style={{ fontSize:11, color:T.muted, background:"none", border:"none", cursor:"pointer", padding:0 }}>Hide taps</button>
+            ) : null}
+          </div>
           {logs.map((log, i) => (
             <div
               key={`${log.date}-${i}-${typeof log.value === "object" ? JSON.stringify(log.value) : String(log.value)}`}
@@ -2254,13 +2311,13 @@ function HabitDayCard({ habit, logs, onReflect, onDeleteLogEntry }) {
         </div>
       )}
 
-      {/* Quick notes — newest first */}
-      {[...uniqueNotes].reverse().map((n, i) => (
+      {/* Quick notes — limit notes live in day summary or per-row when taps expanded */}
+      {!isLimit ? [...uniqueNotes].reverse().map((n, i) => (
         <div key={i} style={{ padding:"8px 14px", borderBottom:i<uniqueNotes.length-1?`0.5px solid ${T.border}`:"none", background:`${T.surface}66` }}>
           <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:3 }}>Note</div>
           <div style={{ fontSize:13, color:T.sub, lineHeight:1.55, fontStyle:"italic" }}>{n}</div>
         </div>
-      ))}
+      )) : null}
 
       {/* Add reflection prompt if none yet */}
       {!reflection && habit.habitType !== "goal" && (
@@ -2441,7 +2498,9 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
           <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>Journal</div>
           <div style={{ fontSize:13, color:T.muted, marginTop:3 }}>
             {loggedDaysCount} days logged
-            {missedCount > 0 ? <span> · {missedCount} missed marked</span> : null}
+            {missedCount > 0 ? (
+              <span> · <span style={{ color:T.amber, fontWeight:600 }}>? {missedCount} need fill-in</span> (marked missed)</span>
+            ) : null}
           </div>
         </div>
         <div data-tour="journal-viewmode" style={{ display:"flex", background:T.surface, borderRadius:T.rsm, padding:3, gap:2 }}>
@@ -2513,10 +2572,10 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
             ))}
           </div>
 
-          <div style={{ fontSize:10, color:T.hint, marginBottom:8, display:"flex", gap:10, flexWrap:"wrap" }}>
+          <div style={{ fontSize:10, color:T.hint, marginBottom:8, display:"flex", gap:12, flexWrap:"wrap", alignItems:"center" }}>
             <span>● logged</span>
-            <span>· open</span>
-            <span style={{ color:T.amber }}>✕ missed</span>
+            <span style={{ color:"rgba(230,126,34,0.9)", fontWeight:600 }}>? no log</span>
+            <span style={{ color:T.amber, fontWeight:600 }}>✕ missed</span>
           </div>
 
           <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4, marginBottom:16 }}>
@@ -2560,11 +2619,11 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
                       {habitColors.map((c, ci) => <div key={ci} style={{ width:4, height:4, borderRadius:"50%", background:c }}/>)}
                     </div>
                   ) : isMissed ? (
-                    <div style={{ fontSize:8, color:T.amber }}>✕</div>
+                    <div title="Marked missed" style={{ fontSize:9, fontWeight:700, color:T.amber, width:15, height:15, borderRadius:"50%", background:"rgba(230,126,34,0.22)", display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>✕</div>
                   ) : isJourneyStart ? (
                     <div style={{ fontSize:7, color:T.gold }}>✦</div>
                   ) : isOpenDay ? (
-                    <div style={{ fontSize:9, color:T.hint }}>·</div>
+                    <div title="No logs — select to mark missed" style={{ fontSize:11, fontWeight:700, color:"rgba(230,126,34,0.88)", lineHeight:1 }}>?</div>
                   ) : null}
                 </button>
               );
@@ -2595,8 +2654,9 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
                   <div style={{ padding:"0 0 8px" }}>
                     {showMissedEditor ? (
                       <div style={{ padding:"12px 14px", background:T.surface, borderRadius:T.r, border:`0.5px solid ${T.border}` }}>
-                        <div style={{ fontSize:12, color:T.muted, marginBottom:6 }}>
-                          No logs this day. <span style={{ color:T.amber }}>Open day</span> — mark missed and add an optional note.
+                        <div style={{ fontSize:12, color:T.muted, marginBottom:6, lineHeight:1.5 }}>
+                          <span style={{ fontSize:14, fontWeight:700, color:"rgba(230,126,34,0.95)", marginRight:6 }}>?</span>
+                          Nothing logged this day. Mark it <strong style={{ color:T.text }}>missed</strong> if you skipped forging, and add a short note (travel, sick day…). Clear later if you catch up on Today.
                         </div>
                         <textarea
                           value={monthMissedDraft}
@@ -2661,7 +2721,7 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
           {listEmpty && (
             <div style={{ padding:"60px 30px", textAlign:"center" }}>
               <div style={{ fontSize:36, marginBottom:14 }}>📓</div>
-              <div style={{ fontSize:14, color:T.muted, lineHeight:1.7 }}>No entries or missed marks yet. Log habits or mark open days in Month view.</div>
+              <div style={{ fontSize:14, color:T.muted, lineHeight:1.7 }}>No entries yet. Log on Today, or open <strong style={{ color:T.text }}>Month</strong> — days with a <strong style={{ color:"rgba(230,126,34,0.95)" }}>?</strong> have no logs and can be marked missed.</div>
             </div>
           )}
           {!listEmpty && sortedDatesDesc.map(date => renderDayOrMissed(date))}
@@ -2681,6 +2741,11 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
               .filter(d => weekStartFor(d) === ws)
               .sort((a, b) => b.localeCompare(a));
             const expanded = openWeeks.has(ws);
+            const missedInWeek = daysInWeek.filter(d => Object.prototype.hasOwnProperty.call(missedMap, d)).length;
+            const openDaysInWeek = daysInWeek.filter(d => {
+              const hasLog = allByDate[d] && Object.keys(allByDate[d]).length > 0;
+              return !!(firstLogDate && d >= firstLogDate && d < tStr && !hasLog && !Object.prototype.hasOwnProperty.call(missedMap, d));
+            }).length;
             return (
               <div key={ws} style={{ margin:"0 14px 8px", borderRadius:T.r, border:`0.5px solid ${T.border}`, overflow:"hidden", background:T.raised }}>
                 <button
@@ -2690,9 +2755,15 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
                     width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between",
                     padding:"12px 14px", background:T.surface, border:"none", cursor:"pointer", gap:10,
                   }}>
-                  <span style={{ fontSize:12, fontWeight:600, color:T.text, textAlign:"left" }}>
+                  <span style={{ fontSize:12, fontWeight:600, color:T.text, textAlign:"left", lineHeight:1.35 }}>
                     Week · {fmtWeekRange(ws)}
                     <span style={{ fontWeight:400, color:T.muted, marginLeft:8 }}>({daysInWeek.length})</span>
+                    {missedInWeek > 0 ? (
+                      <span style={{ display:"block", fontSize:10, fontWeight:600, color:T.amber, marginTop:3 }}>? {missedInWeek} missed mark{missedInWeek !== 1 ? "s" : ""} · review below</span>
+                    ) : null}
+                    {missedInWeek === 0 && openDaysInWeek > 0 ? (
+                      <span style={{ display:"block", fontSize:10, fontWeight:500, color:"rgba(230,126,34,0.75)", marginTop:3 }}>? {openDaysInWeek} day{openDaysInWeek !== 1 ? "s" : ""} with no log — check Month or Today</span>
+                    ) : null}
                   </span>
                   <span style={{ fontSize:12, color:T.hint, flexShrink:0 }}>{expanded ? "▾" : "▸"}</span>
                 </button>
@@ -2709,7 +2780,7 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
 
       {missedEditDate && (
         <div style={{ margin:"0 14px 24px", padding:14, background:T.surface, borderRadius:T.r, border:`0.5px solid ${T.border}` }}>
-          <div style={{ fontSize:12, color:T.text, marginBottom:8 }}>Missed · {fmtEntryDate(missedEditDate)}</div>
+          <div style={{ fontSize:12, color:T.text, marginBottom:8 }}><span style={{ color:T.amber, fontWeight:700, marginRight:6 }}>?</span>Missed · {fmtEntryDate(missedEditDate)}</div>
           <textarea
             value={missedNoteDraft}
             onChange={e => setMissedNoteDraft(e.target.value)}
@@ -3149,7 +3220,18 @@ function AddGoalModal({ onClose, onSave }) {
   return (
     <Modal onClose={onClose}>
       <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, marginBottom:4 }}>Set a goal</div>
-      <div style={{ fontSize:13, color:T.muted, marginBottom:22 }}>Track an outcome with a target number.</div>
+      <div style={{ fontSize:13, color:T.muted, marginBottom:14, lineHeight:1.55 }}>
+        A <strong style={{ color:T.text }}>goal</strong> is an outcome with a start and target number (you log how close you are). <strong style={{ color:T.text }}>Habits</strong> are repeated actions (daily tap, weekly sessions, build time, or staying under a limit).
+      </div>
+      <div style={{ marginBottom:20, padding:"12px 14px", background:T.surface, borderRadius:T.rsm, border:`0.5px solid ${T.border}` }}>
+        <div style={{ fontSize:10, fontWeight:600, color:T.hint, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Examples</div>
+        <ul style={{ margin:0, paddingLeft:18, fontSize:12, color:T.muted, lineHeight:1.65 }}>
+          <li>Weight: 92 kg → 85 kg (log weigh-ins toward the target)</li>
+          <li>Savings: $0 → $5,000 emergency fund</li>
+          <li>Strength: squat 1RM 225 → 275 lb</li>
+          <li>Body fat %, race time, or any number you want to reach by a date</li>
+        </ul>
+      </div>
 
       <div style={{ display:"flex", gap:10, marginBottom:20 }}>
         <div style={{ flex:1 }}>
@@ -3405,7 +3487,7 @@ function AddActionSheet({ onAddHabit, onAddGoal, onClose }) {
           <span style={{ fontSize:22 }}>🎯</span>
           <div>
             <div style={{ fontSize:15, fontWeight:500, color:T.text }}>Set a goal</div>
-            <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>An outcome with a target number — track your progress</div>
+            <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>Outcomes with numbers (weight, savings, PRs) — not the same as daily habits or limits</div>
           </div>
         </button>
         <button onClick={onClose} style={{ width:"100%", padding:"13px", borderRadius:T.rsm, border:"none", background:T.surface, color:T.muted, fontSize:14, cursor:"pointer", marginTop:4 }}>Cancel</button>
