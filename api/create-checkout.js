@@ -37,6 +37,7 @@ export default async function handler(req, res) {
     const stripe  = new Stripe(stripeKey);
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
+      payment_method_collection: "if_required",
       line_items: [{ price: priceId, quantity: 1 }],
       allow_promotion_codes: true,
       client_reference_id: userId,
