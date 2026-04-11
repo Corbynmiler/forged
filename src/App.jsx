@@ -803,7 +803,7 @@ function useTodayHabitLongPeekHandlers(setPeek, enabled) {
   };
 }
 
-/** Same ··· control as Today / Habits goal rows (inline, not low-contrast absolute). */
+/** ··· overflow control — Today + Habits goal rows (muted, not as faint as body hint text). */
 function TodayOverflowDotsBtn({ expanded, onToggle }) {
   return (
     <button
@@ -812,7 +812,23 @@ function TodayOverflowDotsBtn({ expanded, onToggle }) {
       aria-expanded={expanded}
       onPointerDown={e => { e.stopPropagation(); }}
       onClick={(e) => { e.stopPropagation(); onToggle(); }}
-      style={{ fontSize:18, color:T.hint, background:"none", border:"none", cursor:"pointer", lineHeight:1, padding:"2px 4px", flexShrink:0 }}
+      style={{
+        fontSize: 21,
+        fontWeight: 700,
+        letterSpacing: "0.06em",
+        color: expanded ? T.sub : T.muted,
+        background: expanded ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.03)",
+        border: `0.5px solid ${expanded ? T.borderMid : T.border}`,
+        borderRadius: T.rsm,
+        cursor: "pointer",
+        lineHeight: 1,
+        padding: "5px 8px",
+        flexShrink: 0,
+        minWidth: 36,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
     >
       ···
     </button>
@@ -1889,7 +1905,7 @@ const GLOBAL_TOUR = [
   {
     target: "[data-tour='nav']",
     title: "Five screens, one app",
-    body: "Today logs habits. Journal stores reflections. Insights shows patterns. Habits lets you manage everything. Profile tracks your XP and account.",
+    body: "Today logs habits. Journal stores reflections. Insights shows patterns. Social is where Forge Pro crew features will live. Profile tracks your XP and account.",
     pad: 4, radius: 16, callout: "top",
   },
 ];
@@ -1909,12 +1925,12 @@ const PAGE_TOURS = {
       pad: 6,
     },
   ],
-  habits: [
+  social: [
     {
-      target: "[data-tour='habits-add']",
-      title: "Add and manage habits",
-      body: "Tap here to add a new habit. Tap any existing habit to edit it, view its full history, or delete it.",
-      pad: 6,
+      target: "[data-tour='social-teaser']",
+      title: "Forge together",
+      body: "Forge Pro adds friends, challenges, streak comparisons, and group leaderboards — built for people who want accountability that actually sticks.",
+      pad: 8,
     },
     {
       target: "[data-tour='coach-card']",
@@ -3587,95 +3603,6 @@ function EditGoalModal({ goal, onClose, onSave }) {
   );
 }
 
-// ─── GOAL CARD ────────────────────────────────────────────────────────────────
-function GoalCard({ goal, onEdit, onComplete, onDelete }) {
-  const stats = getGoalProgress(goal);
-  const { isComplete } = stats;
-  const barFillPct = goalBarFillWidthPct(stats);
-  const statusText = getGoalStatusText(goal, stats);
-  const [showMenu, setShowMenu] = useState(false);
-  const achievedDate = goal.logs?.filter(l => typeof l.value === "number").sort((a, b) => a.date.localeCompare(b.date)).at(-1)?.date || goal.lastLogDate || null;
-
-  return (
-    <div
-      onClick={e => e.stopPropagation()}
-      style={{ margin:"0 14px 10px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${isComplete ? "rgba(39,174,96,0.4)" : T.border}`, overflow:"hidden" }}>
-      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px 10px" }}>
-        <div style={{ width:40, height:40, borderRadius:11, background:goal.color+"20", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>{goal.emoji}</div>
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{goal.name}</div>
-          <div style={{ fontSize:12, color:T.muted, marginTop:1 }}>
-            <strong style={{ color:goal.color }}>{goal.currentValue}{goal.unit}</strong>
-            {" → "}<strong style={{ color:T.text }}>{goal.targetValue}{goal.unit}</strong>
-          </div>
-        </div>
-        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          <button
-            type="button"
-            onPointerDown={e => { e.stopPropagation(); }}
-            onMouseDown={e => { e.stopPropagation(); }}
-            onClick={e => { e.stopPropagation(); onEdit(goal.id); }}
-            style={{ fontSize:12, color:goal.color, background:"none", border:`0.5px solid ${goal.color+"55"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>
-            Edit
-          </button>
-          <button type="button" onClick={(e) => { e.stopPropagation(); setShowMenu(m => !m); }}
-            style={{ fontSize:18, color:T.hint, background:"none", border:"none", cursor:"pointer", lineHeight:1, padding:"2px 4px" }}>
-            ···
-          </button>
-        </div>
-      </div>
-
-      {/* Progress bar */}
-      <div style={{ padding:"0 15px 4px" }}>
-        <div style={{ height:5, background:T.surface, borderRadius:3, overflow:"hidden", marginBottom:6 }}>
-          <div style={{ height:"100%", borderRadius:3, background:isComplete ? T.green : goal.color, width:`${barFillPct}%`, transition:"width 0.4s ease" }}/>
-        </div>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-          <div style={{ fontSize:11, color:isComplete ? T.green : T.muted, fontWeight:isComplete ? 500 : 400 }}>
-            {isComplete ? "🎉 Goal reached — great work!" : statusText}
-          </div>
-          {goal.lastLogDate && (
-            <div style={{ fontSize:10, color:T.hint }}>
-              Last: {fmtEntryDate(goal.lastLogDate)}
-            </div>
-          )}
-          {goal.targetDate && (
-            <div style={{ fontSize:10, color:T.hint, marginLeft:8 }}>
-              By {fmtEntryDate(goal.targetDate)}
-            </div>
-          )}
-        </div>
-        {isComplete && (
-          <div style={{ marginTop:8, fontSize:11, color:T.green, background:"rgba(39,174,96,0.10)", border:`0.5px solid rgba(39,174,96,0.28)`, borderRadius:T.rsm, padding:"6px 8px" }}>
-            Milestone unlocked{achievedDate ? ` · achieved ${fmtEntryDate(achievedDate)}` : ""} ✨
-          </div>
-        )}
-      </div>
-
-      {/* Inline menu */}
-      {showMenu && (
-        <div style={{ borderTop:`0.5px solid ${T.border}`, padding:"8px 15px 10px", display:"flex", gap:8 }}>
-          {!isComplete && (
-            <button type="button" onClick={(e) => { e.stopPropagation(); onComplete(goal.id); setShowMenu(false); }}
-              style={{ fontSize:12, color:T.green, background:"none", border:`0.5px solid ${T.green+"44"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer" }}>
-              Complete goal
-            </button>
-          )}
-          <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(goal.id); setShowMenu(false); }}
-            style={{ fontSize:12, color:"#e74c3c", background:"none", border:`0.5px solid rgba(231,76,60,0.3)`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer" }}>
-            Delete
-          </button>
-          <button type="button" onClick={(e) => { e.stopPropagation(); setShowMenu(false); }}
-            style={{ fontSize:12, color:T.muted, background:"none", border:"none", cursor:"pointer", marginLeft:"auto" }}>
-            Cancel
-          </button>
-        </div>
-      )}
-      <div style={{ height:6 }}/>
-    </div>
-  );
-}
-
 // ─── ADD ACTION SHEET ─────────────────────────────────────────────────────────
 function AddActionSheet({ onAddHabit, onAddGoal, onClose }) {
   return (
@@ -3703,106 +3630,69 @@ function AddActionSheet({ onAddHabit, onAddGoal, onClose }) {
   );
 }
 
-// ─── HABITS SCREEN ────────────────────────────────────────────────────────────
-function HabitsScreen({ habits, goals = [], onEdit, onDelete, onAdd, onReflect, onCoach, onUpgrade, isPro, coachName, onEditGoal, onDeleteGoal, onCompleteGoal }) {
-  const [confirmDelete, setConfirmDelete] = useState(null);
-  const [completedOpen, setCompletedOpen] = useState(false);
-  const grouped = Object.fromEntries(Object.keys(HABIT_TYPES).map(k => [k, habits.filter(h => h.habitType === k)]));
-  const activeGoals    = goals.filter(g => g.status !== "completed");
-  const completedGoals = goals.filter(g => g.status === "completed");
-
-  function DetailRow({ h }) {
-    if (h.habitType === "project") {
-      const s = getProjectStats(h);
-      return <div style={{ padding:"0 15px 14px", display:"flex", gap:8 }}><Stat label="total hrs" value={s.totalHours} color={h.color}/><Stat label="wins" value={s.wins} color={T.green}/><Stat label="hard parts" value={s.hard} color={T.amber}/></div>;
-    }
-    if (h.habitType === "weekly") {
-      const wk = getWeeklyCount(h), pct = Math.min(100, Math.round((wk / h.weeklyTarget) * 100));
-      return <div style={{ padding:"0 15px 14px" }}><div style={{ height:5, background:T.surface, borderRadius:3, overflow:"hidden" }}><div style={{ height:"100%", borderRadius:3, background:h.color, width:`${pct}%` }}/></div><div style={{ fontSize:11, color:T.muted, marginTop:5 }}>{wk}/{h.weeklyTarget} sessions this week</div></div>;
-    }
-    return null;
-  }
-
+// ─── SOCIAL / FORGE PRO TEASER (replaces former Habits tab) ───────────────────
+function SocialTeaserCard({ emoji, title, children }) {
   return (
-    <div>
-      <div style={{ padding:"16px 18px 10px" }}>
-        <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>Your habits</div>
-        <div style={{ fontSize:13, color:T.muted, marginTop:3 }}>{habits.length} habit{habits.length !== 1 ? "s" : ""}{goals.length > 0 ? ` · ${activeGoals.length} goal${activeGoals.length !== 1 ? "s" : ""}` : ""}</div>
+    <div className="rc" style={{ margin:"0 14px 10px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, overflow:"hidden", padding:"16px 16px 15px" }}>
+      <div style={{ display:"flex", alignItems:"flex-start", gap:12 }}>
+        <div style={{ width:44, height:44, borderRadius:12, flexShrink:0, background:"rgba(200,144,42,0.12)", border:`0.5px solid rgba(200,144,42,0.22)`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>{emoji}</div>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:15, fontWeight:600, color:T.text, letterSpacing:"-0.01em", marginBottom:6 }}>{title}</div>
+          <div style={{ fontSize:13, color:T.sub, lineHeight:1.55 }}>{children}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SocialTeaserScreen() {
+  return (
+    <div data-tour="social-teaser">
+      <div style={{ padding:"22px 18px 6px", textAlign:"center" }}>
+        <div
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "5px 12px 6px",
+            borderRadius: 999,
+            background: "rgba(200,144,42,0.12)",
+            border: "0.5px solid rgba(200,144,42,0.35)",
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: "0.04em",
+            textTransform: "uppercase",
+            color: T.gold,
+            marginBottom: 18,
+          }}
+        >
+          Forge Pro — Beta coming soon
+        </div>
+        <h1 style={{ fontFamily: T.serif, fontSize: 30, fontWeight: 400, color: T.text, margin: 0, lineHeight: 1.15, letterSpacing: "-0.02em" }}>
+          Forge together.
+        </h1>
+        <p style={{ fontSize: 15, color: T.sub, lineHeight: 1.55, margin: "14px 0 0", maxWidth: 340, marginLeft: "auto", marginRight: "auto" }}>
+          Challenge friends, compare streaks, and stay accountable with people who actually push you.
+        </p>
       </div>
 
-      {/* Goals section */}
-      {(activeGoals.length > 0 || completedGoals.length > 0) && (
-        <div>
-          <SLabel>Goals</SLabel>
-          {activeGoals.map(g => (
-            <GoalCard key={g.id} goal={g} onEdit={onEditGoal} onComplete={() => onCompleteGoal(g.id)} onDelete={() => onDeleteGoal(g.id)} />
-          ))}
-          {completedGoals.length > 0 && (
-            <div style={{ margin:"0 14px 10px" }}>
-              <button onClick={() => setCompletedOpen(o => !o)}
-                style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", background:"none", border:`0.5px solid ${T.border}`, borderRadius:T.r, padding:"10px 14px", cursor:"pointer", color:T.muted, fontSize:13 }}>
-                <span>Completed goals ({completedGoals.length})</span>
-                <span style={{ fontSize:10, transform: completedOpen ? "rotate(180deg)" : "none", display:"inline-block", transition:"transform 0.2s" }}>▼</span>
-              </button>
-              {completedOpen && completedGoals.map(g => (
-                <GoalCard key={g.id} goal={g} onEdit={onEditGoal} onComplete={() => onCompleteGoal(g.id)} onDelete={() => onDeleteGoal(g.id)} />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      <div style={{ height: 8 }} />
 
-      {/* Habits section */}
-      {Object.entries(grouped).filter(([, arr]) => arr.length > 0).map(([type, arr]) => (
-        <div key={type}>
-          <SLabel>{HABIT_TYPES[type]?.label}</SLabel>
-          {arr.map(h => (
-            <div key={h.id} className="rc" style={{ margin:"0 14px 10px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${confirmDelete===h.id?"rgba(231,76,60,0.4)":T.border}`, overflow:"hidden", transition:"border-color 0.2s" }}>
-              <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
-                <div style={{ width:44, height:44, borderRadius:12, flexShrink:0, background:h.color+"20", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>{h.emoji}</div>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{h.name}</div>
-                  <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>
-                    {getStreak(h)>0?`🔥 ${getStreak(h)} · `:""}
-                    {h.habitType === "weekly"
-                      ? `${getWeeklyCount(h)} this week · ${getTotalSessionLogsCount(h)} total logged`
-                      : `${new Set(h.logs.filter(l=>l.value!=="quicknote").map(l=>l.date)).size} days logged`}
-                  </div>
-                </div>
-                {confirmDelete === h.id ? (
-                  <>
-                    <button onClick={() => { onDelete(h.id); setConfirmDelete(null); }}
-                      style={{ fontSize:12, color:"#e74c3c", background:"rgba(231,76,60,0.1)", border:`0.5px solid rgba(231,76,60,0.4)`, borderRadius:T.rsm, padding:"5px 11px", cursor:"pointer", fontWeight:500, marginRight:4 }}>
-                      Delete
-                    </button>
-                    <button onClick={() => setConfirmDelete(null)}
-                      style={{ fontSize:12, color:T.muted, background:"none", border:`0.5px solid ${T.border}`, borderRadius:T.rsm, padding:"5px 11px", cursor:"pointer" }}>
-                      Cancel
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); onEdit(h.id); }} style={{ fontSize:12, color:h.color, background:"none", border:`0.5px solid ${h.color+"44"}`, borderRadius:T.rsm, padding:"4px 10px", cursor:"pointer", fontWeight:500, marginRight:6 }}>Edit</button>
-                    <button onClick={() => setConfirmDelete(h.id)} style={{ fontSize:18, color:T.hint, background:"none", border:"none", cursor:"pointer" }}>×</button>
-                  </>
-                )}
-              </div>
-              {confirmDelete === h.id && (
-                <div style={{ padding:"0 15px 12px", fontSize:12, color:"rgba(231,76,60,0.8)" }}>
-                  This will permanently delete <strong>{h.name}</strong> and all its logs. This can't be undone.
-                </div>
-              )}
-              <DetailRow h={h}/>
-            </div>
-          ))}
-        </div>
-      ))}
+      <SocialTeaserCard emoji="🤝" title="Friends & challenges">
+        Add your crew and set shared targets — small groups, real stakes, and the kind of pressure that feels like support.
+      </SocialTeaserCard>
+      <SocialTeaserCard emoji="🔥" title="Streak comparisons">
+        {"See who's on a run. Light a fire under each other — friendly rivalry that keeps everyone showing up."}
+      </SocialTeaserCard>
+      <SocialTeaserCard emoji="🏆" title="Leaderboard">
+        Weekly rankings across your group. Top of the board wins bragging rights — and everyone else gets a reason to log one more day.
+      </SocialTeaserCard>
 
-      <button data-tour="habits-add" onClick={onAdd} style={{ margin:"8px 14px 0", width:"calc(100% - 28px)", border:`1px dashed ${T.borderStrong}`, background:"none", borderRadius:T.r, padding:14, fontSize:13, color:T.muted, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2v10M2 7h10" stroke={T.muted} strokeWidth="1.5" strokeLinecap="round"/></svg>Add habit or goal
-      </button>
-
-      <div style={{ paddingBottom:16 }}></div>
+      <div style={{ margin: "22px 18px 28px", padding: "16px 18px", borderRadius: T.r, border: `0.5px solid ${T.borderMid}`, background: "linear-gradient(165deg, rgba(200,144,42,0.08) 0%, ${T.surface} 55%)", textAlign: "center" }}>
+        <p style={{ fontSize: 13, color: T.muted, lineHeight: 1.6, margin: 0 }}>
+          {"You'll get early access as a Forged beta user."}
+        </p>
+      </div>
     </div>
   );
 }
@@ -3863,7 +3753,7 @@ function buildCoachSystemPrompt(user, habits, coachName, screen) {
 
   const screenCtx = {
     today:    "The user is on the Today screen, viewing their daily habit checklist.",
-    habits:   "The user is on the Habits screen, viewing all their habits and their configurations.",
+    social:   "The user is on the Social (Forge Pro) teaser screen — upcoming crew features: friends, challenges, streak comparisons, and leaderboards. Nothing to configure here yet.",
     journal:  "The user is on the Journal screen, reviewing past reflections and notes.",
     insights: "The user is on the Insights screen, seeing stats and streak charts.",
     profile:  "The user is on the Profile screen.",
@@ -6419,7 +6309,7 @@ export default function App() {
           </div>
           <TodayScreen habits={habits} goals={goals} xp={0} onTap={handleTap} onUndo={() => {}} onSkip={() => {}} onAddNote={() => demoBounce()} onLogZero={() => demoBounce()} onOpenLog={() => demoBounce()} onOpenGoalLog={() => demoBounce()} onEditGoal={() => demoBounce()} onCompleteGoal={() => demoBounce()} onDeleteGoal={() => demoBounce()} onEditHabit={() => demoBounce()} onDeleteHabit={() => demoBounce()} onXPInfo={() => {}} onCoach={() => demoBounce()} onAdd={() => demoBounce()}/>
           <nav style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:430, maxWidth:"100vw", background:"rgba(26,26,22,0.96)", backdropFilter:"blur(16px)", borderTop:`0.5px solid ${T.border}`, display:"flex", zIndex:100, paddingBottom:6 }}>
-            {[{id:"today",label:"Today"},{id:"journal",label:"Journal"},{id:"insights",label:"Insights"},{id:"habits",label:"Habits"},{id:"profile",label:"Profile"}].map(n => (
+            {[{id:"today",label:"Today"},{id:"journal",label:"Journal"},{id:"insights",label:"Insights"},{id:"social",label:"Social"},{id:"profile",label:"Profile"}].map(n => (
               <button key={n.id} onClick={() => demoBounce()} style={{ flex:1, padding:"10px 4px 6px", border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3, fontSize:10, fontWeight:500, color:n.id==="today"?T.accent:T.muted }}>
                 {n.label}
               </button>
@@ -6716,8 +6606,8 @@ export default function App() {
   // Gate adding habits at 5 for free users
   function handleStartAdd() {
     if (demoBounce()) return;
-    // On Habits / Today, show choice sheet (habit or goal), then AddModal or AddGoalModal — same modals as Habits.
-    if (screen === "habits" || screen === "today") {
+    // On Today, show choice sheet (habit or goal), then AddModal or AddGoalModal.
+    if (screen === "today") {
       setShowAddChoice(true);
     } else if (!isPro && habits.length >= 5) {
       setShowUpgrade(true);
@@ -6871,7 +6761,7 @@ export default function App() {
     { id:"today",    label:"Today",    icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.5"/><path d="M10 6v4l2.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
     { id:"journal",  label:"Journal",  icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="4" y="3" width="12" height="14" rx="2" stroke="currentColor" strokeWidth="1.5"/><path d="M7 7h6M7 10h6M7 13h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg> },
     { id:"insights", label:"Insights", icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 15l4-5 3 3 4-6 3 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg> },
-    { id:"habits",   label:"Habits",   icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 6h12M4 10h12M4 14h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
+    { id:"social",   label:"Social",   icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden><circle cx="7.5" cy="7" r="2.5" stroke="currentColor" strokeWidth="1.5"/><path d="M3 16.5c0-2.5 2-4.5 4.5-4.5s4.5 2 4.5 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><circle cx="14.5" cy="6.5" r="2" stroke="currentColor" strokeWidth="1.5"/><path d="M11 16.5c0-1.7 1.1-3.1 2.6-3.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
     { id:"profile",  label:"Profile",  icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="7" r="3" stroke="currentColor" strokeWidth="1.5"/><path d="M4 17c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
   ];
 
@@ -6901,7 +6791,7 @@ export default function App() {
         {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onXPInfo={() => setShowXP(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)} onAdd={handleStartAdd} isPro={isPro} coachName={coachName}/>}
         {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
         {screen === "insights" && <InsightsScreen habits={habits} goals={goals} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
-        {screen === "habits"   && <HabitsScreen   habits={habits} goals={goals} onEdit={openEditHabit} onDelete={handleDeleteHabit} onAdd={handleStartAdd} onReflect={setReflectId} onCoach={() => setShowCoach(true)} onUpgrade={() => setShowUpgrade(true)} isPro={isPro} coachName={coachName} onEditGoal={openEditGoal} onDeleteGoal={handleDeleteGoal} onCompleteGoal={handleCompleteGoal}/>}
+        {screen === "social"   && <SocialTeaserScreen />}
         {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} stripeCustomerId={stripeCustomerId} refCode={refCode}
           authEmail={authEmail}
           onUpgrade={() => setShowUpgrade(true)}
