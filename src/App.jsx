@@ -4719,7 +4719,7 @@ function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
   );
 }
 
-function ProfileScreen({ user, xp, habits, isPro, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onSignOut, onShowTour, onUpgrade, coachName, onUpdateCoachName }) {
+function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onSignOut, onShowTour, onUpgrade, coachName, onUpdateCoachName }) {
   const [editingName,    setEditingName]    = useState(false);
   const [nameVal,        setNameVal]        = useState(user.name);
   const [editingCoach,   setEditingCoach]   = useState(false);
@@ -4728,6 +4728,7 @@ function ProfileScreen({ user, xp, habits, isPro, refCode, authEmail, onUpdateUs
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
   const [refCount,       setRefCount]       = useState(null);
   const [refCopied,      setRefCopied]      = useState(false);
+  const [portalLoading,  setPortalLoading]  = useState(false);
 
   useEffect(() => {
     supabase.rpc("my_referral_count").then(({ data }) => {
@@ -4866,6 +4867,52 @@ function ProfileScreen({ user, xp, habits, isPro, refCode, authEmail, onUpdateUs
             <div style={{ fontSize:14, color:T.text, lineHeight:1.6 }}>
               You're an early supporter — thanks for backing Forged while it's in beta. 🙌<br/>
               <span style={{ fontSize:12, color:T.muted }}>You get beta access to everything, including AI Habit Coach.</span>
+              {stripeCustomerId ? (
+                <button
+                  type="button"
+                  disabled={portalLoading}
+                  onClick={async () => {
+                    setPortalLoading(true);
+                    try {
+                      const res = await fetch("/api/create-portal-session", {
+                        method: "POST",
+                        headers: {
+                          "Content-Type": "application/json",
+                          Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token || ""}`,
+                        },
+                        body: "{}",
+                      });
+                      const json = await res.json().catch(() => ({}));
+                      if (res.ok && json.url) window.location.href = json.url;
+                      else window.alert(json.error || "Couldn't open billing — try again or email support.");
+                    } catch {
+                      window.alert("Couldn't connect — try again.");
+                    } finally {
+                      setPortalLoading(false);
+                    }
+                  }}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    marginTop: 14,
+                    padding: "11px 14px",
+                    borderRadius: T.rsm,
+                    border: `0.5px solid rgba(200,144,42,0.45)`,
+                    background: "rgba(200,144,42,0.10)",
+                    color: T.gold,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: portalLoading ? "wait" : "pointer",
+                    opacity: portalLoading ? 0.75 : 1,
+                  }}
+                >
+                  {portalLoading ? "Opening billing…" : "Manage subscription & billing →"}
+                </button>
+              ) : (
+                <div style={{ fontSize:11, color:T.hint, marginTop:12, lineHeight:1.5 }}>
+                  Billing portal links to Stripe after checkout records your customer. If you should have access here, refresh or contact support.
+                </div>
+              )}
             </div>
           ) : (
             <>
@@ -5425,6 +5472,8 @@ export default function App() {
   // Tour temporarily disabled — state kept for re-enabling
   const [showShare,   setShowShare]   = useState(false);
   const [isPro,          setIsPro]          = useState(false);
+  /** From profiles.stripe_customer_id — used for Stripe Customer Portal */
+  const [stripeCustomerId, setStripeCustomerId] = useState(null);
   const [coachName,      setCoachName]      = useState("Coach");
   const [showUpgrade,    setShowUpgrade]    = useState(false);
   const [checkingPayment,setCheckingPayment]= useState(false);
@@ -5616,12 +5665,15 @@ export default function App() {
           setShowWelcome(true);
         }
         setRefCode(profile.ref_code ?? null);
+        setStripeCustomerId(profile.stripe_customer_id ?? null);
         setCoachName(profile.coach_name || "Coach");
         isOnboarded = profile.onboarded ?? false;
         if (!isOnboarded && profile.name && profile.name.trim()) {
           isOnboarded = true;
           supabase.from("profiles").update({ onboarded: true, updated_at: new Date().toISOString() }).eq("id", uid);
         }
+      } else {
+        setStripeCustomerId(null);
       }
 
       if (rows && rows.length > 0) {
@@ -5907,6 +5959,7 @@ export default function App() {
           setXp(0);
           setOnboarded(null);
           setIsPro(false);
+          setStripeCustomerId(null);
           setRefCode(null);
           setAuthEmail(null);
           localStorage.removeItem('forged_checkout_pending');
@@ -6646,7 +6699,7 @@ export default function App() {
         {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
         {screen === "insights" && <InsightsScreen habits={habits} goals={goals} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
         {screen === "habits"   && <HabitsScreen   habits={habits} goals={goals} onEdit={id => { setEditGoalId(null); setEditId(id); }} onDelete={handleDeleteHabit} onAdd={handleStartAdd} onReflect={setReflectId} onCoach={() => setShowCoach(true)} onUpgrade={() => setShowUpgrade(true)} isPro={isPro} coachName={coachName} onEditGoal={id => { setEditId(null); setEditGoalId(id); }} onDeleteGoal={handleDeleteGoal} onCompleteGoal={handleCompleteGoal}/>}
-        {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} refCode={refCode}
+        {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} stripeCustomerId={stripeCustomerId} refCode={refCode}
           authEmail={authEmail}
           onUpgrade={() => setShowUpgrade(true)}
           onUpdateUser={updates => {

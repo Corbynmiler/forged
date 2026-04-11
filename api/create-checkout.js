@@ -1,6 +1,10 @@
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 
+/**
+ * Env priority (Vercel): use canonical live vars first — STRIPE_SECRET_KEY, STRIPE_MONTHLY_PRICE_ID,
+ * STRIPE_ANNUAL_PRICE_ID. Test backups (e.g. Stripe_Secret_Key_Test) are only used if the live var is unset.
+ */
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") return res.status(405).end();
@@ -12,7 +16,6 @@ export default async function handler(req, res) {
       : null;
     if (!token) return res.status(401).json({ error: "Missing Authorization bearer token" });
 
-    // Support both canonical and test-suffixed env var names
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const stripeKey      = process.env.STRIPE_SECRET_KEY      || process.env.Stripe_Secret_Key_Test;
     const priceId        = plan === "annual"
@@ -35,6 +38,7 @@ export default async function handler(req, res) {
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       line_items: [{ price: priceId, quantity: 1 }],
+      allow_promotion_codes: true,
       client_reference_id: userId,
       ...(email ? { customer_email: email } : {}),
       success_url: `${process.env.APP_URL || "https://forged-sage.vercel.app"}/?checkout=success`,

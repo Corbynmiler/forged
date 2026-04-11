@@ -1,6 +1,7 @@
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 
+/** Verify with STRIPE_WEBHOOK_SECRET (live) when set; STRIPE_WEBHOOK_KEY is legacy fallback. */
 // Disable body parsing — Stripe needs the raw body to verify signatures
 export const config = { api: { bodyParser: false } };
 
@@ -19,7 +20,6 @@ export default async function handler(req, res) {
   const sig = req.headers["stripe-signature"];
   if (!sig) return res.status(400).json({ error: "Missing stripe-signature header" });
 
-  // Support both canonical and variant env var names
   const stripeKey     = process.env.STRIPE_SECRET_KEY   || process.env.Stripe_Secret_Key_Test;
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || process.env.STRIPE_WEBHOOK_KEY;
 
