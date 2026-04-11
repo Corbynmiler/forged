@@ -776,7 +776,7 @@ function PlusBtn({ habit, logged, onClick }) {
 
 // ─── HABIT CARDS ─────────────────────────────────────────────────────────────
 
-/** Long-press empty card area (not buttons/inputs) to open Today habit options — complements the ··· affordance. */
+/** Long-press empty card area (not buttons/inputs) to open the Today habit ··· menu. */
 function useTodayHabitLongPeekHandlers(setPeek, enabled) {
   const lpTimer = useRef(null);
   const clearLp = () => {
@@ -803,57 +803,65 @@ function useTodayHabitLongPeekHandlers(setPeek, enabled) {
   };
 }
 
-/** Subtle ··· on Today habit cards — tap reveals Habits-matching Edit / × (then same delete confirm copy). */
-function TodayHabitMgmtAffordance({ rightPx, peek, onTogglePeek }) {
+/** Same ··· control as Today / Habits goal rows (inline, not low-contrast absolute). */
+function TodayOverflowDotsBtn({ expanded, onToggle }) {
   return (
     <button
       type="button"
-      aria-label="Habit options"
-      aria-expanded={peek}
-      onClick={(e) => { e.stopPropagation(); onTogglePeek(); }}
-      style={{
-        position:"absolute", right:rightPx, top:"50%", transform:"translateY(-50%)",
-        padding:"6px 2px", zIndex:2, background:"none", border:"none", cursor:"pointer",
-        color:T.hint, fontSize:14, opacity:peek ? 0.85 : 0.38, lineHeight:1,
-      }}
+      aria-label="Options"
+      aria-expanded={expanded}
+      onPointerDown={e => { e.stopPropagation(); }}
+      onClick={(e) => { e.stopPropagation(); onToggle(); }}
+      style={{ fontSize:18, color:T.hint, background:"none", border:"none", cursor:"pointer", lineHeight:1, padding:"2px 4px", flexShrink:0 }}
     >
       ···
     </button>
   );
 }
 
-function TodayHabitMgmtStrip({ habit, onEdit, onDelete, peek, onClosePeek }) {
+/** Today habit cards: ··· menu with Edit / Delete (delete uses same confirm copy as Habits list). */
+function TodayHabitMenuDropdown({ habit, onEdit, onDelete, menuOpen, onCloseMenu }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   useEffect(() => {
-    if (!peek) setConfirmDelete(false);
-  }, [peek]);
-  if (!peek) return null;
+    if (!menuOpen) setConfirmDelete(false);
+  }, [menuOpen]);
+  if (!menuOpen) return null;
   if (confirmDelete) {
     return (
-      <>
-        <div style={{ padding:"8px 15px 10px", borderTop:`0.5px solid ${T.border}`, display:"flex", alignItems:"center", gap:8, justifyContent:"flex-end" }}>
-          <button type="button" onClick={() => { onDelete(habit.id); setConfirmDelete(false); onClosePeek(); }}
-            style={{ fontSize:12, color:"#e74c3c", background:"rgba(231,76,60,0.1)", border:`0.5px solid rgba(231,76,60,0.4)`, borderRadius:T.rsm, padding:"5px 11px", cursor:"pointer", fontWeight:500, marginRight:4 }}>
+      <div onClick={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()}>
+        <div style={{ padding:"10px 15px 6px", borderTop:`0.5px solid ${T.border}`, fontSize:13, fontWeight:500, color:T.text }}>
+          Delete {habit.name}?
+        </div>
+        <div style={{ padding:"8px 15px 10px", display:"flex", alignItems:"center", gap:8, justifyContent:"flex-end" }}>
+          <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(habit.id); setConfirmDelete(false); onCloseMenu(); }}
+            style={{ fontSize:12, color:"#e74c3c", background:"rgba(231,76,60,0.1)", border:`0.5px solid rgba(231,76,60,0.4)`, borderRadius:T.rsm, padding:"5px 11px", cursor:"pointer", fontWeight:500 }}>
             Delete
           </button>
-          <button type="button" onClick={() => setConfirmDelete(false)}
+          <button type="button" onClick={(e) => { e.stopPropagation(); setConfirmDelete(false); }}
             style={{ fontSize:12, color:T.muted, background:"none", border:`0.5px solid ${T.border}`, borderRadius:T.rsm, padding:"5px 11px", cursor:"pointer" }}>
             Cancel
           </button>
         </div>
         <div style={{ padding:"0 15px 12px", fontSize:12, color:"rgba(231,76,60,0.8)" }}>
-          This will permanently delete <strong>{habit.name}</strong> and all its logs. This can't be undone.
+          This will permanently delete <strong>{habit.name}</strong> and all its logs. {"This can't be undone."}
         </div>
-      </>
+      </div>
     );
   }
   return (
-    <div style={{ padding:"8px 15px 10px", borderTop:`0.5px solid ${T.border}`, display:"flex", alignItems:"center", gap:8 }}>
-      <button type="button" onClick={(e) => { e.stopPropagation(); onEdit(habit.id); onClosePeek(); }}
-        style={{ fontSize:12, color:habit.color, background:"none", border:`0.5px solid ${habit.color+"44"}`, borderRadius:T.rsm, padding:"4px 10px", cursor:"pointer", fontWeight:500, marginRight:6 }}>
+    <div onClick={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()} style={{ borderTop:`0.5px solid ${T.border}`, padding:"8px 15px 10px", display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+      <button type="button" onPointerDown={e => e.stopPropagation()} onClickCapture={e => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onEdit(habit.id); onCloseMenu(); }}
+        style={{ fontSize:12, color:habit.color, background:"none", border:`0.5px solid ${habit.color+"44"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>
         Edit
       </button>
-      <button type="button" onClick={() => setConfirmDelete(true)} style={{ fontSize:18, color:T.hint, background:"none", border:"none", cursor:"pointer" }}>×</button>
+      <button type="button" aria-label="Delete habit" onClick={(e) => { e.stopPropagation(); setConfirmDelete(true); }}
+        style={{ fontSize:12, color:"#e74c3c", background:"none", border:`0.5px solid rgba(231,76,60,0.3)`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>
+        Delete
+      </button>
+      <button type="button" onClick={(e) => { e.stopPropagation(); onCloseMenu(); }}
+        style={{ fontSize:12, color:T.muted, background:"none", border:"none", cursor:"pointer", marginLeft:"auto" }}>
+        Cancel
+      </button>
     </div>
   );
 }
@@ -864,8 +872,8 @@ function DailyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDeleteHabit
   const isSkip = tLog?.value === "skip";
   const [restOpen, setRestOpen] = useState(false);
   const [restWhy, setRestWhy] = useState("");
-  const [habitPeek, setHabitPeek] = useState(false);
-  const longPeek = useTodayHabitLongPeekHandlers(setHabitPeek, !!(onEditHabit && onDeleteHabit));
+  const [habitMenuOpen, setHabitMenuOpen] = useState(false);
+  const longPeek = useTodayHabitLongPeekHandlers(setHabitMenuOpen, !!(onEditHabit && onDeleteHabit));
   useEffect(() => {
     if (logged) {
       setRestOpen(false);
@@ -874,7 +882,7 @@ function DailyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDeleteHabit
   }, [logged]);
   return (
     <div className="rc" style={cardStyle(logged && !isSkip, habit)} {...longPeek}>
-      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px", position:"relative" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
         <IconBox habit={habit} logged={logged && !isSkip}/>
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{habit.name}</div>
@@ -883,7 +891,7 @@ function DailyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDeleteHabit
           </div>
         </div>
         {onEditHabit && onDeleteHabit && (
-          <TodayHabitMgmtAffordance rightPx={52} peek={habitPeek} onTogglePeek={() => setHabitPeek(p => !p)} />
+          <TodayOverflowDotsBtn expanded={habitMenuOpen} onToggle={() => setHabitMenuOpen(p => !p)} />
         )}
         {isSkip
           ? <button className="tap" onClick={() => onTap(habit.id, { currentTarget: { getBoundingClientRect: () => ({left:0,top:0,width:0,height:0}) } })}
@@ -894,7 +902,7 @@ function DailyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDeleteHabit
         }
       </div>
       {onEditHabit && onDeleteHabit && (
-        <TodayHabitMgmtStrip habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} peek={habitPeek} onClosePeek={() => setHabitPeek(false)} />
+        <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} />
       )}
       {isSkip && (
         <div style={{ margin:"0 15px 12px", background:"rgba(106,104,96,0.15)", borderRadius:T.rsm, padding:"8px 12px", display:"flex", flexDirection:"column", gap:6 }}>
@@ -951,11 +959,11 @@ function WeeklyCard({ habit, onTap, onAddNote, onEditHabit, onDeleteHabit }) {
   const logged = isLoggedToday(habit);
   const wk = getWeeklyCount(habit);
   const pct = Math.min(100, Math.round((wk / habit.weeklyTarget) * 100));
-  const [habitPeek, setHabitPeek] = useState(false);
-  const longPeek = useTodayHabitLongPeekHandlers(setHabitPeek, !!(onEditHabit && onDeleteHabit));
+  const [habitMenuOpen, setHabitMenuOpen] = useState(false);
+  const longPeek = useTodayHabitLongPeekHandlers(setHabitMenuOpen, !!(onEditHabit && onDeleteHabit));
   return (
     <div className="rc" style={cardStyle(logged, habit)} {...longPeek}>
-      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px", position:"relative" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
         <IconBox habit={habit} logged={logged}/>
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{habit.name}</div>
@@ -965,12 +973,12 @@ function WeeklyCard({ habit, onTap, onAddNote, onEditHabit, onDeleteHabit }) {
           </div>
         </div>
         {onEditHabit && onDeleteHabit && (
-          <TodayHabitMgmtAffordance rightPx={52} peek={habitPeek} onTogglePeek={() => setHabitPeek(p => !p)} />
+          <TodayOverflowDotsBtn expanded={habitMenuOpen} onToggle={() => setHabitMenuOpen(p => !p)} />
         )}
         <CheckBtn logged={logged} habit={habit} onClick={e => onTap(habit.id, e)}/>
       </div>
       {onEditHabit && onDeleteHabit && (
-        <TodayHabitMgmtStrip habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} peek={habitPeek} onClosePeek={() => setHabitPeek(false)} />
+        <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} />
       )}
       <div style={{ padding:"0 15px 14px" }}>
         <div style={{ height:5, background:T.surface, borderRadius:3, overflow:"hidden", marginBottom:8 }}>
@@ -1015,11 +1023,11 @@ function ProjectCard({ habit, onOpenLog, onAddNote, onEditHabit, onDeleteHabit }
     : `Tap + to log a session${streakPhrase}`;
   const buildMetaDisplay = truncateText(buildMeta, 68);
   const latestWinDisplay = truncateText(lastWin?.value?.win || "", 96);
-  const [habitPeek, setHabitPeek] = useState(false);
-  const longPeek = useTodayHabitLongPeekHandlers(setHabitPeek, !!(onEditHabit && onDeleteHabit));
+  const [habitMenuOpen, setHabitMenuOpen] = useState(false);
+  const longPeek = useTodayHabitLongPeekHandlers(setHabitMenuOpen, !!(onEditHabit && onDeleteHabit));
   return (
     <div className="rc" style={cardStyle(logged, habit)} {...longPeek}>
-      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px", position:"relative" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
         <IconBox habit={habit} logged={logged}/>
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{habit.name}</div>
@@ -1028,12 +1036,12 @@ function ProjectCard({ habit, onOpenLog, onAddNote, onEditHabit, onDeleteHabit }
           </div>
         </div>
         {onEditHabit && onDeleteHabit && (
-          <TodayHabitMgmtAffordance rightPx={52} peek={habitPeek} onTogglePeek={() => setHabitPeek(p => !p)} />
+          <TodayOverflowDotsBtn expanded={habitMenuOpen} onToggle={() => setHabitMenuOpen(p => !p)} />
         )}
         <PlusBtn habit={habit} logged={logged} onClick={() => onOpenLog(habit.id)}/>
       </div>
       {onEditHabit && onDeleteHabit && (
-        <TodayHabitMgmtStrip habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} peek={habitPeek} onClosePeek={() => setHabitPeek(false)} />
+        <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} />
       )}
       <div style={{ padding:"0 15px 14px", display:"flex", gap:8 }}>
         <Stat label="hrs this wk" value={stats.weekHours} color={habit.color}/>
@@ -1067,11 +1075,11 @@ function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHabit, on
   const inc      = habit.tapIncrement ?? 1;
   const unitSuffix = habit.unit && habit.unit !== "logged" ? ` ${habit.unit}` : "";
   const limitMetaColor = logged ? (over ? T.accent : T.green) : T.hint;
-  const [habitPeek, setHabitPeek] = useState(false);
-  const longPeek = useTodayHabitLongPeekHandlers(setHabitPeek, !!(onEditHabit && onDeleteHabit));
+  const [habitMenuOpen, setHabitMenuOpen] = useState(false);
+  const longPeek = useTodayHabitLongPeekHandlers(setHabitMenuOpen, !!(onEditHabit && onDeleteHabit));
   return (
     <div className="rc" style={{ ...cardStyle(false, habit), borderColor:over?T.accent+"66":T.border, background:over?`${T.accent}0A`:T.raised }} {...longPeek}>
-      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px", position:"relative" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
         <IconBox habit={habit} logged={false}/>
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{habit.name}</div>
@@ -1088,7 +1096,7 @@ function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHabit, on
           </div>
         </div>
         {onEditHabit && onDeleteHabit && (
-          <TodayHabitMgmtAffordance rightPx={98} peek={habitPeek} onTogglePeek={() => setHabitPeek(p => !p)} />
+          <TodayOverflowDotsBtn expanded={habitMenuOpen} onToggle={() => setHabitMenuOpen(p => !p)} />
         )}
         <div style={{ display:"flex", gap:6, flexShrink:0 }}>
           {logged && (
@@ -1100,7 +1108,7 @@ function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHabit, on
         </div>
       </div>
       {onEditHabit && onDeleteHabit && (
-        <TodayHabitMgmtStrip habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} peek={habitPeek} onClosePeek={() => setHabitPeek(false)} />
+        <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} />
       )}
 
       {logged ? (
@@ -1139,9 +1147,14 @@ function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete, onDelete }) {
   const statusText = getGoalStatusText(goal, stats);
   const deadlineLine = goalTodayDeadlineLine(goal, stats, isComplete);
   const [showMenu, setShowMenu] = useState(false);
+  const [goalDeleteConfirm, setGoalDeleteConfirm] = useState(false);
+  useEffect(() => {
+    if (!showMenu) setGoalDeleteConfirm(false);
+  }, [showMenu]);
   return (
     <div
       onClick={e => e.stopPropagation()}
+      onPointerDown={e => e.stopPropagation()}
       className="rc"
       style={{ margin:"0 14px 10px", background:loggedToday ? `${goal.color}0D` : T.raised, borderRadius:T.r, border:`0.5px solid ${loggedToday ? goal.color+"66" : T.border}`, overflow:"hidden" }}>
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
@@ -1162,18 +1175,7 @@ function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete, onDelete }) {
               Log
             </button>
           )}
-          <button
-            type="button"
-            onPointerDown={e => { e.stopPropagation(); }}
-            onMouseDown={e => { e.stopPropagation(); }}
-            onClick={e => { e.stopPropagation(); onEdit(goal.id); }}
-            style={{ fontSize:12, color:goal.color, background:"none", border:`0.5px solid ${goal.color+"55"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>
-            Edit
-          </button>
-          <button type="button" onClick={(e) => { e.stopPropagation(); setShowMenu(m => !m); }}
-            style={{ fontSize:18, color:T.hint, background:"none", border:"none", cursor:"pointer", lineHeight:1, padding:"2px 4px" }}>
-            ···
-          </button>
+          <TodayOverflowDotsBtn expanded={showMenu} onToggle={() => setShowMenu(m => !m)} />
         </div>
       </div>
       <div style={{ padding:"0 15px 14px" }}>
@@ -1184,22 +1186,59 @@ function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete, onDelete }) {
           <div style={{ fontSize:11, color:T.sub, marginTop:7, lineHeight:1.45 }}>{deadlineLine}</div>
         ) : null}
       </div>
-      {showMenu && (
-        <div style={{ borderTop:`0.5px solid ${T.border}`, padding:"8px 15px 10px", display:"flex", gap:8 }}>
+      {showMenu && !goalDeleteConfirm && (
+        <div
+          role="menu"
+          onClick={e => e.stopPropagation()}
+          onPointerDown={e => e.stopPropagation()}
+          style={{ borderTop:`0.5px solid ${T.border}`, padding:"8px 15px 10px", display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+          <button
+            type="button"
+            onPointerDown={e => { e.stopPropagation(); }}
+            onMouseDown={e => { e.stopPropagation(); }}
+            onClickCapture={e => { e.stopPropagation(); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit(goal.id);
+              setShowMenu(false);
+            }}
+            style={{ fontSize:12, color:goal.color, background:"none", border:`0.5px solid ${goal.color+"55"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>
+            Edit
+          </button>
           {!isComplete && (
             <button type="button" onClick={(e) => { e.stopPropagation(); onComplete(goal.id); setShowMenu(false); }}
               style={{ fontSize:12, color:T.green, background:"none", border:`0.5px solid ${T.green+"44"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer" }}>
               Complete goal
             </button>
           )}
-          <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(goal.id); setShowMenu(false); }}
-            style={{ fontSize:12, color:"#e74c3c", background:"none", border:`0.5px solid rgba(231,76,60,0.3)`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer" }}>
+          <button type="button" aria-label="Delete goal" onClick={(e) => { e.stopPropagation(); setGoalDeleteConfirm(true); }}
+            style={{ fontSize:12, color:"#e74c3c", background:"none", border:`0.5px solid rgba(231,76,60,0.3)`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>
             Delete
           </button>
           <button type="button" onClick={(e) => { e.stopPropagation(); setShowMenu(false); }}
             style={{ fontSize:12, color:T.muted, background:"none", border:"none", cursor:"pointer", marginLeft:"auto" }}>
             Cancel
           </button>
+        </div>
+      )}
+      {showMenu && goalDeleteConfirm && (
+        <div onClick={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()}>
+          <div style={{ padding:"10px 15px 6px", borderTop:`0.5px solid ${T.border}`, fontSize:13, fontWeight:500, color:T.text }}>
+            Delete {goal.name}?
+          </div>
+          <div style={{ padding:"8px 15px 10px", display:"flex", alignItems:"center", gap:8, justifyContent:"flex-end" }}>
+            <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(goal.id); setShowMenu(false); }}
+              style={{ fontSize:12, color:"#e74c3c", background:"rgba(231,76,60,0.1)", border:`0.5px solid rgba(231,76,60,0.4)`, borderRadius:T.rsm, padding:"5px 11px", cursor:"pointer", fontWeight:500 }}>
+              Delete
+            </button>
+            <button type="button" onClick={(e) => { e.stopPropagation(); setGoalDeleteConfirm(false); }}
+              style={{ fontSize:12, color:T.muted, background:"none", border:`0.5px solid ${T.border}`, borderRadius:T.rsm, padding:"5px 11px", cursor:"pointer" }}>
+              Cancel
+            </button>
+          </div>
+          <div style={{ padding:"0 15px 12px", fontSize:12, color:"rgba(231,76,60,0.8)" }}>
+            This will permanently delete <strong>{goal.name}</strong> and its progress. {"This can't be undone."}
+          </div>
         </div>
       )}
     </div>
@@ -6213,9 +6252,14 @@ export default function App() {
     setEditGoalId(id);
   }, []);
   const openEditHabit = useCallback(id => {
+    // Goal rows use `openEditGoal`; if this id is a goal, never open the habit editor (avoids stacked modals / wrong form).
+    if (goals.some(g => g.id === id)) {
+      openEditGoal(id);
+      return;
+    }
     flushSync(() => { setEditGoalId(null); });
     setEditId(id);
-  }, []);
+  }, [goals, openEditGoal]);
 
   const reflectHabit = habits.find(h => h.id === reflectId) || null;
   const editHabit    = habits.find(h => h.id === editId)    || null;
