@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
+import { flushSync } from "react-dom";
 import { supabase, habitToRow, rowToHabit, rowToGoal, goalToRow } from "./supabase.js";
 
 // ─── DATE UTILS ───────────────────────────────────────────────────────────────
@@ -492,7 +493,7 @@ function Modal({ children, onClose }) {
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", zIndex:300, display:"flex", alignItems:"flex-end", justifyContent:"center" }}
       onClick={e => e.target === e.currentTarget && onClose()}>
-      <div style={{ width:430, maxWidth:"100vw", maxHeight:"92vh", overflowY:"auto", background:T.raised, borderRadius:"22px 22px 0 0", padding:"0 20px 60px" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width:430, maxWidth:"100vw", maxHeight:"92vh", overflowY:"auto", background:T.raised, borderRadius:"22px 22px 0 0", padding:"0 20px 60px" }}>
         <div style={{ width:36, height:4, background:T.borderStrong, borderRadius:2, margin:"14px auto 22px" }}/>
         {children}
       </div>
@@ -775,12 +776,96 @@ function PlusBtn({ habit, logged, onClick }) {
 
 // ─── HABIT CARDS ─────────────────────────────────────────────────────────────
 
-function DailyCard({ habit, onTap, onSkip, onAddNote }) {
+/** Long-press empty card area (not buttons/inputs) to open Today habit options — complements the ··· affordance. */
+function useTodayHabitLongPeekHandlers(setPeek, enabled) {
+  const lpTimer = useRef(null);
+  const clearLp = () => {
+    if (lpTimer.current) {
+      clearTimeout(lpTimer.current);
+      lpTimer.current = null;
+    }
+  };
+  useEffect(() => () => clearLp(), []);
+  return {
+    onPointerDownCapture(e) {
+      if (!enabled) return;
+      if (!e.isPrimary) return;
+      if (e.target.closest("button, textarea, input, a")) return;
+      clearLp();
+      lpTimer.current = window.setTimeout(() => {
+        lpTimer.current = null;
+        setPeek(true);
+      }, 520);
+    },
+    onPointerUpCapture: clearLp,
+    onPointerCancelCapture: clearLp,
+    onPointerLeaveCapture: clearLp,
+  };
+}
+
+/** Subtle ··· on Today habit cards — tap reveals Habits-matching Edit / × (then same delete confirm copy). */
+function TodayHabitMgmtAffordance({ rightPx, peek, onTogglePeek }) {
+  return (
+    <button
+      type="button"
+      aria-label="Habit options"
+      aria-expanded={peek}
+      onClick={(e) => { e.stopPropagation(); onTogglePeek(); }}
+      style={{
+        position:"absolute", right:rightPx, top:"50%", transform:"translateY(-50%)",
+        padding:"6px 2px", zIndex:2, background:"none", border:"none", cursor:"pointer",
+        color:T.hint, fontSize:14, opacity:peek ? 0.85 : 0.38, lineHeight:1,
+      }}
+    >
+      ···
+    </button>
+  );
+}
+
+function TodayHabitMgmtStrip({ habit, onEdit, onDelete, peek, onClosePeek }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  useEffect(() => {
+    if (!peek) setConfirmDelete(false);
+  }, [peek]);
+  if (!peek) return null;
+  if (confirmDelete) {
+    return (
+      <>
+        <div style={{ padding:"8px 15px 10px", borderTop:`0.5px solid ${T.border}`, display:"flex", alignItems:"center", gap:8, justifyContent:"flex-end" }}>
+          <button type="button" onClick={() => { onDelete(habit.id); setConfirmDelete(false); onClosePeek(); }}
+            style={{ fontSize:12, color:"#e74c3c", background:"rgba(231,76,60,0.1)", border:`0.5px solid rgba(231,76,60,0.4)`, borderRadius:T.rsm, padding:"5px 11px", cursor:"pointer", fontWeight:500, marginRight:4 }}>
+            Delete
+          </button>
+          <button type="button" onClick={() => setConfirmDelete(false)}
+            style={{ fontSize:12, color:T.muted, background:"none", border:`0.5px solid ${T.border}`, borderRadius:T.rsm, padding:"5px 11px", cursor:"pointer" }}>
+            Cancel
+          </button>
+        </div>
+        <div style={{ padding:"0 15px 12px", fontSize:12, color:"rgba(231,76,60,0.8)" }}>
+          This will permanently delete <strong>{habit.name}</strong> and all its logs. This can't be undone.
+        </div>
+      </>
+    );
+  }
+  return (
+    <div style={{ padding:"8px 15px 10px", borderTop:`0.5px solid ${T.border}`, display:"flex", alignItems:"center", gap:8 }}>
+      <button type="button" onClick={(e) => { e.stopPropagation(); onEdit(habit.id); onClosePeek(); }}
+        style={{ fontSize:12, color:habit.color, background:"none", border:`0.5px solid ${habit.color+"44"}`, borderRadius:T.rsm, padding:"4px 10px", cursor:"pointer", fontWeight:500, marginRight:6 }}>
+        Edit
+      </button>
+      <button type="button" onClick={() => setConfirmDelete(true)} style={{ fontSize:18, color:T.hint, background:"none", border:"none", cursor:"pointer" }}>×</button>
+    </div>
+  );
+}
+
+function DailyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDeleteHabit }) {
   const tLog  = latestTodayLog(habit);
   const logged = isLoggedToday(habit);
   const isSkip = tLog?.value === "skip";
   const [restOpen, setRestOpen] = useState(false);
   const [restWhy, setRestWhy] = useState("");
+  const [habitPeek, setHabitPeek] = useState(false);
+  const longPeek = useTodayHabitLongPeekHandlers(setHabitPeek, !!(onEditHabit && onDeleteHabit));
   useEffect(() => {
     if (logged) {
       setRestOpen(false);
@@ -788,8 +873,8 @@ function DailyCard({ habit, onTap, onSkip, onAddNote }) {
     }
   }, [logged]);
   return (
-    <div className="rc" style={cardStyle(logged && !isSkip, habit)}>
-      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
+    <div className="rc" style={cardStyle(logged && !isSkip, habit)} {...longPeek}>
+      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px", position:"relative" }}>
         <IconBox habit={habit} logged={logged && !isSkip}/>
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{habit.name}</div>
@@ -797,6 +882,9 @@ function DailyCard({ habit, onTap, onSkip, onAddNote }) {
             Daily{getHabitCardStreakSuffix(habit)}
           </div>
         </div>
+        {onEditHabit && onDeleteHabit && (
+          <TodayHabitMgmtAffordance rightPx={52} peek={habitPeek} onTogglePeek={() => setHabitPeek(p => !p)} />
+        )}
         {isSkip
           ? <button className="tap" onClick={() => onTap(habit.id, { currentTarget: { getBoundingClientRect: () => ({left:0,top:0,width:0,height:0}) } })}
               style={{ width:44, height:44, borderRadius:"50%", flexShrink:0, border:`2px solid ${T.muted}`, background:T.surface, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, transition:"all 0.18s" }}>
@@ -805,6 +893,9 @@ function DailyCard({ habit, onTap, onSkip, onAddNote }) {
           : <CheckBtn logged={logged} habit={habit} onClick={e => onTap(habit.id, e)}/>
         }
       </div>
+      {onEditHabit && onDeleteHabit && (
+        <TodayHabitMgmtStrip habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} peek={habitPeek} onClosePeek={() => setHabitPeek(false)} />
+      )}
       {isSkip && (
         <div style={{ margin:"0 15px 12px", background:"rgba(106,104,96,0.15)", borderRadius:T.rsm, padding:"8px 12px", display:"flex", flexDirection:"column", gap:6 }}>
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
@@ -856,14 +947,15 @@ function DailyCard({ habit, onTap, onSkip, onAddNote }) {
   );
 }
 
-function WeeklyCard({ habit, onTap, onAddNote }) {
+function WeeklyCard({ habit, onTap, onAddNote, onEditHabit, onDeleteHabit }) {
   const logged = isLoggedToday(habit);
   const wk = getWeeklyCount(habit);
   const pct = Math.min(100, Math.round((wk / habit.weeklyTarget) * 100));
-  const tLog = latestTodayLog(habit);
+  const [habitPeek, setHabitPeek] = useState(false);
+  const longPeek = useTodayHabitLongPeekHandlers(setHabitPeek, !!(onEditHabit && onDeleteHabit));
   return (
-    <div className="rc" style={cardStyle(logged, habit)}>
-      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
+    <div className="rc" style={cardStyle(logged, habit)} {...longPeek}>
+      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px", position:"relative" }}>
         <IconBox habit={habit} logged={logged}/>
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{habit.name}</div>
@@ -872,8 +964,14 @@ function WeeklyCard({ habit, onTap, onAddNote }) {
             {getHabitCardStreakSuffix(habit)}
           </div>
         </div>
+        {onEditHabit && onDeleteHabit && (
+          <TodayHabitMgmtAffordance rightPx={52} peek={habitPeek} onTogglePeek={() => setHabitPeek(p => !p)} />
+        )}
         <CheckBtn logged={logged} habit={habit} onClick={e => onTap(habit.id, e)}/>
       </div>
+      {onEditHabit && onDeleteHabit && (
+        <TodayHabitMgmtStrip habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} peek={habitPeek} onClosePeek={() => setHabitPeek(false)} />
+      )}
       <div style={{ padding:"0 15px 14px" }}>
         <div style={{ height:5, background:T.surface, borderRadius:3, overflow:"hidden", marginBottom:8 }}>
           <div style={{ height:"100%", borderRadius:3, background:pct>=100?T.goldBright:habit.color, width:`${pct}%`, transition:"width 0.5s ease" }}/>
@@ -893,7 +991,7 @@ function WeeklyCard({ habit, onTap, onAddNote }) {
   );
 }
 
-function ProjectCard({ habit, onOpenLog, onAddNote }) {
+function ProjectCard({ habit, onOpenLog, onAddNote, onEditHabit, onDeleteHabit }) {
   const stats = getProjectStats(habit);
   const tLogs = todayLogs(habit);
   const logged = tLogs.length > 0;
@@ -917,10 +1015,11 @@ function ProjectCard({ habit, onOpenLog, onAddNote }) {
     : `Tap + to log a session${streakPhrase}`;
   const buildMetaDisplay = truncateText(buildMeta, 68);
   const latestWinDisplay = truncateText(lastWin?.value?.win || "", 96);
-  const tLog = tLogs[tLogs.length - 1];
+  const [habitPeek, setHabitPeek] = useState(false);
+  const longPeek = useTodayHabitLongPeekHandlers(setHabitPeek, !!(onEditHabit && onDeleteHabit));
   return (
-    <div className="rc" style={cardStyle(logged, habit)}>
-      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
+    <div className="rc" style={cardStyle(logged, habit)} {...longPeek}>
+      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px", position:"relative" }}>
         <IconBox habit={habit} logged={logged}/>
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{habit.name}</div>
@@ -928,8 +1027,14 @@ function ProjectCard({ habit, onOpenLog, onAddNote }) {
             {buildMetaDisplay}
           </div>
         </div>
+        {onEditHabit && onDeleteHabit && (
+          <TodayHabitMgmtAffordance rightPx={52} peek={habitPeek} onTogglePeek={() => setHabitPeek(p => !p)} />
+        )}
         <PlusBtn habit={habit} logged={logged} onClick={() => onOpenLog(habit.id)}/>
       </div>
+      {onEditHabit && onDeleteHabit && (
+        <TodayHabitMgmtStrip habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} peek={habitPeek} onClosePeek={() => setHabitPeek(false)} />
+      )}
       <div style={{ padding:"0 15px 14px", display:"flex", gap:8 }}>
         <Stat label="hrs this wk" value={stats.weekHours} color={habit.color}/>
         <Stat label="total hrs" value={stats.totalHours}/>
@@ -950,7 +1055,7 @@ function ProjectCard({ habit, onOpenLog, onAddNote }) {
   );
 }
 
-function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote }) {
+function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHabit, onDeleteHabit }) {
   const todayLogsArr = habit.logs.filter(l => l.date === todayStr() && l.value !== "quicknote");
   const used   = todayLogsArr.reduce((s, l) => s + (typeof l.value === "number" ? l.value : 0), 0);
   const budget = habit.dailyBudget || 60;
@@ -962,9 +1067,11 @@ function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote }) {
   const inc      = habit.tapIncrement ?? 1;
   const unitSuffix = habit.unit && habit.unit !== "logged" ? ` ${habit.unit}` : "";
   const limitMetaColor = logged ? (over ? T.accent : T.green) : T.hint;
+  const [habitPeek, setHabitPeek] = useState(false);
+  const longPeek = useTodayHabitLongPeekHandlers(setHabitPeek, !!(onEditHabit && onDeleteHabit));
   return (
-    <div className="rc" style={{ ...cardStyle(false, habit), borderColor:over?T.accent+"66":T.border, background:over?`${T.accent}0A`:T.raised }}>
-      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
+    <div className="rc" style={{ ...cardStyle(false, habit), borderColor:over?T.accent+"66":T.border, background:over?`${T.accent}0A`:T.raised }} {...longPeek}>
+      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px", position:"relative" }}>
         <IconBox habit={habit} logged={false}/>
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{habit.name}</div>
@@ -980,6 +1087,9 @@ function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote }) {
             <span style={{ color: T.muted }}>{getHabitCardStreakSuffix(habit)}{inc > 1 ? ` · +${inc} per tap` : ""}</span>
           </div>
         </div>
+        {onEditHabit && onDeleteHabit && (
+          <TodayHabitMgmtAffordance rightPx={98} peek={habitPeek} onTogglePeek={() => setHabitPeek(p => !p)} />
+        )}
         <div style={{ display:"flex", gap:6, flexShrink:0 }}>
           {logged && (
             <button className="tap" onClick={() => onUndo(habit.id)}
@@ -989,6 +1099,9 @@ function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote }) {
             style={{ width:44, height:44, borderRadius:"50%", border:`2px solid ${habit.color+"66"}`, background:"transparent", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, color:habit.color, fontWeight:300, transition:"all 0.18s" }}>+</button>
         </div>
       </div>
+      {onEditHabit && onDeleteHabit && (
+        <TodayHabitMgmtStrip habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} peek={habitPeek} onClosePeek={() => setHabitPeek(false)} />
+      )}
 
       {logged ? (
         <div style={{ padding:"0 15px 14px" }}>
@@ -1018,7 +1131,7 @@ function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote }) {
   );
 }
 
-function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete }) {
+function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete, onDelete }) {
   const stats = getGoalProgress(goal);
   const { isComplete } = stats;
   const barFillPct = goalBarFillWidthPct(stats);
@@ -1027,7 +1140,10 @@ function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete }) {
   const deadlineLine = goalTodayDeadlineLine(goal, stats, isComplete);
   const [showMenu, setShowMenu] = useState(false);
   return (
-    <div className="rc" style={{ margin:"0 14px 10px", background:loggedToday ? `${goal.color}0D` : T.raised, borderRadius:T.r, border:`0.5px solid ${loggedToday ? goal.color+"66" : T.border}`, overflow:"hidden" }}>
+    <div
+      onClick={e => e.stopPropagation()}
+      className="rc"
+      style={{ margin:"0 14px 10px", background:loggedToday ? `${goal.color}0D` : T.raised, borderRadius:T.r, border:`0.5px solid ${loggedToday ? goal.color+"66" : T.border}`, overflow:"hidden" }}>
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
         <div style={{ width:40, height:40, borderRadius:11, background:goal.color+"20", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>{goal.emoji}</div>
         <div style={{ flex:1, minWidth:0 }}>
@@ -1046,6 +1162,14 @@ function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete }) {
               Log
             </button>
           )}
+          <button
+            type="button"
+            onPointerDown={e => { e.stopPropagation(); }}
+            onMouseDown={e => { e.stopPropagation(); }}
+            onClick={e => { e.stopPropagation(); onEdit(goal.id); }}
+            style={{ fontSize:12, color:goal.color, background:"none", border:`0.5px solid ${goal.color+"55"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>
+            Edit
+          </button>
           <button type="button" onClick={(e) => { e.stopPropagation(); setShowMenu(m => !m); }}
             style={{ fontSize:18, color:T.hint, background:"none", border:"none", cursor:"pointer", lineHeight:1, padding:"2px 4px" }}>
             ···
@@ -1065,12 +1189,12 @@ function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete }) {
           {!isComplete && (
             <button type="button" onClick={(e) => { e.stopPropagation(); onComplete(goal.id); setShowMenu(false); }}
               style={{ fontSize:12, color:T.green, background:"none", border:`0.5px solid ${T.green+"44"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer" }}>
-              Mark complete
+              Complete goal
             </button>
           )}
-          <button type="button" onClick={(e) => { e.stopPropagation(); onEdit(goal.id); setShowMenu(false); }}
-            style={{ fontSize:12, color:goal.color, background:"none", border:`0.5px solid ${goal.color+"55"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer" }}>
-            Edit
+          <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(goal.id); setShowMenu(false); }}
+            style={{ fontSize:12, color:"#e74c3c", background:"none", border:`0.5px solid rgba(231,76,60,0.3)`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer" }}>
+            Delete
           </button>
           <button type="button" onClick={(e) => { e.stopPropagation(); setShowMenu(false); }}
             style={{ fontSize:12, color:T.muted, background:"none", border:"none", cursor:"pointer", marginLeft:"auto" }}>
@@ -1935,7 +2059,7 @@ function TourOverlay({ steps, stepIdx, onNext, onSkip }) {
 }
 
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
-function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote, onLogZero, onOpenLog, onOpenGoalLog, onEditGoal, onCompleteGoal, onXPInfo, onCoach, isPro, coachName }) {
+function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote, onLogZero, onOpenLog, onOpenGoalLog, onEditGoal, onCompleteGoal, onDeleteGoal, onEditHabit, onDeleteHabit, onXPInfo, onCoach, onAdd, isPro, coachName }) {
   const activeGoals = goals.filter(g => g.status !== "completed");
   const loggedHabitsCount = habits.filter(h => isLoggedToday(h)).length;
   const loggedGoalsCount = activeGoals.filter(g => (g.logs || []).some(l => l.date === todayStr())).length;
@@ -1977,11 +2101,11 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
       {/* Tour target: wraps only the first non-empty section so the spotlight ring is tight */}
       {(() => {
         const sections = [
-          activeGoals.length > 0 && <><SLabel>Goals</SLabel> {activeGoals.map(g => <TodayGoalCard key={g.id} goal={g} onOpenLog={onOpenGoalLog} onEdit={onEditGoal} onComplete={onCompleteGoal}/>)}</>,
-          daily.length   > 0 && <><SLabel>Daily</SLabel>          {daily.map(h   => <DailyCard  key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote}/>)}</>,
-          limit.length   > 0 && <><SLabel>Limits</SLabel>         {limit.map(h   => <LimitCard  key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onAddNote={onAddNote}/>)}</>,
-          weekly.length  > 0 && <><SLabel>Weekly targets</SLabel> {weekly.map(h  => <WeeklyCard key={h.id} habit={h} onTap={onTap} onAddNote={onAddNote}/>)}</>,
-          project.length > 0 && <><SLabel>Build</SLabel>          {project.map(h => <ProjectCard key={h.id} habit={h} onOpenLog={onOpenLog} onAddNote={onAddNote}/>)}</>,
+          activeGoals.length > 0 && <><SLabel>Goals</SLabel> {activeGoals.map(g => <TodayGoalCard key={g.id} goal={g} onOpenLog={onOpenGoalLog} onEdit={onEditGoal} onComplete={onCompleteGoal} onDelete={onDeleteGoal}/>)}</>,
+          daily.length   > 0 && <><SLabel>Daily</SLabel>          {daily.map(h   => <DailyCard  key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit}/>)}</>,
+          limit.length   > 0 && <><SLabel>Limits</SLabel>         {limit.map(h   => <LimitCard  key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit}/>)}</>,
+          weekly.length  > 0 && <><SLabel>Weekly targets</SLabel> {weekly.map(h  => <WeeklyCard key={h.id} habit={h} onTap={onTap} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit}/>)}</>,
+          project.length > 0 && <><SLabel>Build</SLabel>          {project.map(h => <ProjectCard key={h.id} habit={h} onOpenLog={onOpenLog} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit}/>)}</>,
         ].filter(Boolean);
         return sections.map((sec, i) =>
           i === 0
@@ -2009,6 +2133,25 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
         );
       })()}
       <div style={{ height:16 }}/>
+      {(habits.length > 0 || activeGoals.length > 0) && onAdd && (
+        <button
+          type="button"
+          onClick={onAdd}
+          aria-label="Add habit or goal"
+          title="Add habit or goal"
+          style={{
+            position:"fixed", bottom:142, right:18, width:52, height:52,
+            borderRadius:"50%", border:"none",
+            background:T.accent, color:"#fff", fontSize:28, fontWeight:300, lineHeight:1,
+            cursor:"pointer", zIndex:99,
+            boxShadow:"0 4px 16px rgba(192,57,43,0.35)",
+            display:"flex", alignItems:"center", justifyContent:"center",
+            fontFamily:T.font,
+          }}
+        >
+          +
+        </button>
+      )}
     </div>
   );
 }
@@ -3415,7 +3558,9 @@ function GoalCard({ goal, onEdit, onComplete, onDelete }) {
   const achievedDate = goal.logs?.filter(l => typeof l.value === "number").sort((a, b) => a.date.localeCompare(b.date)).at(-1)?.date || goal.lastLogDate || null;
 
   return (
-    <div style={{ margin:"0 14px 10px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${isComplete ? "rgba(39,174,96,0.4)" : T.border}`, overflow:"hidden" }}>
+    <div
+      onClick={e => e.stopPropagation()}
+      style={{ margin:"0 14px 10px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${isComplete ? "rgba(39,174,96,0.4)" : T.border}`, overflow:"hidden" }}>
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px 10px" }}>
         <div style={{ width:40, height:40, borderRadius:11, background:goal.color+"20", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>{goal.emoji}</div>
         <div style={{ flex:1, minWidth:0 }}>
@@ -3426,7 +3571,11 @@ function GoalCard({ goal, onEdit, onComplete, onDelete }) {
           </div>
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          <button type="button" onClick={(e) => { e.stopPropagation(); onEdit(goal.id); }}
+          <button
+            type="button"
+            onPointerDown={e => { e.stopPropagation(); }}
+            onMouseDown={e => { e.stopPropagation(); }}
+            onClick={e => { e.stopPropagation(); onEdit(goal.id); }}
             style={{ fontSize:12, color:goal.color, background:"none", border:`0.5px solid ${goal.color+"55"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>
             Edit
           </button>
@@ -6058,6 +6207,16 @@ export default function App() {
     setToasts(t => [...t, { id, msg }]);
   }, []);
 
+  /** Clear the other editor first so goal vs habit modals never stack (flushSync avoids stale editId + editGoalId in one tick). */
+  const openEditGoal = useCallback(id => {
+    flushSync(() => { setEditId(null); });
+    setEditGoalId(id);
+  }, []);
+  const openEditHabit = useCallback(id => {
+    flushSync(() => { setEditGoalId(null); });
+    setEditId(id);
+  }, []);
+
   const reflectHabit = habits.find(h => h.id === reflectId) || null;
   const editHabit    = habits.find(h => h.id === editId)    || null;
   const logHabit     = habits.find(h => h.id === logId)     || null;
@@ -6214,7 +6373,7 @@ export default function App() {
               ⚡ 0 xp
             </button>
           </div>
-          <TodayScreen habits={habits} goals={goals} xp={0} onTap={handleTap} onUndo={() => {}} onSkip={() => {}} onReflect={() => demoBounce()} onAddNote={() => demoBounce()} onLogZero={() => demoBounce()} onOpenLog={() => demoBounce()} onOpenGoalLog={() => demoBounce()} onEditGoal={() => demoBounce()} onCompleteGoal={() => demoBounce()} onXPInfo={() => {}}/>
+          <TodayScreen habits={habits} goals={goals} xp={0} onTap={handleTap} onUndo={() => {}} onSkip={() => {}} onAddNote={() => demoBounce()} onLogZero={() => demoBounce()} onOpenLog={() => demoBounce()} onOpenGoalLog={() => demoBounce()} onEditGoal={() => demoBounce()} onCompleteGoal={() => demoBounce()} onDeleteGoal={() => demoBounce()} onEditHabit={() => demoBounce()} onDeleteHabit={() => demoBounce()} onXPInfo={() => {}} onCoach={() => demoBounce()} onAdd={() => demoBounce()}/>
           <nav style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:430, maxWidth:"100vw", background:"rgba(26,26,22,0.96)", backdropFilter:"blur(16px)", borderTop:`0.5px solid ${T.border}`, display:"flex", zIndex:100, paddingBottom:6 }}>
             {[{id:"today",label:"Today"},{id:"journal",label:"Journal"},{id:"insights",label:"Insights"},{id:"habits",label:"Habits"},{id:"profile",label:"Profile"}].map(n => (
               <button key={n.id} onClick={() => demoBounce()} style={{ flex:1, padding:"10px 4px 6px", border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3, fontSize:10, fontWeight:500, color:n.id==="today"?T.accent:T.muted }}>
@@ -6513,8 +6672,8 @@ export default function App() {
   // Gate adding habits at 5 for free users
   function handleStartAdd() {
     if (demoBounce()) return;
-    // On Habits screen, show choice sheet (habit or goal). On other screens, go straight to habit.
-    if (screen === "habits") {
+    // On Habits / Today, show choice sheet (habit or goal), then AddModal or AddGoalModal — same modals as Habits.
+    if (screen === "habits" || screen === "today") {
       setShowAddChoice(true);
     } else if (!isPro && habits.length >= 5) {
       setShowUpgrade(true);
@@ -6695,10 +6854,10 @@ export default function App() {
           </button>
         </div>
 
-        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onReflect={setReflectId} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={id => { setEditId(null); setEditGoalId(id); }} onCompleteGoal={handleCompleteGoal} onXPInfo={() => setShowXP(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)} isPro={isPro} coachName={coachName}/>}
+        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onXPInfo={() => setShowXP(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)} onAdd={handleStartAdd} isPro={isPro} coachName={coachName}/>}
         {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
         {screen === "insights" && <InsightsScreen habits={habits} goals={goals} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
-        {screen === "habits"   && <HabitsScreen   habits={habits} goals={goals} onEdit={id => { setEditGoalId(null); setEditId(id); }} onDelete={handleDeleteHabit} onAdd={handleStartAdd} onReflect={setReflectId} onCoach={() => setShowCoach(true)} onUpgrade={() => setShowUpgrade(true)} isPro={isPro} coachName={coachName} onEditGoal={id => { setEditId(null); setEditGoalId(id); }} onDeleteGoal={handleDeleteGoal} onCompleteGoal={handleCompleteGoal}/>}
+        {screen === "habits"   && <HabitsScreen   habits={habits} goals={goals} onEdit={openEditHabit} onDelete={handleDeleteHabit} onAdd={handleStartAdd} onReflect={setReflectId} onCoach={() => setShowCoach(true)} onUpgrade={() => setShowUpgrade(true)} isPro={isPro} coachName={coachName} onEditGoal={openEditGoal} onDeleteGoal={handleDeleteGoal} onCompleteGoal={handleCompleteGoal}/>}
         {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} stripeCustomerId={stripeCustomerId} refCode={refCode}
           authEmail={authEmail}
           onUpgrade={() => setShowUpgrade(true)}
@@ -6755,7 +6914,7 @@ export default function App() {
       {showXP        && <XPModal       xp={xp}                               onClose={() => setShowXP(false)}/>}
       {showHistory   && <HistoryModal  habits={habits} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onClose={() => setShowHistory(false)}/>}
       {reflectId     && <ReflectModal  habit={reflectHabit}                  onClose={() => setReflectId(null)} onSave={handleSaveReflection}/>}
-      {editId        && editHabit && <EditModal habit={editHabit}             onClose={() => setEditId(null)}    onSave={handleEditSave}/>}
+      {editId && !editGoalId && editHabit && editHabit.habitType !== "goal" && editHabit.habitType !== "progress" && <EditModal habit={editHabit} onClose={() => setEditId(null)} onSave={handleEditSave}/>}
       {logId && logHabit?.habitType === "project"  && <LogProjectModal   habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
       {showCoach   && <AICoach habits={habits} user={user} isPro={isPro} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)} coachName={coachName} currentScreen={screen}/>}
       {showUpgrade && <BetaPaywallModal onClose={() => setShowUpgrade(false)}/>}
