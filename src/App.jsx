@@ -5096,7 +5096,7 @@ function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
   );
 }
 
-function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onSignOut, onShowTour, onUpgrade, coachName, coachIcon, onSaveCoach }) {
+function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onSignOut, onShowTour, onUpgrade, coachName, coachIcon, onSaveCoach, notifEnabled, notifTime, notifLoading, notifPermission, onNotifToggle, onNotifTimeChange }) {
   const [editingName,    setEditingName]    = useState(false);
   const [nameVal,        setNameVal]        = useState(user.name);
   const [showCoachSheet, setShowCoachSheet] = useState(false);
@@ -5105,124 +5105,6 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
   const [refCount,       setRefCount]       = useState(null);
   const [refCopied,      setRefCopied]      = useState(false);
   const [portalLoading,  setPortalLoading]  = useState(false);
-
-  // ── Notification state ──────────────────────────────────────────────────────
-  const [notifEnabled,    setNotifEnabled]    = useState(false);
-  const [notifTime,       setNotifTime]       = useState("09:00");
-  const [notifLoading,    setNotifLoading]    = useState(false);
-  const [notifPermission, setNotifPermission] = useState(
-    typeof Notification !== "undefined" ? Notification.permission : "denied"
-  );
-
-  useEffect(() => {
-    // On mount, restore notification state from browser + DB
-    if (typeof Notification === "undefined" || !("serviceWorker" in navigator)) return;
-    setNotifPermission(Notification.permission);
-    if (Notification.permission !== "granted") return;
-    (async () => {
-      try {
-        const reg = await navigator.serviceWorker.ready;
-        const sub = await reg.pushManager.getSubscription();
-        if (!sub) return;
-        // Browser has a live subscription — show as enabled immediately
-        setNotifEnabled(true);
-        // Then try to sync time preference from DB
-        const { data } = await supabase
-          .from("push_subscriptions")
-          .select("reminder_time, notifications_enabled")
-          .eq("user_id", user.id)
-          .maybeSingle();
-        if (data) {
-          setNotifEnabled(data.notifications_enabled);
-          setNotifTime(data.reminder_time || "09:00");
-        } else {
-          // Browser subscribed but no DB row — re-save it now
-          const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-          await supabase.from("push_subscriptions").upsert({
-            user_id: user.id,
-            subscription: sub.toJSON(),
-            reminder_time: "09:00",
-            notifications_enabled: true,
-            timezone: tz,
-            updated_at: new Date().toISOString(),
-          }, { onConflict: "user_id" });
-        }
-      } catch (e) { console.warn("[Forged] notif restore error:", e); }
-    })();
-  }, [user.id]);
-
-  async function handleNotifToggle() {
-    if (typeof Notification === "undefined" || !("serviceWorker" in navigator)) {
-      alert("Notifications aren't supported in this browser. Try Chrome on Android or Safari on iOS 16.4+.");
-      return;
-    }
-    setNotifLoading(true);
-    try {
-      if (notifEnabled) {
-        // ── Turn OFF ──────────────────────────────────────────────────────────
-        const reg = await navigator.serviceWorker.ready;
-        const sub = await reg.pushManager.getSubscription();
-        if (sub) await sub.unsubscribe();
-        await supabase.from("push_subscriptions").delete().eq("user_id", user.id);
-        setNotifEnabled(false);
-      } else {
-        // ── Turn ON ───────────────────────────────────────────────────────────
-        const permission = await Notification.requestPermission();
-        setNotifPermission(permission);
-        if (permission !== "granted") { setNotifLoading(false); return; }
-        const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
-        if (!vapidKey) { alert("Setup error: VAPID key missing. Contact support."); setNotifLoading(false); return; }
-        let reg;
-        try {
-          reg = await Promise.race([
-            navigator.serviceWorker.ready,
-            new Promise((_, reject) => setTimeout(() => reject(new Error("SW timeout")), 8000)),
-          ]);
-        } catch (swErr) {
-          alert("Service worker not ready: " + swErr.message + ". Try reloading the app.");
-          setNotifLoading(false);
-          return;
-        }
-        let sub;
-        try {
-          sub = await reg.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array(vapidKey),
-          });
-        } catch (subErr) {
-          alert("Could not subscribe to push: " + subErr.message);
-          setNotifLoading(false);
-          return;
-        }
-        // Mark enabled in UI immediately — don't wait for DB
-        setNotifEnabled(true);
-        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-        const { error: upsertErr } = await supabase.from("push_subscriptions").upsert({
-          user_id: user.id,
-          subscription: sub.toJSON(),
-          reminder_time: notifTime,
-          notifications_enabled: true,
-          timezone: tz,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: "user_id" });
-        if (upsertErr) alert("Saved to browser but DB save failed: " + upsertErr.message);
-      }
-    } catch (err) {
-      alert("[Forged] Unexpected error: " + err.message);
-      setNotifEnabled(false);
-    }
-    setNotifLoading(false);
-  }
-
-  async function handleNotifTimeChange(newTime) {
-    setNotifTime(newTime);
-    if (!notifEnabled) return;
-    await supabase.from("push_subscriptions").update({
-      reminder_time: newTime,
-      updated_at: new Date().toISOString(),
-    }).eq("user_id", user.id);
-  }
-  // ── End notification state ──────────────────────────────────────────────────
 
   useEffect(() => {
     supabase.rpc("my_referral_count").then(({ data }) => {
@@ -5366,7 +5248,7 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
             {/* Toggle switch */}
             <button
               type="button"
-              onClick={handleNotifToggle}
+              onClick={onNotifToggle}
               disabled={notifLoading || notifPermission === "denied"}
               style={{
                 flexShrink:0, width:48, height:28, borderRadius:14, border:"none",
@@ -5393,7 +5275,7 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
               <input
                 type="time"
                 value={notifTime}
-                onChange={e => handleNotifTimeChange(e.target.value)}
+                onChange={e => onNotifTimeChange(e.target.value)}
                 style={{
                   background:T.bg, border:`0.5px solid ${T.border}`, borderRadius:8,
                   color:T.text, fontSize:14, fontWeight:600, padding:"6px 10px",
@@ -6047,6 +5929,16 @@ export default function App() {
   const [stripeCustomerId, setStripeCustomerId] = useState(null);
   const [coachName,      setCoachName]      = useState("Coach");
   const [coachIcon,      setCoachIcon]      = useState("");
+
+  // ── Notification state (App-level so it survives tab switches) ───────────────
+  const [notifEnabled,    setNotifEnabled]    = useState(false);
+  const [notifTime,       setNotifTime]       = useState("09:00");
+  const [notifLoading,    setNotifLoading]    = useState(false);
+  const [notifPermission, setNotifPermission] = useState(
+    typeof Notification !== "undefined" ? Notification.permission : "denied"
+  );
+  // ─────────────────────────────────────────────────────────────────────────────
+
   const [showUpgrade,    setShowUpgrade]    = useState(false);
   const [checkingPayment,setCheckingPayment]= useState(false);
   const [showWelcome,    setShowWelcome]    = useState(false);
@@ -6089,6 +5981,106 @@ export default function App() {
       return next.size === prev.size ? prev : next;
     });
   }, [habits]);
+
+  // ── App-level notification restore (survives tab switches) ───────────────────
+  useEffect(() => {
+    if (typeof Notification === "undefined" || !("serviceWorker" in navigator)) return;
+    setNotifPermission(Notification.permission);
+    if (Notification.permission !== "granted") return;
+    (async () => {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (!sub) return;
+        setNotifEnabled(true); // browser has live subscription — show as on immediately
+        const uid = sessionUserId;
+        if (!uid) return;
+        const { data } = await supabase
+          .from("push_subscriptions")
+          .select("reminder_time, notifications_enabled")
+          .eq("user_id", uid)
+          .maybeSingle();
+        if (data) {
+          setNotifEnabled(data.notifications_enabled);
+          setNotifTime(data.reminder_time || "09:00");
+        } else {
+          // Browser subscribed but no DB row — re-save
+          const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+          await supabase.from("push_subscriptions").upsert({
+            user_id: uid, subscription: sub.toJSON(),
+            reminder_time: "09:00", notifications_enabled: true,
+            timezone: tz, updated_at: new Date().toISOString(),
+          }, { onConflict: "user_id" });
+        }
+      } catch (e) { console.warn("[Forged] notif restore:", e); }
+    })();
+  }, [sessionUserId]);
+
+  async function handleNotifToggle() {
+    if (typeof Notification === "undefined" || !("serviceWorker" in navigator)) {
+      alert("Notifications aren't supported in this browser. Try Chrome on Android or Safari on iOS 16.4+.");
+      return;
+    }
+    setNotifLoading(true);
+    try {
+      if (notifEnabled) {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) await sub.unsubscribe();
+        await supabase.from("push_subscriptions").delete().eq("user_id", sessionUserId);
+        setNotifEnabled(false);
+      } else {
+        const permission = await Notification.requestPermission();
+        setNotifPermission(permission);
+        if (permission !== "granted") { setNotifLoading(false); return; }
+        const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+        if (!vapidKey) { alert("Setup error: VAPID key missing."); setNotifLoading(false); return; }
+        let reg;
+        try {
+          reg = await Promise.race([
+            navigator.serviceWorker.ready,
+            new Promise((_, rej) => setTimeout(() => rej(new Error("SW timeout")), 8000)),
+          ]);
+        } catch (swErr) {
+          alert("Service worker not ready: " + swErr.message + ". Try reloading the app.");
+          setNotifLoading(false); return;
+        }
+        let sub;
+        try {
+          sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(vapidKey),
+          });
+        } catch (subErr) {
+          alert("Could not subscribe to push: " + subErr.message);
+          setNotifLoading(false); return;
+        }
+        setNotifEnabled(true); // flip immediately — don't wait for DB
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const { error: upsertErr } = await supabase.from("push_subscriptions").upsert({
+          user_id: sessionUserId, subscription: sub.toJSON(),
+          reminder_time: notifTime, notifications_enabled: true,
+          timezone: tz, updated_at: new Date().toISOString(),
+        }, { onConflict: "user_id" });
+        if (upsertErr) alert("Saved to browser but DB save failed: " + upsertErr.message);
+      }
+    } catch (err) {
+      alert("[Forged] Unexpected error: " + err.message);
+      const reg2 = await navigator.serviceWorker.ready.catch(() => null);
+      const sub2 = reg2 ? await reg2.pushManager.getSubscription().catch(() => null) : null;
+      if (!sub2) setNotifEnabled(false);
+    }
+    setNotifLoading(false);
+  }
+
+  async function handleNotifTimeChange(newTime) {
+    setNotifTime(newTime);
+    if (!notifEnabled || !sessionUserId) return;
+    await supabase.from("push_subscriptions").update({
+      reminder_time: newTime, updated_at: new Date().toISOString(),
+    }).eq("user_id", sessionUserId);
+  }
+  // ── End App-level notification ────────────────────────────────────────────────
 
   // ─── Supabase helpers ──────────────────────────────────────────────────────
   async function syncHabit(habit) {
@@ -7396,6 +7388,12 @@ export default function App() {
             setCoachIcon(icon);
             syncProfile({ coach_name: name, coach_icon: icon });
           }}
+          notifEnabled={notifEnabled}
+          notifTime={notifTime}
+          notifLoading={notifLoading}
+          notifPermission={notifPermission}
+          onNotifToggle={handleNotifToggle}
+          onNotifTimeChange={handleNotifTimeChange}
         />}
 
         {/* Coach FAB (+ Today-only Add habit below) — hidden on Profile */}
