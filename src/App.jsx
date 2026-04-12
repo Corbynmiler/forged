@@ -109,6 +109,14 @@ const COLORS = ["#C0392B","#E67E22","#27AE60","#8E44AD","#2980B9","#C8902A","#16
 /** Profile / floating coach button — preset icons only (must match CoachSettingsSheet). */
 const COACH_ICON_OPTIONS = ["✦", "⚡", "🔥", "🛡️", "⚔️", "👻"];
 
+// Converts a VAPID base64 public key to the Uint8Array that PushManager.subscribe() expects
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
 function normalizeCoachIcon(icon) {
   const t = (icon ?? "").trim();
   return COACH_ICON_OPTIONS.includes(t) ? t : "✦";
@@ -515,6 +523,12 @@ const CSS = `
   }
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes fadeIn { from { opacity:0 } to { opacity:1 } }
+  @keyframes coachNudge {
+    0%   { opacity: 0; transform: translateY(10px) scale(0.97); }
+    9%   { opacity: 1; transform: translateY(0) scale(1); }
+    82%  { opacity: 1; transform: translateY(0) scale(1); }
+    100% { opacity: 0; transform: translateY(5px) scale(0.99); }
+  }
   .tap:active { transform: scale(0.86) !important; }
   .rc { transition: border-color 0.2s, background 0.2s; }
   .rc:hover { border-color: ${T.borderMid} !important; }
@@ -2214,7 +2228,7 @@ function TourOverlay({ steps, stepIdx, onNext, onSkip }) {
 }
 
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
-function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote, onLogZero, onOpenLog, onOpenGoalLog, onEditGoal, onCompleteGoal, onDeleteGoal, onEditHabit, onDeleteHabit, onXPInfo, onAdd }) {
+function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote, onLogZero, onOpenLog, onOpenGoalLog, onEditGoal, onCompleteGoal, onDeleteGoal, onEditHabit, onDeleteHabit, onXPInfo, onAdd, hideFloatingAdd }) {
   const activeGoals = goals.filter(g => g.status !== "completed");
   const loggedHabitsCount = habits.filter(h => isLoggedToday(h)).length;
   const loggedGoalsCount = activeGoals.filter(g => (g.logs || []).some(l => l.date === todayStr())).length;
@@ -2269,14 +2283,14 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
         );
       })()}
       <div style={{ height:16 }}/>
-      {(habits.length > 0 || activeGoals.length > 0) && onAdd && (
+      {!hideFloatingAdd && (habits.length > 0 || activeGoals.length > 0) && onAdd && (
         <button
           type="button"
           onClick={onAdd}
           aria-label="Add habit or goal"
           title="Add habit or goal"
           style={{
-            position:"fixed", bottom:142, right:18, height:52, padding:"0 18px 0 16px",
+            position:"fixed", bottom:210, right:18, height:52, padding:"0 18px 0 16px",
             borderRadius:26, border:"none",
             background:T.accent, color:"#fff", fontSize:14, fontWeight:700, lineHeight:1,
             cursor:"pointer", zIndex:99,
@@ -5092,6 +5106,90 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
   const [refCopied,      setRefCopied]      = useState(false);
   const [portalLoading,  setPortalLoading]  = useState(false);
 
+  // ── Notification state ──────────────────────────────────────────────────────
+  const [notifEnabled,    setNotifEnabled]    = useState(false);
+  const [notifTime,       setNotifTime]       = useState("09:00");
+  const [notifLoading,    setNotifLoading]    = useState(false);
+  const [notifPermission, setNotifPermission] = useState(
+    typeof Notification !== "undefined" ? Notification.permission : "denied"
+  );
+
+  useEffect(() => {
+    // On mount, check if this user already has a subscription stored
+    if (typeof Notification === "undefined" || !("serviceWorker" in navigator)) return;
+    setNotifPermission(Notification.permission);
+    if (Notification.permission !== "granted") return;
+    (async () => {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (!sub) return;
+        const { data } = await supabase
+          .from("push_subscriptions")
+          .select("reminder_time, notifications_enabled")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        if (data) {
+          setNotifEnabled(data.notifications_enabled);
+          setNotifTime(data.reminder_time || "09:00");
+        }
+      } catch (e) { /* silent — permission may have been revoked externally */ }
+    })();
+  }, [user.id]);
+
+  async function handleNotifToggle() {
+    if (typeof Notification === "undefined" || !("serviceWorker" in navigator)) {
+      alert("Notifications aren't supported in this browser. Try Chrome on Android or Safari on iOS 16.4+.");
+      return;
+    }
+    setNotifLoading(true);
+    try {
+      if (notifEnabled) {
+        // ── Turn OFF ──────────────────────────────────────────────────────────
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) await sub.unsubscribe();
+        await supabase.from("push_subscriptions").delete().eq("user_id", user.id);
+        setNotifEnabled(false);
+      } else {
+        // ── Turn ON ───────────────────────────────────────────────────────────
+        const permission = await Notification.requestPermission();
+        setNotifPermission(permission);
+        if (permission !== "granted") { setNotifLoading(false); return; }
+        const reg = await navigator.serviceWorker.ready;
+        const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+        if (!vapidKey) { console.error("[Forged] VITE_VAPID_PUBLIC_KEY not set"); setNotifLoading(false); return; }
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(vapidKey),
+        });
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        await supabase.from("push_subscriptions").upsert({
+          user_id: user.id,
+          subscription: sub.toJSON(),
+          reminder_time: notifTime,
+          notifications_enabled: true,
+          timezone: tz,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: "user_id" });
+        setNotifEnabled(true);
+      }
+    } catch (err) {
+      console.error("[Forged] notification toggle error:", err);
+    }
+    setNotifLoading(false);
+  }
+
+  async function handleNotifTimeChange(newTime) {
+    setNotifTime(newTime);
+    if (!notifEnabled) return;
+    await supabase.from("push_subscriptions").update({
+      reminder_time: newTime,
+      updated_at: new Date().toISOString(),
+    }).eq("user_id", user.id);
+  }
+  // ── End notification state ──────────────────────────────────────────────────
+
   useEffect(() => {
     supabase.rpc("my_referral_count").then(({ data }) => {
       if (typeof data === "number") setRefCount(data);
@@ -5207,38 +5305,69 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
             padding:"14px 16px 16px",
             background:"linear-gradient(135deg, rgba(200,144,42,0.12) 0%, rgba(200,144,42,0.04) 100%)",
             borderTop:`0.5px solid rgba(200,144,42,0.22)`,
-            display:"flex",
-            alignItems:"flex-start",
-            gap:12,
           }}
         >
-          <div
-            style={{
-              width:40, height:40, borderRadius:12, flexShrink:0,
-              background:"rgba(200,144,42,0.18)", border:`0.5px solid rgba(200,144,42,0.35)`,
-              display:"flex", alignItems:"center", justifyContent:"center", fontSize:20,
-            }}
-            aria-hidden
-          >
-            🔔
-          </div>
-          <div style={{ flex:1, minWidth:0, paddingTop:1 }}>
-            <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", marginBottom:4 }}>
-              <span style={{ fontSize:15, fontWeight:600, color:T.text, letterSpacing:"-0.01em" }}>Notifications</span>
-              <span
-                style={{
-                  fontSize:9, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase",
-                  color:"#1a1208", background:T.gold, padding:"3px 8px", borderRadius:6,
-                  boxShadow:"0 1px 0 rgba(0,0,0,0.2)",
-                }}
-              >
-                Coming soon
-              </span>
+          {/* Header row: icon + label + toggle */}
+          <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+            <div
+              style={{
+                width:40, height:40, borderRadius:12, flexShrink:0,
+                background:"rgba(200,144,42,0.18)", border:`0.5px solid rgba(200,144,42,0.35)`,
+                display:"flex", alignItems:"center", justifyContent:"center", fontSize:20,
+              }}
+              aria-hidden
+            >
+              🔔
             </div>
-            <p style={{ fontSize:12, color:T.sub, lineHeight:1.55, margin:0 }}>
-              {`Gentle reminders when it's time to log, streak saves, and goal check-ins — built so Forged nudges you, not noise.`}
-            </p>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize:15, fontWeight:600, color:T.text, letterSpacing:"-0.01em" }}>Daily reminders</div>
+              <div style={{ fontSize:12, color:T.sub, marginTop:2 }}>
+                {notifPermission === "denied"
+                  ? "Blocked — enable in your device Settings → Notifications"
+                  : notifEnabled
+                    ? `Reminding you at ${notifTime}`
+                    : "Tap to get daily habit reminders"}
+              </div>
+            </div>
+            {/* Toggle switch */}
+            <button
+              type="button"
+              onClick={handleNotifToggle}
+              disabled={notifLoading || notifPermission === "denied"}
+              style={{
+                flexShrink:0, width:48, height:28, borderRadius:14, border:"none",
+                background: notifEnabled ? T.gold : T.border,
+                opacity: (notifLoading || notifPermission === "denied") ? 0.5 : 1,
+                cursor: (notifLoading || notifPermission === "denied") ? "not-allowed" : "pointer",
+                position:"relative", transition:"background 0.2s", padding:0,
+              }}
+              aria-label={notifEnabled ? "Disable reminders" : "Enable reminders"}
+            >
+              <div style={{
+                position:"absolute", top:3,
+                left: notifEnabled ? "calc(100% - 25px)" : 3,
+                width:22, height:22, borderRadius:"50%",
+                background:"#fff", transition:"left 0.2s",
+                boxShadow:"0 1px 3px rgba(0,0,0,0.3)",
+              }}/>
+            </button>
           </div>
+          {/* Time picker — only shown when enabled */}
+          {notifEnabled && (
+            <div style={{ marginTop:14, display:"flex", alignItems:"center", gap:10 }}>
+              <span style={{ fontSize:13, color:T.sub, flex:1 }}>Remind me at</span>
+              <input
+                type="time"
+                value={notifTime}
+                onChange={e => handleNotifTimeChange(e.target.value)}
+                style={{
+                  background:T.bg, border:`0.5px solid ${T.border}`, borderRadius:8,
+                  color:T.text, fontSize:14, fontWeight:600, padding:"6px 10px",
+                  outline:"none", cursor:"pointer",
+                }}
+              />
+            </div>
+          )}
         </div>
       </div>
 
@@ -5838,6 +5967,15 @@ function PaywallScreen({ onPaid }) {
   );
 }
 
+/** Contextual coach hint when landing on a main tab (Profile omits FAB — no nudge). One shot per navigation; no interval. */
+const COACH_PAGE_NUDGES = {
+  today: "Need help logging today quickly?",
+  journal: "Want help making sense of your recent entries?",
+  insights: "Want a deeper read on your progress?",
+  social: "This is where your accountability layer will live.",
+};
+const COACH_NUDGE_DURATION_MS = 2800;
+
 // ─── ROOT APP ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [onboarded,   setOnboarded]  = useState(null);
@@ -5858,6 +5996,9 @@ export default function App() {
   const [showHistory, setShowHistory]= useState(false);
   const [showCoach,   setShowCoach]  = useState(false);
   const [showCoachTeaser, setShowCoachTeaser] = useState(false);
+  /** Ephemeral bubble above the coach FAB: `{ id, text }` while visible; `id` ties to the navigation that triggered it. */
+  const [coachPageNudge, setCoachPageNudge] = useState(null);
+  const coachNudgeSeqRef = useRef(0);
   const [reflectId,   setReflectId]  = useState(null);
   const [editId,      setEditId]     = useState(null);
   const [logId,       setLogId]      = useState(null);
@@ -6523,6 +6664,40 @@ export default function App() {
     }
   }, []);
 
+  const coachNudgeShellActive =
+    !loading &&
+    !authScreen &&
+    !passwordRecovery &&
+    sessionUserId != null &&
+    accountDataReady &&
+    !accountLoadError &&
+    !demoMode &&
+    !previewOnboarding &&
+    onboarded !== false &&
+    !checkingPayment;
+
+  useEffect(() => {
+    if (!coachNudgeShellActive) {
+      setCoachPageNudge(null);
+      return;
+    }
+    if (screen === "profile") {
+      setCoachPageNudge(null);
+      return;
+    }
+    const text = COACH_PAGE_NUDGES[screen];
+    if (!text) {
+      setCoachPageNudge(null);
+      return;
+    }
+    const id = ++coachNudgeSeqRef.current;
+    setCoachPageNudge({ id, text });
+    const t = setTimeout(() => {
+      setCoachPageNudge(prev => (prev && prev.id === id ? null : prev));
+    }, COACH_NUDGE_DURATION_MS);
+    return () => clearTimeout(t);
+  }, [screen, coachNudgeShellActive]);
+
   async function completeOnboarding({ name, habits: newHabits, coachName: newCoachName }) {
     const uid = userIdRef.current;
     const resolvedCoach = newCoachName || "Coach";
@@ -6622,7 +6797,7 @@ export default function App() {
       <>
         <style>{CSS}</style>
         {toasts.map(t => <Toast key={t.id} msg={t.msg} onDone={() => setToasts(ts => ts.filter(x => x.id !== t.id))}/>)}
-        <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, paddingBottom:80 }}>
+        <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, paddingBottom:104 }}>
           <DemoBanner onGetStarted={() => { setDemoMode(false); setHabits([]); shownDemoRef.current = true; setAuthScreen(true); }} />
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 18px 8px" }}>
             <div>
@@ -6635,9 +6810,9 @@ export default function App() {
             </button>
           </div>
           <TodayScreen habits={habits} goals={goals} xp={0} onTap={handleTap} onUndo={() => {}} onSkip={() => {}} onAddNote={() => demoBounce()} onLogZero={() => demoBounce()} onOpenLog={() => demoBounce()} onOpenGoalLog={() => demoBounce()} onEditGoal={openEditGoal} onCompleteGoal={() => demoBounce()} onDeleteGoal={() => demoBounce()} onEditHabit={openEditHabit} onDeleteHabit={() => demoBounce()} onXPInfo={() => {}} onAdd={() => demoBounce()}/>
-          <nav style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:430, maxWidth:"100vw", background:"rgba(26,26,22,0.96)", backdropFilter:"blur(16px)", borderTop:`0.5px solid ${T.border}`, display:"flex", zIndex:100, paddingBottom:6 }}>
+          <nav style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:430, maxWidth:"100vw", background:"linear-gradient(180deg, rgba(38,38,34,0.98) 0%, rgba(22,22,19,0.99) 100%)", backdropFilter:"blur(20px)", WebkitBackdropFilter:"blur(20px)", borderTop:`1px solid rgba(200,144,42,0.2)`, boxShadow:"0 -6px 32px rgba(0,0,0,0.5)", display:"flex", zIndex:100, paddingTop:8, paddingBottom:"max(11px, env(safe-area-inset-bottom, 0px))" }}>
             {[{id:"today",label:"Today"},{id:"journal",label:"Journal"},{id:"insights",label:"Insights"},{id:"social",label:"Social"},{id:"profile",label:"Profile"}].map(n => (
-              <button key={n.id} onClick={() => demoBounce()} style={{ flex:1, padding:"10px 4px 6px", border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3, fontSize:10, fontWeight:500, color:n.id==="today"?T.accent:T.muted }}>
+              <button key={n.id} onClick={() => demoBounce()} style={{ flex:1, padding:"9px 4px 6px", border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3, fontSize:10, fontWeight:600, color:n.id==="today"?T.accent:T.muted, letterSpacing:"0.02em" }}>
                 {n.label}
               </button>
             ))}
@@ -7143,7 +7318,7 @@ export default function App() {
       {flashes.map(f   => <XPFlash  key={f.id} {...f} onDone={() => setFlashes(fs  => fs.filter(x  => x.id !== f.id))}/>)}
       {toasts.map(t    => <Toast    key={t.id} msg={t.msg} onDone={() => setToasts(ts => ts.filter(x => x.id !== t.id))}/>)}
 
-      <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, paddingBottom:80 }}>
+      <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, paddingBottom:104 }}>
         {/* Top bar */}
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"22px 18px 8px" }}>
           <div>
@@ -7159,7 +7334,7 @@ export default function App() {
           </button>
         </div>
 
-        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd}/>}
+        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} hideFloatingAdd/>}
         {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)}/>}
         {screen === "insights" && <InsightsScreen habits={habits} goals={goals} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)}/>}
         {screen === "social"   && <SocialTeaserScreen />}
@@ -7189,58 +7364,132 @@ export default function App() {
           }}
         />}
 
-        {/* Floating AI coach — label shows coach name; hidden on Profile (secondary to Today “+ Add habit” FAB) */}
+        {/* Coach FAB (+ Today-only Add habit below) — hidden on Profile */}
         {screen !== "profile" && (() => {
           const coachLabelRaw = (coachName ?? "").trim() || "Coach";
           const coachLabelShort = coachLabelRaw.length > 13 ? `${coachLabelRaw.slice(0, 12)}…` : coachLabelRaw;
+          const showTodayAdd =
+            screen === "today" &&
+            (habits.length > 0 || goals.some(g => g.status !== "completed"));
           return (
             <div
               data-tour="coach-fab"
               style={{
-                position:"fixed", bottom:84, right:14, zIndex:98,
-                display:"flex", flexDirection:"column", alignItems:"center", gap:5,
-                maxWidth:92,
+                position:"fixed",
+                right:14,
+                bottom:108,
+                zIndex:102,
+                display:"flex",
+                flexDirection:"column",
+                alignItems:"flex-end",
+                justifyContent:"flex-end",
+                gap:10,
               }}
             >
-              <button
-                type="button"
-                onClick={() => setShowCoachTeaser(true)}
-                aria-label={`${coachLabelRaw} — AI coach`}
-                title={`${coachLabelRaw} — coming soon`}
+              <div
                 style={{
-                  width:44, height:44,
-                  borderRadius:"50%", border:`0.5px solid ${T.borderMid}`,
-                  background:"rgba(30,30,28,0.96)", backdropFilter:"blur(10px)",
-                  color:T.sub, cursor:"pointer",
-                  display:"flex", alignItems:"center", justifyContent:"center",
-                  boxShadow:"0 2px 14px rgba(0,0,0,0.4)",
+                  display:"flex", flexDirection:"row", alignItems:"center", justifyContent:"flex-end",
+                  gap:10,
                 }}
               >
-                {coachIcon && COACH_ICON_OPTIONS.includes(coachIcon) ? (
-                  <span style={{ fontSize:20, lineHeight:1 }} aria-hidden>{coachIcon}</span>
-                ) : (
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <path d="M12 2l1.8 5.9L20 10l-6.2 2.1L12 22l-1.8-9.9L4 10l6.2-2.1L12 2z" fill="currentColor" opacity="0.92"/>
-                  </svg>
+                {coachPageNudge && (
+                  <div
+                    key={coachPageNudge.id}
+                    role="status"
+                    aria-live="polite"
+                    style={{
+                      pointerEvents:"none",
+                      maxWidth:200,
+                      padding:"9px 12px",
+                      borderRadius:12,
+                      background:"rgba(24,24,22,0.96)",
+                      backdropFilter:"blur(12px)",
+                      WebkitBackdropFilter:"blur(12px)",
+                      border:"0.5px solid rgba(200,144,42,0.32)",
+                      boxShadow:"0 4px 22px rgba(0,0,0,0.38)",
+                      fontSize:12,
+                      lineHeight:1.45,
+                      color:T.sub,
+                      textAlign:"left",
+                      animation:`coachNudge ${COACH_NUDGE_DURATION_MS}ms cubic-bezier(0.22, 1, 0.36, 1) forwards`,
+                      userSelect:"none",
+                      flexShrink:1,
+                    }}
+                  >
+                    {coachPageNudge.text}
+                  </div>
                 )}
-              </button>
-              <span
-                style={{
-                  fontSize:10, fontWeight:700, color:T.gold, textAlign:"center", lineHeight:1.25,
-                  maxWidth:92, wordBreak:"break-word", letterSpacing:"0.02em",
-                  textShadow:"0 1px 10px rgba(0,0,0,0.75)",
-                }}
-              >
-                {coachLabelShort}
-              </span>
+                <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:5, flexShrink:0 }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowCoachTeaser(true)}
+                    aria-label={`${coachLabelRaw} — AI coach`}
+                    title={`${coachLabelRaw} — coming soon`}
+                    style={{
+                      width:44, height:44,
+                      borderRadius:"50%", border:`0.5px solid ${T.borderMid}`,
+                      background:"rgba(30,30,28,0.96)", backdropFilter:"blur(10px)",
+                      color:T.sub, cursor:"pointer",
+                      display:"flex", alignItems:"center", justifyContent:"center",
+                      boxShadow:"0 2px 14px rgba(0,0,0,0.4)",
+                    }}
+                  >
+                    {coachIcon && COACH_ICON_OPTIONS.includes(coachIcon) ? (
+                      <span style={{ fontSize:20, lineHeight:1 }} aria-hidden>{coachIcon}</span>
+                    ) : (
+                      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden>
+                        <path d="M12 2l1.8 5.9L20 10l-6.2 2.1L12 22l-1.8-9.9L4 10l6.2-2.1L12 2z" fill="currentColor" opacity="0.92"/>
+                      </svg>
+                    )}
+                  </button>
+                  <span
+                    style={{
+                      fontSize:10, fontWeight:700, color:T.gold, textAlign:"center", lineHeight:1.25,
+                      maxWidth:92, wordBreak:"break-word", letterSpacing:"0.02em",
+                      textShadow:"0 1px 10px rgba(0,0,0,0.75)",
+                    }}
+                  >
+                    {coachLabelShort}
+                  </span>
+                </div>
+              </div>
+              {showTodayAdd && (
+                <button
+                  type="button"
+                  onClick={handleStartAdd}
+                  aria-label="Add habit or goal"
+                  title="Add habit or goal"
+                  style={{
+                    height:44,
+                    padding:"0 14px 0 12px",
+                    borderRadius:22,
+                    border:"none",
+                    background:T.accent,
+                    color:"#fff",
+                    fontSize:13,
+                    fontWeight:700,
+                    lineHeight:1,
+                    cursor:"pointer",
+                    boxShadow:"0 3px 14px rgba(192,57,43,0.32)",
+                    display:"flex",
+                    alignItems:"center",
+                    justifyContent:"center",
+                    gap:6,
+                    fontFamily:T.font,
+                  }}
+                >
+                  <span style={{ fontSize:18, fontWeight:700, lineHeight:1, marginTop:1 }} aria-hidden>+</span>
+                  <span>Add habit</span>
+                </button>
+              )}
             </div>
           );
         })()}
 
         {/* Bottom nav */}
-        <nav data-tour="nav" style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:430, maxWidth:"100vw", background:"rgba(26,26,22,0.96)", backdropFilter:"blur(16px)", borderTop:`0.5px solid ${T.border}`, display:"flex", zIndex:100, paddingBottom:6 }}>
+        <nav data-tour="nav" style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:430, maxWidth:"100vw", background:"linear-gradient(180deg, rgba(38,38,34,0.98) 0%, rgba(22,22,19,0.99) 100%)", backdropFilter:"blur(20px)", WebkitBackdropFilter:"blur(20px)", borderTop:`1px solid rgba(200,144,42,0.2)`, boxShadow:"0 -6px 32px rgba(0,0,0,0.5)", display:"flex", zIndex:100, paddingTop:8, paddingBottom:"max(11px, env(safe-area-inset-bottom, 0px))" }}>
           {NAV.map(n => (
-            <button key={n.id} onClick={() => setScreen(n.id)} style={{ flex:1, padding:"10px 4px 6px", border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3, fontSize:10, fontWeight:500, color:screen===n.id?T.accent:T.muted, transition:"color 0.15s" }}>
+            <button key={n.id} onClick={() => setScreen(n.id)} style={{ flex:1, padding:"9px 4px 6px", border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3, fontSize:10, fontWeight:600, color:screen===n.id?T.accent:T.muted, letterSpacing:"0.02em", transition:"color 0.15s" }}>
               {n.icon}{n.label}
             </button>
           ))}
