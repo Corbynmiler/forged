@@ -5115,7 +5115,7 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
   );
 
   useEffect(() => {
-    // On mount, check if this user already has a subscription stored
+    // On mount, restore notification state from browser + DB
     if (typeof Notification === "undefined" || !("serviceWorker" in navigator)) return;
     setNotifPermission(Notification.permission);
     if (Notification.permission !== "granted") return;
@@ -5124,6 +5124,9 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
         const reg = await navigator.serviceWorker.ready;
         const sub = await reg.pushManager.getSubscription();
         if (!sub) return;
+        // Browser has a live subscription — show as enabled immediately
+        setNotifEnabled(true);
+        // Then try to sync time preference from DB
         const { data } = await supabase
           .from("push_subscriptions")
           .select("reminder_time, notifications_enabled")
@@ -5132,8 +5135,19 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
         if (data) {
           setNotifEnabled(data.notifications_enabled);
           setNotifTime(data.reminder_time || "09:00");
+        } else {
+          // Browser subscribed but no DB row — re-save it now
+          const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+          await supabase.from("push_subscriptions").upsert({
+            user_id: user.id,
+            subscription: sub.toJSON(),
+            reminder_time: "09:00",
+            notifications_enabled: true,
+            timezone: tz,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: "user_id" });
         }
-      } catch (e) { /* silent — permission may have been revoked externally */ }
+      } catch (e) { console.warn("[Forged] notif restore error:", e); }
     })();
   }, [user.id]);
 
@@ -5158,13 +5172,15 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
         if (permission !== "granted") { setNotifLoading(false); return; }
         const reg = await navigator.serviceWorker.ready;
         const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
-        if (!vapidKey) { console.error("[Forged] VITE_VAPID_PUBLIC_KEY not set"); setNotifLoading(false); return; }
+        if (!vapidKey) { alert("[Forged] VAPID key missing — contact support."); setNotifLoading(false); return; }
         const sub = await reg.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: urlBase64ToUint8Array(vapidKey),
         });
+        // Mark enabled in UI immediately — don't wait for DB
+        setNotifEnabled(true);
         const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-        await supabase.from("push_subscriptions").upsert({
+        const { error: upsertErr } = await supabase.from("push_subscriptions").upsert({
           user_id: user.id,
           subscription: sub.toJSON(),
           reminder_time: notifTime,
@@ -5172,10 +5188,14 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
           timezone: tz,
           updated_at: new Date().toISOString(),
         }, { onConflict: "user_id" });
-        setNotifEnabled(true);
+        if (upsertErr) console.error("[Forged] subscription save error:", upsertErr.message);
       }
     } catch (err) {
       console.error("[Forged] notification toggle error:", err);
+      // Only reset to off if we never got a browser subscription
+      const reg = await navigator.serviceWorker.ready.catch(() => null);
+      const sub = reg ? await reg.pushManager.getSubscription().catch(() => null) : null;
+      if (!sub) setNotifEnabled(false);
     }
     setNotifLoading(false);
   }
