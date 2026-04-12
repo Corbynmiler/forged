@@ -42,7 +42,7 @@ function calcDailyStreak(logs) {
 function pickMessage(habits, goals) {
   const today = todayStr();
 
-  const TRACKABLE = ["daily", "weekly", "build", "limit"];
+  const TRACKABLE = ["daily", "weekly", "build", "limit", "project"];
 
   // ── 1. Streak protection (≥ 3 days, all daily-style habits) ────────────────
   let bestStreak = 0;
