@@ -21,28 +21,64 @@ function daysBetween(fromStr, toStr) {
 
 // ── Streak calculation ─────────────────────────────────────────────────────────
 // Counts consecutive days ending *yesterday* with value===true.
-// We start from yesterday because the notification fires before the user logs today.
+// We start from yesterday because the notification fires at end of day.
 
 function calcDailyStreak(logs) {
   const loggedDates = new Set(
     (logs || []).filter(l => l.value === true).map(l => l.date)
   );
   let streak = 0;
-  for (let i = 1; i <= 365; i++) {
+  // Start from today (7pm — user has had time to log)
+  for (let i = 0; i <= 365; i++) {
     if (loggedDates.has(daysAgo(i))) streak++;
     else break;
   }
   return streak;
 }
 
+// ── "Logged today" check ───────────────────────────────────────────────────────
+
+function weekStartStr(todayISO) {
+  const d = new Date(todayISO);
+  d.setDate(d.getDate() - d.getDay()); // back to Sunday
+  return d.toISOString().split("T")[0];
+}
+
+function isHabitDoneToday(h, today) {
+  const logs = h.logs || [];
+  if (h.habit_type === "weekly") {
+    const ws = weekStartStr(today);
+    return logs.some(l => l.date >= ws && l.value === true);
+  }
+  const todayLog = logs.find(l => l.date === today);
+  if (!todayLog) return false;
+  if (h.habit_type === "daily") return todayLog.value === true;
+  // build / limit / project — any non-null numeric or truthy value counts
+  return todayLog.value !== null && todayLog.value !== undefined && todayLog.value !== false;
+}
+
 // ── Message picker ─────────────────────────────────────────────────────────────
 // Returns { title, body } for a single user based on their habits + goals.
-// Priority: streak protection → goal deadline → re-engagement → default.
+// Priority: all done → streak → goal deadline → re-engagement → default.
 
 function pickMessage(habits, goals) {
   const today = todayStr();
 
   const TRACKABLE = ["daily", "weekly", "build", "limit", "project"];
+
+  // ── 0. All habits logged today → congrats ──────────────────────────────────
+  const trackableHabits = habits.filter(h => TRACKABLE.includes(h.habit_type));
+  if (trackableHabits.length > 0 && trackableHabits.every(h => isHabitDoneToday(h, today))) {
+    const CONGRATS = [
+      "Every habit logged. That's how it's built. ⚒️",
+      "100% today. You showed up and got it done. 🔥",
+      "All done for today. You're an absolute weapon. 💪",
+      "Full house. Keep this up and nothing stops you. 🏆",
+      "Locked in today. Log your progress and keep pushing. ✅",
+    ];
+    const msg = CONGRATS[new Date().getDate() % CONGRATS.length]; // rotates daily
+    return { title: "Forged ✅", body: msg };
+  }
 
   // ── 1. Streak protection (≥ 3 days, all daily-style habits) ────────────────
   let bestStreak = 0;
