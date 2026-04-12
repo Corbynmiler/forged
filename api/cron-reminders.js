@@ -178,7 +178,12 @@ export default async function handler(req, res) {
       const habits = habitsByUser[sub.user_id] || [];
       const goals  = goalsByUser[sub.user_id]  || [];
       const { title, body } = pickMessage(habits, goals);
-      debugMessages.push({ user: sub.user_id.slice(0,8), title, body });
+      debugMessages.push({
+        user: sub.user_id.slice(0,8),
+        title, body,
+        habits: habits.map(h => `${h.name}(${h.habit_type})`),
+        goals:  goals.map(g => `${g.name}(${g.goal_status})`),
+      });
 
       const payload = JSON.stringify({ title, body, url: "/" });
 
