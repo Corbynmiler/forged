@@ -5241,7 +5241,7 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
                 {notifPermission === "denied"
                   ? "Blocked — enable in your device Settings → Notifications"
                   : notifEnabled
-                    ? `Reminding you at ${notifTime}`
+                    ? "You'll get a daily reminder each morning"
                     : "Tap to get daily habit reminders"}
               </div>
             </div>
@@ -5268,22 +5268,6 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
               }}/>
             </button>
           </div>
-          {/* Time picker — only shown when enabled */}
-          {notifEnabled && (
-            <div style={{ marginTop:14, display:"flex", alignItems:"center", gap:10 }}>
-              <span style={{ fontSize:13, color:T.sub, flex:1 }}>Remind me at</span>
-              <input
-                type="time"
-                value={notifTime}
-                onChange={e => onNotifTimeChange(e.target.value)}
-                style={{
-                  background:T.bg, border:`0.5px solid ${T.border}`, borderRadius:8,
-                  color:T.text, fontSize:14, fontWeight:600, padding:"6px 10px",
-                  outline:"none", cursor:"pointer",
-                }}
-              />
-            </div>
-          )}
         </div>
       </div>
 
