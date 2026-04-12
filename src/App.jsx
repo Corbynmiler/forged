@@ -4286,8 +4286,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
   const [builtHabits,     setBuiltHabits]     = useState([]);
   const [firstLogDone,    setFirstLogDone]    = useState(false);
   const [firstLogValue,   setFirstLogValue]   = useState("");
-  const [showingPaywall,  setShowingPaywall]  = useState(false);
-  const [showingWaitlist, setShowingWaitlist] = useState(false);
+  const [showingFinal,    setShowingFinal]    = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError,   setCheckoutError]   = useState(null);
 
@@ -4347,17 +4346,30 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
     setStep(s => s + 1);
   }
 
-  async function handleUnlock() {
+  function habitsSaved() {
+    // Build the log entry if the user filled it in during FIRST_STEP
+    if (builtHabits.length === 0) return builtHabits;
+    const firstHabit = pickFirstHabit(builtHabits);
+    if (!firstLogDone) return builtHabits;
+    const logEntry = buildFirstLog(firstHabit, firstLogValue);
+    return builtHabits.map(h => h.id === firstHabit.id ? { ...h, logs:[logEntry] } : h);
+  }
+
+  async function handleEnterApp() {
+    try {
+      await onSaveProgress({ name:name.trim()||"You", habits:habitsSaved(), coachName:coachNameInput.trim()||"Coach" });
+      onComplete();
+    } catch(err) {
+      // silently complete even if save fails — app will sync later
+      onComplete();
+    }
+  }
+
+  async function handleGoPro() {
     setCheckoutLoading(true);
     setCheckoutError(null);
-    // Build log for the first habit
-    const firstHabit = pickFirstHabit(builtHabits);
-    const logEntry = buildFirstLog(firstHabit, firstLogValue);
-    const habitsWithLog = builtHabits.map(h =>
-      h.id === firstHabit.id ? { ...h, logs:[logEntry] } : h
-    );
     try {
-      await onSaveProgress({ name:name.trim()||"You", habits:habitsWithLog, coachName:coachNameInput.trim()||"Coach" });
+      await onSaveProgress({ name:name.trim()||"You", habits:habitsSaved(), coachName:coachNameInput.trim()||"Coach" });
       await onCheckout();
     } catch(err) {
       setCheckoutError(err.message || "Something went wrong. Try again.");
@@ -4393,56 +4405,33 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
 
   const wrap = { fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column" };
 
-  // ── Waitlist screen ──────────────────────────────────────────────────────────
-  if (showingWaitlist) {
-    return (
-      <div style={wrap}>
-        <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"0 28px", textAlign:"center" }}>
-          <div style={{ fontSize:48, marginBottom:20 }}>👋</div>
-          <h2 style={{ fontFamily:T.serif, fontSize:26, color:T.text, marginBottom:12, lineHeight:1.2 }}>We'll be in touch.</h2>
-          <p style={{ fontSize:14, color:T.muted, lineHeight:1.7, marginBottom:32, maxWidth:300 }}>
-            Head to the landing page to join the waitlist — we send invites in batches and you'll hear from us soon.
-          </p>
-          <a href="/landing.html"
-            style={{ display:"block", width:"100%", maxWidth:300, padding:"15px 0", borderRadius:12, background:T.surface, border:`0.5px solid ${T.border}`, color:T.sub, fontSize:14, textAlign:"center", textDecoration:"none" }}>
-            Go to landing page →
-          </a>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Paywall step (after first log) ──────────────────────────────────────────
-  if (showingPaywall) {
+  // ── Final screen: you're in ──────────────────────────────────────────────────
+  if (showingFinal) {
     return (
       <div style={wrap}>
         <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"0 28px" }}>
-          <div style={{ width:"100%", maxWidth:360 }}>
-            <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:32, textAlign:"center" }}>Forged.</div>
-            <div style={{ background:T.surface, borderRadius:20, border:`0.5px solid ${T.border}`, padding:"32px 28px 28px", textAlign:"center" }}>
-              <div style={{ fontSize:11, fontWeight:600, color:T.accent, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:14 }}>
-                First entry logged
-              </div>
-              <h1 style={{ fontFamily:T.serif, fontSize:24, color:T.text, margin:"0 0 14px", lineHeight:1.2 }}>
-                You just logged your first entry.
-              </h1>
-              <p style={{ fontSize:14, color:T.sub, lineHeight:1.75, margin:"0 0 28px" }}>
-                That's how simple it is. Beta access is <strong style={{ color:T.text }}>$4.99/month</strong> — you're one of the first people in, and that price locks in for life when we launch.
-              </p>
-              <button
-                onClick={handleUnlock}
-                disabled={checkoutLoading}
-                style={{ width:"100%", padding:"15px 0", borderRadius:12, border:"none", background:T.accent, color:"#fff", fontSize:15, fontWeight:600, cursor:checkoutLoading?"not-allowed":"pointer", opacity:checkoutLoading?0.7:1, fontFamily:T.font, marginBottom:12, transition:"opacity 0.15s" }}
-              >
-                {checkoutLoading ? "Opening checkout…" : "Unlock beta access — $4.99/month"}
-              </button>
-              {checkoutError && <p style={{ fontSize:12, color:"#e05c5c", margin:"0 0 10px", lineHeight:1.5 }}>{checkoutError}</p>}
-              <button onClick={() => setShowingWaitlist(true)}
-                style={{ display:"block", width:"100%", padding:"8px 0", background:"none", border:"none", color:T.muted, fontSize:13, cursor:"pointer" }}>
-                Join the waitlist instead
-              </button>
+          <div style={{ width:"100%", maxWidth:360, textAlign:"center" }}>
+            <div style={{ fontSize:52, marginBottom:18 }}>⚒️</div>
+            <div style={{ fontFamily:T.serif, fontSize:28, color:T.text, marginBottom:10, lineHeight:1.2 }}>
+              You're set up.
             </div>
-            <p style={{ fontSize:11, color:T.hint, textAlign:"center", marginTop:16, lineHeight:1.6 }}>Secure checkout via Stripe. Cancel anytime.</p>
+            <div style={{ fontSize:14, color:T.muted, lineHeight:1.7, marginBottom:36, maxWidth:280, margin:"0 auto 36px" }}>
+              Start logging, build your streaks, and track what matters. Forged is free to use — upgrade to Pro any time to unlock insights and more.
+            </div>
+            <button
+              onClick={handleEnterApp}
+              style={{ width:"100%", padding:"16px 0", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:600, cursor:"pointer", marginBottom:12, fontFamily:T.font }}
+            >
+              Start using Forged →
+            </button>
+            <button
+              onClick={handleGoPro}
+              disabled={checkoutLoading}
+              style={{ width:"100%", padding:"13px 0", borderRadius:T.rsm, border:`0.5px solid ${T.borderStrong}`, background:"none", color:T.gold, fontSize:14, fontWeight:500, cursor:checkoutLoading?"not-allowed":"pointer", opacity:checkoutLoading?0.7:1, fontFamily:T.font }}
+            >
+              {checkoutLoading ? "Opening checkout…" : "Unlock Forged Pro — $4.99/month"}
+            </button>
+            {checkoutError && <p style={{ fontSize:12, color:"#e05c5c", marginTop:10, lineHeight:1.5 }}>{checkoutError}</p>}
           </div>
         </div>
       </div>
@@ -4705,7 +4694,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
         <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
           {already ? (
             <button
-              onClick={() => setShowingPaywall(true)}
+              onClick={() => setShowingFinal(true)}
               style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:600, cursor:"pointer", marginBottom:10 }}
             >
               Reminders on — let's go ✓
@@ -4714,7 +4703,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
             <button
               onClick={async () => {
                 if (onNotifToggle) await onNotifToggle();
-                setShowingPaywall(true);
+                setShowingFinal(true);
               }}
               disabled={notifLoading || blocked}
               style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:blocked?T.surface:T.gold, color:blocked?T.muted:"#0F0F0D", fontSize:16, fontWeight:600, cursor:blocked?"not-allowed":"pointer", opacity:(notifLoading||blocked)?0.7:1, marginBottom:10, transition:"opacity 0.15s" }}
@@ -4723,7 +4712,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
             </button>
           )}
           <button
-            onClick={() => setShowingPaywall(true)}
+            onClick={() => setShowingFinal(true)}
             style={{ width:"100%", padding:12, background:"none", border:"none", color:T.hint, fontSize:13, cursor:"pointer" }}
           >
             Skip for now
