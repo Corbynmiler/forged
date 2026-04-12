@@ -5170,13 +5170,30 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
         const permission = await Notification.requestPermission();
         setNotifPermission(permission);
         if (permission !== "granted") { setNotifLoading(false); return; }
-        const reg = await navigator.serviceWorker.ready;
         const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
-        if (!vapidKey) { alert("[Forged] VAPID key missing — contact support."); setNotifLoading(false); return; }
-        const sub = await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(vapidKey),
-        });
+        if (!vapidKey) { alert("Setup error: VAPID key missing. Contact support."); setNotifLoading(false); return; }
+        let reg;
+        try {
+          reg = await Promise.race([
+            navigator.serviceWorker.ready,
+            new Promise((_, reject) => setTimeout(() => reject(new Error("SW timeout")), 8000)),
+          ]);
+        } catch (swErr) {
+          alert("Service worker not ready: " + swErr.message + ". Try reloading the app.");
+          setNotifLoading(false);
+          return;
+        }
+        let sub;
+        try {
+          sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(vapidKey),
+          });
+        } catch (subErr) {
+          alert("Could not subscribe to push: " + subErr.message);
+          setNotifLoading(false);
+          return;
+        }
         // Mark enabled in UI immediately — don't wait for DB
         setNotifEnabled(true);
         const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -5188,14 +5205,11 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
           timezone: tz,
           updated_at: new Date().toISOString(),
         }, { onConflict: "user_id" });
-        if (upsertErr) console.error("[Forged] subscription save error:", upsertErr.message);
+        if (upsertErr) alert("Saved to browser but DB save failed: " + upsertErr.message);
       }
     } catch (err) {
-      console.error("[Forged] notification toggle error:", err);
-      // Only reset to off if we never got a browser subscription
-      const reg = await navigator.serviceWorker.ready.catch(() => null);
-      const sub = reg ? await reg.pushManager.getSubscription().catch(() => null) : null;
-      if (!sub) setNotifEnabled(false);
+      alert("[Forged] Unexpected error: " + err.message);
+      setNotifEnabled(false);
     }
     setNotifLoading(false);
   }
