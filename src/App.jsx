@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
-import { flushSync } from "react-dom";
+import { flushSync, createPortal } from "react-dom";
 import { supabase, habitToRow, rowToHabit, rowToGoal, goalToRow } from "./supabase.js";
 
 // ─── DATE UTILS ───────────────────────────────────────────────────────────────
@@ -106,6 +106,14 @@ const T = {
 
 const COLORS = ["#C0392B","#E67E22","#27AE60","#8E44AD","#2980B9","#C8902A","#16A085","#D4537E"];
 
+/** Profile / floating coach button — preset icons only (must match CoachSettingsSheet). */
+const COACH_ICON_OPTIONS = ["✦", "⚡", "🔥", "🛡️", "⚔️", "👻"];
+
+function normalizeCoachIcon(icon) {
+  const t = (icon ?? "").trim();
+  return COACH_ICON_OPTIONS.includes(t) ? t : "✦";
+}
+
 const HABIT_TYPES = {
   daily:    { label:"Daily habit",    desc:"One tap per day (e.g. meditate, read, cold shower).",      icon:"✓"  },
   weekly:   { label:"Weekly target",  desc:"Hit a session count each week (e.g. gym 4x, run 3x).",     icon:"📅" },
@@ -157,6 +165,17 @@ function inferProgressDirection(startValue, targetValue) {
 }
 function isLegacyProgressType(type) {
   return type === "progress";
+}
+
+/** Compare habit/goal ids — tolerate number vs string, and dots vs underscores (see habitToRow/goalToRow normalizeId). */
+function entityIdEq(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return false;
+  const norm = v => String(v).replace(/\./g, "_");
+  const sa = String(a);
+  const sb = String(b);
+  if (sa === sb) return true;
+  return norm(sa) === norm(sb);
 }
 function resolveProgressDirection(h) {
   if (h.direction === "decreasing" || h.direction === "increasing") return h.direction;
@@ -490,14 +509,17 @@ function Stat({ label, value, color }) {
   );
 }
 function Modal({ children, onClose }) {
-  return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", zIndex:300, display:"flex", alignItems:"flex-end", justifyContent:"center" }}
-      onClick={e => e.target === e.currentTarget && onClose()}>
-      <div onClick={e => e.stopPropagation()} style={{ width:430, maxWidth:"100vw", maxHeight:"92vh", overflowY:"auto", background:T.raised, borderRadius:"22px 22px 0 0", padding:"0 20px 60px" }}>
-        <div style={{ width:36, height:4, background:T.borderStrong, borderRadius:2, margin:"14px auto 22px" }}/>
-        {children}
+  return createPortal(
+    (
+      <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", zIndex:10000, display:"flex", alignItems:"flex-end", justifyContent:"center" }}
+        onClick={e => e.target === e.currentTarget && onClose()}>
+        <div onClick={e => e.stopPropagation()} style={{ width:430, maxWidth:"100vw", maxHeight:"92vh", overflowY:"auto", background:T.raised, borderRadius:"22px 22px 0 0", padding:"0 20px 60px" }}>
+          <div style={{ width:36, height:4, background:T.borderStrong, borderRadius:2, margin:"14px auto 22px" }}/>
+          {children}
+        </div>
       </div>
-    </div>
+    ),
+    document.body
   );
 }
 const lbl = { fontSize:10, fontWeight:500, color:T.muted, marginBottom:7, display:"block", textTransform:"uppercase", letterSpacing:"0.07em" };
@@ -2195,16 +2217,17 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
           aria-label="Add habit or goal"
           title="Add habit or goal"
           style={{
-            position:"fixed", bottom:142, right:18, width:52, height:52,
-            borderRadius:"50%", border:"none",
-            background:T.accent, color:"#fff", fontSize:28, fontWeight:300, lineHeight:1,
+            position:"fixed", bottom:142, right:18, height:52, padding:"0 18px 0 16px",
+            borderRadius:26, border:"none",
+            background:T.accent, color:"#fff", fontSize:14, fontWeight:700, lineHeight:1,
             cursor:"pointer", zIndex:99,
             boxShadow:"0 4px 16px rgba(192,57,43,0.35)",
-            display:"flex", alignItems:"center", justifyContent:"center",
+            display:"flex", alignItems:"center", justifyContent:"center", gap:7,
             fontFamily:T.font,
           }}
         >
-          +
+          <span style={{ fontSize:22, fontWeight:700, lineHeight:1, marginTop:1 }} aria-hidden>+</span>
+          <span>Add habit</span>
         </button>
       )}
     </div>
@@ -3630,6 +3653,103 @@ function AddActionSheet({ onAddHabit, onAddGoal, onClose }) {
   );
 }
 
+/** Bottom sheet: edit AI coach name and preset icon. */
+function CoachSettingsSheet({ onClose, onSave, initialName, initialIcon }) {
+  const [nameDraft, setNameDraft] = useState((initialName ?? "").trim() || "Coach");
+  const [iconDraft, setIconDraft] = useState(() => normalizeCoachIcon(initialIcon));
+  useEffect(() => {
+    setNameDraft((initialName ?? "").trim() || "Coach");
+    setIconDraft(normalizeCoachIcon(initialIcon));
+  }, [initialName, initialIcon]);
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.52)", zIndex:302, display:"flex", alignItems:"flex-end", justifyContent:"center" }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ width:430, maxWidth:"100vw", background:T.raised, borderRadius:"20px 20px 0 0", padding:"22px 20px 36px", borderTop:`0.5px solid ${T.borderMid}`, boxSizing:"border-box" }}
+      >
+        <div style={{ width:36, height:4, borderRadius:2, background:T.border, margin:"0 auto 18px" }}/>
+        <div style={{ fontFamily:T.serif, fontSize:20, color:T.text, marginBottom:14 }}>AI coach</div>
+        <label style={{ ...lbl, marginBottom:6 }}>Coach name</label>
+        <input
+          style={{ ...inp, marginBottom:18 }}
+          value={nameDraft}
+          onChange={e => setNameDraft(e.target.value)}
+          placeholder="e.g. Atlas, Sam…"
+          maxLength={40}
+          autoFocus
+        />
+        <div style={{ fontSize:10, fontWeight:500, color:T.muted, marginBottom:8, textTransform:"uppercase", letterSpacing:"0.07em" }}>Coach icon</div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(6, 1fr)", gap:8, marginBottom:22 }}>
+          {COACH_ICON_OPTIONS.map(ic => (
+            <button
+              key={ic}
+              type="button"
+              onClick={() => setIconDraft(ic)}
+              style={{
+                aspectRatio:1, borderRadius:T.rsm,
+                border:`0.5px solid ${iconDraft === ic ? T.gold : T.borderStrong}`,
+                background: iconDraft === ic ? "rgba(200,144,42,0.14)" : T.surface,
+                fontSize:22, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center",
+                lineHeight:1, padding:0,
+              }}
+            >
+              {ic}
+            </button>
+          ))}
+        </div>
+        <div style={{ display:"flex", gap:10 }}>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{ flex:1, padding:13, borderRadius:T.rsm, border:`0.5px solid ${T.borderStrong}`, background:"none", color:T.muted, fontSize:14, fontWeight:500, cursor:"pointer" }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => { onSave({ name: nameDraft.trim() || "Coach", icon: iconDraft }); onClose(); }}
+            style={{ flex:1, padding:13, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer" }}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CoachComingSoonSheet({ onClose, coachName, context }) {
+  void context;
+  const trimmed = (coachName ?? "").trim();
+  const displayName = trimmed.length ? trimmed : "Your coach";
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.52)", zIndex:301, display:"flex", alignItems:"flex-end", justifyContent:"center" }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ width:430, maxWidth:"100vw", background:T.raised, borderRadius:"20px 20px 0 0", padding:"22px 20px 36px", borderTop:`0.5px solid ${T.borderMid}`, boxSizing:"border-box" }}
+      >
+        <div style={{ width:36, height:4, borderRadius:2, background:T.border, margin:"0 auto 20px" }}/>
+        <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, textAlign:"center", marginBottom:14, letterSpacing:"-0.02em" }}>
+          {displayName}
+        </div>
+        <p style={{ fontSize:15, color:T.sub, lineHeight:1.55, textAlign:"center", margin:"0 6px 24px" }}>
+          <span style={{ color:T.text, fontWeight:600 }}>{displayName}</span>
+          {" "}is almost ready. AI coaching is coming soon to Forged.
+        </p>
+        <button
+          type="button"
+          onClick={onClose}
+          style={{ width:"100%", padding:13, borderRadius:T.rsm, border:`0.5px solid ${T.borderStrong}`, background:T.surface, color:T.muted, fontSize:14, fontWeight:500, cursor:"pointer" }}
+        >
+          Got it
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── SOCIAL / FORGE PRO TEASER (replaces former Habits tab) ───────────────────
 function SocialTeaserCard({ emoji, title, children }) {
   return (
@@ -4797,11 +4917,10 @@ function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
   );
 }
 
-function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onSignOut, onShowTour, onUpgrade, coachName, onUpdateCoachName }) {
+function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onSignOut, onShowTour, onUpgrade, coachName, coachIcon, onSaveCoach }) {
   const [editingName,    setEditingName]    = useState(false);
   const [nameVal,        setNameVal]        = useState(user.name);
-  const [editingCoach,   setEditingCoach]   = useState(false);
-  const [coachVal,       setCoachVal]       = useState(coachName || "Coach");
+  const [showCoachSheet, setShowCoachSheet] = useState(false);
   const [showAvatarPick, setShowAvatarPick] = useState(false);
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
   const [refCount,       setRefCount]       = useState(null);
@@ -4907,29 +5026,16 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
         <div style={{ padding:"10px 16px 6px", fontSize:10, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em" }}>Account</div>
         <SRow label="Display name" value={user.name} onPress={() => setEditingName(true)}/>
         <div style={{ borderBottom:`0.5px solid ${T.border}`, padding:"12px 16px" }}>
-          {editingCoach ? (
-            <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-              <div style={{ fontSize:14, color:T.text, flexShrink:0 }}>Coach name</div>
-              <input
-                style={{ flex:1, background:T.surface, border:`0.5px solid ${T.borderStrong}`, borderRadius:T.rsm, padding:"7px 10px", fontSize:14, color:T.text, outline:"none" }}
-                value={coachVal}
-                onChange={e => setCoachVal(e.target.value)}
-                onKeyDown={e => { if(e.key==="Enter"){ onUpdateCoachName(coachVal.trim()||"Coach"); setEditingCoach(false); }}}
-                autoFocus
-              />
-              <button onClick={() => { onUpdateCoachName(coachVal.trim()||"Coach"); setEditingCoach(false); }}
-                style={{ padding:"7px 12px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:13, cursor:"pointer", flexShrink:0 }}>Save</button>
-            </div>
-          ) : (
-            <button onClick={() => setEditingCoach(true)} style={{ display:"flex", alignItems:"center", width:"100%", background:"none", border:"none", cursor:"pointer", gap:10 }}>
-              <div style={{ fontSize:18, flexShrink:0 }}>🤖</div>
-              <div style={{ flex:1, textAlign:"left" }}>
-                <div style={{ fontSize:14, color:T.text }}>AI coach name</div>
-                <div style={{ fontSize:12, color:T.muted, marginTop:1 }}>{coachName || "Coach"}</div>
+          <button type="button" onClick={() => setShowCoachSheet(true)} style={{ display:"flex", alignItems:"center", width:"100%", background:"none", border:"none", cursor:"pointer", gap:10 }}>
+            <div style={{ fontSize:18, flexShrink:0 }}>🤖</div>
+            <div style={{ flex:1, textAlign:"left" }}>
+              <div style={{ fontSize:14, color:T.text }}>AI coach name</div>
+              <div style={{ fontSize:12, color:T.muted, marginTop:1 }}>
+                {(coachIcon && COACH_ICON_OPTIONS.includes(coachIcon)) ? <>{coachIcon} {coachName || "Coach"}</> : (coachName || "Coach")}
               </div>
-              <span style={{ fontSize:18, color:T.hint }}>›</span>
-            </button>
-          )}
+            </div>
+            <span style={{ fontSize:18, color:T.hint }}>›</span>
+          </button>
         </div>
         <SRow label="Notifications" note="Coming soon" onPress={null}/>
       </div>
@@ -5103,6 +5209,15 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
           <SRow label="Sign out" destructive onPress={() => setShowSignOutConfirm(true)}/>
         )}
       </div>
+
+      {showCoachSheet && (
+        <CoachSettingsSheet
+          initialName={coachName}
+          initialIcon={coachIcon}
+          onClose={() => setShowCoachSheet(false)}
+          onSave={onSaveCoach}
+        />
+      )}
 
       <div style={{ height:20 }}/>
     </div>
@@ -5540,6 +5655,7 @@ export default function App() {
   const [showXP,      setShowXP]     = useState(false);
   const [showHistory, setShowHistory]= useState(false);
   const [showCoach,   setShowCoach]  = useState(false);
+  const [showCoachTeaser, setShowCoachTeaser] = useState(false);
   const [reflectId,   setReflectId]  = useState(null);
   const [editId,      setEditId]     = useState(null);
   const [logId,       setLogId]      = useState(null);
@@ -5553,6 +5669,7 @@ export default function App() {
   /** From profiles.stripe_customer_id — used for Stripe Customer Portal */
   const [stripeCustomerId, setStripeCustomerId] = useState(null);
   const [coachName,      setCoachName]      = useState("Coach");
+  const [coachIcon,      setCoachIcon]      = useState("");
   const [showUpgrade,    setShowUpgrade]    = useState(false);
   const [checkingPayment,setCheckingPayment]= useState(false);
   const [showWelcome,    setShowWelcome]    = useState(false);
@@ -5745,6 +5862,7 @@ export default function App() {
         setRefCode(profile.ref_code ?? null);
         setStripeCustomerId(profile.stripe_customer_id ?? null);
         setCoachName(profile.coach_name || "Coach");
+        setCoachIcon((profile.coach_icon && String(profile.coach_icon).trim()) || "");
         isOnboarded = profile.onboarded ?? false;
         if (!isOnboarded && profile.name && profile.name.trim()) {
           isOnboarded = true;
@@ -6035,6 +6153,8 @@ export default function App() {
           setHabits([]);
           setUser({ name: "", avatarUrl: null });
           setXp(0);
+          setCoachName("Coach");
+          setCoachIcon("");
           setOnboarded(null);
           setIsPro(false);
           setStripeCustomerId(null);
@@ -6137,23 +6257,35 @@ export default function App() {
   }, []);
 
   /** Clear the other editor first so goal vs habit modals never stack (flushSync avoids stale editId + editGoalId in one tick). */
-  const openEditGoal = useCallback(id => {
+  const openEditGoal = useCallback(rawId => {
+    const g = goals.find(x => entityIdEq(x.id, rawId));
     flushSync(() => { setEditId(null); });
-    setEditGoalId(id);
-  }, []);
-  const openEditHabit = useCallback(id => {
-    // Goal rows use `openEditGoal`; if this id is a goal, never open the habit editor (avoids stacked modals / wrong form).
-    if (goals.some(g => g.id === id)) {
-      openEditGoal(id);
+    setEditGoalId(g ? g.id : null);
+  }, [goals]);
+  const openEditHabit = useCallback(rawId => {
+    const goalMatch = goals.find(g => entityIdEq(g.id, rawId));
+    if (goalMatch) {
+      openEditGoal(goalMatch.id);
       return;
     }
+    const habitMatch = habits.find(h => entityIdEq(h.id, rawId));
+    if (
+      habitMatch &&
+      (habitMatch.habitType === "goal" || habitMatch.habitType === "progress" || isLegacyProgressType(habitMatch.habitType))
+    ) {
+      const g2 = goals.find(x => entityIdEq(x.id, rawId));
+      if (g2) {
+        openEditGoal(g2.id);
+        return;
+      }
+    }
     flushSync(() => { setEditGoalId(null); });
-    setEditId(id);
-  }, [goals, openEditGoal]);
+    setEditId(habitMatch ? habitMatch.id : null);
+  }, [goals, habits, openEditGoal]);
 
-  const reflectHabit = habits.find(h => h.id === reflectId) || null;
-  const editHabit    = habits.find(h => h.id === editId)    || null;
-  const logHabit     = habits.find(h => h.id === logId)     || null;
+  const reflectHabit = habits.find(h => entityIdEq(h.id, reflectId)) || null;
+  const editHabit    = habits.find(h => entityIdEq(h.id, editId))    || null;
+  const logHabit     = habits.find(h => entityIdEq(h.id, logId))     || null;
 
   // Capture ?ref= from URL and handle ?checkout=success
   useEffect(() => {
@@ -6810,24 +6942,39 @@ export default function App() {
           onSignOut={handleSignOut}
           onShowTour={() => { setScreen("today"); setTimeout(() => { setTourSteps(GLOBAL_TOUR); setTourIdx(0); }, 120); }}
           coachName={coachName}
-          onUpdateCoachName={name => { setCoachName(name); syncProfile({ coach_name: name }); }}
+          coachIcon={coachIcon}
+          onSaveCoach={({ name, icon }) => {
+            setCoachName(name);
+            setCoachIcon(icon);
+            syncProfile({ coach_name: name, coach_icon: icon });
+          }}
         />}
 
-        {/* Floating help button — general help, not AI coach */}
-        <button
-          onClick={() => window.open("mailto:corbyn.miller2000@gmail.com?subject=Forged%20Help&body=Hey%2C%20I%20need%20help%20with%3A%0A%0A", "_blank")}
-          title="Get help"
-          style={{
-            position:"fixed", bottom:86, right:18, width:48, height:48,
-            borderRadius:"50%", border:`0.5px solid ${T.border}`,
-            background:"rgba(26,26,22,0.94)", backdropFilter:"blur(8px)",
-            color:T.muted, fontSize:20, cursor:"pointer", zIndex:98,
-            display:"flex", alignItems:"center", justifyContent:"center",
-            boxShadow:"0 2px 12px rgba(0,0,0,0.35)",
-          }}
-        >
-          ?
-        </button>
+        {/* Floating AI coach teaser — hidden on Profile (secondary to Today “+ Add habit” FAB) */}
+        {screen !== "profile" && (
+          <button
+            type="button"
+            onClick={() => setShowCoachTeaser(true)}
+            aria-label="AI coach"
+            title="AI coach"
+            style={{
+              position:"fixed", bottom:88, right:18, width:44, height:44,
+              borderRadius:"50%", border:`0.5px solid ${T.borderMid}`,
+              background:"rgba(30,30,28,0.96)", backdropFilter:"blur(10px)",
+              color:T.sub, cursor:"pointer", zIndex:98,
+              display:"flex", alignItems:"center", justifyContent:"center",
+              boxShadow:"0 2px 14px rgba(0,0,0,0.4)",
+            }}
+          >
+            {coachIcon && COACH_ICON_OPTIONS.includes(coachIcon) ? (
+              <span style={{ fontSize:20, lineHeight:1 }} aria-hidden>{coachIcon}</span>
+            ) : (
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path d="M12 2l1.8 5.9L20 10l-6.2 2.1L12 22l-1.8-9.9L4 10l6.2-2.1L12 2z" fill="currentColor" opacity="0.92"/>
+              </svg>
+            )}
+          </button>
+        )}
 
         {/* Bottom nav */}
         <nav data-tour="nav" style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:430, maxWidth:"100vw", background:"rgba(26,26,22,0.96)", backdropFilter:"blur(16px)", borderTop:`0.5px solid ${T.border}`, display:"flex", zIndex:100, paddingBottom:6 }}>
@@ -6843,8 +6990,9 @@ export default function App() {
       {showAdd       && <AddModal      onClose={() => setShowAdd(false)}     onSave={handleAddHabit}/>}
       {showAddGoal   && <AddGoalModal  onClose={() => setShowAddGoal(false)} onSave={handleAddGoal}/>}
       {showAddChoice && <AddActionSheet onAddHabit={() => { setShowAddChoice(false); setShowAdd(true); }} onAddGoal={() => { setShowAddChoice(false); setShowAddGoal(true); }} onClose={() => setShowAddChoice(false)}/>}
-      {logGoalId     && (() => { const g = goals.find(x => x.id === logGoalId); return g ? <LogGoalModal goal={g} onClose={() => setLogGoalId(null)} onLog={(id, val, note) => { handleLogGoal(id, val, note); setLogGoalId(null); }}/> : null; })()}
-      {editGoalId    && (() => { const g = goals.find(x => x.id === editGoalId); return g ? <EditGoalModal goal={g} onClose={() => setEditGoalId(null)} onSave={handleEditGoalSave}/> : null; })()}
+      {showCoachTeaser && <CoachComingSoonSheet onClose={() => setShowCoachTeaser(false)} coachName={coachName} context={screen}/>}
+      {logGoalId     && (() => { const g = goals.find(x => entityIdEq(x.id, logGoalId)); return g ? <LogGoalModal goal={g} onClose={() => setLogGoalId(null)} onLog={(id, val, note) => { handleLogGoal(id, val, note); setLogGoalId(null); }}/> : null; })()}
+      {editGoalId    && (() => { const g = goals.find(x => entityIdEq(x.id, editGoalId)); return g ? <EditGoalModal goal={g} onClose={() => setEditGoalId(null)} onSave={handleEditGoalSave}/> : null; })()}
       {showXP        && <XPModal       xp={xp}                               onClose={() => setShowXP(false)}/>}
       {showHistory   && <HistoryModal  habits={habits} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onClose={() => setShowHistory(false)}/>}
       {reflectId     && <ReflectModal  habit={reflectHabit}                  onClose={() => setReflectId(null)} onSave={handleSaveReflection}/>}
