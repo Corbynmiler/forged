@@ -196,30 +196,16 @@ export default async function handler(req, res) {
     }
   }
 
-  // DEBUG: log what we see per user (remove once counts are confirmed correct)
-  for (const sub of subs) {
-    const habits = habitsByUser[sub.user_id] || [];
-    const goals  = goalsByUser[sub.user_id]  || [];
-    console.log(`[Forged cron] user ${sub.user_id.slice(0,8)}: habits=[${habits.map(h=>`${h.name}(${h.habit_type})`).join(", ")}] goals=[${goals.map(g=>g.name).join(", ")}]`);
-  }
-
   // 4. Send personalized push per subscriber
   let sent = 0;
   let failed = 0;
   const staleIds = [];
-  const debugMessages = [];
 
   await Promise.all(
     subs.map(async (sub) => {
       const habits = habitsByUser[sub.user_id] || [];
       const goals  = goalsByUser[sub.user_id]  || [];
       const { title, body } = pickMessage(habits, goals);
-      debugMessages.push({
-        user: sub.user_id.slice(0,8),
-        title, body,
-        habits: habits.map(h => `${h.name}(${h.habit_type})`),
-        goals:  goals.map(g => `${g.name}(${g.goal_status})`),
-      });
 
       const payload = JSON.stringify({ title, body, url: "/" });
 
@@ -243,5 +229,5 @@ export default async function handler(req, res) {
   }
 
   console.log(`[Forged cron] sent: ${sent}, failed: ${failed}, stale removed: ${staleIds.length}`);
-  return res.status(200).json({ sent, failed, debug: debugMessages });
+  return res.status(200).json({ sent, failed });
 }
