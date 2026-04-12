@@ -4276,7 +4276,7 @@ const HABIT_ANNOTATIONS = {
   limit: "Limit habits track what you're reducing. Each tap logs one unit against your daily budget. Streaks increase only on days you log and stay at or under your limit.",
 };
 
-function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout }) {
+function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, notifEnabled, notifLoading, notifPermission, onNotifToggle }) {
   const [step,            setStep]            = useState(0);
   const [name,            setName]            = useState("");
   const [coachNameInput,  setCoachNameInput]  = useState("");
@@ -4298,6 +4298,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout }) {
   const INTER_STEP = ONBOARD_STEPS.length;       // virtual step 5
   const FIRST_STEP = ONBOARD_STEPS.length + 1;   // virtual step 6
   const HOME_STEP  = ONBOARD_STEPS.length + 2;   // virtual step 7 — add to home screen
+  const NOTIF_STEP = ONBOARD_STEPS.length + 3;   // virtual step 8 — enable notifications
 
   const isVirtual = step >= ONBOARD_STEPS.length;
 
@@ -4458,7 +4459,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout }) {
       <div style={wrap}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"32px 24px 0" }}>
           <div style={{ display:"flex", gap:6 }}>
-            {[...ONBOARD_STEPS, {},{},{}].map((_, i) => (
+            {[...ONBOARD_STEPS, {},{},{},{}].map((_, i) => (
               <div key={i} style={{ width:i===step?20:6, height:6, borderRadius:3, background:i<=step?T.accent:T.surface, transition:"all 0.3s" }}/>
             ))}
           </div>
@@ -4594,7 +4595,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout }) {
               ⚡ Why it matters
             </div>
             <div style={{ fontSize:13, color:T.sub, lineHeight:1.7 }}>
-              Forged works when you open it every day. A home screen icon makes that happen — no searching, no excuses. It also makes the app feel like what it is: a real tool, not a browser tab. Notifications will tie into this later too.
+              Forged works when you open it every day. A home screen icon makes that happen — no searching, no excuses. It also unlocks daily reminders so we can nudge you when it counts.
             </div>
           </div>
 
@@ -4631,16 +4632,101 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout }) {
         {/* CTAs */}
         <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
           <button
-            onClick={() => setShowingPaywall(true)}
+            onClick={() => setStep(NOTIF_STEP)}
             style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:600, cursor:"pointer", marginBottom:10 }}
           >
             Done — I've added it ✓
           </button>
           <button
-            onClick={() => setShowingPaywall(true)}
+            onClick={() => setStep(NOTIF_STEP)}
             style={{ width:"100%", padding:12, background:"none", border:"none", color:T.hint, fontSize:13, cursor:"pointer" }}
           >
             I'll set it up later
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Virtual step 8: enable notifications ────────────────────────────────────
+  if (step === NOTIF_STEP) {
+    const blocked = notifPermission === "denied";
+    const already = notifEnabled;
+
+    return (
+      <div style={wrap}>
+        {/* Progress dots */}
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"32px 24px 0" }}>
+          <div style={{ display:"flex", gap:6 }}>
+            {[...ONBOARD_STEPS, {},{},{},{}].map((_, i) => (
+              <div key={i} style={{ width:i===step?20:6, height:6, borderRadius:3, background:i<=step?T.accent:T.surface, transition:"all 0.3s" }}/>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ flex:1, padding:"40px 24px 16px", overflowY:"auto", display:"flex", flexDirection:"column", justifyContent:"center" }}>
+          {/* Hero */}
+          <div style={{ textAlign:"center", marginBottom:28 }}>
+            <div style={{ fontSize:52, marginBottom:14, lineHeight:1 }}>🔔</div>
+            <div style={{ fontFamily:T.serif, fontSize:26, color:T.text, lineHeight:1.2, marginBottom:10 }}>
+              Stay on track.
+            </div>
+            <div style={{ fontSize:14, color:T.muted, lineHeight:1.6, maxWidth:300, margin:"0 auto" }}>
+              One reminder a day. We send it when it matters most — at the end of the day, when you still have time to log.
+            </div>
+          </div>
+
+          {/* Benefit rows */}
+          <div style={{ display:"flex", flexDirection:"column", gap:12, marginBottom:28 }}>
+            {[
+              { icon:"🔥", title:"Streak protection", desc:"Get nudged before your streak breaks." },
+              { icon:"🎯", title:"Goal countdowns", desc:"Know when a deadline is approaching." },
+              { icon:"✅", title:"Daily check-in", desc:"A quick tap to log and close the day." },
+            ].map(({ icon, title, desc }) => (
+              <div key={title} style={{ display:"flex", alignItems:"center", gap:14, background:T.raised, border:`0.5px solid ${T.border}`, borderRadius:T.rsm, padding:"14px 16px" }}>
+                <div style={{ fontSize:22, flexShrink:0 }}>{icon}</div>
+                <div>
+                  <div style={{ fontSize:13, fontWeight:600, color:T.text, marginBottom:2 }}>{title}</div>
+                  <div style={{ fontSize:12, color:T.muted, lineHeight:1.5 }}>{desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {blocked && (
+            <div style={{ background:"rgba(224,92,92,0.08)", border:"0.5px solid rgba(224,92,92,0.25)", borderRadius:T.rsm, padding:"10px 14px", marginBottom:16 }}>
+              <div style={{ fontSize:12, color:"#e05c5c", lineHeight:1.6 }}>
+                Notifications are blocked in your browser settings. To enable them, open Settings → Safari/Chrome → Notifications and allow Forged.
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
+          {already ? (
+            <button
+              onClick={() => setShowingPaywall(true)}
+              style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:600, cursor:"pointer", marginBottom:10 }}
+            >
+              Reminders on — let's go ✓
+            </button>
+          ) : (
+            <button
+              onClick={async () => {
+                if (onNotifToggle) await onNotifToggle();
+                setShowingPaywall(true);
+              }}
+              disabled={notifLoading || blocked}
+              style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:blocked?T.surface:T.gold, color:blocked?T.muted:"#0F0F0D", fontSize:16, fontWeight:600, cursor:blocked?"not-allowed":"pointer", opacity:(notifLoading||blocked)?0.7:1, marginBottom:10, transition:"opacity 0.15s" }}
+            >
+              {notifLoading ? "Enabling…" : blocked ? "Notifications blocked" : "Enable daily reminders 🔔"}
+            </button>
+          )}
+          <button
+            onClick={() => setShowingPaywall(true)}
+            style={{ width:"100%", padding:12, background:"none", border:"none", color:T.hint, fontSize:13, cursor:"pointer" }}
+          >
+            Skip for now
           </button>
         </div>
       </div>
@@ -4657,7 +4743,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout }) {
       <div style={wrap}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"32px 24px 0" }}>
           <div style={{ display:"flex", gap:6 }}>
-            {[...ONBOARD_STEPS, {},{}].map((_, i) => (
+            {[...ONBOARD_STEPS, {},{},{},{}].map((_, i) => (
               <div key={i} style={{ width:i===step?20:6, height:6, borderRadius:3, background:i<=step?T.accent:T.surface, transition:"all 0.3s" }}/>
             ))}
           </div>
@@ -5921,6 +6007,9 @@ export default function App() {
   const [notifPermission, setNotifPermission] = useState(
     typeof Notification !== "undefined" ? Notification.permission : "denied"
   );
+  const [notifNudgeDismissed, setNotifNudgeDismissed] = useState(
+    () => !!localStorage.getItem("forged_notif_nudge_dismissed")
+  );
   // ─────────────────────────────────────────────────────────────────────────────
 
   const [showUpgrade,    setShowUpgrade]    = useState(false);
@@ -6851,6 +6940,10 @@ export default function App() {
           return Promise.resolve();
         }}
         onSkip={() => setPreviewOnboarding(false)}
+        notifEnabled={notifEnabled}
+        notifLoading={notifLoading}
+        notifPermission={notifPermission}
+        onNotifToggle={handleNotifToggle}
       /></>
     );
   }
@@ -6889,6 +6982,10 @@ export default function App() {
           setOnboarded(true);
           syncProfile({ onboarded: true, name: user.name || "", xp: 0 });
         }}
+        notifEnabled={notifEnabled}
+        notifLoading={notifLoading}
+        notifPermission={notifPermission}
+        onNotifToggle={handleNotifToggle}
       /></>
     );
   }
@@ -7344,6 +7441,25 @@ export default function App() {
           </button>
         </div>
 
+        {/* Notification nudge banner — shown on Today screen when not enabled */}
+        {screen === "today" && !notifEnabled && !notifNudgeDismissed && notifPermission !== "denied" && (
+          <div style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 14px", background:"rgba(200,144,42,0.1)", borderBottom:`0.5px solid rgba(200,144,42,0.22)` }}>
+            <span style={{ fontSize:16, flexShrink:0 }}>🔔</span>
+            <span style={{ flex:1, fontSize:12, color:T.sub, lineHeight:1.5 }}>Get daily reminders to keep your streak.</span>
+            <button
+              onClick={handleNotifToggle}
+              disabled={notifLoading}
+              style={{ flexShrink:0, padding:"5px 12px", borderRadius:16, border:"none", background:T.gold, color:"#0F0F0D", fontSize:12, fontWeight:700, cursor:"pointer", opacity:notifLoading?0.7:1 }}
+            >
+              {notifLoading ? "…" : "Enable"}
+            </button>
+            <button
+              onClick={() => { setNotifNudgeDismissed(true); localStorage.setItem("forged_notif_nudge_dismissed","1"); }}
+              style={{ flexShrink:0, width:24, height:24, borderRadius:"50%", border:"none", background:"none", color:T.muted, fontSize:16, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", padding:0 }}
+              aria-label="Dismiss"
+            >×</button>
+          </div>
+        )}
         {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} hideFloatingAdd/>}
         {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)}/>}
         {screen === "insights" && <InsightsScreen habits={habits} goals={goals} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)}/>}
@@ -7392,49 +7508,22 @@ export default function App() {
               data-tour="coach-fab"
               style={{
                 position:"fixed",
-                right:14,
+                left:14,
                 bottom:108,
                 zIndex:102,
                 display:"flex",
                 flexDirection:"column",
-                alignItems:"flex-end",
+                alignItems:"flex-start",
                 justifyContent:"flex-end",
                 gap:10,
               }}
             >
               <div
                 style={{
-                  display:"flex", flexDirection:"row", alignItems:"center", justifyContent:"flex-end",
+                  display:"flex", flexDirection:"row", alignItems:"center", justifyContent:"flex-start",
                   gap:10,
                 }}
               >
-                {coachPageNudge && (
-                  <div
-                    key={coachPageNudge.id}
-                    role="status"
-                    aria-live="polite"
-                    style={{
-                      pointerEvents:"none",
-                      maxWidth:200,
-                      padding:"9px 12px",
-                      borderRadius:12,
-                      background:"rgba(24,24,22,0.96)",
-                      backdropFilter:"blur(12px)",
-                      WebkitBackdropFilter:"blur(12px)",
-                      border:"0.5px solid rgba(200,144,42,0.32)",
-                      boxShadow:"0 4px 22px rgba(0,0,0,0.38)",
-                      fontSize:12,
-                      lineHeight:1.45,
-                      color:T.sub,
-                      textAlign:"left",
-                      animation:`coachNudge ${COACH_NUDGE_DURATION_MS}ms cubic-bezier(0.22, 1, 0.36, 1) forwards`,
-                      userSelect:"none",
-                      flexShrink:1,
-                    }}
-                  >
-                    {coachPageNudge.text}
-                  </div>
-                )}
                 <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:5, flexShrink:0 }}>
                   <button
                     type="button"
@@ -7468,6 +7557,33 @@ export default function App() {
                     {coachLabelShort}
                   </span>
                 </div>
+                {coachPageNudge && (
+                  <div
+                    key={coachPageNudge.id}
+                    role="status"
+                    aria-live="polite"
+                    style={{
+                      pointerEvents:"none",
+                      maxWidth:200,
+                      padding:"9px 12px",
+                      borderRadius:12,
+                      background:"rgba(24,24,22,0.96)",
+                      backdropFilter:"blur(12px)",
+                      WebkitBackdropFilter:"blur(12px)",
+                      border:"0.5px solid rgba(200,144,42,0.32)",
+                      boxShadow:"0 4px 22px rgba(0,0,0,0.38)",
+                      fontSize:12,
+                      lineHeight:1.45,
+                      color:T.sub,
+                      textAlign:"left",
+                      animation:`coachNudge ${COACH_NUDGE_DURATION_MS}ms cubic-bezier(0.22, 1, 0.36, 1) forwards`,
+                      userSelect:"none",
+                      flexShrink:1,
+                    }}
+                  >
+                    {coachPageNudge.text}
+                  </div>
+                )}
               </div>
               {showTodayAdd && (
                 <button
