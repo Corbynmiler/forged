@@ -2033,9 +2033,9 @@ const PAGE_TOURS = {
       pad: 8,
     },
     {
-      target: "[data-tour='coach-card']",
+      target: "[data-tour='coach-fab']",
       title: "Your AI coach",
-      body: "Unlike generic coaching apps, your coach actually reads your logs, streaks, and reflections before responding. Unlock it with early supporter access.",
+      body: "Tap the floating coach anytime. Soon you'll be able to talk or type with a coach that knows your habits — set goals, log progress, and stay on track without the busywork.",
       callout: "top", pad: 8,
     },
   ],
@@ -2214,7 +2214,7 @@ function TourOverlay({ steps, stepIdx, onNext, onSkip }) {
 }
 
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
-function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote, onLogZero, onOpenLog, onOpenGoalLog, onEditGoal, onCompleteGoal, onDeleteGoal, onEditHabit, onDeleteHabit, onXPInfo, onCoach, onAdd, isPro, coachName }) {
+function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote, onLogZero, onOpenLog, onOpenGoalLog, onEditGoal, onCompleteGoal, onDeleteGoal, onEditHabit, onDeleteHabit, onXPInfo, onAdd }) {
   const activeGoals = goals.filter(g => g.status !== "completed");
   const loggedHabitsCount = habits.filter(h => isLoggedToday(h)).length;
   const loggedGoalsCount = activeGoals.filter(g => (g.logs || []).some(l => l.date === todayStr())).length;
@@ -2266,25 +2266,6 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
           i === 0
             ? <div key={i} data-tour="today-first-section">{sec}</div>
             : <div key={i}>{sec}</div>
-        );
-      })()}
-      {/* Coach card */}
-      {habits.length > 0 && (() => {
-        const contextLine = loggedCount === 0
-          ? "Nothing logged yet today — want to think through what's in the way?"
-          : loggedCount === totalTrackables
-          ? `You've logged all ${totalTrackables} items today — want to reflect on how it went?`
-          : `You've logged ${loggedCount} of ${totalTrackables} items today — want to talk through the rest?`;
-        return (
-          <button onClick={onCoach}
-            style={{ margin:"12px 14px 4px", width:"calc(100% - 28px)", background:"rgba(200,144,42,0.06)", border:`0.5px solid rgba(200,144,42,0.28)`, borderRadius:T.r, padding:"14px 16px", cursor:"pointer", display:"flex", alignItems:"center", gap:14, textAlign:"left", boxSizing:"border-box" }}>
-            <div style={{ width:36, height:36, borderRadius:10, background:"rgba(200,144,42,0.12)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>🤖</div>
-            <div style={{ flex:1 }}>
-              <div style={{ fontSize:13, fontWeight:500, color:T.text, marginBottom:3 }}>Ask your habit coach anything</div>
-              <div style={{ fontSize:12, color:T.muted, lineHeight:1.5 }}>{contextLine}</div>
-            </div>
-            <div style={{ fontSize:16, color:"rgba(200,144,42,0.5)", flexShrink:0 }}>›</div>
-          </button>
         );
       })()}
       <div style={{ height:16 }}/>
@@ -2650,7 +2631,7 @@ function HabitDayCard({ habit, logs, onReflect, onDeleteLogEntry }) {
 }
 
 // ─── JOURNAL SCREEN ───────────────────────────────────────────────────────────
-function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, journalUserId, isPro, onUpgrade, onCoach }) {
+function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, journalUserId, isPro, onUpgrade }) {
   const [filter, setFilter] = useState("all");
   const [viewMode, setViewMode] = useState("day"); // "day" | "week" | "month"
   const [monthOffset, setMonthOffset] = useState(0);
@@ -3117,16 +3098,7 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
         </div>
       )}
 
-      {/* Coach card */}
-      <button onClick={onCoach}
-        style={{ margin:"4px 14px 16px", width:"calc(100% - 28px)", background:"rgba(200,144,42,0.06)", border:`0.5px solid rgba(200,144,42,0.28)`, borderRadius:T.r, padding:"14px 16px", cursor:"pointer", display:"flex", alignItems:"center", gap:14, textAlign:"left", boxSizing:"border-box" }}>
-        <div style={{ width:36, height:36, borderRadius:10, background:"rgba(200,144,42,0.12)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>🤖</div>
-        <div style={{ flex:1 }}>
-          <div style={{ fontSize:13, fontWeight:500, color:T.text, marginBottom:3 }}>Want help reflecting on what you've written?</div>
-          <div style={{ fontSize:12, color:T.muted, lineHeight:1.5 }}>Your coach can help you find patterns and meaning in your journal.</div>
-        </div>
-        <div style={{ fontSize:16, color:"rgba(200,144,42,0.5)", flexShrink:0 }}>›</div>
-      </button>
+      <div style={{ height:20 }}/>
     </div>
   );
 }
@@ -3179,7 +3151,7 @@ function EntryCard({ entry, onReflect }) {
 }
 
 // ─── INSIGHTS SCREEN ──────────────────────────────────────────────────────────
-function InsightsScreen({ habits, goals = [], onShowHistory, onShare, onCoach }) {
+function InsightsScreen({ habits, goals = [], onShowHistory, onShare }) {
   function IC({ title, children, action, dataTour }) {
     return (
       <div data-tour={dataTour} style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:18 }}>
@@ -3420,18 +3392,7 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare, onCoach })
         );
       })}
 
-      {/* Coach patterns card — locked teaser */}
-      <button onClick={onCoach}
-        style={{ margin:"4px 14px 16px", width:"calc(100% - 28px)", background:"rgba(200,144,42,0.06)", border:`0.5px solid rgba(200,144,42,0.28)`, borderRadius:T.r, padding:"18px 18px", cursor:"pointer", display:"flex", alignItems:"flex-start", gap:14, textAlign:"left", boxSizing:"border-box" }}>
-        <div style={{ width:38, height:38, borderRadius:10, background:"rgba(200,144,42,0.12)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:19, flexShrink:0, marginTop:1 }}>🤖</div>
-        <div style={{ flex:1 }}>
-          <div style={{ fontSize:13, fontWeight:600, color:T.text, marginBottom:4 }}>Your coach spotted patterns this week</div>
-          <div style={{ fontSize:12, color:T.muted, lineHeight:1.6 }}>Unlock to see connections between your habits and what your data actually means.</div>
-          <div style={{ marginTop:10, display:"inline-flex", alignItems:"center", gap:5, fontSize:11, fontWeight:600, color:T.gold, background:"rgba(200,144,42,0.12)", padding:"4px 12px", borderRadius:20 }}>
-            🔒 Unlock
-          </div>
-        </div>
-      </button>
+      <div style={{ height:20 }}/>
     </div>
   );
 }
@@ -3798,30 +3759,49 @@ function CoachSettingsSheet({ onClose, onSave, initialName, initialIcon }) {
 }
 
 function CoachComingSoonSheet({ onClose, coachName, context }) {
-  void context;
   const trimmed = (coachName ?? "").trim();
   const displayName = trimmed.length ? trimmed : "Your coach";
+  const where =
+    context === "journal" ? "Journal" :
+    context === "insights" ? "Insights" :
+    context === "today" ? "Today" : "Forged";
+  const bullet = (icon, title, body) => (
+    <div style={{ display:"flex", gap:12, alignItems:"flex-start", marginBottom:14 }}>
+      <div style={{ width:36, height:36, borderRadius:10, background:"rgba(200,144,42,0.14)", border:`0.5px solid rgba(200,144,42,0.25)`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:17, flexShrink:0 }}>{icon}</div>
+      <div style={{ flex:1, minWidth:0 }}>
+        <div style={{ fontSize:13, fontWeight:600, color:T.text, marginBottom:3 }}>{title}</div>
+        <div style={{ fontSize:12, color:T.muted, lineHeight:1.55 }}>{body}</div>
+      </div>
+    </div>
+  );
   return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.52)", zIndex:301, display:"flex", alignItems:"flex-end", justifyContent:"center" }}
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", zIndex:301, display:"flex", alignItems:"flex-end", justifyContent:"center" }}
       onClick={e => e.target === e.currentTarget && onClose()}>
       <div
         onClick={e => e.stopPropagation()}
-        style={{ width:430, maxWidth:"100vw", background:T.raised, borderRadius:"20px 20px 0 0", padding:"22px 20px 36px", borderTop:`0.5px solid ${T.borderMid}`, boxSizing:"border-box" }}
+        style={{ width:430, maxWidth:"100vw", background:`linear-gradient(180deg, rgba(200,144,42,0.14) 0%, ${T.raised} 52px)`, borderRadius:"20px 20px 0 0", padding:"18px 20px 34px", borderTop:`0.5px solid rgba(200,144,42,0.35)`, boxSizing:"border-box" }}
       >
-        <div style={{ width:36, height:4, borderRadius:2, background:T.border, margin:"0 auto 20px" }}/>
-        <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, textAlign:"center", marginBottom:14, letterSpacing:"-0.02em" }}>
-          {displayName}
+        <div style={{ width:36, height:4, borderRadius:2, background:T.border, margin:"0 auto 16px" }}/>
+        <div style={{ textAlign:"center", marginBottom:6 }}>
+          <span style={{ fontSize:13, fontWeight:600, letterSpacing:"0.12em", textTransform:"uppercase", color:T.gold }}>Coming soon</span>
         </div>
-        <p style={{ fontSize:15, color:T.sub, lineHeight:1.55, textAlign:"center", margin:"0 6px 24px" }}>
-          <span style={{ color:T.text, fontWeight:600 }}>{displayName}</span>
-          {" "}is almost ready. AI coaching is coming soon to Forged.
+        <div style={{ fontFamily:T.serif, fontSize:26, color:T.text, textAlign:"center", marginBottom:8, letterSpacing:"-0.02em", lineHeight:1.2 }}>
+          Meet <span style={{ color:T.gold }}>{displayName}</span> — your voice and text forge partner
+        </div>
+        <p style={{ fontSize:14, color:T.sub, lineHeight:1.55, textAlign:"center", margin:"0 4px 18px" }}>
+          {"This is the big unlock: a coach that actually knows your habits, goals, and logs. We're building it so Forged feels effortless — starting from "}{where}{"."}
         </p>
+        <div style={{ margin:"0 0 20px", padding:"14px 14px 4px", borderRadius:T.r, border:`0.5px solid ${T.border}`, background:"rgba(0,0,0,0.12)" }}>
+          {bullet("🎯", "Goals without the friction", "Brainstorm targets, break them into steps, and keep them honest — conversationally.")}
+          {bullet("🎙️", "Talk or type", "Voice when you’re on the move, text when you’re focused. Same coach, same context.")}
+          {bullet("⚡", "Log & fill the day faster", "Quick check-ins so updating habits doesn’t feel like another chore.")}
+        </div>
         <button
           type="button"
           onClick={onClose}
-          style={{ width:"100%", padding:13, borderRadius:T.rsm, border:`0.5px solid ${T.borderStrong}`, background:T.surface, color:T.muted, fontSize:14, fontWeight:500, cursor:"pointer" }}
+          style={{ width:"100%", padding:14, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:15, fontWeight:600, cursor:"pointer", boxShadow:"0 4px 18px rgba(192,57,43,0.35)" }}
         >
-          Got it
+          {"Got it — I'm ready"}
         </button>
       </div>
     </div>
@@ -4303,6 +4283,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout }) {
   const COACH_STEP = ONBOARD_STEPS.findIndex(s => s.id === "coach");
   const INTER_STEP = ONBOARD_STEPS.length;       // virtual step 5
   const FIRST_STEP = ONBOARD_STEPS.length + 1;   // virtual step 6
+  const HOME_STEP  = ONBOARD_STEPS.length + 2;   // virtual step 7 — add to home screen
 
   const isVirtual = step >= ONBOARD_STEPS.length;
 
@@ -4531,15 +4512,121 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout }) {
             onClick={() => {
               if (needsValue && !firstLogValue) return;
               setFirstLogDone(true);
-              setShowingPaywall(true);
+              setStep(HOME_STEP);
             }}
             style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:(needsValue&&!firstLogValue)?T.surface:firstHabit.color, color:(needsValue&&!firstLogValue)?T.muted:"#fff", fontSize:16, fontWeight:500, cursor:"pointer", transition:"all 0.2s" }}
           >
             Log your first entry →
           </button>
-          <button onClick={() => setShowingPaywall(true)}
+          <button onClick={() => { setStep(HOME_STEP); }}
             style={{ width:"100%", padding:12, background:"none", border:"none", color:T.hint, fontSize:13, cursor:"pointer", marginTop:6 }}>
             Skip this step
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Virtual step 7: add to home screen ──────────────────────────────────────
+  if (step === HOME_STEP) {
+    const instructions = [
+      {
+        os: "iPhone / Safari",
+        icon: "🍎",
+        steps: [
+          { icon: "⬆️", text: "Tap the Share icon at the bottom of Safari" },
+          { icon: "📲", text: "Scroll down and tap \"Add to Home Screen\"" },
+          { icon: "✅", text: "Tap \"Add\" in the top right corner" },
+        ],
+      },
+      {
+        os: "Android / Chrome",
+        icon: "🤖",
+        steps: [
+          { icon: "⋮", text: "Tap the three-dot menu in the top right of Chrome", mono: true },
+          { icon: "📲", text: "Tap \"Add to Home screen\" or \"Install app\"" },
+          { icon: "✅", text: "Confirm when prompted" },
+        ],
+      },
+    ];
+
+    return (
+      <div style={wrap}>
+        {/* Progress dots */}
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"32px 24px 0" }}>
+          <div style={{ display:"flex", gap:6 }}>
+            {[...ONBOARD_STEPS, {},{},{},{}].map((_, i) => (
+              <div key={i} style={{ width:i===step?20:6, height:6, borderRadius:3, background:i<=step?T.accent:T.surface, transition:"all 0.3s" }}/>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ flex:1, padding:"28px 24px 16px", overflowY:"auto" }}>
+
+          {/* Hero */}
+          <div style={{ textAlign:"center", marginBottom:28 }}>
+            <div style={{ fontSize:52, marginBottom:14, lineHeight:1 }}>📱</div>
+            <div style={{ fontFamily:T.serif, fontSize:26, color:T.text, lineHeight:1.2, marginBottom:10 }}>
+              Add Forged to your home screen.
+            </div>
+            <div style={{ fontSize:14, color:T.muted, lineHeight:1.6, maxWidth:320, margin:"0 auto" }}>
+              This is the single most important thing you can do as a beta user.
+            </div>
+          </div>
+
+          {/* Why callout */}
+          <div style={{ background:"rgba(200,144,42,0.08)", border:`0.5px solid rgba(200,144,42,0.25)`, borderRadius:T.r, padding:"14px 18px", marginBottom:24 }}>
+            <div style={{ fontSize:12, fontWeight:600, color:T.gold, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:8 }}>
+              ⚡ Why it matters
+            </div>
+            <div style={{ fontSize:13, color:T.sub, lineHeight:1.7 }}>
+              Forged works when you open it every day. A home screen icon makes that happen — no searching, no excuses. It also makes the app feel like what it is: a real tool, not a browser tab. Notifications will tie into this later too.
+            </div>
+          </div>
+
+          {/* Instruction cards */}
+          {instructions.map(({ os, icon, steps: sList }) => (
+            <div key={os} style={{ background:T.raised, border:`0.5px solid ${T.border}`, borderRadius:T.r, padding:"16px 18px", marginBottom:14 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14 }}>
+                <span style={{ fontSize:18 }}>{icon}</span>
+                <span style={{ fontSize:13, fontWeight:600, color:T.text }}>{os}</span>
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                {sList.map((s, i) => (
+                  <div key={i} style={{ display:"flex", alignItems:"flex-start", gap:12 }}>
+                    <div style={{ width:24, height:24, borderRadius:"50%", background:T.surface, border:`0.5px solid ${T.border}`, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, fontSize:s.mono?14:13, fontFamily:s.mono?T.font:undefined, color:T.muted, lineHeight:1, marginTop:1 }}>
+                      {i + 1}
+                    </div>
+                    <div style={{ fontSize:13, color:T.sub, lineHeight:1.6, paddingTop:3 }}>
+                      {s.mono
+                        ? <><code style={{ fontFamily:"monospace", fontSize:15, color:T.text, letterSpacing:"0.05em" }}>{s.icon}</code>{" "}{s.text.replace(s.icon + " ", "")}</>
+                        : <>{s.icon && <span style={{ marginRight:6 }}>{s.icon}</span>}{s.text}</>
+                      }
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+
+          <div style={{ fontSize:12, color:T.hint, textAlign:"center", lineHeight:1.6, marginTop:8, marginBottom:4 }}>
+            Do it now — it takes less than 30 seconds.
+          </div>
+        </div>
+
+        {/* CTAs */}
+        <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
+          <button
+            onClick={() => setShowingPaywall(true)}
+            style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:600, cursor:"pointer", marginBottom:10 }}
+          >
+            Done — I've added it ✓
+          </button>
+          <button
+            onClick={() => setShowingPaywall(true)}
+            style={{ width:"100%", padding:12, background:"none", border:"none", color:T.hint, fontSize:13, cursor:"pointer" }}
+          >
+            I'll set it up later
           </button>
         </div>
       </div>
@@ -5115,7 +5202,44 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
             <span style={{ fontSize:18, color:T.hint }}>›</span>
           </button>
         </div>
-        <SRow label="Notifications" note="Coming soon" onPress={null}/>
+        <div
+          style={{
+            padding:"14px 16px 16px",
+            background:"linear-gradient(135deg, rgba(200,144,42,0.12) 0%, rgba(200,144,42,0.04) 100%)",
+            borderTop:`0.5px solid rgba(200,144,42,0.22)`,
+            display:"flex",
+            alignItems:"flex-start",
+            gap:12,
+          }}
+        >
+          <div
+            style={{
+              width:40, height:40, borderRadius:12, flexShrink:0,
+              background:"rgba(200,144,42,0.18)", border:`0.5px solid rgba(200,144,42,0.35)`,
+              display:"flex", alignItems:"center", justifyContent:"center", fontSize:20,
+            }}
+            aria-hidden
+          >
+            🔔
+          </div>
+          <div style={{ flex:1, minWidth:0, paddingTop:1 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", marginBottom:4 }}>
+              <span style={{ fontSize:15, fontWeight:600, color:T.text, letterSpacing:"-0.01em" }}>Notifications</span>
+              <span
+                style={{
+                  fontSize:9, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase",
+                  color:"#1a1208", background:T.gold, padding:"3px 8px", borderRadius:6,
+                  boxShadow:"0 1px 0 rgba(0,0,0,0.2)",
+                }}
+              >
+                Coming soon
+              </span>
+            </div>
+            <p style={{ fontSize:12, color:T.sub, lineHeight:1.55, margin:0 }}>
+              {`Gentle reminders when it's time to log, streak saves, and goal check-ins — built so Forged nudges you, not noise.`}
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* Pro section */}
@@ -6510,7 +6634,7 @@ export default function App() {
               ⚡ 0 xp
             </button>
           </div>
-          <TodayScreen habits={habits} goals={goals} xp={0} onTap={handleTap} onUndo={() => {}} onSkip={() => {}} onAddNote={() => demoBounce()} onLogZero={() => demoBounce()} onOpenLog={() => demoBounce()} onOpenGoalLog={() => demoBounce()} onEditGoal={openEditGoal} onCompleteGoal={() => demoBounce()} onDeleteGoal={() => demoBounce()} onEditHabit={openEditHabit} onDeleteHabit={() => demoBounce()} onXPInfo={() => {}} onCoach={() => demoBounce()} onAdd={() => demoBounce()}/>
+          <TodayScreen habits={habits} goals={goals} xp={0} onTap={handleTap} onUndo={() => {}} onSkip={() => {}} onAddNote={() => demoBounce()} onLogZero={() => demoBounce()} onOpenLog={() => demoBounce()} onOpenGoalLog={() => demoBounce()} onEditGoal={openEditGoal} onCompleteGoal={() => demoBounce()} onDeleteGoal={() => demoBounce()} onEditHabit={openEditHabit} onDeleteHabit={() => demoBounce()} onXPInfo={() => {}} onAdd={() => demoBounce()}/>
           <nav style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:430, maxWidth:"100vw", background:"rgba(26,26,22,0.96)", backdropFilter:"blur(16px)", borderTop:`0.5px solid ${T.border}`, display:"flex", zIndex:100, paddingBottom:6 }}>
             {[{id:"today",label:"Today"},{id:"journal",label:"Journal"},{id:"insights",label:"Insights"},{id:"social",label:"Social"},{id:"profile",label:"Profile"}].map(n => (
               <button key={n.id} onClick={() => demoBounce()} style={{ flex:1, padding:"10px 4px 6px", border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3, fontSize:10, fontWeight:500, color:n.id==="today"?T.accent:T.muted }}>
@@ -7035,9 +7159,9 @@ export default function App() {
           </button>
         </div>
 
-        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onXPInfo={() => setShowXP(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)} onAdd={handleStartAdd} isPro={isPro} coachName={coachName}/>}
-        {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
-        {screen === "insights" && <InsightsScreen habits={habits} goals={goals} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} onCoach={() => isPro ? setShowCoach(true) : setShowUpgrade(true)}/>}
+        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd}/>}
+        {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)}/>}
+        {screen === "insights" && <InsightsScreen habits={habits} goals={goals} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)}/>}
         {screen === "social"   && <SocialTeaserScreen />}
         {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} stripeCustomerId={stripeCustomerId} refCode={refCode}
           authEmail={authEmail}
@@ -7065,31 +7189,53 @@ export default function App() {
           }}
         />}
 
-        {/* Floating AI coach teaser — hidden on Profile (secondary to Today “+ Add habit” FAB) */}
-        {screen !== "profile" && (
-          <button
-            type="button"
-            onClick={() => setShowCoachTeaser(true)}
-            aria-label="AI coach"
-            title="AI coach"
-            style={{
-              position:"fixed", bottom:88, right:18, width:44, height:44,
-              borderRadius:"50%", border:`0.5px solid ${T.borderMid}`,
-              background:"rgba(30,30,28,0.96)", backdropFilter:"blur(10px)",
-              color:T.sub, cursor:"pointer", zIndex:98,
-              display:"flex", alignItems:"center", justifyContent:"center",
-              boxShadow:"0 2px 14px rgba(0,0,0,0.4)",
-            }}
-          >
-            {coachIcon && COACH_ICON_OPTIONS.includes(coachIcon) ? (
-              <span style={{ fontSize:20, lineHeight:1 }} aria-hidden>{coachIcon}</span>
-            ) : (
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path d="M12 2l1.8 5.9L20 10l-6.2 2.1L12 22l-1.8-9.9L4 10l6.2-2.1L12 2z" fill="currentColor" opacity="0.92"/>
-              </svg>
-            )}
-          </button>
-        )}
+        {/* Floating AI coach — label shows coach name; hidden on Profile (secondary to Today “+ Add habit” FAB) */}
+        {screen !== "profile" && (() => {
+          const coachLabelRaw = (coachName ?? "").trim() || "Coach";
+          const coachLabelShort = coachLabelRaw.length > 13 ? `${coachLabelRaw.slice(0, 12)}…` : coachLabelRaw;
+          return (
+            <div
+              data-tour="coach-fab"
+              style={{
+                position:"fixed", bottom:84, right:14, zIndex:98,
+                display:"flex", flexDirection:"column", alignItems:"center", gap:5,
+                maxWidth:92,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setShowCoachTeaser(true)}
+                aria-label={`${coachLabelRaw} — AI coach`}
+                title={`${coachLabelRaw} — coming soon`}
+                style={{
+                  width:44, height:44,
+                  borderRadius:"50%", border:`0.5px solid ${T.borderMid}`,
+                  background:"rgba(30,30,28,0.96)", backdropFilter:"blur(10px)",
+                  color:T.sub, cursor:"pointer",
+                  display:"flex", alignItems:"center", justifyContent:"center",
+                  boxShadow:"0 2px 14px rgba(0,0,0,0.4)",
+                }}
+              >
+                {coachIcon && COACH_ICON_OPTIONS.includes(coachIcon) ? (
+                  <span style={{ fontSize:20, lineHeight:1 }} aria-hidden>{coachIcon}</span>
+                ) : (
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path d="M12 2l1.8 5.9L20 10l-6.2 2.1L12 22l-1.8-9.9L4 10l6.2-2.1L12 2z" fill="currentColor" opacity="0.92"/>
+                  </svg>
+                )}
+              </button>
+              <span
+                style={{
+                  fontSize:10, fontWeight:700, color:T.gold, textAlign:"center", lineHeight:1.25,
+                  maxWidth:92, wordBreak:"break-word", letterSpacing:"0.02em",
+                  textShadow:"0 1px 10px rgba(0,0,0,0.75)",
+                }}
+              >
+                {coachLabelShort}
+              </span>
+            </div>
+          );
+        })()}
 
         {/* Bottom nav */}
         <nav data-tour="nav" style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:430, maxWidth:"100vw", background:"rgba(26,26,22,0.96)", backdropFilter:"blur(16px)", borderTop:`0.5px solid ${T.border}`, display:"flex", zIndex:100, paddingBottom:6 }}>
