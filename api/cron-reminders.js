@@ -42,11 +42,13 @@ function calcDailyStreak(logs) {
 function pickMessage(habits, goals) {
   const today = todayStr();
 
-  // ── 1. Streak protection (≥ 3 days) ────────────────────────────────────────
+  const TRACKABLE = ["daily", "weekly", "build", "limit"];
+
+  // ── 1. Streak protection (≥ 3 days, all daily-style habits) ────────────────
   let bestStreak = 0;
   let bestStreakHabit = null;
   for (const h of habits) {
-    if (h.habit_type !== "daily") continue;
+    if (h.habit_type !== "daily") continue; // only daily habits have day-based streaks
     const s = calcDailyStreak(h.logs);
     if (s > bestStreak) { bestStreak = s; bestStreakHabit = h; }
   }
@@ -75,16 +77,16 @@ function pickMessage(habits, goals) {
     };
   }
 
-  // ── 3. Re-engagement — habit not logged in 2+ days ─────────────────────────
+  // ── 3. Re-engagement — any habit not logged in 2+ days ─────────────────────
   let worstGap = 0;
   let gapHabit = null;
   for (const h of habits) {
-    if (h.habit_type !== "daily") continue;
-    const trueLogs = (h.logs || [])
-      .filter(l => l.value === true)
+    if (!TRACKABLE.includes(h.habit_type)) continue;
+    const recentLogs = (h.logs || [])
+      .filter(l => l.value !== null && l.value !== undefined && l.value !== false)
       .sort((a, b) => b.date.localeCompare(a.date));
-    if (trueLogs.length === 0) continue;
-    const gap = daysBetween(trueLogs[0].date, today);
+    if (recentLogs.length === 0) continue;
+    const gap = daysBetween(recentLogs[0].date, today);
     if (gap >= 2 && gap > worstGap) { worstGap = gap; gapHabit = h; }
   }
   if (gapHabit) {
@@ -95,12 +97,12 @@ function pickMessage(habits, goals) {
     };
   }
 
-  // ── 4. Default: habit count ─────────────────────────────────────────────────
-  const dailyCount = habits.filter(h => h.habit_type === "daily").length;
-  if (dailyCount > 0) {
+  // ── 4. Default: total habit count (all types) ───────────────────────────────
+  const totalCount = habits.filter(h => TRACKABLE.includes(h.habit_type)).length;
+  if (totalCount > 0) {
     return {
       title: "Forged",
-      body: `${dailyCount} habit${dailyCount === 1 ? "" : "s"} to log today. Let's build. 🔨`,
+      body: `${totalCount} habit${totalCount === 1 ? "" : "s"} to log today. Let's build. 🔨`,
     };
   }
 
