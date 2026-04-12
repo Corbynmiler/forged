@@ -177,6 +177,84 @@ function entityIdEq(a, b) {
   if (sa === sb) return true;
   return norm(sa) === norm(sb);
 }
+
+/** Split `habits` table rows into in-app `goals` vs `habits` (must stay aligned with loadUserData). */
+function splitDbRowsIntoGoalsAndHabits(rows) {
+  if (!rows?.length) return { goals: [], habits: [] };
+  const goalRows = rows.filter(r => r.habit_type === "goal");
+  const progressRows = rows.filter(r => r.habit_type === "progress");
+  const habitRows = rows.filter(r => r.habit_type !== "goal" && r.habit_type !== "progress");
+  return {
+    goals: [...goalRows, ...progressRows].map(rowToGoal),
+    habits: habitRows.map(rowToHabit),
+  };
+}
+
+/**
+ * When `habits` was populated with goal/progress rows (e.g. bad resync), rebuild the goal object
+ * so EditGoalModal / LogGoalModal can mount even if `goals.find` misses.
+ */
+function goalFromMisplacedHabit(h) {
+  if (!h) return null;
+  const ht = h.habitType;
+  const typed = isGoalLikeHabitType(h) || isLegacyProgressType(ht);
+  const untypedGoal =
+    ht === undefined &&
+    Array.isArray(h.logs) &&
+    Number.isFinite(Number(h.startValue)) &&
+    Number.isFinite(Number(h.targetValue)) &&
+    Number(h.targetValue) !== Number(h.startValue);
+  if (!typed && !untypedGoal) return null;
+  const logs = h.logs ?? [];
+  const numericLogs = logs.filter(l => typeof l.value === "number");
+  const startValue = Number(h.startValue ?? 0);
+  const targetValue = Number(h.targetValue ?? 0);
+  const currentValue =
+    typeof h.currentValue === "number" && Number.isFinite(h.currentValue)
+      ? h.currentValue
+      : numericLogs.length > 0
+        ? numericLogs[numericLogs.length - 1].value
+        : startValue;
+  const direction =
+    h.direction === "decreasing" || h.direction === "increasing"
+      ? h.direction
+      : targetValue < startValue
+        ? "decreasing"
+        : "increasing";
+  const lastLogDate =
+    logs.length > 0 ? [...logs].sort((a, b) => b.date.localeCompare(a.date))[0].date : null;
+  return {
+    id: h.id,
+    name: h.name,
+    emoji: h.emoji ?? "",
+    unit: h.unit ?? "",
+    startValue,
+    targetValue,
+    currentValue,
+    direction,
+    targetDate: h.targetDate ?? null,
+    status: h.status ?? "active",
+    logs,
+    lastLogDate,
+    color: h.color ?? "#E67E22",
+  };
+}
+
+function resolveGoalForModal(goalId, goals, habits) {
+  if (goalId == null) return null;
+  const g = goals.find(x => entityIdEq(x.id, goalId));
+  if (g) return g;
+  const h = habits.find(x => entityIdEq(x.id, goalId));
+  return goalFromMisplacedHabit(h);
+}
+
+/** Treat as goal/progress for routing to goal editor (handles odd casing / enum stringification). */
+function isGoalLikeHabitType(h) {
+  if (!h || h.habitType == null) return false;
+  const t = String(h.habitType).trim().toLowerCase();
+  return t === "goal" || t === "progress";
+}
+
 function resolveProgressDirection(h) {
   if (h.direction === "decreasing" || h.direction === "increasing") return h.direction;
   return inferProgressDirection(Number(h.startValue ?? 0), Number(h.targetValue ?? 0));
@@ -888,7 +966,8 @@ function TodayHabitMenuDropdown({ habit, onEdit, onDelete, menuOpen, onCloseMenu
   }
   return (
     <div onClick={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()} style={{ borderTop:`0.5px solid ${T.border}`, padding:"8px 15px 10px", display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
-      <button type="button" onPointerDown={e => e.stopPropagation()} onClickCapture={e => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onEdit(habit.id); onCloseMenu(); }}
+      <button type="button" onPointerDown={e => e.stopPropagation()} onClick={(e) => { e.stopPropagation();
+        onEdit(habit.id); onCloseMenu(); }}
         style={{ fontSize:12, color:habit.color, background:"none", border:`0.5px solid ${habit.color+"44"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>
         Edit
       </button>
@@ -1234,7 +1313,6 @@ function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete, onDelete }) {
             type="button"
             onPointerDown={e => { e.stopPropagation(); }}
             onMouseDown={e => { e.stopPropagation(); }}
-            onClickCapture={e => { e.stopPropagation(); }}
             onClick={(e) => {
               e.stopPropagation();
               onEdit(goal.id);
@@ -5884,9 +5962,7 @@ export default function App() {
       setOnboarded(isOnboarded);
 
       if (rows) {
-        const goalRows     = rows.filter(r => r.habit_type === "goal");
         const progressRows = rows.filter(r => r.habit_type === "progress");
-        const habitRows    = rows.filter(r => r.habit_type !== "goal" && r.habit_type !== "progress");
 
         // Migrate legacy progress habits → goals (fire-and-forget DB update)
         if (progressRows.length > 0) {
@@ -5899,8 +5975,9 @@ export default function App() {
             });
         }
 
-        setGoals([...goalRows, ...progressRows].map(rowToGoal));
-        setHabits(habitRows.map(rowToHabit));
+        const { goals: nextGoals, habits: nextHabits } = splitDbRowsIntoGoalsAndHabits(rows);
+        setGoals(nextGoals);
+        setHabits(nextHabits);
       }
 
       userIdRef.current = uid;
@@ -6258,10 +6335,10 @@ export default function App() {
 
   /** Clear the other editor first so goal vs habit modals never stack (flushSync avoids stale editId + editGoalId in one tick). */
   const openEditGoal = useCallback(rawId => {
-    const g = goals.find(x => entityIdEq(x.id, rawId));
+    const g = resolveGoalForModal(rawId, goals, habits);
     flushSync(() => { setEditId(null); });
     setEditGoalId(g ? g.id : null);
-  }, [goals]);
+  }, [goals, habits]);
   const openEditHabit = useCallback(rawId => {
     const goalMatch = goals.find(g => entityIdEq(g.id, rawId));
     if (goalMatch) {
@@ -6269,15 +6346,9 @@ export default function App() {
       return;
     }
     const habitMatch = habits.find(h => entityIdEq(h.id, rawId));
-    if (
-      habitMatch &&
-      (habitMatch.habitType === "goal" || habitMatch.habitType === "progress" || isLegacyProgressType(habitMatch.habitType))
-    ) {
-      const g2 = goals.find(x => entityIdEq(x.id, rawId));
-      if (g2) {
-        openEditGoal(g2.id);
-        return;
-      }
+    if (habitMatch && (isGoalLikeHabitType(habitMatch) || isLegacyProgressType(habitMatch.habitType))) {
+      openEditGoal(rawId);
+      return;
     }
     flushSync(() => { setEditGoalId(null); });
     setEditId(habitMatch ? habitMatch.id : null);
@@ -6439,7 +6510,7 @@ export default function App() {
               ⚡ 0 xp
             </button>
           </div>
-          <TodayScreen habits={habits} goals={goals} xp={0} onTap={handleTap} onUndo={() => {}} onSkip={() => {}} onAddNote={() => demoBounce()} onLogZero={() => demoBounce()} onOpenLog={() => demoBounce()} onOpenGoalLog={() => demoBounce()} onEditGoal={() => demoBounce()} onCompleteGoal={() => demoBounce()} onDeleteGoal={() => demoBounce()} onEditHabit={() => demoBounce()} onDeleteHabit={() => demoBounce()} onXPInfo={() => {}} onCoach={() => demoBounce()} onAdd={() => demoBounce()}/>
+          <TodayScreen habits={habits} goals={goals} xp={0} onTap={handleTap} onUndo={() => {}} onSkip={() => {}} onAddNote={() => demoBounce()} onLogZero={() => demoBounce()} onOpenLog={() => demoBounce()} onOpenGoalLog={() => demoBounce()} onEditGoal={openEditGoal} onCompleteGoal={() => demoBounce()} onDeleteGoal={() => demoBounce()} onEditHabit={openEditHabit} onDeleteHabit={() => demoBounce()} onXPInfo={() => {}} onCoach={() => demoBounce()} onAdd={() => demoBounce()}/>
           <nav style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:430, maxWidth:"100vw", background:"rgba(26,26,22,0.96)", backdropFilter:"blur(16px)", borderTop:`0.5px solid ${T.border}`, display:"flex", zIndex:100, paddingBottom:6 }}>
             {[{id:"today",label:"Today"},{id:"journal",label:"Journal"},{id:"insights",label:"Insights"},{id:"social",label:"Social"},{id:"profile",label:"Profile"}].map(n => (
               <button key={n.id} onClick={() => demoBounce()} style={{ flex:1, padding:"10px 4px 6px", border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3, fontSize:10, fontWeight:500, color:n.id==="today"?T.accent:T.muted }}>
@@ -6448,6 +6519,9 @@ export default function App() {
             ))}
           </nav>
         </div>
+        {/* Same edit modals as signed-in shell — demo branch previously omitted them, so Edit appeared to do nothing. */}
+        {editGoalId    && (() => { const g = resolveGoalForModal(editGoalId, goals, habits); return g ? <EditGoalModal goal={g} onClose={() => setEditGoalId(null)} onSave={handleEditGoalSave}/> : null; })()}
+        {editId && !editGoalId && editHabit && !isGoalLikeHabitType(editHabit) && <EditModal habit={editHabit} onClose={() => setEditId(null)} onSave={handleEditSave}/>}
       </>
     );
   }
@@ -6723,15 +6797,21 @@ export default function App() {
 
   // Edit save
   async function handleEditSave(id, updates) {
-    const habit = habits.find(h => h.id === id);
+    const habit = habits.find(h => entityIdEq(h.id, id));
     if (!habit) return;
     const edited = { ...habit, ...updates };
+    if (demoMode) {
+      setHabits(prev => prev.map(h => (entityIdEq(h.id, id) ? edited : h)));
+      setEditId(null);
+      addToast("Preview only — create a free account to save edits.");
+      return;
+    }
     const saved = await syncHabit(edited);
     if (!saved) {
       addToast("⚠️ Couldn't update habit — check your connection");
       return;
     }
-    setHabits(prev => prev.map(h => h.id === id ? edited : h));
+    setHabits(prev => prev.map(h => (entityIdEq(h.id, id) ? edited : h)));
     addToast("✓ Habit updated");
   }
 
@@ -6771,7 +6851,11 @@ export default function App() {
       addToast("⚠️ Couldn't delete — tap again to retry");
       // Re-sync from DB so nothing is lost
       const { data: rows } = await supabase.from("habits").select("*").eq("user_id", uid).order("created_at");
-      if (rows) setHabits(rows.map(rowToHabit));
+      if (rows) {
+        const { goals: nextGoals, habits: nextHabits } = splitDbRowsIntoGoalsAndHabits(rows);
+        setGoals(nextGoals);
+        setHabits(nextHabits);
+      }
     }
   }
 
@@ -6787,7 +6871,7 @@ export default function App() {
   }
 
   async function handleLogGoal(id, value, note) {
-    const goal = goals.find(g => g.id === id);
+    const goal = resolveGoalForModal(id, goals, habits);
     if (!goal) return;
     const newLogs = [...goal.logs, { date: todayStr(), value, note: note || "" }];
     const updated = {
@@ -6799,7 +6883,12 @@ export default function App() {
     };
     const saved = await syncGoal(updated);
     if (!saved) return;
-    setGoals(prev => prev.map(g => g.id === id ? updated : g));
+    setGoals(prev => {
+      const idx = prev.findIndex(g => entityIdEq(g.id, id));
+      if (idx === -1) return [...prev, updated];
+      return prev.map(g => (entityIdEq(g.id, id) ? updated : g));
+    });
+    setHabits(prev => prev.filter(h => !entityIdEq(h.id, id)));
     const today = todayStr();
     const awardKey = `goal:${id}:${today}`;
     if (xpAwardedDates.has(awardKey)) return;
@@ -6830,7 +6919,7 @@ export default function App() {
   }
 
   async function handleCompleteGoal(id) {
-    const goal = goals.find(g => g.id === id);
+    const goal = resolveGoalForModal(id, goals, habits);
     if (!goal) return;
     const updated = { ...goal, status: "completed" };
     const saved = await syncGoal(updated);
@@ -6838,20 +6927,41 @@ export default function App() {
       addToast("⚠️ Couldn't complete goal — check your connection");
       return;
     }
-    setGoals(prev => prev.map(g => g.id === id ? updated : g));
+    setGoals(prev => {
+      const idx = prev.findIndex(g => entityIdEq(g.id, id));
+      if (idx === -1) return [...prev, updated];
+      return prev.map(g => (entityIdEq(g.id, id) ? updated : g));
+    });
+    setHabits(prev => prev.filter(h => !entityIdEq(h.id, id)));
     addToast("✓ Goal completed");
   }
 
   async function handleEditGoalSave(id, updates) {
-    const goal = goals.find(g => g.id === id);
+    const goal = resolveGoalForModal(id, goals, habits);
     if (!goal) return;
     const updated = { ...goal, ...updates };
+    if (demoMode) {
+      setGoals(prev => {
+        const idx = prev.findIndex(g => entityIdEq(g.id, id));
+        if (idx === -1) return [...prev, updated];
+        return prev.map(g => (entityIdEq(g.id, id) ? updated : g));
+      });
+      setHabits(prev => prev.filter(h => !entityIdEq(h.id, id)));
+      setEditGoalId(null);
+      addToast("Preview only — create a free account to save edits.");
+      return;
+    }
     const saved = await syncGoal(updated);
     if (!saved) {
       addToast("⚠️ Couldn't update goal — check your connection");
       return;
     }
-    setGoals(prev => prev.map(g => g.id === id ? updated : g));
+    setGoals(prev => {
+      const idx = prev.findIndex(g => entityIdEq(g.id, id));
+      if (idx === -1) return [...prev, updated];
+      return prev.map(g => (entityIdEq(g.id, id) ? updated : g));
+    });
+    setHabits(prev => prev.filter(h => !entityIdEq(h.id, id)));
     addToast("✓ Goal updated");
   }
 
@@ -6860,7 +6970,7 @@ export default function App() {
     const isGoal = entity.habitType === "goal";
     const id = entity.id;
     if (isGoal) {
-      const g = goals.find(x => x.id === id);
+      const g = resolveGoalForModal(id, goals, habits);
       if (!g) return false;
       const idx = g.logs.indexOf(logEntry);
       if (idx === -1) return false;
@@ -6868,7 +6978,12 @@ export default function App() {
       const updated = goalStateAfterLogRemoval(g, nextLogs);
       const saved = await syncGoal(updated);
       if (!saved) return false;
-      setGoals(prev => prev.map(x => x.id === id ? updated : x));
+      setGoals(prev => {
+        const idx = prev.findIndex(x => entityIdEq(x.id, id));
+        if (idx === -1) return [...prev, updated];
+        return prev.map(x => (entityIdEq(x.id, id) ? updated : x));
+      });
+      setHabits(prev => prev.filter(h => !entityIdEq(h.id, id)));
       addToast("✓ Entry removed");
       return true;
     }
@@ -6991,12 +7106,12 @@ export default function App() {
       {showAddGoal   && <AddGoalModal  onClose={() => setShowAddGoal(false)} onSave={handleAddGoal}/>}
       {showAddChoice && <AddActionSheet onAddHabit={() => { setShowAddChoice(false); setShowAdd(true); }} onAddGoal={() => { setShowAddChoice(false); setShowAddGoal(true); }} onClose={() => setShowAddChoice(false)}/>}
       {showCoachTeaser && <CoachComingSoonSheet onClose={() => setShowCoachTeaser(false)} coachName={coachName} context={screen}/>}
-      {logGoalId     && (() => { const g = goals.find(x => entityIdEq(x.id, logGoalId)); return g ? <LogGoalModal goal={g} onClose={() => setLogGoalId(null)} onLog={(id, val, note) => { handleLogGoal(id, val, note); setLogGoalId(null); }}/> : null; })()}
-      {editGoalId    && (() => { const g = goals.find(x => entityIdEq(x.id, editGoalId)); return g ? <EditGoalModal goal={g} onClose={() => setEditGoalId(null)} onSave={handleEditGoalSave}/> : null; })()}
+      {logGoalId     && (() => { const g = resolveGoalForModal(logGoalId, goals, habits); return g ? <LogGoalModal goal={g} onClose={() => setLogGoalId(null)} onLog={(id, val, note) => { handleLogGoal(id, val, note); setLogGoalId(null); }}/> : null; })()}
+      {editGoalId    && (() => { const g = resolveGoalForModal(editGoalId, goals, habits); return g ? <EditGoalModal goal={g} onClose={() => setEditGoalId(null)} onSave={handleEditGoalSave}/> : null; })()}
       {showXP        && <XPModal       xp={xp}                               onClose={() => setShowXP(false)}/>}
       {showHistory   && <HistoryModal  habits={habits} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onClose={() => setShowHistory(false)}/>}
       {reflectId     && <ReflectModal  habit={reflectHabit}                  onClose={() => setReflectId(null)} onSave={handleSaveReflection}/>}
-      {editId && !editGoalId && editHabit && editHabit.habitType !== "goal" && editHabit.habitType !== "progress" && <EditModal habit={editHabit} onClose={() => setEditId(null)} onSave={handleEditSave}/>}
+      {editId && !editGoalId && editHabit && !isGoalLikeHabitType(editHabit) && <EditModal habit={editHabit} onClose={() => setEditId(null)} onSave={handleEditSave}/>}
       {logId && logHabit?.habitType === "project"  && <LogProjectModal   habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
       {showCoach   && <AICoach habits={habits} user={user} isPro={isPro} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)} coachName={coachName} currentScreen={screen}/>}
       {showUpgrade && <BetaPaywallModal onClose={() => setShowUpgrade(false)}/>}
