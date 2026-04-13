@@ -3837,53 +3837,294 @@ function SocialTeaserCard({ emoji, title, children }) {
   );
 }
 
-function SocialTeaserScreen() {
+function SocialScreen({ user, xp, habits, friends, friendRequests, friendsLoading, onSendRequest, onAccept, onDecline, onRemoveFriend, sharedGoals, sharedGoalsLoading, onCreateSharedGoal, onJoinSharedGoal, onLogSharedGoal }) {
+  const [showAddFriend,   setShowAddFriend]   = useState(false);
+  const [addEmail,        setAddEmail]        = useState("");
+  const [addError,        setAddError]        = useState("");
+  const [addLoading,      setAddLoading]      = useState(false);
+  const [addDone,         setAddDone]         = useState(false);
+  const [showNewGoal,     setShowNewGoal]     = useState(false);
+  const [showJoinGoal,    setShowJoinGoal]    = useState(false);
+  const [joinCode,        setJoinCode]        = useState("");
+  const [joinError,       setJoinError]       = useState("");
+  const [joinLoading,     setJoinLoading]     = useState(false);
+  const [goalName,        setGoalName]        = useState("");
+  const [goalEmoji,       setGoalEmoji]       = useState("🎯");
+  const [goalType,        setGoalType]        = useState("daily");
+  const [createLoading,   setCreateLoading]   = useState(false);
+  const [copiedId,        setCopiedId]        = useState(null);
+
+  const today = todayStr();
+  const myStreak = habits.length ? Math.max(0, ...habits.map(h => h.streak || 0)) : 0;
+  const myLoggedToday = habits.filter(h => (h.logs||[]).some(l => l.date === today)).length;
+
+  const card = { background: T.raised, border: `0.5px solid ${T.border}`, borderRadius: T.r, padding: "14px 16px", marginBottom: 10 };
+  const sectionLabel = { fontSize: 11, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 };
+
+  async function handleSendRequest() {
+    if (!addEmail.trim()) return;
+    setAddLoading(true); setAddError("");
+    const res = await onSendRequest(addEmail);
+    setAddLoading(false);
+    if (res?.error) { setAddError(res.error); }
+    else { setAddDone(true); setAddEmail(""); setTimeout(() => { setAddDone(false); setShowAddFriend(false); }, 2000); }
+  }
+
+  async function handleJoin() {
+    if (!joinCode.trim()) return;
+    setJoinLoading(true); setJoinError("");
+    const res = await onJoinSharedGoal(joinCode.trim());
+    setJoinLoading(false);
+    if (res?.error) { setJoinError(res.error); }
+    else { setJoinCode(""); setShowJoinGoal(false); }
+  }
+
+  async function handleCreate() {
+    if (!goalName.trim()) return;
+    setCreateLoading(true);
+    await onCreateSharedGoal({ name: goalName, emoji: goalEmoji, habitType: goalType });
+    setCreateLoading(false);
+    setGoalName(""); setGoalEmoji("🎯"); setGoalType("daily");
+    setShowNewGoal(false);
+  }
+
+  function copyInviteLink(goal) {
+    const url = `${window.location.origin}/join/${goal.inviteCode}`;
+    if (navigator.share) {
+      navigator.share({ title: `Join "${goal.name}" on Forged`, url }).catch(() => {});
+    } else {
+      navigator.clipboard?.writeText(url).then(() => {
+        setCopiedId(goal.id);
+        setTimeout(() => setCopiedId(null), 2000);
+      });
+    }
+  }
+
+  function Avatar({ name, avatarUrl, size = 32 }) {
+    if (avatarUrl && !avatarUrl.startsWith("http")) {
+      return <div style={{ width: size, height: size, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: size * 0.55, background: T.surface, flexShrink: 0 }}>{avatarUrl}</div>;
+    }
+    if (avatarUrl) {
+      return <img src={avatarUrl} alt={name} style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />;
+    }
+    const initials = (name || "?").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+    return <div style={{ width: size, height: size, borderRadius: "50%", background: "rgba(200,144,42,0.18)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: size * 0.38, fontWeight: 700, color: T.gold, flexShrink: 0 }}>{initials}</div>;
+  }
+
   return (
-    <div data-tour="social-teaser">
-      <div style={{ padding:"22px 18px 6px", textAlign:"center" }}>
-        <div
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "5px 12px 6px",
-            borderRadius: 999,
-            background: "rgba(200,144,42,0.12)",
-            border: "0.5px solid rgba(200,144,42,0.35)",
-            fontSize: 11,
-            fontWeight: 600,
-            letterSpacing: "0.04em",
-            textTransform: "uppercase",
-            color: T.gold,
-            marginBottom: 18,
-          }}
-        >
-          Forge Pro — Beta coming soon
+    <div style={{ paddingBottom: 24 }}>
+      {/* ── Your card ── */}
+      <div style={{ margin: "0 0 20px", padding: "16px", background: `linear-gradient(135deg, rgba(200,144,42,0.12) 0%, ${T.surface} 100%)`, border: `0.5px solid rgba(200,144,42,0.28)`, borderRadius: T.r }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+          <Avatar name={user?.name} avatarUrl={user?.avatarUrl} size={40} />
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: T.text }}>{user?.name || "You"}</div>
+            <div style={{ fontSize: 12, color: T.muted }}>Your stats</div>
+          </div>
         </div>
-        <h1 style={{ fontFamily: T.serif, fontSize: 30, fontWeight: 400, color: T.text, margin: 0, lineHeight: 1.15, letterSpacing: "-0.02em" }}>
-          Forge together.
-        </h1>
-        <p style={{ fontSize: 15, color: T.sub, lineHeight: 1.55, margin: "14px 0 0", maxWidth: 340, marginLeft: "auto", marginRight: "auto" }}>
-          Challenge friends, compare streaks, and stay accountable with people who actually push you.
-        </p>
+        <div style={{ display: "flex", gap: 16 }}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 20, fontWeight: 700, color: T.text }}>{myStreak}</div>
+            <div style={{ fontSize: 11, color: T.muted }}>🔥 streak</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 20, fontWeight: 700, color: T.text }}>{xp}</div>
+            <div style={{ fontSize: 11, color: T.muted }}>⚡ xp</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 20, fontWeight: 700, color: myLoggedToday > 0 ? T.green : T.muted }}>{myLoggedToday}</div>
+            <div style={{ fontSize: 11, color: T.muted }}>logged today</div>
+          </div>
+        </div>
       </div>
 
-      <div style={{ height: 8 }} />
+      {/* ── Pending requests ── */}
+      {friendRequests.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={sectionLabel}>Friend requests</div>
+          {friendRequests.map(req => (
+            <div key={req.friendshipId} style={{ ...card, display: "flex", alignItems: "center", gap: 10 }}>
+              <Avatar name={req.name} avatarUrl={req.avatarUrl} size={34} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 14, color: T.text, fontWeight: 500 }}>{req.name}</div>
+                <div style={{ fontSize: 12, color: T.muted }}>wants to be friends</div>
+              </div>
+              <button onClick={() => onAccept(req.friendshipId)} style={{ padding: "6px 12px", borderRadius: 16, border: "none", background: T.accent, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", marginRight: 6 }}>Accept</button>
+              <button onClick={() => onDecline(req.friendshipId)} style={{ padding: "6px 10px", borderRadius: 16, border: `0.5px solid ${T.border}`, background: "none", color: T.muted, fontSize: 12, cursor: "pointer" }}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
 
-      <SocialTeaserCard emoji="🤝" title="Friends & challenges">
-        Add your crew and set shared targets — small groups, real stakes, and the kind of pressure that feels like support.
-      </SocialTeaserCard>
-      <SocialTeaserCard emoji="🔥" title="Streak comparisons">
-        {"See who's on a run. Light a fire under each other — friendly rivalry that keeps everyone showing up."}
-      </SocialTeaserCard>
-      <SocialTeaserCard emoji="🏆" title="Leaderboard">
-        Weekly rankings across your group. Top of the board wins bragging rights — and everyone else gets a reason to log one more day.
-      </SocialTeaserCard>
+      {/* ── Friends leaderboard ── */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <div style={sectionLabel}>Friends</div>
+          <button onClick={() => { setShowAddFriend(s => !s); setAddError(""); setAddEmail(""); setAddDone(false); }}
+            style={{ padding: "5px 12px", borderRadius: 16, border: `0.5px solid ${T.borderStrong}`, background: "none", color: T.gold, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+            + Add friend
+          </button>
+        </div>
 
-      <div style={{ margin: "22px 18px 28px", padding: "16px 18px", borderRadius: T.r, border: `0.5px solid ${T.borderMid}`, background: "linear-gradient(165deg, rgba(200,144,42,0.08) 0%, ${T.surface} 55%)", textAlign: "center" }}>
-        <p style={{ fontSize: 13, color: T.muted, lineHeight: 1.6, margin: 0 }}>
-          {"You'll get early access as a Forged beta user."}
-        </p>
+        {showAddFriend && (
+          <div style={{ ...card, marginBottom: 12 }}>
+            <div style={{ fontSize: 12, color: T.muted, marginBottom: 8 }}>Enter their email address</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                type="email" placeholder="friend@email.com" value={addEmail}
+                onChange={e => { setAddEmail(e.target.value); setAddError(""); }}
+                onKeyDown={e => e.key === "Enter" && handleSendRequest()}
+                style={{ flex: 1, background: T.surface, border: `0.5px solid ${T.borderStrong}`, borderRadius: T.rsm, padding: "9px 12px", fontSize: 14, color: T.text, outline: "none" }}
+              />
+              <button onClick={handleSendRequest} disabled={addLoading || !addEmail.trim()}
+                style={{ padding: "9px 14px", borderRadius: T.rsm, border: "none", background: T.accent, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: (!addEmail.trim() || addLoading) ? 0.6 : 1 }}>
+                {addLoading ? "…" : addDone ? "✓ Sent!" : "Send"}
+              </button>
+            </div>
+            {addError && <div style={{ fontSize: 12, color: "#e05c5c", marginTop: 6 }}>{addError}</div>}
+          </div>
+        )}
+
+        {friendsLoading ? (
+          <div style={{ textAlign: "center", padding: "24px 0", color: T.muted, fontSize: 13 }}>Loading…</div>
+        ) : friends.length === 0 ? (
+          <div style={{ ...card, textAlign: "center", padding: "24px 16px", color: T.muted, fontSize: 13 }}>
+            No friends yet. Add someone to start the leaderboard.
+          </div>
+        ) : (
+          friends.map((f, i) => (
+            <div key={f.id} style={{ ...card, display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: i === 0 ? T.gold : T.muted, width: 18, textAlign: "center" }}>{i + 1}</div>
+              <Avatar name={f.name} avatarUrl={f.avatarUrl} size={34} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 14, color: T.text, fontWeight: 500 }}>{f.name}</div>
+                <div style={{ fontSize: 12, color: T.muted }}>⚡ {f.xp} xp</div>
+              </div>
+              <div style={{ textAlign: "center", marginRight: 4 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: f.loggedToday ? T.green : T.muted }}>
+                  {f.loggedToday ? "✓" : "—"}
+                </div>
+                <div style={{ fontSize: 10, color: T.hint }}>today</div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* ── Shared goals ── */}
+      <div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <div style={sectionLabel}>Shared goals</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => { setShowJoinGoal(s => !s); setJoinError(""); setJoinCode(""); }}
+              style={{ padding: "5px 11px", borderRadius: 16, border: `0.5px solid ${T.borderStrong}`, background: "none", color: T.sub, fontSize: 12, cursor: "pointer" }}>
+              Join
+            </button>
+            <button onClick={() => setShowNewGoal(s => !s)}
+              style={{ padding: "5px 12px", borderRadius: 16, border: `0.5px solid ${T.borderStrong}`, background: "none", color: T.gold, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+              + New
+            </button>
+          </div>
+        </div>
+
+        {showJoinGoal && (
+          <div style={{ ...card, marginBottom: 12 }}>
+            <div style={{ fontSize: 12, color: T.muted, marginBottom: 8 }}>Paste an invite link or code</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                placeholder="e.g. ab3f9c2d" value={joinCode}
+                onChange={e => { setJoinCode(e.target.value); setJoinError(""); }}
+                onKeyDown={e => e.key === "Enter" && handleJoin()}
+                style={{ flex: 1, background: T.surface, border: `0.5px solid ${T.borderStrong}`, borderRadius: T.rsm, padding: "9px 12px", fontSize: 14, color: T.text, outline: "none" }}
+              />
+              <button onClick={handleJoin} disabled={joinLoading || !joinCode.trim()}
+                style={{ padding: "9px 14px", borderRadius: T.rsm, border: "none", background: T.gold, color: "#0F0F0D", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: (!joinCode.trim() || joinLoading) ? 0.6 : 1 }}>
+                {joinLoading ? "…" : "Join"}
+              </button>
+            </div>
+            {joinError && <div style={{ fontSize: 12, color: "#e05c5c", marginTop: 6 }}>{joinError}</div>}
+          </div>
+        )}
+
+        {showNewGoal && (
+          <div style={{ ...card, marginBottom: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 14 }}>New shared goal</div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <input
+                placeholder="Emoji" value={goalEmoji} onChange={e => setGoalEmoji(e.target.value)}
+                style={{ width: 52, background: T.surface, border: `0.5px solid ${T.borderStrong}`, borderRadius: T.rsm, padding: "9px 8px", fontSize: 20, color: T.text, outline: "none", textAlign: "center" }}
+              />
+              <input
+                placeholder="Goal name (e.g. Gym)" value={goalName} onChange={e => setGoalName(e.target.value)}
+                style={{ flex: 1, background: T.surface, border: `0.5px solid ${T.borderStrong}`, borderRadius: T.rsm, padding: "9px 12px", fontSize: 14, color: T.text, outline: "none" }}
+              />
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+              {[["daily","Daily"], ["weekly","Weekly"], ["project","Build"]].map(([v, l]) => (
+                <button key={v} onClick={() => setGoalType(v)}
+                  style={{ flex: 1, padding: "8px 0", borderRadius: T.rsm, border: `0.5px solid ${goalType === v ? T.gold : T.border}`, background: goalType === v ? "rgba(200,144,42,0.12)" : "none", color: goalType === v ? T.gold : T.muted, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+                  {l}
+                </button>
+              ))}
+            </div>
+            <button onClick={handleCreate} disabled={createLoading || !goalName.trim()}
+              style={{ width: "100%", padding: "11px 0", borderRadius: T.rsm, border: "none", background: T.accent, color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: (!goalName.trim() || createLoading) ? 0.6 : 1 }}>
+              {createLoading ? "Creating…" : "Create & get invite link"}
+            </button>
+          </div>
+        )}
+
+        {sharedGoalsLoading ? (
+          <div style={{ textAlign: "center", padding: "24px 0", color: T.muted, fontSize: 13 }}>Loading…</div>
+        ) : sharedGoals.length === 0 ? (
+          <div style={{ ...card, textAlign: "center", padding: "24px 16px", color: T.muted, fontSize: 13 }}>
+            No shared goals yet. Create one and invite your friends.
+          </div>
+        ) : (
+          sharedGoals.map(g => {
+            const myLoggedToday = (g.myLogs || []).some(l => l.date === today);
+            return (
+              <div key={g.id} style={{ ...card }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                  <div style={{ fontSize: 24 }}>{g.emoji}</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: T.text }}>{g.name}</div>
+                    <div style={{ fontSize: 12, color: T.muted }}>{g.members.length} member{g.members.length !== 1 ? "s" : ""}</div>
+                  </div>
+                  <button
+                    onClick={() => copyInviteLink(g)}
+                    style={{ padding: "5px 10px", borderRadius: 12, border: `0.5px solid ${T.borderStrong}`, background: "none", color: copiedId === g.id ? T.green : T.sub, fontSize: 11, cursor: "pointer", fontWeight: 500 }}>
+                    {copiedId === g.id ? "✓ Copied" : "Invite"}
+                  </button>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+                  {g.members.map(m => {
+                    const mLoggedToday = (m.logs || []).some(l => l.date === today);
+                    return (
+                      <div key={m.userId} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <Avatar name={m.name} avatarUrl={m.avatarUrl} size={26} />
+                        <div style={{ flex: 1, fontSize: 13, color: m.isMe ? T.text : T.sub }}>{m.isMe ? "You" : m.name}</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: mLoggedToday ? T.green : T.hint }}>
+                          {mLoggedToday ? "✓" : "—"}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {!myLoggedToday && (
+                  <button
+                    onClick={() => onLogSharedGoal(g.id, { value: true, note: "" })}
+                    style={{ width: "100%", padding: "10px 0", borderRadius: T.rsm, border: "none", background: g.color || T.accent, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                    Log today ✓
+                  </button>
+                )}
+                {myLoggedToday && (
+                  <div style={{ textAlign: "center", fontSize: 12, color: T.green, padding: "4px 0" }}>Done for today ✓</div>
+                )}
+              </div>
+            );
+          })
+        )}
       </div>
     </div>
   );
@@ -6001,6 +6242,14 @@ export default function App() {
   );
   // ─────────────────────────────────────────────────────────────────────────────
 
+  // ── Social state ─────────────────────────────────────────────────────────────
+  const [friends,              setFriends]              = useState([]);
+  const [friendRequests,       setFriendRequests]       = useState([]);
+  const [friendsLoading,       setFriendsLoading]       = useState(false);
+  const [sharedGoals,          setSharedGoals]          = useState([]);
+  const [sharedGoalsLoading,   setSharedGoalsLoading]   = useState(false);
+  // ─────────────────────────────────────────────────────────────────────────────
+
   const [showUpgrade,    setShowUpgrade]    = useState(false);
   const [checkingPayment,setCheckingPayment]= useState(false);
   const [showWelcome,    setShowWelcome]    = useState(false);
@@ -6078,6 +6327,41 @@ export default function App() {
     })();
   }, [sessionUserId]);
 
+  // ── Load social data whenever sessionUserId is available ─────────────────────
+  useEffect(() => {
+    if (!sessionUserId) return;
+    loadFriends(sessionUserId);
+    loadFriendRequests(sessionUserId);
+    loadSharedGoals(sessionUserId);
+    syncLastActive();
+  }, [sessionUserId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Handle /join/[code] invite URLs ──────────────────────────────────────────
+  useEffect(() => {
+    const match = window.location.pathname.match(/^\/join\/([a-zA-Z0-9]+)$/);
+    if (match) {
+      localStorage.setItem("forged_pending_join", match[1]);
+      // Clean up URL without reloading
+      window.history.replaceState({}, "", "/");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!sessionUserId) return;
+    const code = localStorage.getItem("forged_pending_join");
+    if (!code) return;
+    localStorage.removeItem("forged_pending_join");
+    joinSharedGoal(code).then(result => {
+      if (result?.success) {
+        addToast(`✓ Joined "${result.goal.emoji} ${result.goal.name}"`);
+        setScreen("social");
+      } else if (result?.error) {
+        addToast(`Invite: ${result.error}`);
+      }
+    });
+  }, [sessionUserId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ─────────────────────────────────────────────────────────────────────────────
+
   async function handleNotifToggle() {
     if (typeof Notification === "undefined" || !("serviceWorker" in navigator)) {
       alert("Notifications aren't supported in this browser. Try Chrome on Android or Safari on iOS 16.4+.");
@@ -6143,6 +6427,178 @@ export default function App() {
     }).eq("user_id", sessionUserId);
   }
   // ── End App-level notification ────────────────────────────────────────────────
+
+  // ── Social: helpers ───────────────────────────────────────────────────────────
+  function syncLastActive() {
+    const uid = userIdRef.current;
+    if (!uid || demoMode) return;
+    const today = todayStr();
+    supabase.from("profiles").update({ last_active_date: today }).eq("id", uid).then(() => {});
+  }
+
+  async function loadFriends(uid) {
+    const id = uid || userIdRef.current;
+    if (!id) return;
+    setFriendsLoading(true);
+    try {
+      const { data: fships } = await supabase
+        .from("friendships")
+        .select("id, requester_id, addressee_id")
+        .or(`requester_id.eq.${id},addressee_id.eq.${id}`)
+        .eq("status", "accepted");
+      if (!fships?.length) { setFriends([]); return; }
+      const friendIds = fships.map(f => f.requester_id === id ? f.addressee_id : f.requester_id);
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("id, name, avatar_url, xp, last_active_date")
+        .in("id", friendIds);
+      const today = todayStr();
+      setFriends((profiles || []).map(p => ({
+        id: p.id,
+        name: p.name || "Friend",
+        avatarUrl: p.avatar_url,
+        xp: p.xp || 0,
+        loggedToday: p.last_active_date === today,
+        friendshipId: fships.find(f => f.requester_id === p.id || f.addressee_id === p.id)?.id,
+      })).sort((a, b) => b.xp - a.xp));
+    } catch(e) { console.warn("[Forged] loadFriends:", e); }
+    finally { setFriendsLoading(false); }
+  }
+
+  async function loadFriendRequests(uid) {
+    const id = uid || userIdRef.current;
+    if (!id) return;
+    const { data: reqs } = await supabase
+      .from("friendships")
+      .select("id, requester_id, created_at")
+      .eq("addressee_id", id)
+      .eq("status", "pending");
+    if (!reqs?.length) { setFriendRequests([]); return; }
+    const { data: profiles } = await supabase
+      .from("profiles").select("id, name, avatar_url").in("id", reqs.map(r => r.requester_id));
+    setFriendRequests(reqs.map(r => ({
+      friendshipId: r.id,
+      requesterId:  r.requester_id,
+      name:    profiles?.find(p => p.id === r.requester_id)?.name || "Someone",
+      avatarUrl: profiles?.find(p => p.id === r.requester_id)?.avatar_url,
+    })));
+  }
+
+  async function sendFriendRequest(email) {
+    const uid = userIdRef.current;
+    if (!uid) return { error: "Not signed in" };
+    const { data: targetId, error } = await supabase.rpc("find_user_by_email", { p_email: email.trim().toLowerCase() });
+    if (error || !targetId) return { error: "No Forged account found with that email" };
+    if (targetId === uid) return { error: "That's you!" };
+    const { data: existing } = await supabase.from("friendships").select("id, status")
+      .or(`and(requester_id.eq.${uid},addressee_id.eq.${targetId}),and(requester_id.eq.${targetId},addressee_id.eq.${uid})`)
+      .maybeSingle();
+    if (existing?.status === "accepted") return { error: "Already friends!" };
+    if (existing?.status === "pending")  return { error: "Request already sent" };
+    const { error: err } = await supabase.from("friendships").insert({ requester_id: uid, addressee_id: targetId, status: "pending" });
+    if (err) return { error: "Couldn't send — try again" };
+    return { success: true };
+  }
+
+  async function acceptFriendRequest(friendshipId) {
+    await supabase.from("friendships").update({ status: "accepted" }).eq("id", friendshipId);
+    const uid = userIdRef.current;
+    await Promise.all([loadFriends(uid), loadFriendRequests(uid)]);
+  }
+
+  async function declineFriendRequest(friendshipId) {
+    await supabase.from("friendships").update({ status: "declined" }).eq("id", friendshipId);
+    await loadFriendRequests(userIdRef.current);
+  }
+
+  async function removeFriend(friendshipId) {
+    await supabase.from("friendships").delete().eq("id", friendshipId);
+    setFriends(f => f.filter(fr => fr.friendshipId !== friendshipId));
+  }
+
+  async function loadSharedGoals(uid) {
+    const id = uid || userIdRef.current;
+    if (!id) return;
+    setSharedGoalsLoading(true);
+    try {
+      const { data: memberships } = await supabase
+        .from("shared_goal_members")
+        .select("id, shared_goal_id, logs, joined_at, shared_goals(*)")
+        .eq("user_id", id);
+      if (!memberships?.length) { setSharedGoals([]); return; }
+      const goalIds = memberships.map(m => m.shared_goal_id);
+      const { data: allMembers } = await supabase
+        .from("shared_goal_members")
+        .select("shared_goal_id, user_id, logs")
+        .in("shared_goal_id", goalIds);
+      const memberIds = [...new Set((allMembers || []).map(m => m.user_id))];
+      const { data: mProfiles } = await supabase
+        .from("profiles").select("id, name, avatar_url").in("id", memberIds);
+      setSharedGoals(memberships.map(m => {
+        const goal = m.shared_goals;
+        const members = (allMembers || [])
+          .filter(mem => mem.shared_goal_id === m.shared_goal_id)
+          .map(mem => ({
+            userId:   mem.user_id,
+            name:     mProfiles?.find(p => p.id === mem.user_id)?.name || "Member",
+            avatarUrl: mProfiles?.find(p => p.id === mem.user_id)?.avatar_url,
+            logs:     mem.logs || [],
+            isMe:     mem.user_id === id,
+          }));
+        return { id: goal.id, name: goal.name, emoji: goal.emoji, habitType: goal.habit_type,
+          weeklyTarget: goal.weekly_target, targetDate: goal.target_date, color: goal.color,
+          inviteCode: goal.invite_code, myLogs: m.logs || [], myMembershipId: m.id, members };
+      }));
+    } catch(e) { console.warn("[Forged] loadSharedGoals:", e); }
+    finally { setSharedGoalsLoading(false); }
+  }
+
+  async function createSharedGoal({ name, emoji, habitType, weeklyTarget, color }) {
+    const uid = userIdRef.current;
+    if (!uid || !name?.trim()) return null;
+    const { data: goal, error } = await supabase.from("shared_goals")
+      .insert({ creator_id: uid, name: name.trim(), emoji: emoji || "🎯",
+        habit_type: habitType || "daily", weekly_target: weeklyTarget || null,
+        color: color || "#C0392B" })
+      .select().single();
+    if (error || !goal) { addToast("Couldn't create goal"); return null; }
+    await supabase.from("shared_goal_members").insert({ shared_goal_id: goal.id, user_id: uid, logs: [] });
+    await loadSharedGoals(uid);
+    return goal;
+  }
+
+  async function joinSharedGoal(inviteCode) {
+    const uid = userIdRef.current;
+    if (!uid) return { error: "Not signed in" };
+    const { data: goal } = await supabase.from("shared_goals")
+      .select("id, name, emoji").eq("invite_code", inviteCode).maybeSingle();
+    if (!goal) return { error: "No goal found with that code" };
+    const { data: existing } = await supabase.from("shared_goal_members")
+      .select("id").eq("shared_goal_id", goal.id).eq("user_id", uid).maybeSingle();
+    if (!existing) {
+      await supabase.from("shared_goal_members").insert({ shared_goal_id: goal.id, user_id: uid, logs: [] });
+    }
+    await loadSharedGoals(uid);
+    return { success: true, goal };
+  }
+
+  async function logSharedGoal(sharedGoalId, logEntry) {
+    const uid = userIdRef.current;
+    if (!uid) return;
+    const { data: member } = await supabase.from("shared_goal_members")
+      .select("id, logs").eq("shared_goal_id", sharedGoalId).eq("user_id", uid).single();
+    if (!member) return;
+    const today = todayStr();
+    const newLogs = [...(member.logs || []).filter(l => l.date !== today), { date: today, ...logEntry }];
+    await supabase.from("shared_goal_members").update({ logs: newLogs }).eq("id", member.id);
+    setSharedGoals(prev => prev.map(g => g.id !== sharedGoalId ? g : {
+      ...g, myLogs: newLogs,
+      members: g.members.map(m => m.isMe ? { ...m, logs: newLogs } : m),
+    }));
+    syncLastActive();
+    addToast("✓ Logged");
+  }
+  // ── End social helpers ────────────────────────────────────────────────────────
 
   // ─── Supabase helpers ──────────────────────────────────────────────────────
   async function syncHabit(habit) {
@@ -7452,7 +7908,15 @@ export default function App() {
         {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} hideFloatingAdd/>}
         {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)}/>}
         {screen === "insights" && <InsightsScreen habits={habits} goals={goals} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)}/>}
-        {screen === "social"   && <SocialTeaserScreen />}
+        {screen === "social"   && <SocialScreen
+          user={user} xp={xp} habits={habits}
+          friends={friends} friendRequests={friendRequests} friendsLoading={friendsLoading}
+          onSendRequest={sendFriendRequest} onAccept={acceptFriendRequest}
+          onDecline={declineFriendRequest} onRemoveFriend={removeFriend}
+          sharedGoals={sharedGoals} sharedGoalsLoading={sharedGoalsLoading}
+          onCreateSharedGoal={createSharedGoal} onJoinSharedGoal={joinSharedGoal}
+          onLogSharedGoal={logSharedGoal}
+        />}
         {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} stripeCustomerId={stripeCustomerId} refCode={refCode}
           authEmail={authEmail}
           onUpgrade={() => setShowUpgrade(true)}
