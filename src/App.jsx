@@ -950,7 +950,7 @@ function TodayOverflowDotsBtn({ expanded, onToggle }) {
 }
 
 /** Today habit cards: ··· menu with Edit / Delete (delete uses same confirm copy as Habits list). */
-function TodayHabitMenuDropdown({ habit, onEdit, onDelete, onShareHabit, menuOpen, onCloseMenu }) {
+function TodayHabitMenuDropdown({ habit, onEdit, onDelete, onShareHabit, shareSaving, menuOpen, onCloseMenu }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   useEffect(() => {
     if (!menuOpen) setConfirmDelete(false);
@@ -986,12 +986,12 @@ function TodayHabitMenuDropdown({ habit, onEdit, onDelete, onShareHabit, menuOpe
         Edit
       </button>
       {!habit.sharedGoalId && onShareHabit && (
-        <button type="button" onPointerDown={e => e.stopPropagation()} onClick={async (e) => {
+        <button type="button" disabled={!!shareSaving} onPointerDown={e => e.stopPropagation()} onClick={async (e) => {
           e.stopPropagation();
           try { await onShareHabit(habit.id); } finally { onCloseMenu(); }
         }}
-          style={{ fontSize:12, color:T.gold, background:"rgba(200,144,42,0.12)", border:`0.5px solid rgba(200,144,42,0.35)`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>
-          Share with friends
+          style={{ fontSize:12, color:T.gold, background:"rgba(200,144,42,0.12)", border:`0.5px solid rgba(200,144,42,0.35)`, borderRadius:T.rsm, padding:"5px 12px", cursor:shareSaving?"wait":"pointer", fontWeight:500, opacity:shareSaving?0.55:1 }}>
+          {shareSaving ? "Sharing…" : "Share with friends"}
         </button>
       )}
       <button type="button" aria-label="Delete habit" onClick={(e) => { e.stopPropagation(); setConfirmDelete(true); }}
@@ -1006,7 +1006,7 @@ function TodayHabitMenuDropdown({ habit, onEdit, onDelete, onShareHabit, menuOpe
   );
 }
 
-function DailyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDeleteHabit, onShareHabit }) {
+function DailyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit }) {
   const tLog  = latestTodayLog(habit);
   const logged = isLoggedToday(habit);
   const isSkip = tLog?.value === "skip";
@@ -1042,7 +1042,7 @@ function DailyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDeleteHabit
         }
       </div>
       {onEditHabit && onDeleteHabit && (
-        <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} onShareHabit={onShareHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} />
+        <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} onShareHabit={onShareHabit} shareSaving={!!sharingThisHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} />
       )}
       {isSkip && (
         <div style={{ margin:"0 15px 12px", background:"rgba(106,104,96,0.15)", borderRadius:T.rsm, padding:"8px 12px", display:"flex", flexDirection:"column", gap:6 }}>
@@ -1095,7 +1095,7 @@ function DailyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDeleteHabit
   );
 }
 
-function WeeklyCard({ habit, onTap, onAddNote, onEditHabit, onDeleteHabit, onShareHabit }) {
+function WeeklyCard({ habit, onTap, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit }) {
   const logged = isLoggedToday(habit);
   const wk = getWeeklyCount(habit);
   const pct = Math.min(100, Math.round((wk / habit.weeklyTarget) * 100));
@@ -1118,7 +1118,7 @@ function WeeklyCard({ habit, onTap, onAddNote, onEditHabit, onDeleteHabit, onSha
         <CheckBtn logged={logged} habit={habit} onClick={e => onTap(habit.id, e)}/>
       </div>
       {onEditHabit && onDeleteHabit && (
-        <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} onShareHabit={onShareHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} />
+        <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} onShareHabit={onShareHabit} shareSaving={!!sharingThisHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} />
       )}
       <div style={{ padding:"0 15px 14px" }}>
         <div style={{ height:5, background:T.surface, borderRadius:3, overflow:"hidden", marginBottom:8 }}>
@@ -1139,7 +1139,7 @@ function WeeklyCard({ habit, onTap, onAddNote, onEditHabit, onDeleteHabit, onSha
   );
 }
 
-function ProjectCard({ habit, onOpenLog, onAddNote, onEditHabit, onDeleteHabit, onShareHabit }) {
+function ProjectCard({ habit, onOpenLog, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit }) {
   const stats = getProjectStats(habit);
   const tLogs = todayLogs(habit);
   const logged = tLogs.length > 0;
@@ -1181,7 +1181,7 @@ function ProjectCard({ habit, onOpenLog, onAddNote, onEditHabit, onDeleteHabit, 
         <PlusBtn habit={habit} logged={logged} onClick={() => onOpenLog(habit.id)}/>
       </div>
       {onEditHabit && onDeleteHabit && (
-        <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} onShareHabit={onShareHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} />
+        <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} onShareHabit={onShareHabit} shareSaving={!!sharingThisHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} />
       )}
       <div style={{ padding:"0 15px 14px", display:"flex", gap:8 }}>
         <Stat label="hrs this wk" value={stats.weekHours} color={habit.color}/>
@@ -1203,7 +1203,7 @@ function ProjectCard({ habit, onOpenLog, onAddNote, onEditHabit, onDeleteHabit, 
   );
 }
 
-function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHabit, onDeleteHabit, onShareHabit }) {
+function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit }) {
   const todayLogsArr = habit.logs.filter(l => l.date === todayStr() && l.value !== "quicknote");
   const used   = todayLogsArr.reduce((s, l) => s + (typeof l.value === "number" ? l.value : 0), 0);
   const budget = habit.dailyBudget || 60;
@@ -1248,7 +1248,7 @@ function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHabit, on
         </div>
       </div>
       {onEditHabit && onDeleteHabit && (
-        <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} onShareHabit={onShareHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} />
+        <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} onShareHabit={onShareHabit} shareSaving={!!sharingThisHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} />
       )}
 
       {logged ? (
@@ -2237,7 +2237,7 @@ function TourOverlay({ steps, stepIdx, onNext, onSkip }) {
 }
 
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
-function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote, onLogZero, onOpenLog, onOpenGoalLog, onEditGoal, onCompleteGoal, onDeleteGoal, onEditHabit, onDeleteHabit, onShareHabit, onXPInfo, onAdd, hideFloatingAdd }) {
+function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote, onLogZero, onOpenLog, onOpenGoalLog, onEditGoal, onCompleteGoal, onDeleteGoal, onEditHabit, onDeleteHabit, onShareHabit, sharingHabitId, onXPInfo, onAdd, hideFloatingAdd }) {
   const activeGoals = goals.filter(g => g.status !== "completed");
   const loggedCount = habits.filter(h => isLoggedToday(h)).length;
   const totalTrackables = habits.length;
@@ -2278,10 +2278,10 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
       {(() => {
         const sections = [
           activeGoals.length > 0 && <><SLabel>Goals</SLabel> {activeGoals.map(g => <TodayGoalCard key={g.id} goal={g} onOpenLog={onOpenGoalLog} onEdit={onEditGoal} onComplete={onCompleteGoal} onDelete={onDeleteGoal}/>)}</>,
-          daily.length   > 0 && <><SLabel>Daily</SLabel>          {daily.map(h   => <DailyCard  key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit}/>)}</>,
-          limit.length   > 0 && <><SLabel>Limits</SLabel>         {limit.map(h   => <LimitCard  key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit}/>)}</>,
-          weekly.length  > 0 && <><SLabel>Weekly targets</SLabel> {weekly.map(h  => <WeeklyCard key={h.id} habit={h} onTap={onTap} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit}/>)}</>,
-          project.length > 0 && <><SLabel>Build</SLabel>          {project.map(h => <ProjectCard key={h.id} habit={h} onOpenLog={onOpenLog} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit}/>)}</>,
+          daily.length   > 0 && <><SLabel>Daily</SLabel>          {daily.map(h   => <DailyCard  key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId === h.id}/>)}</>,
+          limit.length   > 0 && <><SLabel>Limits</SLabel>         {limit.map(h   => <LimitCard  key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId === h.id}/>)}</>,
+          weekly.length  > 0 && <><SLabel>Weekly targets</SLabel> {weekly.map(h  => <WeeklyCard key={h.id} habit={h} onTap={onTap} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId === h.id}/>)}</>,
+          project.length > 0 && <><SLabel>Build</SLabel>          {project.map(h => <ProjectCard key={h.id} habit={h} onOpenLog={onOpenLog} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId === h.id}/>)}</>,
         ].filter(Boolean);
         return sections.map((sec, i) =>
           i === 0
@@ -3844,7 +3844,7 @@ function SocialTeaserCard({ emoji, title, children }) {
   );
 }
 
-function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests, friendsLoading, onSendRequest, onAccept, onDecline, onRemoveFriend, onCancelSentRequest, sharedGoals, sharedGoalsLoading, onCreateSharedGoal, onJoinSharedGoal, onLogSharedGoal, onShareHabit }) {
+function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests, friendsLoading, onSendRequest, onAccept, onDecline, onRemoveFriend, onCancelSentRequest, sharedGoals, sharedGoalsLoading, onCreateSharedGoal, onJoinSharedGoal, onLogSharedGoal, onShareHabit, currentUserId, onDeleteSharedGoal }) {
   const [showAddFriend,   setShowAddFriend]   = useState(false);
   const [addEmail,        setAddEmail]        = useState("");
   const [addError,        setAddError]        = useState("");
@@ -3861,6 +3861,8 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
   const [weeklyTarget,   setWeeklyTarget]   = useState(3);
   const [createLoading,   setCreateLoading]   = useState(false);
   const [copiedId,        setCopiedId]        = useState(null);
+  const [sharedGoalDeleteId, setSharedGoalDeleteId] = useState(null);
+  const [deleteSharedLoading, setDeleteSharedLoading] = useState(false);
 
   const today = todayStr();
   const myStreak = habits.length ? Math.max(0, ...habits.map(h => h.streak || 0)) : 0;
@@ -3872,33 +3874,41 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
   async function handleSendRequest() {
     if (!addEmail.trim()) return;
     setAddLoading(true); setAddError("");
-    const res = await onSendRequest(addEmail);
+    const res = await onSendRequest(addEmail.trim());
     setAddLoading(false);
     if (res?.error) { setAddError(res.error); }
-    else { setAddDone(true); setAddEmail(""); setTimeout(() => { setAddDone(false); setShowAddFriend(false); }, 2000); }
+    else { setAddDone(true); setAddEmail(""); setTimeout(() => { setAddDone(false); setShowAddFriend(false); }, 2200); }
   }
 
   async function handleJoin() {
     if (!joinCode.trim()) return;
     setJoinLoading(true); setJoinError("");
-    const res = await onJoinSharedGoal(joinCode.trim());
+    let code = joinCode.trim();
+    const fromUrl = code.match(/\/join\/([^/?#]+)/i);
+    if (fromUrl) code = fromUrl[1];
+    const res = await onJoinSharedGoal(code);
     setJoinLoading(false);
     if (res?.error) { setJoinError(res.error); }
     else { setJoinCode(""); setShowJoinGoal(false); }
   }
 
   async function handleCreate() {
-    if (!goalName.trim()) return;
+    if (!goalName.trim() || createLoading) return;
     setCreateLoading(true);
-    await onCreateSharedGoal({
-      name: goalName,
-      emoji: goalEmoji,
-      habitType: goalType,
-      weeklyTarget: goalType === "weekly" ? Math.min(7, Math.max(1, Number(weeklyTarget) || 3)) : undefined,
-    });
-    setCreateLoading(false);
-    setGoalName(""); setGoalEmoji("🎯"); setGoalType("daily"); setWeeklyTarget(3);
-    setShowNewGoal(false);
+    try {
+      const created = await onCreateSharedGoal({
+        name: goalName,
+        emoji: goalEmoji,
+        habitType: goalType,
+        weeklyTarget: goalType === "weekly" ? Math.min(7, Math.max(1, Number(weeklyTarget) || 3)) : undefined,
+      });
+      if (created === undefined) return;
+      if (!created) return;
+      setGoalName(""); setGoalEmoji("🎯"); setGoalType("daily"); setWeeklyTarget(3);
+      setShowNewGoal(false);
+    } finally {
+      setCreateLoading(false);
+    }
   }
 
   function copyInviteLink(goal) {
@@ -4003,20 +4013,28 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
 
         {showAddFriend && (
           <div style={{ ...card, marginBottom: 12 }}>
-            <div style={{ fontSize: 12, color: T.muted, marginBottom: 8 }}>Enter their email address</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 6 }}>Add a friend</div>
+            <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.55, marginBottom: 10 }}>
+              Enter the <strong style={{ color: T.text }}>email they use for Forged</strong> or their <strong style={{ color: T.text }}>@username</strong> (if they set one in Profile → Social).
+              They’ll get a request here — once they accept, you’ll see each other on this leaderboard.
+            </div>
             <div style={{ display: "flex", gap: 8 }}>
               <input
-                type="email" placeholder="friend@email.com" value={addEmail}
+                type="text"
+                placeholder="friend@email.com or @username"
+                autoComplete="off"
+                value={addEmail}
                 onChange={e => { setAddEmail(e.target.value); setAddError(""); }}
                 onKeyDown={e => e.key === "Enter" && handleSendRequest()}
                 style={{ flex: 1, background: T.surface, border: `0.5px solid ${T.borderStrong}`, borderRadius: T.rsm, padding: "9px 12px", fontSize: 14, color: T.text, outline: "none" }}
               />
-              <button onClick={handleSendRequest} disabled={addLoading || !addEmail.trim()}
+              <button type="button" onClick={handleSendRequest} disabled={addLoading || !addEmail.trim()}
                 style={{ padding: "9px 14px", borderRadius: T.rsm, border: "none", background: T.accent, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: (!addEmail.trim() || addLoading) ? 0.6 : 1 }}>
-                {addLoading ? "…" : addDone ? "✓ Sent!" : "Send"}
+                {addLoading ? "…" : addDone ? "✓ Sent!" : "Send request"}
               </button>
             </div>
             {addError && <div style={{ fontSize: 12, color: "#e05c5c", marginTop: 6 }}>{addError}</div>}
+            {addDone && !addError && <div style={{ fontSize: 12, color: T.green, marginTop: 6 }}>Request sent. They’ll see it under Friend requests.</div>}
           </div>
         )}
 
@@ -4064,7 +4082,9 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
 
         {showJoinGoal && (
           <div style={{ ...card, marginBottom: 12 }}>
-            <div style={{ fontSize: 12, color: T.muted, marginBottom: 8 }}>Paste an invite link or code</div>
+            <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.55, marginBottom: 8 }}>
+              Paste the 8-character code or the full invite link — either works.
+            </div>
             <div style={{ display: "flex", gap: 8 }}>
               <input
                 placeholder="e.g. ab3f9c2d" value={joinCode}
@@ -4134,19 +4154,56 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
         ) : (
           sharedGoals.map(g => {
             const myLoggedToday = (g.myLogs || []).some(l => l.date === today);
+            const isCreator = currentUserId && g.creatorId === currentUserId;
             return (
               <div key={g.id} style={{ ...card }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
                   <div style={{ fontSize: 24 }}>{g.emoji}</div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 15, fontWeight: 600, color: T.text }}>{g.name}</div>
-                    <div style={{ fontSize: 12, color: T.muted }}>{g.members.length} member{g.members.length !== 1 ? "s" : ""}</div>
+                    <div style={{ fontSize: 12, color: T.muted }}>{g.members.length} member{g.members.length !== 1 ? "s" : ""}{isCreator ? " · You created this" : ""}</div>
                   </div>
-                  <button
-                    onClick={() => copyInviteLink(g)}
-                    style={{ padding: "5px 10px", borderRadius: 12, border: `0.5px solid ${T.borderStrong}`, background: "none", color: copiedId === g.id ? T.green : T.sub, fontSize: 11, cursor: "pointer", fontWeight: 500 }}>
-                    {copiedId === g.id ? "✓ Copied" : "Invite"}
-                  </button>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "flex-end" }}>
+                    <button
+                      type="button"
+                      onClick={() => copyInviteLink(g)}
+                      style={{ padding: "5px 10px", borderRadius: 12, border: `0.5px solid ${T.borderStrong}`, background: "none", color: copiedId === g.id ? T.green : T.sub, fontSize: 11, cursor: "pointer", fontWeight: 500 }}>
+                      {copiedId === g.id ? "✓ Copied" : "Invite"}
+                    </button>
+                    {isCreator && onDeleteSharedGoal && (
+                      sharedGoalDeleteId === g.id ? (
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: 6, minWidth: 140 }}>
+                          <span style={{ fontSize: 11, color: T.accent, fontWeight: 600 }}>Delete for everyone?</span>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button
+                              type="button"
+                              disabled={deleteSharedLoading}
+                              onClick={async () => {
+                                setDeleteSharedLoading(true);
+                                const res = await onDeleteSharedGoal(g.id);
+                                setDeleteSharedLoading(false);
+                                if (!res?.error) setSharedGoalDeleteId(null);
+                              }}
+                              style={{ flex: 1, padding: "5px 8px", borderRadius: 10, border: "none", background: T.accent, color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", opacity: deleteSharedLoading ? 0.65 : 1 }}
+                            >
+                              {deleteSharedLoading ? "…" : "Delete"}
+                            </button>
+                            <button type="button" disabled={deleteSharedLoading} onClick={() => setSharedGoalDeleteId(null)}
+                              style={{ flex: 1, padding: "5px 8px", borderRadius: 10, border: `0.5px solid ${T.border}`, background: "none", color: T.muted, fontSize: 11, cursor: "pointer" }}>
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setSharedGoalDeleteId(g.id)}
+                          style={{ padding: "5px 10px", borderRadius: 12, border: `0.5px solid rgba(231,76,60,0.35)`, background: "rgba(231,76,60,0.08)", color: "#e05c5c", fontSize: 11, cursor: "pointer", fontWeight: 600 }}>
+                          Delete
+                        </button>
+                      )
+                    )}
+                  </div>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
                   {g.members.map(m => {
@@ -5472,6 +5529,13 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
   const [refCount,       setRefCount]       = useState(null);
   const [refCopied,      setRefCopied]      = useState(false);
   const [portalLoading,  setPortalLoading]  = useState(false);
+  const [handleDraft,    setHandleDraft]    = useState(() => String(user.username || "").replace(/^@+/, ""));
+  const [handleErr,      setHandleErr]      = useState("");
+  const [handleSaved,    setHandleSaved]    = useState(false);
+
+  useEffect(() => {
+    setHandleDraft(String(user.username || "").replace(/^@+/, ""));
+  }, [user.username]);
 
   useEffect(() => {
     supabase.rpc("my_referral_count").then(({ data }) => {
@@ -5635,6 +5699,74 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
               }}/>
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Social & privacy */}
+      <div style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, overflow:"hidden" }}>
+        <div style={{ padding:"10px 16px 6px", fontSize:10, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em" }}>Social & privacy</div>
+        <div style={{ padding:"12px 16px 14px", borderBottom:`0.5px solid ${T.border}` }}>
+          <div style={{ fontSize:14, fontWeight:600, color:T.text, marginBottom:4 }}>Forged @handle</div>
+          <div style={{ fontSize:12, color:T.sub, lineHeight:1.55, marginBottom:10 }}>
+            Optional. Friends can send you a request with this username instead of your email. Letters, numbers, and underscore only (3–20 characters).
+          </div>
+          <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+            <span style={{ fontSize:14, color:T.muted, flexShrink:0 }}>@</span>
+            <input
+              value={handleDraft}
+              onChange={e => { setHandleDraft(e.target.value.replace(/\s/g, "")); setHandleErr(""); setHandleSaved(false); }}
+              placeholder="your_handle"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              style={{ flex:1, minWidth:120, ...inp, marginBottom:0 }}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const t = handleDraft.trim().replace(/^@+/, "").toLowerCase();
+                if (t && (t.length < 3 || t.length > 20 || !/^[a-z0-9_]+$/.test(t))) {
+                  setHandleErr("Use 3–20 characters: a–z, 0–9, or _");
+                  return;
+                }
+                setHandleErr("");
+                onUpdateUser({ username: t || "" });
+                setHandleSaved(true);
+                setTimeout(() => setHandleSaved(false), 2000);
+              }}
+              style={{ padding:"10px 14px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:13, fontWeight:600, cursor:"pointer" }}
+            >
+              Save handle
+            </button>
+          </div>
+          {handleErr ? <div style={{ fontSize:12, color:"#e05c5c", marginTop:8 }}>{handleErr}</div> : null}
+          {handleSaved && !handleErr ? <div style={{ fontSize:12, color:T.green, marginTop:8 }}>Saved.</div> : null}
+        </div>
+        <div style={{ padding:"14px 16px 16px", display:"flex", alignItems:"center", gap:12 }}>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:14, fontWeight:600, color:T.text }}>Visible to friends of friends</div>
+            <div style={{ fontSize:12, color:T.sub, marginTop:4, lineHeight:1.5 }}>
+              Off: only people you’re friends with see you on social surfaces. On: lightweight discovery later (e.g. mutual connections) can include you — direct friends always see you either way.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => onUpdateUser({ visibleToFriendsOfFriends: !user.visibleToFriendsOfFriends })}
+            style={{
+              flexShrink:0, width:48, height:28, borderRadius:14, border:"none",
+              background: user.visibleToFriendsOfFriends ? T.gold : T.border,
+              cursor:"pointer", position:"relative", transition:"background 0.2s", padding:0,
+            }}
+            aria-label={user.visibleToFriendsOfFriends ? "Disable friends-of-friends visibility" : "Enable friends-of-friends visibility"}
+          >
+            <div style={{
+              position:"absolute", top:3,
+              left: user.visibleToFriendsOfFriends ? "calc(100% - 25px)" : 3,
+              width:22, height:22, borderRadius:"50%",
+              background:"#fff", transition:"left 0.2s",
+              boxShadow:"0 1px 3px rgba(0,0,0,0.3)",
+            }}/>
+          </button>
         </div>
       </div>
 
@@ -6300,6 +6432,10 @@ export default function App() {
   const [friendsLoading,       setFriendsLoading]       = useState(false);
   const [sharedGoals,          setSharedGoals]          = useState([]);
   const [sharedGoalsLoading,   setSharedGoalsLoading]   = useState(false);
+  /** While linking a habit to a new shared goal (Today → Share) — prevents duplicate goals from double-tap */
+  const [sharingHabitId,       setSharingHabitId]       = useState(null);
+  const sharingHabitIdRef = useRef(null);
+  const createSharedGoalInFlightRef = useRef(false);
   // ─────────────────────────────────────────────────────────────────────────────
 
   const [showUpgrade,    setShowUpgrade]    = useState(false);
@@ -6566,11 +6702,25 @@ export default function App() {
     })));
   }
 
-  async function sendFriendRequest(email) {
+  async function sendFriendRequest(identifier) {
     const uid = userIdRef.current;
     if (!uid) return { error: "Not signed in" };
-    const { data: targetId, error } = await supabase.rpc("find_user_by_email", { p_email: email.trim().toLowerCase() });
-    if (error || !targetId) return { error: "No Forged account found with that email" };
+    const raw = (identifier || "").trim();
+    if (!raw) return { error: "Enter their email or @username" };
+    let targetId = null;
+    if (raw.includes("@")) {
+      const { data, error } = await supabase.rpc("find_user_by_email", { p_email: raw.toLowerCase() });
+      if (error || !data) return { error: "No Forged account found with that email" };
+      targetId = data;
+    } else {
+      const handle = raw.replace(/^@+/, "").trim();
+      if (!handle) return { error: "Enter a username (letters, numbers, underscore)" };
+      const { data, error } = await supabase.rpc("find_user_by_username", { p_username: handle });
+      if (error || !data) {
+        return { error: "No account with that username. They can set a @handle in Profile → Social." };
+      }
+      targetId = data;
+    }
     if (targetId === uid) return { error: "That's you!" };
     const { data: existing } = await supabase.from("friendships").select("id, status")
       .or(`and(requester_id.eq.${uid},addressee_id.eq.${targetId}),and(requester_id.eq.${targetId},addressee_id.eq.${uid})`)
@@ -6651,6 +6801,7 @@ export default function App() {
         }));
         return {
           id: goal.id,
+          creatorId: goal.creator_id,
           name: goal.name,
           emoji: goal.emoji,
           habitType: goal.habit_type,
@@ -6671,45 +6822,92 @@ export default function App() {
   }
 
   async function createSharedGoal({ name, emoji, habitType, weeklyTarget, color }) {
+    if (createSharedGoalInFlightRef.current) {
+      addToast("Please wait — creating a shared goal…");
+      return undefined;
+    }
     const uid = userIdRef.current;
     if (!uid || !name?.trim()) return null;
-    const ht = habitType || "daily";
-    const wt = ht === "weekly"
-      ? Math.min(7, Math.max(1, Number(weeklyTarget) || 3))
-      : null;
-    const { data: goal, error } = await supabase.from("shared_goals")
-      .insert({ creator_id: uid, name: name.trim(), emoji: emoji || "🎯",
-        habit_type: ht, weekly_target: wt,
-        color: color || "#C0392B" })
-      .select().single();
-    if (error || !goal) { addToast("Couldn't create goal"); return null; }
-    await supabase.from("shared_goal_members").insert({ shared_goal_id: goal.id, user_id: uid, logs: [] });
-    await loadSharedGoals(uid);
-    return goal;
+    createSharedGoalInFlightRef.current = true;
+    try {
+      const ht = habitType || "daily";
+      const wt = ht === "weekly"
+        ? Math.min(7, Math.max(1, Number(weeklyTarget) || 3))
+        : null;
+      const { data: goal, error } = await supabase.from("shared_goals")
+        .insert({ creator_id: uid, name: name.trim(), emoji: emoji || "🎯",
+          habit_type: ht, weekly_target: wt,
+          color: color || "#C0392B" })
+        .select().single();
+      if (error || !goal) { addToast("Couldn't create goal"); return null; }
+      await supabase.from("shared_goal_members").insert({ shared_goal_id: goal.id, user_id: uid, logs: [] });
+      await loadSharedGoals(uid);
+      return goal;
+    } finally {
+      createSharedGoalInFlightRef.current = false;
+    }
   }
 
   async function shareHabit(habitId) {
     if (demoBounce()) return null;
     const uid = userIdRef.current;
     if (!uid) return null;
-    const habit = habits.find(h => h.id === habitId);
-    if (!habit || habit.sharedGoalId) return null;
-    const newGoal = await createSharedGoal({
-      name: habit.name,
-      emoji: habit.emoji,
-      habitType: habit.habitType,
-      weeklyTarget: habit.weeklyTarget,
-      color: habit.color,
-    });
-    if (!newGoal) return null;
-    const { error } = await supabase.from("habits").update({ shared_goal_id: newGoal.id }).eq("id", habit.id);
-    if (error) {
-      console.error("[Forged] shareHabit link:", error);
-      addToast("Couldn't link habit to shared goal");
-      return null;
+    if (sharingHabitIdRef.current) return null;
+    sharingHabitIdRef.current = habitId;
+    setSharingHabitId(habitId);
+    try {
+      const habit = habits.find(h => h.id === habitId);
+      if (!habit || habit.sharedGoalId) return null;
+      const newGoal = await createSharedGoal({
+        name: habit.name,
+        emoji: habit.emoji,
+        habitType: habit.habitType,
+        weeklyTarget: habit.weeklyTarget,
+        color: habit.color,
+      });
+      if (newGoal === undefined) return null;
+      if (!newGoal) return null;
+      const { error } = await supabase.from("habits").update({ shared_goal_id: newGoal.id }).eq("id", habit.id);
+      if (error) {
+        console.error("[Forged] shareHabit link:", error);
+        addToast("Couldn't link habit to shared goal");
+        return null;
+      }
+      setHabits(prev => prev.map(h => h.id === habitId ? { ...h, sharedGoalId: newGoal.id } : h));
+      return { ...newGoal, inviteCode: newGoal.invite_code };
+    } finally {
+      sharingHabitIdRef.current = null;
+      setSharingHabitId(null);
     }
-    setHabits(prev => prev.map(h => h.id === habitId ? { ...h, sharedGoalId: newGoal.id } : h));
-    return { ...newGoal, inviteCode: newGoal.invite_code };
+  }
+
+  async function deleteSharedGoal(goalId) {
+    const uid = userIdRef.current;
+    if (!uid) {
+      addToast("Not signed in");
+      return { error: "Not signed in" };
+    }
+    const { data: goalRow, error: gErr } = await supabase.from("shared_goals")
+      .select("id, creator_id").eq("id", goalId).maybeSingle();
+    if (gErr || !goalRow) {
+      addToast("Goal not found");
+      return { error: "Goal not found" };
+    }
+    if (goalRow.creator_id !== uid) {
+      addToast("Only the goal creator can delete it");
+      return { error: "Only the person who created this goal can delete it" };
+    }
+    await supabase.from("habits").update({ shared_goal_id: null }).eq("user_id", uid).eq("shared_goal_id", goalId);
+    const { error } = await supabase.from("shared_goals").delete().eq("id", goalId);
+    if (error) {
+      console.error("[Forged] deleteSharedGoal:", error);
+      addToast("Couldn't delete — try again");
+      return { error: "Couldn't delete — try again" };
+    }
+    setHabits(prev => prev.map(h => (h.sharedGoalId === goalId ? { ...h, sharedGoalId: undefined } : h)));
+    await loadSharedGoals(uid);
+    addToast("Shared goal removed");
+    return { success: true };
   }
 
   async function handleShareHabit(habitId) {
@@ -6812,7 +7010,12 @@ export default function App() {
     if (demoMode) return;
     const uid = userIdRef.current;
     if (!uid) return;
-    await supabase.from("profiles").upsert({ id: uid, ...updates, updated_at: new Date().toISOString() });
+    const { error } = await supabase.from("profiles").upsert({ id: uid, ...updates, updated_at: new Date().toISOString() });
+    if (error) {
+      console.warn("[Forged] syncProfile:", error);
+      if (error.code === "23505") addToast("That @handle is already taken");
+      else addToast("Couldn't save profile — check connection");
+    }
   }
 
   async function handleAvatarUpload(file) {
@@ -6893,7 +7096,12 @@ export default function App() {
       let isOnboarded = null;
 
       if (profile) {
-        setUser({ name: profile.name || "", avatarUrl: profile.avatar_url || null });
+        setUser({
+          name: profile.name || "",
+          avatarUrl: profile.avatar_url || null,
+          username: profile.username || "",
+          visibleToFriendsOfFriends: !!profile.visible_to_friends_of_friends,
+        });
         setXp(profile.xp ?? 0);
         const proStatus = !!(profile.is_pro || profile.is_admin);
         setIsPro(proStatus);
@@ -8075,7 +8283,7 @@ export default function App() {
             >×</button>
           </div>
         )}
-        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} hideFloatingAdd/>}
+        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} hideFloatingAdd/>}
         {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)}/>}
         {screen === "insights" && <InsightsScreen habits={habits} goals={goals} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)}/>}
         {screen === "social"   && <SocialScreen
@@ -8087,6 +8295,8 @@ export default function App() {
           onCreateSharedGoal={createSharedGoal} onJoinSharedGoal={joinSharedGoal}
           onLogSharedGoal={logSharedGoal}
           onShareHabit={handleShareHabit}
+          currentUserId={sessionUserId}
+          onDeleteSharedGoal={deleteSharedGoal}
         />}
         {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} stripeCustomerId={stripeCustomerId} refCode={refCode}
           authEmail={authEmail}
@@ -8097,6 +8307,17 @@ export default function App() {
               const next = { ...u, ...updates };
               const profilePatch = { name: next.name };
               if (updates.avatarUrl !== undefined) profilePatch.avatar_url = updates.avatarUrl;
+              if (updates.username !== undefined) {
+                const raw = updates.username === "" || updates.username == null
+                  ? null
+                  : String(updates.username).trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
+                const stored = raw && raw.length > 0 ? raw : null;
+                profilePatch.username = stored;
+                next.username = stored || "";
+              }
+              if (updates.visibleToFriendsOfFriends !== undefined) {
+                profilePatch.visible_to_friends_of_friends = !!next.visibleToFriendsOfFriends;
+              }
               syncProfile(profilePatch);
               return next;
             });
