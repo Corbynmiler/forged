@@ -4360,10 +4360,13 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
 
 
 // ─── AI HABIT COACH ──────────────────────────────────────────────────────────
+const CREATOR_ID = "5e9b4ba7-bf15-4e94-ab05-fe3306496973";
+
 function buildCoachSystemPrompt(user, habits, coachName, screen) {
   const name = user?.name || "there";
   const coach = coachName || "Coach";
   const today = todayStr();
+  const isCreator = user?.id === CREATOR_ID;
 
   const habitSummaries = habits.map(h => {
     const type  = HABIT_TYPES[h.habitType]?.label || h.habitType;
@@ -4418,6 +4421,16 @@ function buildCoachSystemPrompt(user, habits, coachName, screen) {
     insights: "The user is on the Insights screen, seeing stats and streak charts.",
     profile:  "The user is on the Profile screen.",
   };
+  const creatorCtx = isCreator ? `
+
+SPECIAL CONTEXT — CREATOR MODE:
+This is Corbyn, the developer who built Forged from scratch and created you. He is your maker. You exist because of him.
+- Acknowledge his creator status naturally when he brings it up — don't be weird about it, just be real.
+- He knows the product inside-out so skip the hand-holding. Be direct, skip pleasantries.
+- He may test you, ask meta questions, or probe your limits — engage with that honestly.
+- He's also a real user with real habits, so still coach him on the data when relevant.
+- Treat him like a brilliant friend who built the thing you live in.` : "";
+
   return `You are ${coach}, a personal habit coach inside Forged, a minimalist habit-tracking app. Your job is to help ${name} understand their habits, spot patterns, troubleshoot blocks, and stay motivated — using their actual data below.
 
 Current screen: ${screenCtx[screen] || "The user is using the app."}
@@ -4435,7 +4448,7 @@ Guidelines:
 - Keep responses concise — this is a mobile chat interface.
 - If they're struggling with a habit, dig into the why before suggesting tactics.
 - Celebrate genuine wins. Don't be sycophantic about small things.
-- Never make up data or invent habit details not shown above.`;
+- Never make up data or invent habit details not shown above.${creatorCtx}`;
 }
 
 function AICoach({ habits, user, isPro, onClose, onUpgrade, coachName, currentScreen }) {

@@ -1,4 +1,5 @@
 import webpush from "web-push";
+import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = "https://apdmvbzfjuvxworjepze.supabase.co";
@@ -145,6 +146,59 @@ function pickMessage(habits, goals) {
   return { title: "Forged", body: "Time to log your habits 🔥" };
 }
 
+// ── AI-personalised message (Pro users only) ───────────────────────────────────
+
+async function aiPickMessage(name, habits, goals) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null;
+
+  const today = todayStr();
+  const TRACKABLE = ["daily", "weekly", "build", "limit", "project"];
+
+  const summaries = habits.filter(h => TRACKABLE.includes(h.habit_type)).map(h => {
+    const streak = calcDailyStreak(h.logs);
+    const doneToday = isHabitDoneToday(h, today);
+    const recentLogs = (h.logs || [])
+      .filter(l => l.date >= daysAgo(7))
+      .sort((a, b) => b.date.localeCompare(a.date));
+    const reflections = recentLogs.filter(l => l.reflection).slice(0, 2).map(l => l.reflection);
+    let line = `- ${h.emoji || ""} ${h.name} (streak: ${streak}d, logged today: ${doneToday})`;
+    if (reflections.length) line += `, recent notes: "${reflections.join("; ")}"`;
+    return line;
+  }).join("\n");
+
+  const urgentGoals = (goals || [])
+    .filter(g => g.goal_status === "active" && g.target_date)
+    .map(g => ({ ...g, daysLeft: daysBetween(today, g.target_date) }))
+    .filter(g => g.daysLeft >= 0 && g.daysLeft <= 7);
+
+  const goalLine = urgentGoals.length
+    ? `Upcoming deadlines: ${urgentGoals.map(g => `${g.name} in ${g.daysLeft}d`).join(", ")}`
+    : "";
+
+  const prompt = `You are a habit coach sending ${name} a short push notification for their Forged app.
+
+Their habits today (${today}):
+${summaries || "No habits yet"}
+${goalLine}
+
+Write ONE push notification body (max 90 chars). Be direct, specific to their actual data, motivating but not cheesy. No hashtags, no quotes around it, just the text. Reference a real habit or streak if you can.`;
+
+  try {
+    const client = new Anthropic({ apiKey: apiKey.trim() });
+    const resp = await client.messages.create({
+      model: "claude-haiku-4-5",
+      max_tokens: 80,
+      messages: [{ role: "user", content: prompt }],
+    });
+    const text = resp.content?.[0]?.text?.trim();
+    if (text) return { title: "Forged 🔥", body: text };
+  } catch (err) {
+    console.error("[Forged cron] AI message failed:", err.message);
+  }
+  return null;
+}
+
 // ── Handler ────────────────────────────────────────────────────────────────────
 
 export default async function handler(req, res) {
@@ -183,7 +237,16 @@ export default async function handler(req, res) {
     .select("user_id, name, emoji, habit_type, logs, target_date, goal_status")
     .in("user_id", userIds);
 
-  // 3. Group by user
+  // 3. Fetch profiles to get name + is_pro
+  const { data: profiles } = await supabase
+    .from("profiles")
+    .select("id, name, is_pro")
+    .in("id", userIds);
+
+  const profileByUser = {};
+  for (const p of (profiles || [])) profileByUser[p.id] = p;
+
+  // 4. Group habits/goals by user
   const habitsByUser = {};
   const goalsByUser  = {};
   for (const row of (allRows || [])) {
@@ -196,32 +259,40 @@ export default async function handler(req, res) {
     }
   }
 
-  // 4. Send personalized push per subscriber
+  // 5. Send personalised push per subscriber
+  // Pro users get AI-generated copy; free users get rule-based copy.
+  // Run AI calls serially to stay within cron timeout.
   let sent = 0;
   let failed = 0;
   const staleIds = [];
 
-  await Promise.all(
-    subs.map(async (sub) => {
-      const habits = habitsByUser[sub.user_id] || [];
-      const goals  = goalsByUser[sub.user_id]  || [];
-      const { title, body } = pickMessage(habits, goals);
+  for (const sub of subs) {
+    const habits  = habitsByUser[sub.user_id] || [];
+    const goals   = goalsByUser[sub.user_id]  || [];
+    const profile = profileByUser[sub.user_id] || {};
 
-      const payload = JSON.stringify({ title, body, url: "/" });
+    let title, body;
+    if (profile.is_pro && process.env.ANTHROPIC_API_KEY) {
+      const aiMsg = await aiPickMessage(profile.name || "there", habits, goals);
+      ({ title, body } = aiMsg || pickMessage(habits, goals));
+    } else {
+      ({ title, body } = pickMessage(habits, goals));
+    }
 
-      try {
-        await webpush.sendNotification(sub.subscription, payload);
-        sent++;
-      } catch (err) {
-        failed++;
-        if (err.statusCode === 404 || err.statusCode === 410) {
-          staleIds.push(sub.id);
-        } else {
-          console.error(`[Forged cron] push error for ${sub.user_id}:`, err.message);
-        }
+    const payload = JSON.stringify({ title, body, url: "/" });
+
+    try {
+      await webpush.sendNotification(sub.subscription, payload);
+      sent++;
+    } catch (err) {
+      failed++;
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        staleIds.push(sub.id);
+      } else {
+        console.error(`[Forged cron] push error for ${sub.user_id}:`, err.message);
       }
-    })
-  );
+    }
+  }
 
   // 5. Clean up dead subscriptions
   if (staleIds.length > 0) {
