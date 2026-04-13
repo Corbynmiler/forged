@@ -8552,9 +8552,9 @@ export default function App() {
                 <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:5, flexShrink:0 }}>
                   <button
                     type="button"
-                    onClick={() => setShowCoachTeaser(true)}
+                    onClick={() => setShowCoach(true)}
                     aria-label={`${coachLabelRaw} — AI coach`}
-                    title={`${coachLabelRaw} — coming soon`}
+                    title={`${coachLabelRaw} — AI coach`}
                     style={{
                       width:44, height:44,
                       borderRadius:"50%", border:`0.5px solid ${T.borderMid}`,
