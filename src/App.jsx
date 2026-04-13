@@ -3844,7 +3844,7 @@ function SocialTeaserCard({ emoji, title, children }) {
   );
 }
 
-function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests, friendsLoading, onSendRequest, onAccept, onDecline, onRemoveFriend, onCancelSentRequest, sharedGoals, sharedGoalsLoading, onCreateSharedGoal, onJoinSharedGoal, onLogSharedGoal, onShareHabit, currentUserId, onDeleteSharedGoal }) {
+function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests, friendsLoading, onSendRequest, onAccept, onDecline, onRemoveFriend, onCancelSentRequest, sharedGoals, sharedGoalsLoading, onCreateSharedGoal, onJoinSharedGoal, onLogSharedGoal, onShareHabit, currentUserId, onDeleteSharedGoal, onNudgeFriend }) {
   const [showAddFriend,   setShowAddFriend]   = useState(false);
   const [addEmail,        setAddEmail]        = useState("");
   const [addError,        setAddError]        = useState("");
@@ -3858,11 +3858,14 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
   const [goalName,        setGoalName]        = useState("");
   const [goalEmoji,       setGoalEmoji]       = useState("🎯");
   const [goalType,        setGoalType]        = useState("daily");
-  const [weeklyTarget,   setWeeklyTarget]   = useState(3);
+  const [weeklyTarget,    setWeeklyTarget]    = useState(3);
   const [createLoading,   setCreateLoading]   = useState(false);
   const [copiedId,        setCopiedId]        = useState(null);
   const [sharedGoalDeleteId, setSharedGoalDeleteId] = useState(null);
   const [deleteSharedLoading, setDeleteSharedLoading] = useState(false);
+  const [selectedFriend,  setSelectedFriend]  = useState(null);
+  const [nudgedToday,     setNudgedToday]     = useState(() => new Set());
+  const [nudgeSending,    setNudgeSending]    = useState(false);
 
   const today = todayStr();
   const myStreak = habits.length ? Math.max(0, ...habits.map(h => h.streak || 0)) : 0;
@@ -4046,12 +4049,13 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
           </div>
         ) : (
           friends.map((f, i) => (
-            <div key={f.id} style={{ ...card, display: "flex", alignItems: "center", gap: 10 }}>
+            <div key={f.id} onClick={() => setSelectedFriend(f)}
+              style={{ ...card, display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: i === 0 ? T.gold : T.muted, width: 18, textAlign: "center" }}>{i + 1}</div>
               <Avatar name={f.name} avatarUrl={f.avatarUrl} size={34} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 14, color: T.text, fontWeight: 500 }}>{f.name}</div>
-                <div style={{ fontSize: 12, color: T.muted }}>⚡ {f.xp} xp</div>
+                <div style={{ fontSize: 12, color: T.muted }}>⚡ {f.xp} xp{f.streak > 0 ? ` · 🔥 ${f.streak}` : ""}</div>
               </div>
               <div style={{ textAlign: "center", marginRight: 4 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: f.loggedToday ? T.green : T.muted }}>
@@ -4059,6 +4063,7 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
                 </div>
                 <div style={{ fontSize: 10, color: T.hint }}>today</div>
               </div>
+              <div style={{ color: T.hint, fontSize: 14, flexShrink: 0 }}>›</div>
             </div>
           ))
         )}
@@ -4234,6 +4239,120 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
           })
         )}
       </div>
+
+      {/* ── Friend profile modal ── */}
+      {selectedFriend && (() => {
+        const f = selectedFriend;
+        const sharedWithFriend = sharedGoals.filter(g =>
+          g.members.some(m => m.userId === f.id) && g.members.some(m => m.isMe)
+        );
+        const alreadyNudged = nudgedToday.has(f.id);
+
+        async function handleNudge() {
+          if (!onNudgeFriend || alreadyNudged || nudgeSending) return;
+          setNudgeSending(true);
+          const res = await onNudgeFriend(f.id);
+          setNudgeSending(false);
+          if (res?.error) {
+            if (res.error === "Already nudged today") {
+              setNudgedToday(s => new Set([...s, f.id]));
+            }
+          } else {
+            setNudgedToday(s => new Set([...s, f.id]));
+          }
+        }
+
+        return (
+          <>
+            {/* Overlay */}
+            <div onClick={() => setSelectedFriend(null)}
+              style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", zIndex: 200 }} />
+            {/* Sheet */}
+            <div style={{
+              position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 201,
+              background: T.bg, borderRadius: "20px 20px 0 0",
+              padding: "24px 24px 48px", maxWidth: 430, margin: "0 auto",
+              boxShadow: "0 -8px 40px rgba(0,0,0,0.5)",
+            }}>
+              {/* Handle + close */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+                <div style={{ width: 36, height: 4, borderRadius: 2, background: T.border, margin: "0 auto" }} />
+                <button onClick={() => setSelectedFriend(null)}
+                  style={{ position: "absolute", right: 20, top: 16, width: 28, height: 28, borderRadius: "50%", border: "none", background: T.surface, color: T.muted, fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  ×
+                </button>
+              </div>
+
+              {/* Friend header */}
+              <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 22 }}>
+                <Avatar name={f.name} avatarUrl={f.avatarUrl} size={52} />
+                <div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: T.text }}>{f.name}</div>
+                  <div style={{ fontSize: 12, color: T.muted, marginTop: 2 }}>
+                    {f.loggedToday ? "✓ Logged today" : "— Nothing logged today"}
+                  </div>
+                </div>
+              </div>
+
+              {/* Stats row */}
+              <div style={{ display: "flex", gap: 12, marginBottom: 22 }}>
+                {[
+                  { value: `🔥 ${f.streak}`, label: "streak" },
+                  { value: `⚡ ${f.xp}`, label: "xp" },
+                  { value: f.loggedToday ? "✓" : "—", label: "today", color: f.loggedToday ? T.green : T.muted },
+                ].map(({ value, label, color }) => (
+                  <div key={label} style={{ flex: 1, textAlign: "center", background: T.raised, borderRadius: T.rsm, padding: "10px 8px", border: `0.5px solid ${T.border}` }}>
+                    <div style={{ fontSize: 17, fontWeight: 700, color: color || T.text }}>{value}</div>
+                    <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>{label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Shared goals */}
+              {sharedWithFriend.length > 0 && (
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
+                    Shared goals
+                  </div>
+                  {sharedWithFriend.map(g => {
+                    const fMember = g.members.find(m => m.userId === f.id);
+                    const fDone = (fMember?.logs || []).some(l => l.date === today);
+                    return (
+                      <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 10, background: T.raised, borderRadius: T.rsm, padding: "10px 12px", marginBottom: 6, border: `0.5px solid ${T.border}` }}>
+                        <span style={{ fontSize: 20 }}>{g.emoji}</span>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 13, fontWeight: 500, color: T.text }}>{g.name}</div>
+                        </div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: fDone ? T.green : T.hint }}>
+                          {fDone ? "✓ done" : "— not yet"}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Nudge button */}
+              <button
+                onClick={handleNudge}
+                disabled={alreadyNudged || nudgeSending}
+                style={{
+                  width: "100%", padding: "13px 0", borderRadius: T.rsm, border: "none",
+                  background: alreadyNudged ? T.surface : T.gold,
+                  color: alreadyNudged ? T.muted : "#0F0F0D",
+                  fontSize: 15, fontWeight: 700, cursor: alreadyNudged ? "default" : "pointer",
+                  opacity: nudgeSending ? 0.7 : 1, transition: "all 0.2s",
+                }}>
+                {nudgeSending ? "Sending…" : alreadyNudged ? "💪 Nudged today" : "💪 Nudge"}
+              </button>
+              <button onClick={() => { onRemoveFriend(f.friendshipId); setSelectedFriend(null); }}
+                style={{ width: "100%", padding: "10px 0", marginTop: 8, background: "none", border: "none", color: T.hint, fontSize: 13, cursor: "pointer" }}>
+                Remove friend
+              </button>
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 }
@@ -6622,7 +6741,10 @@ export default function App() {
     const uid = userIdRef.current;
     if (!uid || demoMode) return;
     const today = todayStr();
-    supabase.from("profiles").update({ last_active_date: today }).eq("id", uid).then(() => {});
+    const maxStreak = habits.length ? Math.max(0, ...habits.map(h => h.streak || 0)) : 0;
+    supabase.from("profiles")
+      .update({ last_active_date: today, current_streak: maxStreak })
+      .eq("id", uid).then(() => {});
   }
 
   async function loadFriends(uid) {
@@ -6639,7 +6761,7 @@ export default function App() {
       const friendIds = fships.map(f => f.requester_id === id ? f.addressee_id : f.requester_id);
       const { data: profiles } = await supabase
         .from("profiles")
-        .select("id, name, avatar_url, xp, last_active_date")
+        .select("id, name, avatar_url, xp, last_active_date, current_streak")
         .in("id", friendIds);
       const today = todayStr();
       setFriends((profiles || []).map(p => ({
@@ -6647,6 +6769,7 @@ export default function App() {
         name: p.name || "Friend",
         avatarUrl: p.avatar_url,
         xp: p.xp || 0,
+        streak: p.current_streak || 0,
         loggedToday: p.last_active_date === today,
         friendshipId: fships.find(f => f.requester_id === p.id || f.addressee_id === p.id)?.id,
       })).sort((a, b) => b.xp - a.xp));
@@ -6730,6 +6853,15 @@ export default function App() {
     const { error: err } = await supabase.from("friendships").insert({ requester_id: uid, addressee_id: targetId, status: "pending" });
     if (err) return { error: "Couldn't send — try again" };
     await loadSentRequests(uid);
+    // Non-blocking push notification to recipient
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session?.access_token) return;
+      fetch("/api/nudge-friend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ recipientId: targetId, type: "friend_request" }),
+      }).catch(() => {});
+    });
     return { success: true };
   }
 
@@ -6748,6 +6880,23 @@ export default function App() {
   async function cancelFriendRequest(friendshipId) {
     await supabase.from("friendships").delete().eq("id", friendshipId);
     await loadSentRequests(userIdRef.current);
+  }
+
+  async function sendNudge(recipientId) {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return { error: "Not signed in" };
+      const res = await fetch("/api/nudge-friend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ recipientId, type: "nudge" }),
+      });
+      if (res.status === 429) return { error: "Already nudged today" };
+      if (!res.ok) return { error: "Couldn't send nudge" };
+      return { success: true };
+    } catch(e) {
+      return { error: "Couldn't send nudge" };
+    }
   }
 
   async function removeFriend(friendshipId) {
@@ -8314,6 +8463,7 @@ export default function App() {
           onShareHabit={handleShareHabit}
           currentUserId={sessionUserId}
           onDeleteSharedGoal={deleteSharedGoal}
+          onNudgeFriend={sendNudge}
         />}
         {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} stripeCustomerId={stripeCustomerId} refCode={refCode}
           authEmail={authEmail}
