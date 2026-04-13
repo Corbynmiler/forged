@@ -4451,13 +4451,14 @@ Guidelines:
 - Never make up data or invent habit details not shown above.${creatorCtx}`;
 }
 
-function AICoach({ habits, user, isPro, onClose, onUpgrade, coachName, currentScreen }) {
+function AICoach({ habits, user, isPro, onClose, onUpgrade, coachName, currentScreen, onHabitCreated, onGoalCreated }) {
   const cName = coachName || "Coach";
   const greeting = `Hey ${user?.name || "there"} 👋 I can see you're working on ${habits.length} habit${habits.length !== 1 ? "s" : ""}. What's on your mind?`;
   const [messages, setMessages] = useState([{ role:"assistant", content:greeting }]);
   const [input,    setInput]    = useState("");
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState(null);
+  const [lastCreated, setLastCreated] = useState(null);
   const bottomRef = useRef(null);
   const speech    = useSpeechInput(t => setInput(p => p.trim() ? p + " " + t : t));
 
@@ -4470,13 +4471,19 @@ function AICoach({ habits, user, isPro, onClose, onUpgrade, coachName, currentSc
     if (!trimmed || loading) return;
     setInput("");
     setError(null);
+    setLastCreated(null);
     const next = [...messages, { role:"user", content:trimmed }];
     setMessages(next);
     setLoading(true);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
       const res = await fetch("/api/chat", {
         method:"POST",
-        headers:{ "Content-Type":"application/json" },
+        headers:{
+          "Content-Type":"application/json",
+          ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           system:   buildCoachSystemPrompt(user, habits, cName, currentScreen),
           messages: next.map(m => ({ role:m.role, content:m.content })),
@@ -4484,6 +4491,16 @@ function AICoach({ habits, user, isPro, onClose, onUpgrade, coachName, currentSc
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Something went wrong");
+      // If coach created a habit/goal, add it to app state immediately
+      if (data.created) {
+        const row = data.created;
+        if (row.habit_type === "goal") {
+          onGoalCreated?.(rowToGoal(row));
+        } else {
+          onHabitCreated?.(rowToHabit(row));
+        }
+        setLastCreated({ name: row.name, emoji: row.emoji, habit_type: row.habit_type });
+      }
       setMessages(prev => [...prev, { role:"assistant", content:data.reply }]);
     } catch (e) {
       setError(e.message || "Couldn't reach the coach. Try again.");
@@ -4595,6 +4612,16 @@ function AICoach({ habits, user, isPro, onClose, onUpgrade, coachName, currentSc
           {/* Error */}
           {error && (
             <div style={{ textAlign:"center", fontSize:12, color:T.accent, padding:"4px 8px" }}>{error}</div>
+          )}
+
+          {/* Created confirmation pill */}
+          {lastCreated && (
+            <div style={{ display:"flex", justifyContent:"center" }}>
+              <div style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"6px 12px", borderRadius:20, background:"rgba(39,174,96,0.15)", border:"0.5px solid rgba(39,174,96,0.35)", fontSize:12, color:T.green }}>
+                <span>✓</span>
+                <span>{lastCreated.emoji} <strong>{lastCreated.name}</strong> added to your habits</span>
+              </div>
+            </div>
           )}
 
           <div ref={bottomRef}/>
@@ -8678,7 +8705,7 @@ export default function App() {
       {reflectId     && <ReflectModal  habit={reflectHabit}                  onClose={() => setReflectId(null)} onSave={handleSaveReflection}/>}
       {editId && !editGoalId && editHabit && !isGoalLikeHabitType(editHabit) && <EditModal habit={editHabit} onClose={() => setEditId(null)} onSave={handleEditSave}/>}
       {logId && logHabit?.habitType === "project"  && <LogProjectModal   habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
-      {showCoach   && <AICoach habits={habits} user={user} isPro={isPro} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)} coachName={coachName} currentScreen={screen}/>}
+      {showCoach   && <AICoach habits={habits} user={user} isPro={isPro} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)} coachName={coachName} currentScreen={screen} onHabitCreated={h => setHabits(p => [...p, h])} onGoalCreated={g => setGoals(p => [...p, g])}/>}
       {showUpgrade && <BetaPaywallModal onClose={() => setShowUpgrade(false)}/>}
       {showShare && <ShareCardModal user={user} habits={habits} xp={xp} onClose={() => setShowShare(false)}/>}
       {showWelcome && <WelcomeModal onContinue={() => setShowWelcome(false)} />}
