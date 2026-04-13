@@ -67,7 +67,77 @@ const COACH_TOOLS = [
   },
 ];
 
+  {
+    name: "log_habit",
+    description:
+      "Logs today's completion for an existing habit. Use when the user says they did something, completed a habit, or wants to mark something done. " +
+      "Match their words to the closest habit name in the system prompt. Only log habits that actually exist.",
+    input_schema: {
+      type: "object",
+      properties: {
+        habit_id:   { type: "string",  description: "The id of the habit to log (from the habit data in the system prompt)." },
+        habit_name: { type: "string",  description: "The habit name (for confirmation in your reply)." },
+        value:      { type: "boolean", description: "true = completed/done. For daily habits this is always true.", default: true },
+        note:       { type: "string",  description: "Optional short note or reflection the user mentioned." },
+      },
+      required: ["habit_id", "habit_name"],
+    },
+  },
+  {
+    name: "rename_habit",
+    description:
+      "Renames an existing habit. Use when the user asks to rename, update the name of, or change what a habit is called.",
+    input_schema: {
+      type: "object",
+      properties: {
+        habit_id:  { type: "string", description: "The id of the habit to rename." },
+        old_name:  { type: "string", description: "Current habit name (for confirmation)." },
+        new_name:  { type: "string", description: "The new name the user wants." },
+      },
+      required: ["habit_id", "old_name", "new_name"],
+    },
+  },
+];
+
 // ── Execute tool ───────────────────────────────────────────────────────────────
+async function executeLogHabit(input, userId, supabase) {
+  // Fetch current habit row
+  const { data: row, error } = await supabase
+    .from("habits")
+    .select("logs, habit_type")
+    .eq("id", input.habit_id)
+    .eq("user_id", userId)
+    .single();
+  if (error || !row) throw new Error("Habit not found");
+
+  const today = new Date().toISOString().split("T")[0];
+  const logs = Array.isArray(row.logs) ? row.logs : [];
+  // Remove any existing log for today then add new one
+  const filtered = logs.filter(l => l.date !== today);
+  const newLog = { date: today, value: input.value ?? true };
+  if (input.note) newLog.note = input.note;
+  const updatedLogs = [...filtered, newLog];
+
+  const { error: upErr } = await supabase
+    .from("habits")
+    .update({ logs: updatedLogs, updated_at: new Date().toISOString() })
+    .eq("id", input.habit_id)
+    .eq("user_id", userId);
+  if (upErr) throw new Error(upErr.message);
+
+  return { logged: true, habit_id: input.habit_id, habit_name: input.habit_name, date: today, updatedLogs };
+}
+
+async function executeRenameHabit(input, userId, supabase) {
+  const { error } = await supabase
+    .from("habits")
+    .update({ name: input.new_name, updated_at: new Date().toISOString() })
+    .eq("id", input.habit_id)
+    .eq("user_id", userId);
+  if (error) throw new Error(error.message);
+  return { renamed: true, habit_id: input.habit_id, old_name: input.old_name, new_name: input.new_name };
+}
+
 async function executeCreateHabit(input, userId, supabase) {
   const id = crypto.randomUUID();
   const isGoal = input.habit_type === "goal";
@@ -149,12 +219,22 @@ export default async function handler(req, res) {
       const toolBlock = firstResp.content.find(b => b.type === "tool_use");
       let toolResult = {};
       let created = null;
+      let logged   = null;
+      let renamed  = null;
 
       try {
         if (toolBlock.name === "create_habit") {
           const row = await executeCreateHabit(toolBlock.input, userId, serviceSupabase);
           created = row;
           toolResult = { success: true, id: row.id, name: row.name, habit_type: row.habit_type };
+        } else if (toolBlock.name === "log_habit") {
+          const result = await executeLogHabit(toolBlock.input, userId, serviceSupabase);
+          logged = result;
+          toolResult = { success: true, habit_name: result.habit_name, date: result.date };
+        } else if (toolBlock.name === "rename_habit") {
+          const result = await executeRenameHabit(toolBlock.input, userId, serviceSupabase);
+          renamed = result;
+          toolResult = { success: true, old_name: result.old_name, new_name: result.new_name };
         } else {
           toolResult = { error: "Unknown tool" };
         }
@@ -179,7 +259,7 @@ export default async function handler(req, res) {
       });
 
       const reply = secondResp.content.find(b => b.type === "text")?.text ?? "";
-      return res.status(200).json({ reply, created });
+      return res.status(200).json({ reply, created, logged, renamed });
     }
 
     // ── Normal text response ─────────────────────────────────────────────────

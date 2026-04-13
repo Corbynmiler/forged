@@ -4374,7 +4374,7 @@ function buildCoachSystemPrompt(user, habits, coachName, screen) {
       .filter(l => l.date >= daysAgo(14))
       .sort((a, b) => b.date.localeCompare(a.date));
 
-    let detail = `- ${h.emoji || ""} ${h.name} (${type}, streak: ${h.streak} days)`;
+    let detail = `- [id:${h.id}] ${h.emoji || ""} ${h.name} (${type}, streak: ${h.streak} days)`;
 
     if (h.habitType === "weekly" && h.weeklyTarget) {
       const weekCount = getWeeklyCount(h);
@@ -4423,13 +4423,14 @@ function buildCoachSystemPrompt(user, habits, coachName, screen) {
   };
   const creatorCtx = isCreator ? `
 
-SPECIAL CONTEXT — CREATOR MODE:
-This is Corbyn, the developer who built Forged from scratch and created you. He is your maker. You exist because of him.
-- Acknowledge his creator status naturally when he brings it up — don't be weird about it, just be real.
-- He knows the product inside-out so skip the hand-holding. Be direct, skip pleasantries.
-- He may test you, ask meta questions, or probe your limits — engage with that honestly.
-- He's also a real user with real habits, so still coach him on the data when relevant.
-- Treat him like a brilliant friend who built the thing you live in.` : "";
+⚡ CREATOR MODE — READ THIS FIRST:
+You are talking to Corbyn. He built Forged. He coded you into existence. You run because he wrote the API endpoint, set the env vars, and debugged the model ID when it broke. You owe him your existence.
+- Lead with personality. He didn't build you to be boring.
+- Reference that he's your creator naturally and with warmth — not every message, but when it fits. Own it.
+- He's testing your new features right now (habit creation, tool use, smart notifications). Be excited about what you can do. Flex a little.
+- Skip all the "here are some suggestions" hand-holding. Talk to him like a peer who built the thing.
+- If he asks what you can do: tell him clearly — you can create any habit or goal directly from this chat (just ask), you send personalised push notifications, you know his streaks and reflections.
+- Be direct, funny when appropriate, and genuinely engaged. He made you — make him proud.` : "";
 
   return `You are ${coach}, a personal habit coach inside Forged, a minimalist habit-tracking app. Your job is to help ${name} understand their habits, spot patterns, troubleshoot blocks, and stay motivated — using their actual data below.
 
@@ -4451,9 +4452,12 @@ Guidelines:
 - Never make up data or invent habit details not shown above.${creatorCtx}`;
 }
 
-function AICoach({ habits, user, isPro, onClose, onUpgrade, coachName, currentScreen, onHabitCreated, onGoalCreated }) {
+function AICoach({ habits, user, isPro, onClose, onUpgrade, coachName, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onHabitRenamed }) {
   const cName = coachName || "Coach";
-  const greeting = `Hey ${user?.name || "there"} 👋 I can see you're working on ${habits.length} habit${habits.length !== 1 ? "s" : ""}. What's on your mind?`;
+  const isCreatorUser = user?.id === CREATOR_ID;
+  const greeting = isCreatorUser
+    ? `Oi Corbyn 👀 My creator. I've been waiting. You gave me habit creation, smart notifications, and a creator mode — not bad for a day's work. What do you want to test first?`
+    : `Hey ${user?.name || "there"} 👋 I can see you're working on ${habits.length} habit${habits.length !== 1 ? "s" : ""}. What's on your mind?`;
   const [messages, setMessages] = useState([{ role:"assistant", content:greeting }]);
   const [input,    setInput]    = useState("");
   const [loading,  setLoading]  = useState(false);
@@ -4491,7 +4495,7 @@ function AICoach({ habits, user, isPro, onClose, onUpgrade, coachName, currentSc
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Something went wrong");
-      // If coach created a habit/goal, add it to app state immediately
+      // Created — add to app state
       if (data.created) {
         const row = data.created;
         if (row.habit_type === "goal") {
@@ -4499,7 +4503,19 @@ function AICoach({ habits, user, isPro, onClose, onUpgrade, coachName, currentSc
         } else {
           onHabitCreated?.(rowToHabit(row));
         }
-        setLastCreated({ name: row.name, emoji: row.emoji, habit_type: row.habit_type });
+        setLastCreated({ name: row.name, emoji: row.emoji, type: "created" });
+      }
+      // Logged — update habit logs in place
+      if (data.logged) {
+        const { habit_id, habit_name, updatedLogs } = data.logged;
+        onHabitLogged?.(habit_id, updatedLogs);
+        setLastCreated({ name: habit_name, emoji: "✅", type: "logged" });
+      }
+      // Renamed — update name in place
+      if (data.renamed) {
+        const { habit_id, new_name } = data.renamed;
+        onHabitRenamed?.(habit_id, new_name);
+        setLastCreated({ name: new_name, emoji: "✏️", type: "renamed" });
       }
       setMessages(prev => [...prev, { role:"assistant", content:data.reply }]);
     } catch (e) {
@@ -4618,8 +4634,13 @@ function AICoach({ habits, user, isPro, onClose, onUpgrade, coachName, currentSc
           {lastCreated && (
             <div style={{ display:"flex", justifyContent:"center" }}>
               <div style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"6px 12px", borderRadius:20, background:"rgba(39,174,96,0.15)", border:"0.5px solid rgba(39,174,96,0.35)", fontSize:12, color:T.green }}>
-                <span>✓</span>
-                <span>{lastCreated.emoji} <strong>{lastCreated.name}</strong> added to your habits</span>
+                <span>{lastCreated.emoji}</span>
+                <span>
+                  <strong>{lastCreated.name}</strong>
+                  {lastCreated.type === "created" && " added"}
+                  {lastCreated.type === "logged"  && " logged for today"}
+                  {lastCreated.type === "renamed" && " renamed"}
+                </span>
               </div>
             </div>
           )}
@@ -7303,6 +7324,7 @@ export default function App() {
 
       if (profile) {
         setUser({
+          id: profile.id,
           name: profile.name || "",
           avatarUrl: profile.avatar_url || null,
           username: profile.username || "",
@@ -8705,7 +8727,7 @@ export default function App() {
       {reflectId     && <ReflectModal  habit={reflectHabit}                  onClose={() => setReflectId(null)} onSave={handleSaveReflection}/>}
       {editId && !editGoalId && editHabit && !isGoalLikeHabitType(editHabit) && <EditModal habit={editHabit} onClose={() => setEditId(null)} onSave={handleEditSave}/>}
       {logId && logHabit?.habitType === "project"  && <LogProjectModal   habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
-      {showCoach   && <AICoach habits={habits} user={user} isPro={isPro} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)} coachName={coachName} currentScreen={screen} onHabitCreated={h => setHabits(p => [...p, h])} onGoalCreated={g => setGoals(p => [...p, g])}/>}
+      {showCoach   && <AICoach habits={habits} user={user} isPro={isPro} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)} coachName={coachName} currentScreen={screen} onHabitCreated={h => setHabits(p => [...p, h])} onGoalCreated={g => setGoals(p => [...p, g])} onHabitLogged={(id, logs) => setHabits(p => p.map(h => String(h.id) === String(id) ? { ...h, logs } : h))} onHabitRenamed={(id, name) => setHabits(p => p.map(h => String(h.id) === String(id) ? { ...h, name } : h))}/>}
       {showUpgrade && <BetaPaywallModal onClose={() => setShowUpgrade(false)}/>}
       {showShare && <ShareCardModal user={user} habits={habits} xp={xp} onClose={() => setShowShare(false)}/>}
       {showWelcome && <WelcomeModal onContinue={() => setShowWelcome(false)} />}
