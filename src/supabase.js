@@ -38,6 +38,7 @@ export function habitToRow(habit, userId) {
     tap_increment:     habit.tapIncrement  ?? 1,
     best_streak:       habit.bestStreak    ?? 0,
     daily_target_minutes: habit.dailyTargetMinutes ?? 60,
+    shared_goal_id:    habit.sharedGoalId ?? null,
     logs:              habit.logs ?? [],
     updated_at:        new Date().toISOString(),
   };
@@ -133,6 +134,7 @@ export function rowToHabit(row) {
     tapIncrement:     row.tap_increment  ?? 1,
     bestStreak:       row.best_streak    ?? 0,
     dailyTargetMinutes: row.daily_target_minutes ?? 60,
+    sharedGoalId:       row.shared_goal_id ?? undefined,
     logs:             row.logs ?? [],
   };
 }
