@@ -7006,16 +7006,33 @@ export default function App() {
     }
   }
 
-  async function syncProfile(updates) {
-    if (demoMode) return;
+  /** @param {Record<string, unknown>} updates */
+  async function syncProfile(updates, { quiet = false } = {}) {
+    if (demoMode) return null;
     const uid = userIdRef.current;
-    if (!uid) return;
-    const { error } = await supabase.from("profiles").upsert({ id: uid, ...updates, updated_at: new Date().toISOString() });
+    if (!uid) return null;
+    const payload = { ...updates, updated_at: new Date().toISOString() };
+    delete payload.id;
+    const clean = Object.fromEntries(Object.entries(payload).filter(([, v]) => v !== undefined));
+    if (Object.keys(clean).length === 0) return null;
+    const { error } = await supabase.from("profiles").update(clean).eq("id", uid);
     if (error) {
-      console.warn("[Forged] syncProfile:", error);
-      if (error.code === "23505") addToast("That @handle is already taken");
-      else addToast("Couldn't save profile — check connection");
+      console.warn("[Forged] syncProfile:", error.code, error.message, error);
+      if (!quiet) {
+        if (error.code === "23505") addToast("That @handle is already taken");
+        else if (
+          error.code === "42703"
+          || error.code === "PGRST204"
+          || /visible_to_friends_of_friends|schema cache|column/i.test(error.message || "")
+        ) {
+          addToast("Privacy setting needs the latest DB migration (profiles.visible_to_friends_of_friends). Run Supabase migrations, then reload.");
+        } else {
+          addToast(error.message || "Couldn't save profile");
+        }
+      }
+      return error;
     }
+    return null;
   }
 
   async function handleAvatarUpload(file) {
@@ -7497,7 +7514,7 @@ export default function App() {
   useEffect(() => {
     if (loading || !accountDataReady) return;
     if (!xpInitRef.current) { xpInitRef.current = true; return; }
-    syncProfile({ xp });
+    void syncProfile({ xp }, { quiet: true });
   }, [xp, loading, accountDataReady]);
 
   // All hooks must be declared before any conditional returns
@@ -8318,7 +8335,20 @@ export default function App() {
               if (updates.visibleToFriendsOfFriends !== undefined) {
                 profilePatch.visible_to_friends_of_friends = !!next.visibleToFriendsOfFriends;
               }
-              syncProfile(profilePatch);
+              const prevFof = !!u.visibleToFriendsOfFriends;
+              const prevUsername = u.username || "";
+              const revertOnErr = updates.visibleToFriendsOfFriends !== undefined || updates.username !== undefined;
+              void (async () => {
+                const err = await syncProfile(profilePatch);
+                if (err && revertOnErr) {
+                  if (updates.visibleToFriendsOfFriends !== undefined) {
+                    setUser(ux => ({ ...ux, visibleToFriendsOfFriends: prevFof }));
+                  }
+                  if (updates.username !== undefined) {
+                    setUser(ux => ({ ...ux, username: prevUsername }));
+                  }
+                }
+              })();
               return next;
             });
           }}
