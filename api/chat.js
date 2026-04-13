@@ -1,3 +1,5 @@
+import Anthropic from "@anthropic-ai/sdk";
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -15,32 +17,20 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-3-haiku-20240307",
-        max_tokens: 600,
-        system: system || "",
-        messages,
-      }),
+    const client = new Anthropic({ apiKey: apiKey.trim() });
+
+    const response = await client.messages.create({
+      model: "claude-3-haiku-20240307",
+      max_tokens: 600,
+      system: system || "",
+      messages,
     });
 
-    const data = await response.json();
-
-    if (!response.ok) {
-      console.error("Anthropic API error:", data);
-      return res.status(response.status).json({ error: data?.error?.message || "AI error" });
-    }
-
-    const reply = data.content?.[0]?.text || "";
+    const reply = response.content?.[0]?.text || "";
     return res.status(200).json({ reply });
   } catch (err) {
-    console.error("Chat handler error:", err);
-    return res.status(500).json({ error: "Something went wrong. Try again." });
+    console.error("Chat handler error:", err?.status, err?.message, JSON.stringify(err?.error));
+    const msg = err?.error?.message || err?.message || "Something went wrong. Try again.";
+    return res.status(err?.status || 500).json({ error: msg });
   }
 }
