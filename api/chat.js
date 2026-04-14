@@ -233,7 +233,7 @@ export default async function handler(req, res) {
   try {
     // ── First call — detect tool_use ─────────────────────────────────────────
     const firstResp = await client.messages.create({
-      model: "claude-haiku-4-5", max_tokens: 600,
+      model: "claude-haiku-4-5", max_tokens: 250,
       system: system || "", tools,
       messages: trimmedMessages,
     });

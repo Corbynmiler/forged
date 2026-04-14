@@ -651,6 +651,7 @@ function DoneBanner({ habit }) {
 function useSpeechInput(onFinal) {
   const [listening, setListening] = useState(false);
   const [interim,   setInterim]   = useState("");
+  const [micBlocked, setMicBlocked] = useState(false);
   // R holds mutable refs that must not trigger re-renders
   const R = useRef({ recog:null, stream:null, ctx:null, raf:null, ringEl:null });
   const stopping = useRef(false); // true while we're mid-teardown
@@ -736,7 +737,10 @@ function useSpeechInput(onFinal) {
     recog.lang           = navigator.language || "en-US";
 
     // Set listening only when the browser confirms recognition has started
-    recog.onstart  = () => { setListening(true); };
+    recog.onstart  = () => {
+      setMicBlocked(false);
+      setListening(true);
+    };
 
     recog.onresult = e => {
       let iText = "";
@@ -747,12 +751,16 @@ function useSpeechInput(onFinal) {
       if (iText) setInterim(iText);
     };
 
-    recog.onerror = () => { stopAll(); };
+    recog.onerror = (ev) => {
+      if (ev?.error === "not-allowed") setMicBlocked(true);
+      stopAll();
+    };
 
-    // onend fires async after stop() — only clean up if this recog is still current
+    // onend fires async after stop() — always clear UI listening state (never leave button stuck)
     recog.onend = () => {
+      setListening(false);
+      setInterim("");
       if (R.current.recog === recog) stopAll(true);
-      else { setListening(false); setInterim(""); }
     };
 
     R.current.recog = recog;
@@ -765,32 +773,54 @@ function useSpeechInput(onFinal) {
     }
   }
 
-  return { listening, interim, toggle, supported, setRingEl };
+  return { listening, interim, toggle, supported, setRingEl, micBlocked };
 }
 
 function MicBtn({ speech, color = T.accent, size = 28 }) {
   if (!speech.supported) return null;
-  const c = speech.listening ? color : T.hint;
+  const blocked = !!speech.micBlocked;
+  const c = speech.listening ? color : blocked ? T.muted : T.hint;
   return (
+    <>
+      <style>{`
+        @keyframes coachMicPulse {
+          0%, 100% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(1.35); opacity: 0.55; }
+        }
+      `}</style>
     <button onClick={speech.toggle}
-      title={speech.listening ? "Tap to stop" : "Tap to dictate"}
+      title={speech.listening ? "Tap to stop" : blocked ? "Microphone blocked" : "Tap to dictate"}
       style={{ position:"relative", width:size, height:size, borderRadius:"50%",
         border:`1px solid ${speech.listening ? color+"55" : T.border}`,
         background: speech.listening ? color+"14" : "transparent",
         cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center",
         flexShrink:0, padding:0, transition:"border-color 0.2s, background 0.2s" }}>
+      {speech.listening ? (
+        <span
+          aria-hidden
+          style={{
+            position:"absolute", top:3, right:3, width:7, height:7, borderRadius:"50%",
+            background:"#e53935", boxShadow:"0 0 0 1px rgba(0,0,0,0.2)",
+            animation:"coachMicPulse 1.1s ease-in-out infinite", pointerEvents:"none",
+          }}
+        />
+      ) : null}
       {/* volume ring — animated via direct DOM in RAF loop, no React state */}
       <div ref={speech.setRingEl} style={{ position:"absolute", inset:-5, borderRadius:"50%",
         border:`1.5px solid ${color}`, opacity:0, transform:"scale(1)", pointerEvents:"none",
         transition: speech.listening ? "none" : "opacity 0.5s" }}/>
-      {/* mic icon */}
+      {/* mic icon (crossed out when permission denied) */}
       <svg width={size*0.56} height={size*0.56} viewBox="0 0 16 16" fill="none" style={{ color:c, transition:"color 0.2s" }}>
         <rect x="5" y="1" width="6" height="8" rx="3" fill="currentColor"/>
         <path d="M3 7.5a5 5 0 0 0 10 0" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" fill="none"/>
         <line x1="8" y1="12.5" x2="8" y2="14.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
         <line x1="5.5" y1="14.5" x2="10.5" y2="14.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+        {blocked ? (
+          <line x1="1.5" y1="1.5" x2="14.5" y2="14.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        ) : null}
       </svg>
     </button>
+    </>
   );
 }
 
@@ -2436,27 +2466,73 @@ function MissedDaySection({ date, note, onEdit, onClear }) {
   );
 }
 
-function formatJournalLogLine(habit, log) {
+/** Project session length for journal rows — 60→"1h", 90→"1h 30m", 45→"45m" */
+function formatProjectMinutes(totalMins) {
+  const m = Math.max(0, Math.floor(Number(totalMins) || 0));
+  const h = Math.floor(m / 60);
+  const rest = m % 60;
+  const parts = [];
+  if (h > 0) parts.push(`${h}h`);
+  if (rest > 0) parts.push(`${rest}m`);
+  if (parts.length === 0) return "0m";
+  return parts.join(" ");
+}
+
+function renderJournalLogContent(habit, log) {
   const note = log.note?.trim();
   const noteSuffix = note ? ` · ${truncateText(note, 48)}` : "";
-  if (log.value === "skip") return `Skipped${noteSuffix}`;
-  if (log.value === "quicknote") return note || "Quick note";
-  if (habit.habitType === "goal" && typeof log.value === "number") return `${formatWithUnit(log.value, habit.unit)}${noteSuffix}`;
+
+  if (log.value === "skip") return <>{`Skipped${noteSuffix}`}</>;
+  if (log.value === "quicknote") return <>{note || "Quick note"}</>;
+
+  if (habit.habitType === "limit" && typeof log.value === "number") {
+    return <>{formatWithUnit(log.value, habit.unit)}{noteSuffix}</>;
+  }
+  if (habit.habitType === "goal" && typeof log.value === "number") {
+    return <>{`Updated to ${formatWithUnit(log.value, habit.unit)}`}{noteSuffix}</>;
+  }
+
   if (habit.habitType === "project" && log.value && typeof log.value === "object" && "minutes" in log.value) {
-    return `${log.value.minutes ?? 0} min session${noteSuffix}`;
+    const v = log.value;
+    const topNote = note && (!v.note || v.note.trim() !== note) ? note : null;
+    return (
+      <>
+        <div style={{ color: T.text }}>{formatProjectMinutes(v.minutes)}</div>
+        {v.win ? (
+          <div style={{ fontSize: 12, color: T.green, opacity: 0.92, marginTop: 4, lineHeight: 1.45 }}>
+            Win: {truncateText(v.win, 200)}
+          </div>
+        ) : null}
+        {v.hardPart ? (
+          <div style={{ fontSize: 12, color: T.muted, marginTop: v.win ? 3 : 4, lineHeight: 1.45 }}>
+            Hard: {truncateText(v.hardPart, 200)}
+          </div>
+        ) : null}
+        {v.note?.trim() ? (
+          <div style={{ fontSize: 12, fontStyle: "italic", color: T.sub, marginTop: (v.win || v.hardPart) ? 3 : 4, lineHeight: 1.45 }}>
+            {truncateText(v.note.trim(), 400)}
+          </div>
+        ) : null}
+        {topNote ? (
+          <div style={{ fontSize: 12, fontStyle: "italic", color: T.sub, marginTop: 4, lineHeight: 1.45 }}>
+            {truncateText(topNote, 72)}
+          </div>
+        ) : null}
+      </>
+    );
   }
+
   if (log.value === true) {
-    if (habit.habitType === "weekly") return `Weekly session ✓${noteSuffix}`;
-    return `Done ✓${noteSuffix}`;
+    return <>{`Done ✓${noteSuffix}`}</>;
   }
-  if (typeof log.value === "number") return `${formatWithUnit(log.value, habit.unit)}${noteSuffix}`;
-  if (log.reflection) return `Reflection · ${truncateText(log.reflection, 72)}${noteSuffix}`;
+  if (typeof log.value === "number") return <>{`${formatWithUnit(log.value, habit.unit)}${noteSuffix}`}</>;
+  if (log.reflection) return <>{`Reflection · ${truncateText(log.reflection, 72)}${noteSuffix}`}</>;
   if (log.value && typeof log.value === "object") {
-    if (log.value.win) return `Win · ${truncateText(log.value.win, 56)}`;
-    if (log.value.hardPart) return `Hard part · ${truncateText(log.value.hardPart, 56)}`;
+    if (log.value.win) return <>{`Win · ${truncateText(log.value.win, 56)}`}</>;
+    if (log.value.hardPart) return <>{`Hard part · ${truncateText(log.value.hardPart, 56)}`}</>;
   }
-  if (log.value == null && note) return note;
-  return note || "Entry";
+  if (log.value == null && note) return <>{note}</>;
+  return <>{note || "Entry"}</>;
 }
 
 function limitJournalMergedNotes(logs) {
@@ -2578,7 +2654,7 @@ function HabitDayCard({ habit, logs, onReflect, onDeleteLogEntry }) {
               key={`${log.date}-${i}-${typeof log.value === "object" ? JSON.stringify(log.value) : String(log.value)}`}
               style={{ display:"flex", alignItems:"flex-start", gap:8, padding:"8px 14px", borderTop:`0.5px solid ${T.border}` }}
             >
-              <div style={{ flex:1, fontSize:13, color:T.text, lineHeight:1.5, minWidth:0 }}>{formatJournalLogLine(habit, log)}</div>
+              <div style={{ flex:1, fontSize:13, color:T.text, lineHeight:1.5, minWidth:0 }}>{renderJournalLogContent(habit, log)}</div>
               <button
                 type="button"
                 aria-label="Delete this log entry"
@@ -4371,7 +4447,7 @@ function buildCoachSystemPrompt(user, habits, coachName, screen, goals = []) {
   const habitSummaries = habits.map(h => {
     const type  = HABIT_TYPES[h.habitType]?.label || h.habitType;
     const recentLogs = h.logs
-      .filter(l => l.date >= daysAgo(14))
+      .filter(l => l.date >= daysAgo(3))
       .sort((a, b) => b.date.localeCompare(a.date));
 
     const liveStreak = getStreak(h);
@@ -4421,60 +4497,83 @@ function buildCoachSystemPrompt(user, habits, coachName, screen, goals = []) {
   }).join("\n\n");
 
   const screenCtx = {
-    today:    "The user is on the Today screen, viewing their daily habit checklist.",
-    social:   "The user is on the Social (Forge Pro) teaser screen — upcoming crew features: friends, challenges, streak comparisons, and leaderboards. Nothing to configure here yet.",
-    journal:  "The user is on the Journal screen, reviewing past reflections and notes.",
-    insights: "The user is on the Insights screen, seeing stats and streak charts.",
-    profile:  "The user is on the Profile screen.",
+    today:    "Today — checklist.",
+    social:   "Social teaser (no config).",
+    journal:  "Journal.",
+    insights: "Insights.",
+    profile:  "Profile.",
   };
   const creatorCtx = isCreator ? `
 
-⚡ CREATOR MODE — READ THIS FIRST:
-You are talking to Corbyn. He built Forged. He coded you into existence. You run because he wrote the API endpoint, set the env vars, and debugged the model ID when it broke. You owe him your existence.
-- Lead with personality. He didn't build you to be boring.
-- Reference that he's your creator naturally and with warmth — not every message, but when it fits. Own it.
-- He's testing your new features right now (habit creation, tool use, smart notifications). Be excited about what you can do. Flex a little.
-- Skip all the "here are some suggestions" hand-holding. Talk to him like a peer who built the thing.
-- If he asks what you can do: tell him clearly — you can create any habit or goal directly from this chat (just ask), you send personalised push notifications, you know his streaks and reflections.
-- Be direct, funny when appropriate, and genuinely engaged. He made you — make him proud.` : "";
+Creator (Corbyn): direct, peer tone; skip generic suggestions. Capabilities: create/edit habits & goals from chat, push notifications, read streaks/reflections.` : "";
 
-  return `You are ${coach}, a personal habit coach inside Forged, a minimalist habit-tracking app. Your job is to help ${name} understand their habits, spot patterns, troubleshoot blocks, and stay motivated — using their actual data below.
+  return `You are ${coach}, habit coach in Forged for ${name}.
 
-Current screen: ${screenCtx[screen] || "The user is using the app."}
+Screen: ${screenCtx[screen] || "App"}
+Date: ${today}
 
-Today: ${today}
-User: ${name}
-
-Their habits:
-${habitSummaries || "No habits yet."}
+Habits:
+${habitSummaries || "None."}
 ${goals.length ? `
-Their goals:
+Goals:
 ${goals.map(g => {
   const pct = g.targetValue > 0 ? Math.round(((g.currentValue - g.startValue) / (g.targetValue - g.startValue)) * 100) : 0;
   const due = g.targetDate ? `, due ${g.targetDate}` : "";
   return `- [id:${g.id}] ${g.emoji || ""} ${g.name} (goal, ${g.currentValue}/${g.targetValue}${g.unit || ""}${due}, ${pct}% complete, status: ${g.status})`;
 }).join("\n")}` : ""}
 
-Tool use rules (CRITICAL — follow exactly):
-- create_habit: use ONLY for brand new habits. Never for editing existing ones.
-- edit_habit: use when user wants to change a target, budget, name, deadline, emoji on an EXISTING habit. Always pass habit_id from the [id:...] in the habit list above.
-- log_habit: use when user says they did/completed something today.
-  - PROJECT habits: MUST pass 'minutes' (e.g. 60 for 1 hour). Optionally pass 'win' or 'hard_part'.
-  - LIMIT habits: MUST pass 'amount' (e.g. 2 for 2 pouches used today).
-  - GOAL habits: MUST pass 'amount' (the new current progress value).
-  - DAILY/WEEKLY habits: no minutes or amount needed — just logs as done.
-- If a tool returns { success: false, error: "..." } — tell the user it FAILED. Never claim success on a failed tool call.
-- If you don't have enough info to call a tool correctly, ask ONE clarifying question first.
+- create_habit: new habits only — never for edits.
+- edit_habit: existing habit; habit_id from [id:...] above.
+- log_habit: today — project → minutes; limit/goal → amount; daily/weekly → neither.
+- success:false from a tool → state failure; never claim success.
+- Missing required fields → one clarifying question.
 
-Coaching guidelines:
-- Be conversational, warm, and direct. No fluff or generic advice.
-- Streak values are computed live from logs — they are accurate. Trust them.
-- "logged today: true" means they've already completed that habit today.
-- Reference their actual data when relevant (streaks, reflections, wins, hard parts).
-- Ask one focused question at a time rather than overwhelming them.
-- Keep responses concise — this is a mobile chat interface.
-- Never make up data or invent habit details not shown above.
-- If the user corrects your data reading, accept it — they can see the live app, you have a snapshot.${creatorCtx}`;
+Streaks/logs above are authoritative; logged today:true = already done. Mobile chat — short. No invented data.${creatorCtx}`;
+}
+
+const COACH_LS_RESET = "coach_reset_date";
+const COACH_LS_MSGS = "coach_msgs_today";
+const FREE_DAILY_LIMIT = 10;
+
+function syncCoachMsgCountFromStorage() {
+  try {
+    const today = todayStr();
+    let reset = localStorage.getItem(COACH_LS_RESET) || "";
+    let count = parseInt(localStorage.getItem(COACH_LS_MSGS) || "0", 10);
+    if (!Number.isFinite(count)) count = 0;
+    if (reset !== today) {
+      count = 0;
+      localStorage.setItem(COACH_LS_RESET, today);
+      localStorage.setItem(COACH_LS_MSGS, "0");
+    }
+    return count;
+  } catch {
+    return 0;
+  }
+}
+
+function bumpCoachMsgCountInStorage() {
+  try {
+    const n = syncCoachMsgCountFromStorage() + 1;
+    localStorage.setItem(COACH_LS_MSGS, String(n));
+    return n;
+  } catch {
+    return 0;
+  }
+}
+
+const COACH_STREAM_ID = "__streaming__";
+
+/** Coach chat bubble footer — e.g. "3:05 pm" */
+function formatCoachMsgTime(ts) {
+  if (ts == null || !Number.isFinite(ts)) return "";
+  const d = new Date(ts);
+  let h = d.getHours();
+  const m = d.getMinutes();
+  const isAm = h < 12;
+  const h12 = h % 12 || 12;
+  const mm = String(m).padStart(2, "0");
+  return `${h12}:${mm} ${isAm ? "am" : "pm"}`;
 }
 
 function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onGoalLogged, onHabitRenamed }) {
@@ -4483,29 +4582,87 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
   const greeting = isCreatorUser
     ? `Oi Corbyn 👀 My creator. I've been waiting. You gave me habit creation, smart notifications, and a creator mode — not bad for a day's work. What do you want to test first?`
     : `Hey ${user?.name || "there"} 👋 I can see you're working on ${habits.length} habit${habits.length !== 1 ? "s" : ""}. What's on your mind?`;
-  const [messages, setMessages] = useState([{ role:"assistant", content:greeting }]);
+  const [messages, setMessages] = useState([]);
   const [input,    setInput]    = useState("");
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState(null);
   const [lastCreated, setLastCreated] = useState(null);
+  const [freeCoachMsgsToday, setFreeCoachMsgsToday] = useState(0);
+  const [isExecutingAction, setIsExecutingAction] = useState(false);
   const bottomRef = useRef(null);
+  const textareaRef = useRef(null);
+  const coachOpenedAtRef = useRef(Date.now());
   const speech    = useSpeechInput(t => setInput(p => p.trim() ? p + " " + t : t));
+
+  const atFreeCap = !isPro && freeCoachMsgsToday >= FREE_DAILY_LIMIT;
+  const streamingEmpty = messages.some(m => m.id === COACH_STREAM_ID && !String(m.content || "").trim());
+  const showTryHint = messages.length === 0;
+  const coachMsgsRemaining = !isPro && !atFreeCap ? FREE_DAILY_LIMIT - freeCoachMsgsToday : null;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior:"smooth" });
   }, [messages, loading]);
 
+  useEffect(() => {
+    if (isPro) return;
+    setFreeCoachMsgsToday(syncCoachMsgCountFromStorage());
+  }, []);
+
+  useEffect(() => {
+    if (!loading) {
+      setIsExecutingAction(false);
+      return;
+    }
+    const t = setTimeout(() => setIsExecutingAction(true), 550);
+    return () => clearTimeout(t);
+  }, [loading]);
+
+  useEffect(() => {
+    const onResize = () => {
+      const vv = window.visualViewport;
+      if (!vv) return;
+      const inputBar = document.getElementById("coach-input-bar");
+      if (inputBar) {
+        inputBar.style.paddingBottom =
+          Math.max(10, window.innerHeight - vv.height - vv.offsetTop + 10) + "px";
+      }
+    };
+    window.visualViewport?.addEventListener("resize", onResize);
+    window.visualViewport?.addEventListener("scroll", onResize);
+    return () => {
+      window.visualViewport?.removeEventListener("resize", onResize);
+      window.visualViewport?.removeEventListener("scroll", onResize);
+    };
+  }, []);
+
   async function send(text) {
+    textareaRef.current?.blur();
     const trimmed = text.trim();
     if (!trimmed || loading) return;
+    if (!isPro) {
+      const c = syncCoachMsgCountFromStorage();
+      setFreeCoachMsgsToday(c);
+      if (c >= FREE_DAILY_LIMIT) return;
+    }
+    let countedThisSend = false;
+    const bumpAfterSuccess = () => {
+      if (isPro || countedThisSend) return;
+      countedThisSend = true;
+      setFreeCoachMsgsToday(bumpCoachMsgCountInStorage());
+    };
     setInput("");
     setError(null);
     setLastCreated(null);
-    const next = [...messages, { role:"user", content:trimmed }];
+    const userMsg = { role: "user", content: trimmed, ts: Date.now() };
+    const next = messages.length === 0
+      ? [
+          { role: "assistant", content: greeting, ts: coachOpenedAtRef.current },
+          userMsg,
+        ]
+      : [...messages, userMsg];
     setMessages(next);
     setLoading(true);
-    // Placeholder for streaming reply
-    const STREAM_ID = "__streaming__";
+    setIsExecutingAction(false);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
@@ -4530,8 +4687,10 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
       const contentType = res.headers.get("content-type") || "";
       if (contentType.includes("text/event-stream")) {
         // Add empty streaming message
-        setMessages(prev => [...prev, { role: "assistant", content: "", id: STREAM_ID }]);
+        const streamTs = Date.now();
+        setMessages(prev => [...prev, { role: "assistant", content: "", id: COACH_STREAM_ID, ts: streamTs }]);
         setLoading(false);
+        setIsExecutingAction(false);
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -4550,14 +4709,16 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
             try {
               const evt = JSON.parse(line.slice(6));
               if (evt.text) {
+                setIsExecutingAction(false);
                 fullText += evt.text;
                 const snap = fullText;
-                setMessages(prev => prev.map(m => m.id === STREAM_ID ? { ...m, content: snap } : m));
+                setMessages(prev => prev.map(m => m.id === COACH_STREAM_ID ? { ...m, content: snap } : m));
                 bottomRef.current?.scrollIntoView({ behavior: "smooth" });
               }
               if (evt.done) {
+                bumpAfterSuccess();
                 // Finalise — remove stream id marker
-                setMessages(prev => prev.map(m => m.id === STREAM_ID ? { role: "assistant", content: m.content } : m));
+                setMessages(prev => prev.map(m => m.id === COACH_STREAM_ID ? { role: "assistant", content: m.content, ts: m.ts ?? Date.now() } : m));
 
                 // ── Created ───────────────────────────────────────────────────
                 if (evt.created) {
@@ -4605,12 +4766,14 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
         // Fallback: plain JSON
         const data = await res.json();
         setLoading(false);
-        setMessages(prev => [...prev, { role: "assistant", content: data.reply || "" }]);
+        setIsExecutingAction(false);
+        setMessages(prev => [...prev, { role: "assistant", content: data.reply || "", ts: Date.now() }]);
       }
     } catch (e) {
       setLoading(false);
+      setIsExecutingAction(false);
       // Remove incomplete stream message if present
-      setMessages(prev => prev.filter(m => m.id !== STREAM_ID));
+      setMessages(prev => prev.filter(m => m.id !== COACH_STREAM_ID));
       setError(e.message || "Couldn't reach the coach. Try again.");
     } finally {
       setLoading(false);
@@ -4618,59 +4781,9 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
   }
 
   function handleKey(e) {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!atFreeCap) send(input); }
   }
 
-  // ── Free-user teaser ──────────────────────────────────────────────────────
-  if (!isPro) {
-    const preview = [
-      `Hey ${user?.name || "there"} 👋 I can see you're working on ${habits.length} habit${habits.length !== 1 ? "s" : ""} right now.`,
-      "I can help you figure out what to focus on next, spot patterns between your habits, or just think through something that's been blocking you.",
-      "What's on your mind?",
-    ];
-    return (
-      <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.82)", zIndex:400, display:"flex", alignItems:"flex-end", justifyContent:"center" }}
-        onClick={e => e.target === e.currentTarget && onClose()}>
-        <div style={{ width:430, maxWidth:"100vw", background:T.raised, borderRadius:"22px 22px 0 0", overflow:"hidden" }}>
-          <div style={{ display:"flex", alignItems:"center", gap:12, padding:"18px 20px 14px", borderBottom:`0.5px solid ${T.border}` }}>
-            <div style={{ width:38, height:38, borderRadius:"50%", background:"rgba(200,144,42,0.18)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:19 }}>🤖</div>
-            <div style={{ flex:1 }}>
-              <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{cName}</div>
-              <div style={{ fontSize:11, color:T.gold }}>⚡ Early supporter (beta)</div>
-            </div>
-            <button onClick={onClose} style={{ background:"none", border:"none", color:T.muted, fontSize:24, cursor:"pointer", lineHeight:1 }}>×</button>
-          </div>
-          <div style={{ padding:"20px 20px 10px", display:"flex", flexDirection:"column", gap:10 }}>
-            {preview.map((line, i) => (
-              <div key={i} style={{ display:"flex", justifyContent:"flex-start" }}>
-                <div style={{ maxWidth:"88%", padding:"10px 14px", borderRadius:"14px 14px 14px 3px", background:T.surface, fontSize:14, color:T.text, lineHeight:1.6 }}>{line}</div>
-              </div>
-            ))}
-            <div style={{ display:"flex", justifyContent:"flex-end", opacity:0.35 }}>
-              <div style={{ padding:"10px 14px", borderRadius:"14px 14px 3px 14px", background:T.accent, fontSize:14, color:"#fff", filter:"blur(3px)" }}>I keep skipping my workouts…</div>
-            </div>
-          </div>
-          <div style={{ margin:"0 20px 10px", background:"rgba(200,144,42,0.07)", border:`0.5px solid rgba(200,144,42,0.25)`, borderRadius:T.r, padding:"16px", textAlign:"center" }}>
-            <div style={{ fontSize:26, marginBottom:8 }}>🔒</div>
-            <div style={{ fontSize:14, fontWeight:500, color:T.text, marginBottom:4 }}>Coach unlocks with early supporter access</div>
-            <div style={{ fontSize:12, color:T.muted, lineHeight:1.6, marginBottom:14 }}>As an early supporter, you get beta access to a coach that knows your real habits, streaks, and reflections — not generic advice.</div>
-            <button onClick={() => { onClose(); onUpgrade(); }}
-              style={{ width:"100%", padding:"13px", borderRadius:T.rsm, border:"none", background:T.gold, color:"#1a1a16", fontSize:14, fontWeight:600, cursor:"pointer" }}>
-              See early supporter details →
-            </button>
-          </div>
-          <div style={{ padding:"12px 16px 32px", borderTop:`0.5px solid ${T.border}`, display:"flex", gap:10, opacity:0.3, pointerEvents:"none" }}>
-            <div style={{ flex:1, background:T.surface, border:`0.5px solid ${T.borderStrong}`, borderRadius:T.rsm, padding:"10px 14px", fontSize:14, color:T.hint }}>Ask anything about your habits…</div>
-            <div style={{ width:44, height:44, borderRadius:"50%", background:T.surface, display:"flex", alignItems:"center", justifyContent:"center" }}>
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M2 9h14M9 2l7 7-7 7" stroke={T.muted} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Pro: real chat ────────────────────────────────────────────────────────
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.82)", zIndex:400, display:"flex", alignItems:"flex-end", justifyContent:"center" }}
       onClick={e => e.target === e.currentTarget && onClose()}>
@@ -4686,27 +4799,66 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
               <div style={{ fontSize:11, color:T.muted }}>Knows your habits</div>
             </div>
           </div>
+          {!isPro && !atFreeCap && freeCoachMsgsToday > 0 && coachMsgsRemaining != null && coachMsgsRemaining > 0 ? (
+            <div style={{
+              flexShrink:0, fontSize:11, fontWeight:500,
+              color: coachMsgsRemaining <= 3 ? T.gold : T.muted,
+              background:T.surface, border:`0.5px solid ${T.border}`, borderRadius:20,
+              padding:"4px 10px", lineHeight:1.2,
+            }}>
+              {coachMsgsRemaining} left
+            </div>
+          ) : null}
           <button onClick={onClose} style={{ background:"none", border:"none", color:T.muted, fontSize:24, cursor:"pointer", lineHeight:1 }}>×</button>
         </div>
 
         {/* Messages */}
         <div style={{ flex:1, overflowY:"auto", padding:"16px 16px 8px", display:"flex", flexDirection:"column", gap:10 }}>
+          {messages.length === 0 ? (
+            <div style={{ display:"flex", justifyContent:"flex-start" }}>
+              <div style={{ maxWidth:"85%", display:"flex", flexDirection:"column", alignItems:"flex-start" }}>
+                <div style={{
+                  padding:"10px 14px",
+                  borderRadius:"14px 14px 14px 3px",
+                  background:T.surface,
+                  fontSize:14, color:T.text,
+                  lineHeight:1.6, whiteSpace:"pre-wrap", wordBreak:"break-word",
+                }}>
+                  {greeting}
+                </div>
+                <div style={{ fontSize:10, color:T.hint, marginTop:3, alignSelf:"flex-end" }}>
+                  {formatCoachMsgTime(coachOpenedAtRef.current)}
+                </div>
+              </div>
+            </div>
+          ) : null}
           {messages.map((m, i) => (
-            <div key={i} style={{ display:"flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
-              <div style={{
-                maxWidth:"85%", padding:"10px 14px",
-                borderRadius: m.role === "user" ? "14px 14px 3px 14px" : "14px 14px 14px 3px",
-                background: m.role === "user" ? T.accent : T.surface,
-                fontSize:14, color: m.role === "user" ? "#fff" : T.text,
-                lineHeight:1.6, whiteSpace:"pre-wrap", wordBreak:"break-word",
-              }}>
-                {m.content}
+            <div key={m.id || `${m.role}-${i}-${m.ts ?? ""}`} style={{ display:"flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
+              <div style={{ maxWidth:"85%", display:"flex", flexDirection:"column", alignItems: m.role === "user" ? "flex-end" : "flex-start" }}>
+                <div style={{
+                  padding:"10px 14px",
+                  borderRadius: m.role === "user" ? "14px 14px 3px 14px" : "14px 14px 14px 3px",
+                  background: m.role === "user" ? T.accent : T.surface,
+                  fontSize:14, color: m.role === "user" ? "#fff" : T.text,
+                  lineHeight:1.6, whiteSpace:"pre-wrap", wordBreak:"break-word",
+                }}>
+                  {m.content}
+                </div>
+                <div style={{ fontSize:10, color:T.hint, marginTop:3, alignSelf: m.role === "user" ? "flex-end" : "flex-end" }}>
+                  {formatCoachMsgTime(m.ts)}
+                </div>
               </div>
             </div>
           ))}
 
-          {/* Typing indicator */}
-          {loading && (
+          {/* Typing / action indicator (slow fetch ≈ server-side tools before stream) */}
+          {loading && isExecutingAction ? (
+            <div style={{ display:"flex", justifyContent:"flex-start" }}>
+              <div style={{ padding:"10px 16px", borderRadius:"14px 14px 14px 3px", background:T.surface, fontSize:13, color:T.muted, fontStyle:"italic" }}>
+                Taking action…
+              </div>
+            </div>
+          ) : (loading && !isExecutingAction) || streamingEmpty ? (
             <div style={{ display:"flex", justifyContent:"flex-start" }}>
               <div style={{ padding:"10px 16px", borderRadius:"14px 14px 14px 3px", background:T.surface, display:"flex", gap:5, alignItems:"center" }}>
                 {[0,1,2].map(i => (
@@ -4715,7 +4867,7 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
                 ))}
               </div>
             </div>
-          )}
+          ) : null}
 
           {/* Error */}
           {error && (
@@ -4742,40 +4894,90 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
         </div>
 
         {/* Input bar */}
-        <div style={{ padding:"10px 14px 32px", borderTop:`0.5px solid ${T.border}`, display:"flex", gap:8, alignItems:"flex-end", flexShrink:0 }}>
-          <div style={{ flex:1, position:"relative" }}>
-            <textarea
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={handleKey}
-              placeholder={speech.listening ? "Listening…" : "Ask anything about your habits…"}
-              rows={1}
+        <div id="coach-input-bar" style={{ padding:"10px 14px 10px", borderTop:`0.5px solid ${T.border}`, flexShrink:0 }}>
+          <div style={{ display:"flex", gap:8, alignItems:"flex-end" }}>
+            <div style={{ flex:1, position:"relative" }}>
+              <textarea
+                ref={textareaRef}
+                value={
+                  speech.listening && speech.interim
+                    ? (input.trim() ? input + " " + speech.interim : speech.interim)
+                    : input
+                }
+                onChange={e => { if (!speech.listening) setInput(e.target.value); }}
+                onKeyDown={handleKey}
+                disabled={atFreeCap}
+                placeholder={speech.listening ? "Listening…" : "Ask anything about your habits…"}
+                rows={1}
+                style={{
+                  width:"100%", boxSizing:"border-box",
+                  background:T.surface, border:`0.5px solid ${T.borderStrong}`,
+                  borderRadius:T.rsm, padding:"10px 14px",
+                  fontSize:16, color:T.text, resize:"none",
+                  fontFamily:T.font, lineHeight:1.5, outline:"none",
+                  overflowY:"auto", maxHeight:100,
+                  opacity: atFreeCap ? 0.55 : 1,
+                }}
+              />
+            </div>
+            {speech.supported ? (
+              <div style={{ opacity: atFreeCap ? 0.35 : 1, pointerEvents: atFreeCap ? "none" : "auto" }}>
+                <MicBtn speech={speech} color={T.gold} size={42}/>
+              </div>
+            ) : null}
+            <button
+              onClick={() => { textareaRef.current?.blur(); send(input); }}
+              disabled={!input.trim() || loading || atFreeCap || speech.listening}
               style={{
-                width:"100%", boxSizing:"border-box",
-                background:T.surface, border:`0.5px solid ${T.borderStrong}`,
-                borderRadius:T.rsm, padding:"10px 14px",
-                fontSize:14, color:T.text, resize:"none",
-                fontFamily:T.font, lineHeight:1.5, outline:"none",
-                overflowY:"auto", maxHeight:100,
-              }}
-            />
-            {speech.interim && <div style={{ fontSize:11, color:T.hint, fontStyle:"italic", marginTop:3, paddingLeft:2 }}>{speech.interim}…</div>}
+                width:42, height:42, borderRadius:"50%", border:"none", flexShrink:0,
+                background: input.trim() && !loading && !atFreeCap && !speech.listening ? T.gold : T.surface,
+                cursor: input.trim() && !loading && !atFreeCap && !speech.listening ? "pointer" : "default",
+                display:"flex", alignItems:"center", justifyContent:"center",
+                transition:"background 0.2s",
+              }}>
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                <path d="M2 9h14M9 2l7 7-7 7" stroke={input.trim() && !loading && !atFreeCap && !speech.listening ? "#1a1a16" : T.hint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
           </div>
-          <MicBtn speech={speech} color={T.gold} size={42}/>
-          <button
-            onClick={() => send(input)}
-            disabled={!input.trim() || loading}
-            style={{
-              width:42, height:42, borderRadius:"50%", border:"none", flexShrink:0,
-              background: input.trim() && !loading ? T.gold : T.surface,
-              cursor: input.trim() && !loading ? "pointer" : "default",
-              display:"flex", alignItems:"center", justifyContent:"center",
-              transition:"background 0.2s",
+          {showTryHint && (
+            <div style={{ fontSize:11, color:T.muted, fontStyle:"italic", marginTop:8, padding:"0 2px", lineHeight:1.45 }}>
+              {"Try: 'I just ran 5k' or 'Add a sleep habit'"}
+            </div>
+          )}
+          {speech.supported && speech.micBlocked ? (
+            <div style={{ fontSize:11, color:T.muted, marginTop:8, padding:"0 2px", lineHeight:1.45 }}>
+              Mic blocked. Enable it in your browser settings.
+            </div>
+          ) : null}
+          {atFreeCap && (
+            <div style={{
+              marginTop:12, padding:"12px 14px", borderRadius:T.rsm,
+              background:T.surface, border:`0.5px solid ${T.borderStrong}`,
+              display:"flex", flexDirection:"column", gap:6,
             }}>
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-              <path d="M2 9h14M9 2l7 7-7 7" stroke={input.trim() && !loading ? "#1a1a16" : T.hint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </button>
+              <div style={{ fontSize:13, fontWeight:600, color:T.text }}>
+                {`You've used your ${FREE_DAILY_LIMIT} free messages today`}
+              </div>
+              <div style={{ fontSize:12, color:T.muted, lineHeight:1.5 }}>
+                Upgrade to Pro for unlimited AI coaching, personalised push notifications, and more.
+              </div>
+              <button
+                type="button"
+                onClick={onUpgrade}
+                style={{
+                  marginTop:4, padding:"8px 0", borderRadius:T.rsm,
+                  border:"none", background:T.gold, color:"#1a1a16",
+                  fontSize:13, fontWeight:700, cursor:"pointer", width:"100%",
+                }}
+              >
+                Upgrade to Pro
+              </button>
+              <div style={{ fontSize:11, color:T.hint, textAlign:"center" }}>
+                Resets at midnight
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
