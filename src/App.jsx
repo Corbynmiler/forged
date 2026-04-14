@@ -7067,11 +7067,24 @@ export default function App() {
   // ── Load social data whenever sessionUserId is available ─────────────────────
   useEffect(() => {
     if (!sessionUserId) return;
-    loadFriends(sessionUserId);
-    loadFriendRequests(sessionUserId);
-    loadSentRequests(sessionUserId);
-    loadSharedGoals(sessionUserId);
+    const uid = sessionUserId;
+    loadFriends(uid);
+    loadFriendRequests(uid);
+    loadSentRequests(uid);
+    loadSharedGoals(uid);
     syncLastActive();
+
+    // Real-time: re-fetch friend requests the instant one arrives
+    const channel = supabase
+      .channel(`friend-reqs-${uid}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "friendships", filter: `addressee_id=eq.${uid}` },
+        () => loadFriendRequests(uid)
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, [sessionUserId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Handle /join/[code] invite URLs ──────────────────────────────────────────
