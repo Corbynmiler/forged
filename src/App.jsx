@@ -3272,7 +3272,7 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare }) {
     ? `${MONTHS[parseInt(firstLogDate.split("-")[1])-1]} ${firstLogDate.split("-")[0]}`
     : null;
   const longestBestStreak = habits.reduce((best, h) => Math.max(best, getBestStreak(h)), 0);
-  const totalLogsEver = allRealLogs.length;
+  const totalLogsEver = new Set(allRealLogs.map(l => l.date)).size; // unique days tracked, consistent with profile/share
   const totalTracked = habits.length + goals.length;
 
   // Most consistent habit (highest 28-day completion rate)
@@ -5863,11 +5863,12 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
 // ─── SHARE CARD ───────────────────────────────────────────────────────────────
 function ShareCardModal({ user, habits, xp, onClose }) {
   const level = getLevel(xp);
-  const totalLogs = habits.reduce((s, h) => s + h.logs.length, 0);
+  const realLogs = habits.flatMap(h => h.logs.filter(l => l.value !== "quicknote" && l.value !== "skip"));
+  const totalLogs = new Set(realLogs.map(l => l.date)).size; // unique days tracked
   const bestStreak = Math.max(0, ...habits.map(h => getStreak(h)));
   const loggedToday = habits.filter(h => isLoggedToday(h)).length;
   const ws = currentWeekStart();
-  const weekLogs = habits.reduce((s, h) => s + h.logs.filter(l => l.date >= ws).length, 0);
+  const weekLogs = habits.reduce((s, h) => s + h.logs.filter(l => l.date >= ws && l.value !== "quicknote" && l.value !== "skip").length, 0);
   const weekTotal = habits.length * 7;
   const weekPct = weekTotal > 0 ? Math.min(100, Math.round((weekLogs / weekTotal) * 100)) : 0;
   const isEmoji = user.avatarUrl && !user.avatarUrl.startsWith("http");
@@ -5904,7 +5905,7 @@ function ShareCardModal({ user, habits, xp, onClose }) {
               { label:"This week",    value:`${weekPct}%`,    sub:"completion",   color:weekPct>=70?T.green:T.amber },
               { label:"Today",        value:`${loggedToday}/${habits.length}`, sub:"habits logged", color:T.accent },
               { label:"Best streak",  value:`${bestStreak}d`, sub:"consecutive",  color:T.gold },
-              { label:"Total logs",   value:totalLogs,        sub:"all time",     color:T.text },
+              { label:"Days tracked", value:totalLogs,        sub:"all time",     color:T.text },
             ].map((s, i) => (
               <div key={i} style={{ background:"rgba(255,255,255,0.04)", borderRadius:14, padding:"14px 16px", border:`0.5px solid ${T.border}` }}>
                 <div style={{ fontSize:22, fontWeight:600, color:s.color }}>{s.value}</div>
@@ -6149,7 +6150,7 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
   const level = getLevel(xp);
   const next  = nextLevel(xp);
   const pct   = next ? Math.round(((xp - level.min) / (next.min - level.min)) * 100) : 100;
-  const totalLogs        = habits.reduce((s, h) => s + h.logs.length, 0);
+  const totalLogs        = new Set(habits.flatMap(h => h.logs.filter(l => l.value !== "quicknote" && l.value !== "skip").map(l => l.date))).size;
   const totalReflections = habits.reduce((s, h) => s + h.logs.filter(l => l.reflection).length, 0);
   const bestStreak       = Math.max(0, ...habits.map(h => getBestStreak(h)));
 
@@ -6217,7 +6218,7 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
 
       {/* Stats */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, padding:"0 16px 20px" }}>
-        <Stat label="total logs"   value={totalLogs}           color={T.accent}/>
+        <Stat label="days tracked" value={totalLogs}           color={T.accent}/>
         <Stat label="reflections"  value={totalReflections}    color="#8E44AD"/>
         <Stat label="best streak"  value={`${bestStreak}d`}    color={T.gold}/>
       </div>
@@ -8553,15 +8554,10 @@ export default function App() {
     const todayD = todayStr();
     const sgId = base.sharedGoalId;
     if (sgId) {
-      if (base.habitType === "limit") {
-        const prevN = base.logs.filter(l => l.date === todayD).length;
-        const nextN = tapped.logs.filter(l => l.date === todayD).length;
-        if (nextN > prevN) void logSharedGoal(sgId, { value: true, note: "" }, { silent: true });
-      } else {
-        const wasLogged = base.logs.some(l => l.date === todayD && l.value === true);
-        const nowLogged = tapped.logs.some(l => l.date === todayD && l.value === true);
-        if (!wasLogged && nowLogged) void logSharedGoal(sgId, { value: true, note: "" }, { silent: true });
-      }
+      // For all tap-based habits: sync to shared goal when a new log entry is added for today
+      const hadTodayLog = base.logs.some(l => l.date === todayD);
+      const hasTodayLog = tapped.logs.some(l => l.date === todayD);
+      if (!hadTodayLog && hasTodayLog) void logSharedGoal(sgId, { value: true }, { silent: true });
     }
     // Limit + taps never award XP or celebration — usage logging is not rewarded.
     if (tapped.habitType === "limit") return;
@@ -8592,6 +8588,10 @@ export default function App() {
     const saved = await syncHabit(updated);
     if (!saved) return;
     setHabits(prev => prev.map(h => h.id === id ? updated : h));
+    // Auto-sync to shared goal if this habit is linked to one
+    if (habit.sharedGoalId && isNew) {
+      void logSharedGoal(habit.sharedGoalId, { value: true }, { silent: true });
+    }
     if (habit.habitType === "project") {
       const today = todayStr();
       const firstKey = `project-first:${id}:${today}`;
