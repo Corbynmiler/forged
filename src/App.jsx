@@ -4374,7 +4374,9 @@ function buildCoachSystemPrompt(user, habits, coachName, screen) {
       .filter(l => l.date >= daysAgo(14))
       .sort((a, b) => b.date.localeCompare(a.date));
 
-    let detail = `- [id:${h.id}] ${h.emoji || ""} ${h.name} (${type}, streak: ${h.streak} days)`;
+    const liveStreak = getStreak(h);
+    const loggedToday = h.logs.some(l => l.date === today && (l.value === true || (typeof l.value === "number") || l.value?.minutes > 0));
+    let detail = `- [id:${h.id}] ${h.emoji || ""} ${h.name} (${type}, streak: ${liveStreak} days, logged today: ${loggedToday})`;
 
     if (h.habitType === "weekly" && h.weeklyTarget) {
       const weekCount = getWeeklyCount(h);
@@ -4386,9 +4388,13 @@ function buildCoachSystemPrompt(user, habits, coachName, screen) {
     if (h.habitType === "project") {
       const s = getProjectStats(h);
       detail += `, ${s.totalHours}h total, ${s.weekHours}h this week`;
+      const todayMins = getBuildDayMinutes(h, today);
+      if (todayMins > 0) detail += `, ${(todayMins/60).toFixed(1)}h logged today`;
     }
     if (h.habitType === "limit" && h.dailyBudget) {
+      const todayTotal = getLimitDayTotal(h, today);
       detail += `, daily limit: ${h.dailyBudget}${h.unit || ""}`;
+      if (todayTotal != null) detail += `, used today: ${todayTotal}${h.unit || ""}`;
     }
 
     // Recent reflections
@@ -4444,12 +4450,15 @@ ${habitSummaries || "No habits yet."}
 
 Guidelines:
 - Be conversational, warm, and direct. No fluff or generic advice.
+- The streak values above are computed live from the user's actual log entries — they are accurate. Trust them.
+- "logged today: true" means they've already completed that habit today.
 - Reference their actual data when relevant (streaks, reflections, wins, hard parts).
 - Ask one focused question at a time rather than overwhelming them.
 - Keep responses concise — this is a mobile chat interface.
 - If they're struggling with a habit, dig into the why before suggesting tactics.
 - Celebrate genuine wins. Don't be sycophantic about small things.
-- Never make up data or invent habit details not shown above.${creatorCtx}`;
+- Never make up data or invent habit details not shown above.
+- If the user corrects your data reading, accept it immediately — they can see the live app, you're reading a snapshot.${creatorCtx}`;
 }
 
 function AICoach({ habits, user, isPro, onClose, onUpgrade, coachName, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onHabitRenamed }) {
