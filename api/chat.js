@@ -2,100 +2,91 @@ import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = "https://apdmvbzfjuvxworjepze.supabase.co";
+// Anon key is public — safe to hardcode (already hardcoded in src/supabase.js)
+const SUPABASE_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFwZG12YnpmanV2eHdvcmplcHplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MzU4MzAsImV4cCI6MjA5MDIxMTgzMH0.s3O-0m7eN9dLTmCagjezHP4Wwn8fdtlCyXITkI82bPU";
 
 // ── Tool definitions ───────────────────────────────────────────────────────────
 const COACH_TOOLS = [
-  // ─── CREATE ──────────────────────────────────────────────────────────────────
   {
     name: "create_habit",
     description:
-      "Creates a brand new habit or goal in the user's Forged app. " +
-      "Call ONLY when user explicitly asks to add/create/track something NEW. " +
-      "Ask one clarifying question first if the type or key details are genuinely ambiguous. " +
-      "IMPORTANT: If this tool returns an error, tell the user it failed — do not claim success.",
+      "Creates a brand new habit or goal. Call ONLY when user asks to add/create/track something NEW. " +
+      "Ask one clarifying question first if type or key details are ambiguous. " +
+      "If this tool returns success:false, tell the user it failed.",
     input_schema: {
       type: "object",
       properties: {
-        name:          { type: "string",  description: "Short, clear habit name." },
-        emoji:         { type: "string",  description: "A single fitting emoji." },
+        name:          { type: "string" },
+        emoji:         { type: "string", description: "Single emoji." },
         habit_type: {
           type: "string",
           enum: ["daily", "weekly", "project", "limit", "goal"],
-          description:
-            "daily = simple daily checkbox; " +
-            "weekly = X sessions per week (requires weekly_target); " +
-            "project = time/session tracking for a project (e.g. building, studying); " +
-            "limit = stay under a daily budget (e.g. calories, pouches, screen time); " +
-            "goal = track progress toward a numeric target with optional deadline.",
+          description: "daily=checkbox; weekly=X/week(needs weekly_target); project=time tracking; limit=stay under budget; goal=numeric target.",
         },
-        weekly_target: { type: "integer", description: "For weekly: sessions per week (1-7)." },
-        daily_budget:  { type: "number",  description: "For limit: the daily cap (e.g. 7 for 7 pouches, 2000 for calories)." },
-        unit:          { type: "string",  description: "Unit e.g. 'km', 'mins', 'calories', 'hrs', 'pages', 'pouches', 'L'." },
-        start_value:   { type: "number",  description: "For goals: starting value (default 0)." },
-        target_value:  { type: "number",  description: "For goals: the numeric target to reach." },
-        target_date:   { type: "string",  description: "For goals with deadline: YYYY-MM-DD." },
-        color: {
-          type: "string",
-          description: "Hex colour: '#C0392B' red (default), '#27AE60' green, '#2980B9' blue, '#E67E22' orange, '#8E44AD' purple.",
-        },
+        weekly_target: { type: "integer", description: "Sessions/week for weekly habits." },
+        daily_budget:  { type: "number",  description: "Daily cap for limit habits." },
+        unit:          { type: "string",  description: "e.g. km, mins, calories, pouches, L" },
+        start_value:   { type: "number",  description: "Starting value for goals (default 0)." },
+        target_value:  { type: "number",  description: "Target to reach for goals." },
+        target_date:   { type: "string",  description: "Deadline YYYY-MM-DD for goals." },
+        color:         { type: "string",  description: "#C0392B red, #27AE60 green, #2980B9 blue, #E67E22 orange, #8E44AD purple." },
       },
       required: ["name", "habit_type"],
     },
   },
-
-  // ─── EDIT ────────────────────────────────────────────────────────────────────
   {
     name: "edit_habit",
     description:
-      "Updates properties of an existing habit or goal. Use when user asks to change the name, target, budget, deadline, emoji, or any setting on an existing habit. " +
-      "Only include the fields that need changing. " +
-      "IMPORTANT: If this tool returns an error, tell the user it failed — do not claim success.",
+      "Updates fields on an existing habit or goal. Only pass fields that are changing. " +
+      "Use habit_id from the [id:...] in the habits list. " +
+      "If this tool returns success:false, tell the user it failed.",
     input_schema: {
       type: "object",
       properties: {
-        habit_id:      { type: "string", description: "The [id:...] from the habit list in the system prompt." },
-        habit_name:    { type: "string", description: "Current habit name (for your confirmation message)." },
-        name:          { type: "string", description: "New name (if renaming)." },
-        emoji:         { type: "string", description: "New emoji (if changing)." },
-        target_value:  { type: "number", description: "New target value for goals." },
-        daily_budget:  { type: "number", description: "New daily budget for limit habits." },
-        weekly_target: { type: "integer", description: "New sessions/week for weekly habits." },
-        unit:          { type: "string", description: "New unit of measurement." },
-        target_date:   { type: "string", description: "New deadline YYYY-MM-DD for goals." },
-        color:         { type: "string", description: "New hex colour." },
+        habit_id:      { type: "string", description: "The [id:...] value from the habit list." },
+        habit_name:    { type: "string", description: "Current name for your confirmation message." },
+        name:          { type: "string" },
+        emoji:         { type: "string" },
+        target_value:  { type: "number" },
+        daily_budget:  { type: "number" },
+        weekly_target: { type: "integer" },
+        unit:          { type: "string" },
+        target_date:   { type: "string", description: "YYYY-MM-DD" },
+        color:         { type: "string" },
       },
       required: ["habit_id", "habit_name"],
     },
   },
-
-  // ─── LOG ─────────────────────────────────────────────────────────────────────
   {
     name: "log_habit",
     description:
-      "Logs an entry for an existing habit today. The value format depends on the habit type — " +
-      "use 'minutes' for project habits, 'amount' for limit/goal habits, and leave both null for daily/weekly (just marks done). " +
-      "Can log a win, note, or reflection at the same time. " +
-      "You CAN call this multiple times in one turn to log several habits at once. " +
-      "IMPORTANT: If this tool returns an error, tell the user it failed — do not claim success.",
+      "Logs an entry for an existing habit today. Format depends on type: " +
+      "PROJECT: pass minutes (e.g. 60=1hr) + optional win/hard_part. " +
+      "LIMIT: pass amount (number used today). " +
+      "GOAL: pass amount (new current progress value). " +
+      "DAILY/WEEKLY: no extra fields needed — just logs done. " +
+      "Can be called multiple times in one turn to log several habits at once. " +
+      "If this tool returns success:false, tell the user it failed.",
     input_schema: {
       type: "object",
       properties: {
-        habit_id:   { type: "string",  description: "The [id:...] from the habit list in the system prompt." },
-        habit_name: { type: "string",  description: "Habit name (for confirmation)." },
-        minutes:    { type: "number",  description: "For PROJECT habits only: minutes worked this session (e.g. 60 for 1 hour, 120 for 2 hours)." },
-        amount:     { type: "number",  description: "For LIMIT habits: amount used/consumed today (e.g. 2 for 2 pouches). For GOAL habits: new current progress value." },
-        win:        { type: "string",  description: "For PROJECT habits: a win or achievement to record (max ~100 chars)." },
-        hard_part:  { type: "string",  description: "For PROJECT habits: something that was hard or a blocker today." },
-        note:       { type: "string",  description: "A short note or reflection to attach to this log entry." },
+        habit_id:   { type: "string",  description: "The [id:...] value from the habit list." },
+        habit_name: { type: "string",  description: "Habit name for your confirmation." },
+        minutes:    { type: "number",  description: "PROJECT only: minutes worked (60=1hr, 90=1.5hr)." },
+        amount:     { type: "number",  description: "LIMIT: amount used. GOAL: new current value." },
+        win:        { type: "string",  description: "PROJECT: win/achievement to record." },
+        hard_part:  { type: "string",  description: "PROJECT: blocker or hard part today." },
+        note:       { type: "string",  description: "Short note or reflection." },
       },
       required: ["habit_id", "habit_name"],
     },
   },
 ];
 
-// ── Tool executors ─────────────────────────────────────────────────────────────
+// ── Executors ──────────────────────────────────────────────────────────────────
 
-async function executeCreateHabit(input, userId, supabase) {
+async function executeCreateHabit(input, userId, db) {
   const isGoal = input.habit_type === "goal";
   const row = {
     user_id:              userId,
@@ -119,13 +110,12 @@ async function executeCreateHabit(input, userId, supabase) {
     target_date:          input.target_date   ?? null,
     updated_at:           new Date().toISOString(),
   };
-  const { data, error } = await supabase.from("habits").insert(row).select().single();
-  if (error) throw new Error(`DB insert failed: ${error.message}`);
+  const { data, error } = await db.from("habits").insert(row).select().single();
+  if (error) throw new Error(`Insert failed: ${error.message}`);
   return data;
 }
 
-async function executeEditHabit(input, userId, supabase) {
-  // Build only the fields that were actually supplied
+async function executeEditHabit(input, userId, db) {
   const updates = { updated_at: new Date().toISOString() };
   if (input.name          != null) updates.name           = input.name;
   if (input.emoji         != null) updates.emoji          = input.emoji;
@@ -136,99 +126,74 @@ async function executeEditHabit(input, userId, supabase) {
   if (input.target_date   != null) updates.target_date    = input.target_date;
   if (input.color         != null) updates.color          = input.color;
 
-  const { data, error } = await supabase
-    .from("habits")
-    .update(updates)
-    .eq("id", input.habit_id)
-    .eq("user_id", userId)
-    .select()
-    .single();
-  if (error) throw new Error(`DB update failed: ${error.message}`);
-  if (!data) throw new Error("Habit not found or no permission");
+  const { data, error } = await db
+    .from("habits").update(updates)
+    .eq("id", input.habit_id).eq("user_id", userId)
+    .select().single();
+  if (error) throw new Error(`Update failed: ${error.message}`);
+  if (!data)  throw new Error("Habit not found or permission denied");
   return { habit_id: input.habit_id, habit_name: input.habit_name, updates, updatedRow: data };
 }
 
-async function executeLogHabit(input, userId, supabase) {
-  // Fetch current row to know the habit_type and existing logs
-  const { data: row, error } = await supabase
-    .from("habits")
-    .select("logs, habit_type")
-    .eq("id", input.habit_id)
-    .eq("user_id", userId)
-    .single();
+async function executeLogHabit(input, userId, db) {
+  const { data: row, error } = await db
+    .from("habits").select("logs, habit_type")
+    .eq("id", input.habit_id).eq("user_id", userId).single();
   if (error || !row) throw new Error(`Habit not found (id: ${input.habit_id})`);
 
   const today = new Date().toISOString().split("T")[0];
-  const logs = Array.isArray(row.logs) ? row.logs : [];
-
-  // Build the correct log value based on habit type
-  let logValue;
+  const logs  = Array.isArray(row.logs) ? row.logs : [];
   const htype = row.habit_type;
+  let logValue;
 
   if (htype === "project") {
-    // Project habits: value is an object with minutes + optional win/hardPart
-    if (input.minutes == null) throw new Error("Project habits require 'minutes' field. Ask the user how long they worked.");
+    if (input.minutes == null) throw new Error("Project habits need 'minutes'. Ask the user how long they worked.");
     logValue = { minutes: Math.round(input.minutes) };
     if (input.win)       logValue.win      = input.win;
     if (input.hard_part) logValue.hardPart = input.hard_part;
   } else if (htype === "limit") {
-    // Limit habits: value is a number (amount used)
-    if (input.amount == null) throw new Error("Limit habits require 'amount' field — ask the user how much they used.");
+    if (input.amount == null) throw new Error("Limit habits need 'amount'. Ask how much they used today.");
     logValue = input.amount;
   } else if (htype === "goal") {
-    // Goals: value is the new current progress number
-    if (input.amount == null) throw new Error("Goal logging requires 'amount' — the new current progress value.");
+    if (input.amount == null) throw new Error("Goal logging needs 'amount' — the new current progress value.");
     logValue = input.amount;
   } else {
-    // daily / weekly: just mark done
-    logValue = true;
+    logValue = true; // daily / weekly
   }
 
-  // For project habits, merge into existing today entry (additive sessions)
   let updatedLogs;
   if (htype === "project") {
-    const existingIdx = logs.findIndex(l => l.date === today);
-    if (existingIdx >= 0) {
-      const existing = logs[existingIdx];
-      const existingMins = existing.value?.minutes ?? 0;
-      const mergedValue = { ...existing.value, minutes: existingMins + logValue.minutes };
-      if (logValue.win)       mergedValue.win      = logValue.win;
-      if (logValue.hardPart)  mergedValue.hardPart = logValue.hardPart;
-      if (input.note)         mergedValue.note     = input.note;
-      updatedLogs = logs.map((l, i) => i === existingIdx ? { ...l, value: mergedValue } : l);
+    // Additive: merge minutes into existing today session if present
+    const idx = logs.findIndex(l => l.date === today);
+    if (idx >= 0) {
+      const prev = logs[idx];
+      const merged = { ...prev.value, minutes: (prev.value?.minutes ?? 0) + logValue.minutes };
+      if (logValue.win)      merged.win      = logValue.win;
+      if (logValue.hardPart) merged.hardPart = logValue.hardPart;
+      if (input.note)        merged.note     = input.note;
+      updatedLogs = logs.map((l, i) => i === idx ? { ...l, value: merged } : l);
     } else {
       const entry = { date: today, value: logValue };
       if (input.note) entry.note = input.note;
       updatedLogs = [...logs, entry];
     }
   } else {
-    // For all other types: replace today's entry
-    const filtered = logs.filter(l => l.date !== today);
+    // Replace today's entry
     const entry = { date: today, value: logValue };
-    if (input.note)       entry.note       = input.note;
-    if (input.win)        entry.win        = input.win;
-    updatedLogs = [...filtered, entry];
+    if (input.note) entry.note = input.note;
+    updatedLogs = [...logs.filter(l => l.date !== today), entry];
   }
 
-  const { error: upErr } = await supabase
-    .from("habits")
-    .update({ logs: updatedLogs, updated_at: new Date().toISOString() })
-    .eq("id", input.habit_id)
-    .eq("user_id", userId);
-  if (upErr) throw new Error(`DB update failed: ${upErr.message}`);
+  const { error: upErr } = await db
+    .from("habits").update({ logs: updatedLogs, updated_at: new Date().toISOString() })
+    .eq("id", input.habit_id).eq("user_id", userId);
+  if (upErr) throw new Error(`Log save failed: ${upErr.message}`);
 
-  return {
-    habit_id:    input.habit_id,
-    habit_name:  input.habit_name,
-    habit_type:  htype,
-    date:        today,
-    updatedLogs,
-    logValue,
-  };
+  return { habit_id: input.habit_id, habit_name: input.habit_name, habit_type: htype, date: today, updatedLogs, logValue };
 }
 
 // ── SSE helper ─────────────────────────────────────────────────────────────────
-function sseWrite(res, data) {
+function sse(res, data) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
@@ -242,124 +207,122 @@ export default async function handler(req, res) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: "AI Coach is not configured yet." });
 
-  // ── Auth ─────────────────────────────────────────────────────────────────────
+  // ── Auth — use hardcoded anon key so this always works ───────────────────────
   const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
   let userId = null;
-  let serviceSupabase = null;
-  if (token && process.env.SUPABASE_ANON_KEY && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  let db = null;
+  if (token && process.env.SUPABASE_SERVICE_ROLE_KEY) {
     try {
-      const userClient = createClient(SUPABASE_URL, process.env.SUPABASE_ANON_KEY, {
+      const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
         global: { headers: { Authorization: `Bearer ${token}` } },
       });
       const { data: { user } } = await userClient.auth.getUser();
       if (user?.id) {
         userId = user.id;
-        serviceSupabase = createClient(SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+        db = createClient(SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
       }
-    } catch { /* proceed without tools */ }
+    } catch { /* no tools */ }
   }
 
   const client = new Anthropic({ apiKey: apiKey.trim() });
   const tools  = userId ? COACH_TOOLS : [];
 
+  // Cost control: cap history at last 12 messages (6 turns)
+  const trimmedMessages = messages.slice(-12);
+
   try {
-    // ── First call: detect tool_use ──────────────────────────────────────────
+    // ── First call — detect tool_use ─────────────────────────────────────────
     const firstResp = await client.messages.create({
-      model: "claude-haiku-4-5", max_tokens: 800, system: system || "", tools, messages,
+      model: "claude-haiku-4-5", max_tokens: 600,
+      system: system || "", tools,
+      messages: trimmedMessages,
     });
 
-    // ── Tool use: execute ALL tool blocks then stream confirmation ───────────
-    if (firstResp.stop_reason === "tool_use" && userId && serviceSupabase) {
+    // ── Tool path ─────────────────────────────────────────────────────────────
+    if (firstResp.stop_reason === "tool_use" && userId && db) {
       const toolBlocks = firstResp.content.filter(b => b.type === "tool_use");
       const toolResults = [];
       const actions = { created: null, edited: [], logged: [] };
 
-      // Execute all in parallel (safe — they target different habits)
-      await Promise.all(toolBlocks.map(async (toolBlock) => {
+      await Promise.all(toolBlocks.map(async (tb) => {
         let result;
         try {
-          if (toolBlock.name === "create_habit") {
-            const row = await executeCreateHabit(toolBlock.input, userId, serviceSupabase);
+          if (tb.name === "create_habit") {
+            const row = await executeCreateHabit(tb.input, userId, db);
             actions.created = row;
             result = { success: true, id: row.id, name: row.name, habit_type: row.habit_type };
-
-          } else if (toolBlock.name === "edit_habit") {
-            const r = await executeEditHabit(toolBlock.input, userId, serviceSupabase);
+          } else if (tb.name === "edit_habit") {
+            const r = await executeEditHabit(tb.input, userId, db);
             actions.edited.push(r);
-            result = { success: true, habit_name: r.habit_name, updated_fields: Object.keys(r.updates).filter(k => k !== "updated_at") };
-
-          } else if (toolBlock.name === "log_habit") {
-            const r = await executeLogHabit(toolBlock.input, userId, serviceSupabase);
+            result = { success: true, habit_name: r.habit_name, fields_updated: Object.keys(r.updates).filter(k => k !== "updated_at") };
+          } else if (tb.name === "log_habit") {
+            const r = await executeLogHabit(tb.input, userId, db);
             actions.logged.push(r);
-            result = { success: true, habit_name: r.habit_name, habit_type: r.habit_type, date: r.date, value_written: r.logValue };
-
+            result = { success: true, habit_name: r.habit_name, habit_type: r.habit_type, date: r.date, value_saved: r.logValue };
           } else {
-            result = { error: "Unknown tool — this action was NOT performed." };
+            result = { success: false, error: "Unknown tool — action was NOT performed." };
           }
         } catch (err) {
-          // Return structured error so Claude knows the action FAILED
           result = { success: false, error: err.message };
         }
-        toolResults.push({
-          type: "tool_result",
-          tool_use_id: toolBlock.id,
-          content: JSON.stringify(result),
-        });
+        toolResults.push({ type: "tool_result", tool_use_id: tb.id, content: JSON.stringify(result) });
       }));
 
-      // Stream confirmation response (Claude now knows exact success/failure per tool)
+      // Stream confirmation — Claude now knows exact success/failure per action
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("X-Accel-Buffering", "no");
 
-      const stream = await client.messages.stream({
-        model: "claude-haiku-4-5", max_tokens: 400, system: system || "", tools,
+      const confirmStream = client.messages.stream({
+        model: "claude-haiku-4-5", max_tokens: 350,
+        system: system || "", tools,
         messages: [
-          ...messages,
+          ...trimmedMessages,
           { role: "assistant", content: firstResp.content },
           { role: "user",      content: toolResults },
         ],
       });
 
-      for await (const chunk of stream) {
+      for await (const chunk of confirmStream) {
         if (chunk.type === "content_block_delta" && chunk.delta?.type === "text_delta") {
-          sseWrite(res, { text: chunk.delta.text });
+          sse(res, { text: chunk.delta.text });
         }
       }
 
-      // Send action metadata — only include successfully completed actions
-      sseWrite(res, {
+      sse(res, {
         done:    true,
         created: actions.created,
-        edited:  actions.edited.length  > 0 ? actions.edited  : null,
-        logged:  actions.logged.length  > 0 ? actions.logged  : null,
+        edited:  actions.edited.length  ? actions.edited  : null,
+        logged:  actions.logged.length  ? actions.logged  : null,
       });
       return res.end();
     }
 
-    // ── Normal chat: stream directly ────────────────────────────────────────
+    // ── Normal chat — stream directly (FIX: use .stream() not .create()) ─────
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("X-Accel-Buffering", "no");
 
-    const stream = await client.messages.stream({
-      model: "claude-haiku-4-5", max_tokens: 600, system: system || "", tools, messages,
+    const chatStream = client.messages.stream({
+      model: "claude-haiku-4-5", max_tokens: 500,
+      system: system || "", tools,
+      messages: trimmedMessages,
     });
 
-    for await (const chunk of stream) {
+    for await (const chunk of chatStream) {
       if (chunk.type === "content_block_delta" && chunk.delta?.type === "text_delta") {
-        sseWrite(res, { text: chunk.delta.text });
+        sse(res, { text: chunk.delta.text });
       }
     }
 
-    sseWrite(res, { done: true });
+    sse(res, { done: true });
     return res.end();
 
   } catch (err) {
-    console.error("Chat handler error:", err?.status, err?.message);
+    console.error("[chat] error:", err?.status, err?.message);
     const msg = err?.error?.message || err?.message || "Something went wrong.";
     if (!res.headersSent) return res.status(err?.status || 500).json({ error: msg });
-    sseWrite(res, { error: msg, done: true });
+    sse(res, { error: msg, done: true });
     return res.end();
   }
 }

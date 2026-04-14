@@ -4362,7 +4362,7 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
 // ─── AI HABIT COACH ──────────────────────────────────────────────────────────
 const CREATOR_ID = "5e9b4ba7-bf15-4e94-ab05-fe3306496973";
 
-function buildCoachSystemPrompt(user, habits, coachName, screen) {
+function buildCoachSystemPrompt(user, habits, coachName, screen, goals = []) {
   const name = user?.name || "there";
   const coach = coachName || "Coach";
   const today = todayStr();
@@ -4447,6 +4447,13 @@ User: ${name}
 
 Their habits:
 ${habitSummaries || "No habits yet."}
+${goals.length ? `
+Their goals:
+${goals.map(g => {
+  const pct = g.targetValue > 0 ? Math.round(((g.currentValue - g.startValue) / (g.targetValue - g.startValue)) * 100) : 0;
+  const due = g.targetDate ? `, due ${g.targetDate}` : "";
+  return `- [id:${g.id}] ${g.emoji || ""} ${g.name} (goal, ${g.currentValue}/${g.targetValue}${g.unit || ""}${due}, ${pct}% complete, status: ${g.status})`;
+}).join("\n")}` : ""}
 
 Tool use rules (CRITICAL — follow exactly):
 - create_habit: use ONLY for brand new habits. Never for editing existing ones.
@@ -4470,7 +4477,7 @@ Coaching guidelines:
 - If the user corrects your data reading, accept it — they can see the live app, you have a snapshot.${creatorCtx}`;
 }
 
-function AICoach({ habits, user, isPro, onClose, onUpgrade, coachName, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onHabitRenamed }) {
+function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onGoalLogged, onHabitRenamed }) {
   const cName = coachName || "Coach";
   const isCreatorUser = user?.id === CREATOR_ID;
   const greeting = isCreatorUser
@@ -4509,7 +4516,7 @@ function AICoach({ habits, user, isPro, onClose, onUpgrade, coachName, currentSc
           ...(token ? { "Authorization": `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
-          system:   buildCoachSystemPrompt(user, habits, cName, currentScreen),
+          system:   buildCoachSystemPrompt(user, habits, cName, currentScreen, goals),
           messages: next.map(m => ({ role: m.role, content: m.content })),
         }),
       });
@@ -4562,24 +4569,29 @@ function AICoach({ habits, user, isPro, onClose, onUpgrade, coachName, currentSc
 
                 // ── Edited ────────────────────────────────────────────────────
                 if (evt.edited?.length) {
-                  evt.edited.forEach(e => {
-                    const updated = e.updatedRow;
-                    if (!updated) return;
-                    if (updated.habit_type === "goal") {
-                      onGoalCreated?.(rowToGoal(updated)); // reuse — replaces by id in parent
-                      onHabitLogged?.(updated.id, updated.logs); // triggers re-render
+                  evt.edited.forEach(edit => {
+                    const row = edit.updatedRow;
+                    if (!row) return;
+                    // Route to the correct state bucket
+                    if (row.habit_type === "goal") {
+                      onGoalCreated?.(rowToGoal(row)); // upserts by id
                     } else {
-                      onHabitCreated?.(rowToHabit(updated)); // parent dedupes by id
+                      onHabitCreated?.(rowToHabit(row)); // upserts by id
                     }
-                    // Also fire rename callback if name changed
-                    if (e.updates?.name) onHabitRenamed?.(updated.id, updated.name);
                   });
                   setLastCreated({ name: evt.edited[0].habit_name, emoji: "✏️", type: "edited" });
                 }
 
                 // ── Logged ────────────────────────────────────────────────────
                 if (evt.logged?.length) {
-                  evt.logged.forEach(l => onHabitLogged?.(l.habit_id, l.updatedLogs));
+                  evt.logged.forEach(l => {
+                    if (l.habit_type === "goal") {
+                      // Update goals state
+                      onGoalLogged?.(l.habit_id, l.updatedLogs);
+                    } else {
+                      onHabitLogged?.(l.habit_id, l.updatedLogs);
+                    }
+                  });
                   const names = evt.logged.map(l => l.habit_name).join(", ");
                   setLastCreated({ name: names, emoji: "✅", type: "logged" });
                 }
@@ -8808,10 +8820,11 @@ export default function App() {
       {reflectId     && <ReflectModal  habit={reflectHabit}                  onClose={() => setReflectId(null)} onSave={handleSaveReflection}/>}
       {editId && !editGoalId && editHabit && !isGoalLikeHabitType(editHabit) && <EditModal habit={editHabit} onClose={() => setEditId(null)} onSave={handleEditSave}/>}
       {logId && logHabit?.habitType === "project"  && <LogProjectModal   habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
-      {showCoach   && <AICoach habits={habits} user={user} isPro={isPro} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)} coachName={coachName} currentScreen={screen}
-          onHabitCreated={h => setHabits(p => p.some(x => String(x.id) === String(h.id)) ? p.map(x => String(x.id) === String(h.id) ? h : x) : [...p, h])}
-          onGoalCreated={g => setGoals(p => p.some(x => String(x.id) === String(g.id)) ? p.map(x => String(x.id) === String(g.id) ? g : x) : [...p, g])}
+      {showCoach   && <AICoach habits={habits} goals={goals} user={user} isPro={isPro} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)} coachName={coachName} currentScreen={screen}
+          onHabitCreated={h  => setHabits(p => p.some(x => String(x.id) === String(h.id)) ? p.map(x => String(x.id) === String(h.id) ? h : x) : [...p, h])}
+          onGoalCreated={g   => setGoals(p  => p.some(x => String(x.id) === String(g.id)) ? p.map(x => String(x.id) === String(g.id) ? g : x) : [...p, g])}
           onHabitLogged={(id, logs) => setHabits(p => p.map(h => String(h.id) === String(id) ? { ...h, logs } : h))}
+          onGoalLogged={(id, logs)  => setGoals(p  => p.map(g => String(g.id) === String(id) ? { ...g, logs } : g))}
           onHabitRenamed={(id, name) => setHabits(p => p.map(h => String(h.id) === String(id) ? { ...h, name } : h))}
         />}
       {showUpgrade && <BetaPaywallModal onClose={() => setShowUpgrade(false)}/>}
