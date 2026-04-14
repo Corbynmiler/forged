@@ -4448,17 +4448,26 @@ User: ${name}
 Their habits:
 ${habitSummaries || "No habits yet."}
 
-Guidelines:
+Tool use rules (CRITICAL — follow exactly):
+- create_habit: use ONLY for brand new habits. Never for editing existing ones.
+- edit_habit: use when user wants to change a target, budget, name, deadline, emoji on an EXISTING habit. Always pass habit_id from the [id:...] in the habit list above.
+- log_habit: use when user says they did/completed something today.
+  - PROJECT habits: MUST pass 'minutes' (e.g. 60 for 1 hour). Optionally pass 'win' or 'hard_part'.
+  - LIMIT habits: MUST pass 'amount' (e.g. 2 for 2 pouches used today).
+  - GOAL habits: MUST pass 'amount' (the new current progress value).
+  - DAILY/WEEKLY habits: no minutes or amount needed — just logs as done.
+- If a tool returns { success: false, error: "..." } — tell the user it FAILED. Never claim success on a failed tool call.
+- If you don't have enough info to call a tool correctly, ask ONE clarifying question first.
+
+Coaching guidelines:
 - Be conversational, warm, and direct. No fluff or generic advice.
-- The streak values above are computed live from the user's actual log entries — they are accurate. Trust them.
+- Streak values are computed live from logs — they are accurate. Trust them.
 - "logged today: true" means they've already completed that habit today.
 - Reference their actual data when relevant (streaks, reflections, wins, hard parts).
 - Ask one focused question at a time rather than overwhelming them.
 - Keep responses concise — this is a mobile chat interface.
-- If they're struggling with a habit, dig into the why before suggesting tactics.
-- Celebrate genuine wins. Don't be sycophantic about small things.
 - Never make up data or invent habit details not shown above.
-- If the user corrects your data reading, accept it immediately — they can see the live app, you're reading a snapshot.${creatorCtx}`;
+- If the user corrects your data reading, accept it — they can see the live app, you have a snapshot.${creatorCtx}`;
 }
 
 function AICoach({ habits, user, isPro, onClose, onUpgrade, coachName, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onHabitRenamed }) {
@@ -4542,22 +4551,39 @@ function AICoach({ habits, user, isPro, onClose, onUpgrade, coachName, currentSc
               if (evt.done) {
                 // Finalise — remove stream id marker
                 setMessages(prev => prev.map(m => m.id === STREAM_ID ? { role: "assistant", content: m.content } : m));
-                // Handle actions
+
+                // ── Created ───────────────────────────────────────────────────
                 if (evt.created) {
                   const row = evt.created;
                   if (row.habit_type === "goal") onGoalCreated?.(rowToGoal(row));
                   else onHabitCreated?.(rowToHabit(row));
                   setLastCreated({ name: row.name, emoji: row.emoji || "✨", type: "created" });
                 }
+
+                // ── Edited ────────────────────────────────────────────────────
+                if (evt.edited?.length) {
+                  evt.edited.forEach(e => {
+                    const updated = e.updatedRow;
+                    if (!updated) return;
+                    if (updated.habit_type === "goal") {
+                      onGoalCreated?.(rowToGoal(updated)); // reuse — replaces by id in parent
+                      onHabitLogged?.(updated.id, updated.logs); // triggers re-render
+                    } else {
+                      onHabitCreated?.(rowToHabit(updated)); // parent dedupes by id
+                    }
+                    // Also fire rename callback if name changed
+                    if (e.updates?.name) onHabitRenamed?.(updated.id, updated.name);
+                  });
+                  setLastCreated({ name: evt.edited[0].habit_name, emoji: "✏️", type: "edited" });
+                }
+
+                // ── Logged ────────────────────────────────────────────────────
                 if (evt.logged?.length) {
                   evt.logged.forEach(l => onHabitLogged?.(l.habit_id, l.updatedLogs));
                   const names = evt.logged.map(l => l.habit_name).join(", ");
                   setLastCreated({ name: names, emoji: "✅", type: "logged" });
                 }
-                if (evt.renamed?.length) {
-                  evt.renamed.forEach(r => onHabitRenamed?.(r.habit_id, r.new_name));
-                  setLastCreated({ name: evt.renamed[0].new_name, emoji: "✏️", type: "renamed" });
-                }
+
                 if (evt.error) setError(evt.error);
               }
             } catch { /* malformed line — skip */ }
@@ -4691,8 +4717,9 @@ function AICoach({ habits, user, isPro, onClose, onUpgrade, coachName, currentSc
                 <span>{lastCreated.emoji}</span>
                 <span>
                   <strong>{lastCreated.name}</strong>
-                  {lastCreated.type === "created" && " added"}
+                  {lastCreated.type === "created" && " added to your habits"}
                   {lastCreated.type === "logged"  && " logged for today"}
+                  {lastCreated.type === "edited"  && " updated"}
                   {lastCreated.type === "renamed" && " renamed"}
                 </span>
               </div>
@@ -8781,7 +8808,12 @@ export default function App() {
       {reflectId     && <ReflectModal  habit={reflectHabit}                  onClose={() => setReflectId(null)} onSave={handleSaveReflection}/>}
       {editId && !editGoalId && editHabit && !isGoalLikeHabitType(editHabit) && <EditModal habit={editHabit} onClose={() => setEditId(null)} onSave={handleEditSave}/>}
       {logId && logHabit?.habitType === "project"  && <LogProjectModal   habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
-      {showCoach   && <AICoach habits={habits} user={user} isPro={isPro} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)} coachName={coachName} currentScreen={screen} onHabitCreated={h => setHabits(p => [...p, h])} onGoalCreated={g => setGoals(p => [...p, g])} onHabitLogged={(id, logs) => setHabits(p => p.map(h => String(h.id) === String(id) ? { ...h, logs } : h))} onHabitRenamed={(id, name) => setHabits(p => p.map(h => String(h.id) === String(id) ? { ...h, name } : h))}/>}
+      {showCoach   && <AICoach habits={habits} user={user} isPro={isPro} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)} coachName={coachName} currentScreen={screen}
+          onHabitCreated={h => setHabits(p => p.some(x => String(x.id) === String(h.id)) ? p.map(x => String(x.id) === String(h.id) ? h : x) : [...p, h])}
+          onGoalCreated={g => setGoals(p => p.some(x => String(x.id) === String(g.id)) ? p.map(x => String(x.id) === String(g.id) ? g : x) : [...p, g])}
+          onHabitLogged={(id, logs) => setHabits(p => p.map(h => String(h.id) === String(id) ? { ...h, logs } : h))}
+          onHabitRenamed={(id, name) => setHabits(p => p.map(h => String(h.id) === String(id) ? { ...h, name } : h))}
+        />}
       {showUpgrade && <BetaPaywallModal onClose={() => setShowUpgrade(false)}/>}
       {showShare && <ShareCardModal user={user} habits={habits} xp={xp} onClose={() => setShowShare(false)}/>}
       {showWelcome && <WelcomeModal onContinue={() => setShowWelcome(false)} />}
