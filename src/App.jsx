@@ -4479,46 +4479,91 @@ function AICoach({ habits, user, isPro, onClose, onUpgrade, coachName, currentSc
     const next = [...messages, { role:"user", content:trimmed }];
     setMessages(next);
     setLoading(true);
+    // Placeholder for streaming reply
+    const STREAM_ID = "__streaming__";
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
       const res = await fetch("/api/chat", {
-        method:"POST",
-        headers:{
-          "Content-Type":"application/json",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
           ...(token ? { "Authorization": `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
           system:   buildCoachSystemPrompt(user, habits, cName, currentScreen),
-          messages: next.map(m => ({ role:m.role, content:m.content })),
+          messages: next.map(m => ({ role: m.role, content: m.content })),
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Something went wrong");
-      // Created — add to app state
-      if (data.created) {
-        const row = data.created;
-        if (row.habit_type === "goal") {
-          onGoalCreated?.(rowToGoal(row));
-        } else {
-          onHabitCreated?.(rowToHabit(row));
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error || "Something went wrong");
+      }
+
+      // ── Stream the response word-by-word ────────────────────────────────────
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("text/event-stream")) {
+        // Add empty streaming message
+        setMessages(prev => [...prev, { role: "assistant", content: "", id: STREAM_ID }]);
+        setLoading(false);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let fullText = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop(); // keep incomplete line
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            try {
+              const evt = JSON.parse(line.slice(6));
+              if (evt.text) {
+                fullText += evt.text;
+                const snap = fullText;
+                setMessages(prev => prev.map(m => m.id === STREAM_ID ? { ...m, content: snap } : m));
+                bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+              }
+              if (evt.done) {
+                // Finalise — remove stream id marker
+                setMessages(prev => prev.map(m => m.id === STREAM_ID ? { role: "assistant", content: m.content } : m));
+                // Handle actions
+                if (evt.created) {
+                  const row = evt.created;
+                  if (row.habit_type === "goal") onGoalCreated?.(rowToGoal(row));
+                  else onHabitCreated?.(rowToHabit(row));
+                  setLastCreated({ name: row.name, emoji: row.emoji || "✨", type: "created" });
+                }
+                if (evt.logged?.length) {
+                  evt.logged.forEach(l => onHabitLogged?.(l.habit_id, l.updatedLogs));
+                  const names = evt.logged.map(l => l.habit_name).join(", ");
+                  setLastCreated({ name: names, emoji: "✅", type: "logged" });
+                }
+                if (evt.renamed?.length) {
+                  evt.renamed.forEach(r => onHabitRenamed?.(r.habit_id, r.new_name));
+                  setLastCreated({ name: evt.renamed[0].new_name, emoji: "✏️", type: "renamed" });
+                }
+                if (evt.error) setError(evt.error);
+              }
+            } catch { /* malformed line — skip */ }
+          }
         }
-        setLastCreated({ name: row.name, emoji: row.emoji, type: "created" });
+      } else {
+        // Fallback: plain JSON
+        const data = await res.json();
+        setLoading(false);
+        setMessages(prev => [...prev, { role: "assistant", content: data.reply || "" }]);
       }
-      // Logged — update habit logs in place
-      if (data.logged) {
-        const { habit_id, habit_name, updatedLogs } = data.logged;
-        onHabitLogged?.(habit_id, updatedLogs);
-        setLastCreated({ name: habit_name, emoji: "✅", type: "logged" });
-      }
-      // Renamed — update name in place
-      if (data.renamed) {
-        const { habit_id, new_name } = data.renamed;
-        onHabitRenamed?.(habit_id, new_name);
-        setLastCreated({ name: new_name, emoji: "✏️", type: "renamed" });
-      }
-      setMessages(prev => [...prev, { role:"assistant", content:data.reply }]);
     } catch (e) {
+      setLoading(false);
+      // Remove incomplete stream message if present
+      setMessages(prev => prev.filter(m => m.id !== STREAM_ID));
       setError(e.message || "Couldn't reach the coach. Try again.");
     } finally {
       setLoading(false);

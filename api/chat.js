@@ -8,142 +8,70 @@ const COACH_TOOLS = [
   {
     name: "create_habit",
     description:
-      "Creates a new habit or goal for the user in Forged. " +
-      "Call this when the user explicitly asks to add, create, track, or start a new habit or goal. " +
-      "If the type or key details are ambiguous, ask one clarifying question first rather than guessing.",
+      "Creates a new habit or goal for the user. Call when they explicitly ask to add, create, or track something new. " +
+      "Ask one clarifying question first if type or key details are ambiguous.",
     input_schema: {
       type: "object",
       properties: {
-        name: {
-          type: "string",
-          description: "Short, clear habit or goal name.",
-        },
-        emoji: {
-          type: "string",
-          description: "A single emoji representing the habit (pick something fitting).",
-        },
+        name:          { type: "string",  description: "Short, clear habit name." },
+        emoji:         { type: "string",  description: "A single fitting emoji." },
         habit_type: {
           type: "string",
           enum: ["daily", "weekly", "project", "limit", "goal"],
           description:
-            "daily = simple daily checkbox; " +
-            "weekly = X sessions per week (requires weekly_target); " +
-            "project = hour/session tracking (e.g. side-project, study, work); " +
-            "limit = stay under a daily budget (e.g. calories, screen time, spending); " +
-            "goal = track progress toward a numeric target with optional deadline.",
+            "daily=simple checkbox; weekly=X sessions/week (needs weekly_target); " +
+            "project=hour tracking; limit=stay under daily budget; goal=progress toward numeric target.",
         },
-        weekly_target: {
-          type: "integer",
-          description: "For weekly habits: sessions per week (1–7).",
-        },
-        daily_budget: {
-          type: "number",
-          description: "For limit habits: the daily cap (e.g. 2000 for calories, 120 for screen-time minutes).",
-        },
-        unit: {
-          type: "string",
-          description: "Unit of measurement where relevant (e.g. 'km', 'mins', 'calories', 'hrs', 'pages', '£').",
-        },
-        start_value: {
-          type: "number",
-          description: "For goals: the starting value (defaults to 0 if omitted).",
-        },
-        target_value: {
-          type: "number",
-          description: "For goals: the value to reach.",
-        },
-        target_date: {
-          type: "string",
-          description: "For goals with a deadline: YYYY-MM-DD.",
-        },
+        weekly_target: { type: "integer", description: "For weekly: sessions per week (1-7)." },
+        daily_budget:  { type: "number",  description: "For limit: daily cap amount." },
+        unit:          { type: "string",  description: "Unit e.g. km, mins, calories, hrs, pages." },
+        start_value:   { type: "number",  description: "For goals: starting value (default 0)." },
+        target_value:  { type: "number",  description: "For goals: target to reach." },
+        target_date:   { type: "string",  description: "For goals with deadline: YYYY-MM-DD." },
         color: {
           type: "string",
-          description:
-            "Hex accent colour. Options: '#C0392B' red, '#27AE60' green, '#2980B9' blue, '#E67E22' orange, '#8E44AD' purple, '#1ABC9C' teal. Pick something fitting.",
+          description: "Hex colour: '#C0392B' red, '#27AE60' green, '#2980B9' blue, '#E67E22' orange, '#8E44AD' purple.",
         },
       },
       required: ["name", "habit_type"],
     },
   },
-];
-
   {
     name: "log_habit",
     description:
-      "Logs today's completion for an existing habit. Use when the user says they did something, completed a habit, or wants to mark something done. " +
-      "Match their words to the closest habit name in the system prompt. Only log habits that actually exist.",
+      "Logs today's completion for one existing habit. Match user's words to the closest habit id from the system prompt. " +
+      "You can call this tool multiple times in parallel to log several habits at once when the user mentions multiple.",
     input_schema: {
       type: "object",
       properties: {
-        habit_id:   { type: "string",  description: "The id of the habit to log (from the habit data in the system prompt)." },
-        habit_name: { type: "string",  description: "The habit name (for confirmation in your reply)." },
-        value:      { type: "boolean", description: "true = completed/done. For daily habits this is always true.", default: true },
-        note:       { type: "string",  description: "Optional short note or reflection the user mentioned." },
+        habit_id:   { type: "string",  description: "The [id:...] from the habit in the system prompt." },
+        habit_name: { type: "string",  description: "Habit name for confirmation." },
+        value:      { type: "boolean", description: "true = done/completed.", default: true },
+        note:       { type: "string",  description: "Optional note the user mentioned." },
       },
       required: ["habit_id", "habit_name"],
     },
   },
   {
     name: "rename_habit",
-    description:
-      "Renames an existing habit. Use when the user asks to rename, update the name of, or change what a habit is called.",
+    description: "Renames an existing habit. Use when user asks to rename or change a habit's name.",
     input_schema: {
       type: "object",
       properties: {
-        habit_id:  { type: "string", description: "The id of the habit to rename." },
-        old_name:  { type: "string", description: "Current habit name (for confirmation)." },
-        new_name:  { type: "string", description: "The new name the user wants." },
+        habit_id: { type: "string", description: "The [id:...] from the system prompt." },
+        old_name: { type: "string", description: "Current name (for confirmation)." },
+        new_name: { type: "string", description: "New name the user wants." },
       },
       required: ["habit_id", "old_name", "new_name"],
     },
   },
 ];
 
-// ── Execute tool ───────────────────────────────────────────────────────────────
-async function executeLogHabit(input, userId, supabase) {
-  // Fetch current habit row
-  const { data: row, error } = await supabase
-    .from("habits")
-    .select("logs, habit_type")
-    .eq("id", input.habit_id)
-    .eq("user_id", userId)
-    .single();
-  if (error || !row) throw new Error("Habit not found");
-
-  const today = new Date().toISOString().split("T")[0];
-  const logs = Array.isArray(row.logs) ? row.logs : [];
-  // Remove any existing log for today then add new one
-  const filtered = logs.filter(l => l.date !== today);
-  const newLog = { date: today, value: input.value ?? true };
-  if (input.note) newLog.note = input.note;
-  const updatedLogs = [...filtered, newLog];
-
-  const { error: upErr } = await supabase
-    .from("habits")
-    .update({ logs: updatedLogs, updated_at: new Date().toISOString() })
-    .eq("id", input.habit_id)
-    .eq("user_id", userId);
-  if (upErr) throw new Error(upErr.message);
-
-  return { logged: true, habit_id: input.habit_id, habit_name: input.habit_name, date: today, updatedLogs };
-}
-
-async function executeRenameHabit(input, userId, supabase) {
-  const { error } = await supabase
-    .from("habits")
-    .update({ name: input.new_name, updated_at: new Date().toISOString() })
-    .eq("id", input.habit_id)
-    .eq("user_id", userId);
-  if (error) throw new Error(error.message);
-  return { renamed: true, habit_id: input.habit_id, old_name: input.old_name, new_name: input.new_name };
-}
-
+// ── Tool executors ─────────────────────────────────────────────────────────────
 async function executeCreateHabit(input, userId, supabase) {
-  const id = crypto.randomUUID();
   const isGoal = input.habit_type === "goal";
-
   const row = {
-    id,
+    // No id — let Supabase generate via gen_random_uuid()
     user_id:              userId,
     name:                 input.name,
     emoji:                input.emoji ?? "",
@@ -154,21 +82,50 @@ async function executeCreateHabit(input, userId, supabase) {
     best_streak:          0,
     reflection:           !isGoal,
     reflection_prompt:    "",
-    weekly_target:        input.weekly_target    ?? null,
-    start_value:          input.start_value      ?? (isGoal ? 0 : null),
-    target_value:         input.target_value     ?? null,
-    unit:                 input.unit             ?? null,
-    daily_budget:         input.daily_budget     ?? null,
+    weekly_target:        input.weekly_target ?? null,
+    start_value:          input.start_value   ?? (isGoal ? 0 : null),
+    target_value:         input.target_value  ?? null,
+    unit:                 input.unit          ?? null,
+    daily_budget:         input.daily_budget  ?? null,
     tap_increment:        1,
     daily_target_minutes: input.habit_type === "project" ? 60 : null,
     goal_status:          isGoal ? "active" : null,
-    target_date:          input.target_date      ?? null,
+    target_date:          input.target_date   ?? null,
     updated_at:           new Date().toISOString(),
   };
-
   const { data, error } = await supabase.from("habits").insert(row).select().single();
   if (error) throw new Error(error.message);
   return data;
+}
+
+async function executeLogHabit(input, userId, supabase) {
+  const { data: row, error } = await supabase
+    .from("habits").select("logs").eq("id", input.habit_id).eq("user_id", userId).single();
+  if (error || !row) throw new Error("Habit not found");
+  const today = new Date().toISOString().split("T")[0];
+  const logs = Array.isArray(row.logs) ? row.logs : [];
+  const filtered = logs.filter(l => l.date !== today);
+  const newLog = { date: today, value: input.value ?? true };
+  if (input.note) newLog.note = input.note;
+  const updatedLogs = [...filtered, newLog];
+  const { error: upErr } = await supabase
+    .from("habits").update({ logs: updatedLogs, updated_at: new Date().toISOString() })
+    .eq("id", input.habit_id).eq("user_id", userId);
+  if (upErr) throw new Error(upErr.message);
+  return { habit_id: input.habit_id, habit_name: input.habit_name, date: today, updatedLogs };
+}
+
+async function executeRenameHabit(input, userId, supabase) {
+  const { error } = await supabase
+    .from("habits").update({ name: input.new_name, updated_at: new Date().toISOString() })
+    .eq("id", input.habit_id).eq("user_id", userId);
+  if (error) throw new Error(error.message);
+  return { habit_id: input.habit_id, old_name: input.old_name, new_name: input.new_name };
+}
+
+// ── SSE helper ─────────────────────────────────────────────────────────────────
+function sseWrite(res, data) {
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
 // ── Handler ────────────────────────────────────────────────────────────────────
@@ -176,18 +133,15 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   const { messages, system } = req.body;
-  if (!messages || !Array.isArray(messages)) {
-    return res.status(400).json({ error: "Invalid request body" });
-  }
+  if (!messages || !Array.isArray(messages)) return res.status(400).json({ error: "Invalid request body" });
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: "AI Coach is not configured yet." });
 
-  // ── Verify caller identity (optional — tools only enabled when verified) ────
+  // ── Auth ─────────────────────────────────────────────────────────────────────
   const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
   let userId = null;
   let serviceSupabase = null;
-
   if (token && process.env.SUPABASE_ANON_KEY && process.env.SUPABASE_SERVICE_ROLE_KEY) {
     try {
       const userClient = createClient(SUPABASE_URL, process.env.SUPABASE_ANON_KEY, {
@@ -198,77 +152,100 @@ export default async function handler(req, res) {
         userId = user.id;
         serviceSupabase = createClient(SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
       }
-    } catch { /* auth failed — proceed without tools */ }
+    } catch { /* proceed without tools */ }
   }
 
-  try {
-    const client = new Anthropic({ apiKey: apiKey.trim() });
-    const tools = userId ? COACH_TOOLS : [];
+  const client = new Anthropic({ apiKey: apiKey.trim() });
+  const tools  = userId ? COACH_TOOLS : [];
 
-    // ── First Claude call ────────────────────────────────────────────────────
+  try {
+    // ── First call (non-streaming — need to detect tool_use) ─────────────────
     const firstResp = await client.messages.create({
-      model:      "claude-haiku-4-5",
-      max_tokens: 600,
-      system:     system || "",
-      tools,
-      messages,
+      model: "claude-haiku-4-5", max_tokens: 600, system: system || "", tools, messages,
     });
 
-    // ── Tool use? Execute it then get Claude's confirmation ──────────────────
+    // ── Tool use: handle ALL tool blocks (enables parallel logging) ──────────
     if (firstResp.stop_reason === "tool_use" && userId && serviceSupabase) {
-      const toolBlock = firstResp.content.find(b => b.type === "tool_use");
-      let toolResult = {};
-      let created = null;
-      let logged   = null;
-      let renamed  = null;
+      const toolBlocks = firstResp.content.filter(b => b.type === "tool_use");
+      const toolResults = [];
+      const actions = { created: null, logged: [], renamed: [] };
 
-      try {
-        if (toolBlock.name === "create_habit") {
-          const row = await executeCreateHabit(toolBlock.input, userId, serviceSupabase);
-          created = row;
-          toolResult = { success: true, id: row.id, name: row.name, habit_type: row.habit_type };
-        } else if (toolBlock.name === "log_habit") {
-          const result = await executeLogHabit(toolBlock.input, userId, serviceSupabase);
-          logged = result;
-          toolResult = { success: true, habit_name: result.habit_name, date: result.date };
-        } else if (toolBlock.name === "rename_habit") {
-          const result = await executeRenameHabit(toolBlock.input, userId, serviceSupabase);
-          renamed = result;
-          toolResult = { success: true, old_name: result.old_name, new_name: result.new_name };
-        } else {
-          toolResult = { error: "Unknown tool" };
+      // Execute all tools in parallel
+      await Promise.all(toolBlocks.map(async (toolBlock) => {
+        let result = {};
+        try {
+          if (toolBlock.name === "create_habit") {
+            const row = await executeCreateHabit(toolBlock.input, userId, serviceSupabase);
+            actions.created = row;
+            result = { success: true, id: row.id, name: row.name, habit_type: row.habit_type };
+          } else if (toolBlock.name === "log_habit") {
+            const r = await executeLogHabit(toolBlock.input, userId, serviceSupabase);
+            actions.logged.push(r);
+            result = { success: true, habit_name: r.habit_name, date: r.date };
+          } else if (toolBlock.name === "rename_habit") {
+            const r = await executeRenameHabit(toolBlock.input, userId, serviceSupabase);
+            actions.renamed.push(r);
+            result = { success: true, old_name: r.old_name, new_name: r.new_name };
+          }
+        } catch (err) {
+          result = { error: err.message };
         }
-      } catch (err) {
-        toolResult = { error: err.message };
-      }
+        toolResults.push({ type: "tool_result", tool_use_id: toolBlock.id, content: JSON.stringify(result) });
+      }));
 
-      // Second call — Claude acknowledges what it did
-      const secondResp = await client.messages.create({
-        model:      "claude-haiku-4-5",
-        max_tokens: 300,
-        system:     system || "",
-        tools,
+      // Stream the confirmation response
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("X-Accel-Buffering", "no");
+
+      const stream = await client.messages.stream({
+        model: "claude-haiku-4-5", max_tokens: 300, system: system || "", tools,
         messages: [
           ...messages,
           { role: "assistant", content: firstResp.content },
-          {
-            role: "user",
-            content: [{ type: "tool_result", tool_use_id: toolBlock.id, content: JSON.stringify(toolResult) }],
-          },
+          { role: "user", content: toolResults },
         ],
       });
 
-      const reply = secondResp.content.find(b => b.type === "text")?.text ?? "";
-      return res.status(200).json({ reply, created, logged, renamed });
+      for await (const chunk of stream) {
+        if (chunk.type === "content_block_delta" && chunk.delta?.type === "text_delta") {
+          sseWrite(res, { text: chunk.delta.text });
+        }
+      }
+
+      // Send action metadata at the end so frontend can update state
+      sseWrite(res, {
+        done: true,
+        created: actions.created,
+        logged:  actions.logged.length  > 0 ? actions.logged  : null,
+        renamed: actions.renamed.length > 0 ? actions.renamed : null,
+      });
+      return res.end();
     }
 
-    // ── Normal text response ─────────────────────────────────────────────────
-    const reply = firstResp.content.find(b => b.type === "text")?.text ?? "";
-    return res.status(200).json({ reply });
+    // ── Normal chat: stream the response ────────────────────────────────────
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("X-Accel-Buffering", "no");
+
+    const stream = await client.messages.stream({
+      model: "claude-haiku-4-5", max_tokens: 600, system: system || "", tools, messages,
+    });
+
+    for await (const chunk of stream) {
+      if (chunk.type === "content_block_delta" && chunk.delta?.type === "text_delta") {
+        sseWrite(res, { text: chunk.delta.text });
+      }
+    }
+
+    sseWrite(res, { done: true });
+    return res.end();
 
   } catch (err) {
-    console.error("Chat handler error:", err?.status, err?.message, JSON.stringify(err?.error));
-    const msg = err?.error?.message || err?.message || "Something went wrong. Try again.";
-    return res.status(err?.status || 500).json({ error: msg });
+    console.error("Chat handler error:", err?.status, err?.message);
+    const msg = err?.error?.message || err?.message || "Something went wrong.";
+    if (!res.headersSent) return res.status(err?.status || 500).json({ error: msg });
+    sseWrite(res, { error: msg, done: true });
+    return res.end();
   }
 }
