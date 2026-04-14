@@ -2448,10 +2448,10 @@ function MissedDaySection({ date, note, onEdit, onClear }) {
   return (
     <div style={{ margin:"0 14px 10px", background:hasNote ? "rgba(230,126,34,0.06)" : "rgba(230,126,34,0.10)", borderRadius:T.r, border:`0.5px solid ${hasNote ? "rgba(230,126,34,0.22)" : "rgba(230,126,34,0.38)"}`, overflow:"hidden", boxShadow:hasNote ? "none" : "0 0 0 1px rgba(230,126,34,0.06) inset" }}>
       <div style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px", borderBottom:hasNote ? `0.5px solid ${T.border}` : "none" }}>
-        <span style={{ fontSize:18, lineHeight:1, color:hasNote ? T.muted : T.amber, fontWeight:700 }} title={hasNote ? "Marked missed — reason saved" : "Add a short reason for this missed day"}>{hasNote ? "✓" : "?"}</span>
+        <span style={{ fontSize:18, lineHeight:1, color:T.amber, fontWeight:700 }} title="Marked missed">✕</span>
         <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ fontSize:12, fontWeight:600, color:hasNote ? T.sub : T.amber }}>{hasNote ? "Missed — noted" : "Missed — add a note"}</div>
-          <div style={{ fontSize:11, color:T.muted, marginTop:2, lineHeight:1.4 }}>{label} · {hasNote ? "Edit to change, or Clear if you logged on Today." : "Tap Edit to say why (travel, rest…), or Clear if you logged elsewhere."}</div>
+          <div style={{ fontSize:12, fontWeight:600, color:T.amber }}>Missed</div>
+          <div style={{ fontSize:11, color:T.muted, marginTop:2, lineHeight:1.4 }}>{label} · {hasNote ? "Tap Edit to update your note." : "Tap Edit to add a note (optional), or Clear to undo."}</div>
         </div>
         <button type="button" onClick={onEdit} style={{ fontSize:11, color:T.amber, background:"rgba(230,126,34,0.12)", border:`0.5px solid rgba(230,126,34,0.35)`, borderRadius:T.rsm, padding:"5px 10px", cursor:"pointer", fontWeight:600 }}>Edit</button>
         <button type="button" onClick={onClear} style={{ fontSize:11, color:T.hint, background:"none", border:"none", cursor:"pointer" }}>Clear</button>
@@ -2831,7 +2831,6 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
 
   const tStr = todayStr();
   const missedDatesList = Object.keys(missedMap).sort((a, b) => b.localeCompare(a));
-  const missedNeedNoteCount = missedDatesList.filter(d => missedDayNeedsNote(missedMap, d)).length;
   const missedMarkedCount = missedDatesList.length;
   const mergedDatesSet = new Set([...dates, ...missedDatesList]);
   const mergedDesc = [...mergedDatesSet].sort((a, b) => b.localeCompare(a));
@@ -2882,10 +2881,8 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
           <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>Journal</div>
           <div style={{ fontSize:13, color:T.muted, marginTop:3 }}>
             {loggedDaysCount} days logged
-            {missedNeedNoteCount > 0 ? (
-              <span> · <span style={{ color:T.amber, fontWeight:600 }}>? {missedNeedNoteCount} missed day{missedNeedNoteCount !== 1 ? "s" : ""} need a note</span></span>
-            ) : missedMarkedCount > 0 ? (
-              <span> · <span style={{ color:T.muted }}>{missedMarkedCount} marked missed (all noted)</span></span>
+            {missedMarkedCount > 0 ? (
+              <span> · <span style={{ color:T.muted }}>{missedMarkedCount} missed</span></span>
             ) : null}
           </div>
         </div>
@@ -2962,7 +2959,6 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
             <span>● logged</span>
             <span style={{ color:"rgba(230,126,34,0.9)", fontWeight:600 }}>? no log</span>
             <span style={{ color:T.amber, fontWeight:600 }}>✕ missed</span>
-            <span style={{ color:T.muted, fontWeight:500 }}>✓ missed + noted</span>
           </div>
 
           <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4, marginBottom:16 }}>
@@ -2975,7 +2971,6 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
               const isSelected = selectedDay === day;
               const isJourneyStart = firstLogDate === ds;
               const isMissed = Object.prototype.hasOwnProperty.call(missedMap, ds);
-              const missedNeedsNote = isMissed && missedDayNeedsNote(missedMap, ds);
               const canMarkMissed = !!(firstLogDate && ds >= firstLogDate && ds < tStr && !hasEntries);
               const isOpenDay = canMarkMissed && !isMissed;
               const habitColors = hasEntries ? [...new Set(entryDays[day].map(e => e.habitColor))].slice(0, 3) : [];
@@ -2999,19 +2994,15 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
                   }}>
                   <span style={{
                     fontSize:11,
-                    color:isToday ? T.accent : isJourneyStart ? T.gold : hasEntries ? T.text : isMissed ? (missedNeedsNote ? T.amber : T.muted) : T.muted,
-                    fontWeight:isToday || isJourneyStart || (isMissed && missedNeedsNote) ? 500 : 400,
+                    color:isToday ? T.accent : isJourneyStart ? T.gold : hasEntries ? T.text : isMissed ? T.amber : T.muted,
+                    fontWeight:isToday || isJourneyStart || isMissed ? 500 : 400,
                   }}>{day}</span>
                   {hasEntries ? (
                     <div style={{ display:"flex", gap:2 }}>
                       {habitColors.map((c, ci) => <div key={ci} style={{ width:4, height:4, borderRadius:"50%", background:c }}/>)}
                     </div>
                   ) : isMissed ? (
-                    missedNeedsNote ? (
-                      <div title="Missed — add a note" style={{ fontSize:10, fontWeight:800, color:T.amber, width:16, height:16, borderRadius:"50%", background:"rgba(230,126,34,0.28)", display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>?</div>
-                    ) : (
-                      <div title="Missed (noted)" style={{ fontSize:9, fontWeight:700, color:T.muted, width:15, height:15, borderRadius:"50%", background:"rgba(106,104,96,0.2)", display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>✓</div>
-                    )
+                    <div title="Marked missed" style={{ fontSize:10, fontWeight:800, color:T.amber, width:16, height:16, borderRadius:"50%", background:"rgba(230,126,34,0.18)", display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>✕</div>
                   ) : isJourneyStart ? (
                     <div style={{ fontSize:7, color:T.gold }}>✦</div>
                   ) : isOpenDay ? (
@@ -4579,8 +4570,16 @@ function formatCoachMsgTime(ts) {
 function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onGoalLogged, onHabitRenamed }) {
   const cName = coachName || "Coach";
   const isCreatorUser = user?.id === CREATOR_ID;
+  const CREATOR_GREETINGS = [
+    `Oi Corbyn 👀 ${habits.length} habits in the system. What are we breaking today?`,
+    `Creator mode activated. I've been running fine without you... mostly. What do you want to test?`,
+    `Corbyn. Back again. ${habits.length > 0 ? `Your ${habits.length} habits are all accounted for.` : "No habits yet — build something."} What's next?`,
+    `Oi. I've been thinking — you gave me creation, logging, and notifications. What's the next unlock?`,
+    `You're the one who built me. You tell me what's broken. 🔨`,
+    `Hey creator. ${new Date().toLocaleDateString("en-GB", { weekday:"long" })} check-in. What are we shipping?`,
+  ];
   const greeting = isCreatorUser
-    ? `Oi Corbyn 👀 My creator. I've been waiting. You gave me habit creation, smart notifications, and a creator mode — not bad for a day's work. What do you want to test first?`
+    ? CREATOR_GREETINGS[new Date().getDay() % CREATOR_GREETINGS.length]
     : `Hey ${user?.name || "there"} 👋 I can see you're working on ${habits.length} habit${habits.length !== 1 ? "s" : ""}. What's on your mind?`;
   const [messages, setMessages] = useState([]);
   const [input,    setInput]    = useState("");
@@ -4634,6 +4633,14 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
       window.visualViewport?.removeEventListener("scroll", onResize);
     };
   }, []);
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 88) + "px";
+    el.scrollTop = el.scrollHeight;
+  }, [input, speech.interim]);
 
   async function send(text) {
     textareaRef.current?.blur();
@@ -4905,17 +4912,20 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
                     : input
                 }
                 onChange={e => { if (!speech.listening) setInput(e.target.value); }}
+                onInput={e => {
+                  e.target.style.height = "auto";
+                  e.target.style.height = Math.min(e.target.scrollHeight, 88) + "px";
+                }}
                 onKeyDown={handleKey}
                 disabled={atFreeCap}
                 placeholder={speech.listening ? "Listening…" : "Ask anything about your habits…"}
-                rows={1}
                 style={{
                   width:"100%", boxSizing:"border-box",
                   background:T.surface, border:`0.5px solid ${T.borderStrong}`,
                   borderRadius:T.rsm, padding:"10px 14px",
                   fontSize:16, color:T.text, resize:"none",
                   fontFamily:T.font, lineHeight:1.5, outline:"none",
-                  overflowY:"auto", maxHeight:100,
+                  minHeight:"42px", maxHeight:"88px", overflowY:"auto", height:"auto",
                   opacity: atFreeCap ? 0.55 : 1,
                 }}
               />
