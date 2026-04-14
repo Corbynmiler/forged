@@ -2443,25 +2443,38 @@ function DaySection({ date, dayHabits, onReflect, onDeleteLogEntry }) {
 
 // Missed day (marked by user, optional note) — list / week views
 function MissedDaySection({ date, note, onEdit, onClear }) {
+  const [open, setOpen] = useState(false);
   const label = fmtEntryDate(date);
   const hasNote = !!(note && note.trim());
   return (
-    <div style={{ margin:"0 14px 10px", background:hasNote ? "rgba(230,126,34,0.06)" : "rgba(230,126,34,0.10)", borderRadius:T.r, border:`0.5px solid ${hasNote ? "rgba(230,126,34,0.22)" : "rgba(230,126,34,0.38)"}`, overflow:"hidden", boxShadow:hasNote ? "none" : "0 0 0 1px rgba(230,126,34,0.06) inset" }}>
-      <div style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px", borderBottom:hasNote ? `0.5px solid ${T.border}` : "none" }}>
-        <span style={{ fontSize:18, lineHeight:1, color:T.amber, fontWeight:700 }} title="Marked missed">✕</span>
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ fontSize:12, fontWeight:600, color:T.amber }}>Missed</div>
-          <div style={{ fontSize:11, color:T.muted, marginTop:2, lineHeight:1.4 }}>{label} · {hasNote ? "Tap Edit to update your note." : "Tap Edit to add a note (optional), or Clear to undo."}</div>
+    <div style={{ margin:"0 14px 6px", borderRadius:T.r, border:`0.5px solid rgba(230,126,34,0.38)`, overflow:"hidden", background:"rgba(230,126,34,0.04)" }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 14px", background:"none", border:"none", cursor:"pointer", gap:10 }}>
+        <span style={{ fontSize:12, fontWeight:600, color:T.amber }}>{label}</span>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <span style={{ fontSize:11, color:T.amber, fontWeight:700, background:"rgba(230,126,34,0.15)", borderRadius:10, padding:"2px 8px" }}>
+            ✕ Missed{hasNote ? " · noted" : ""}
+          </span>
+          <span style={{ fontSize:11, color:T.hint }}>{open ? "▾" : "▸"}</span>
         </div>
-        <button type="button" onClick={onEdit} style={{ fontSize:11, color:T.amber, background:"rgba(230,126,34,0.12)", border:`0.5px solid rgba(230,126,34,0.35)`, borderRadius:T.rsm, padding:"5px 10px", cursor:"pointer", fontWeight:600 }}>Edit</button>
-        <button type="button" onClick={onClear} style={{ fontSize:11, color:T.hint, background:"none", border:"none", cursor:"pointer" }}>Clear</button>
-      </div>
-      {hasNote ? (
-        <div style={{ padding:"10px 14px" }}>
-          <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:4 }}>Note</div>
-          <div style={{ fontSize:13, color:T.sub, lineHeight:1.55 }}>{note.trim()}</div>
+      </button>
+      {open && (
+        <div style={{ padding:"0 14px 12px", borderTop:`0.5px solid rgba(230,126,34,0.18)` }}>
+          {hasNote ? (
+            <div style={{ fontSize:13, color:T.sub, lineHeight:1.55, marginTop:10, marginBottom:10 }}>{note.trim()}</div>
+          ) : (
+            <div style={{ fontSize:12, color:T.muted, marginTop:8, marginBottom:8 }}>No note added yet.</div>
+          )}
+          <div style={{ display:"flex", gap:10 }}>
+            <button type="button" onClick={onEdit} style={{ fontSize:11, color:T.amber, background:"rgba(230,126,34,0.12)", border:`0.5px solid rgba(230,126,34,0.35)`, borderRadius:T.rsm, padding:"5px 10px", cursor:"pointer", fontWeight:600 }}>
+              {hasNote ? "Edit note" : "Add note"}
+            </button>
+            <button type="button" onClick={onClear} style={{ fontSize:11, color:T.hint, background:"none", border:"none", cursor:"pointer" }}>Clear</button>
+          </div>
         </div>
-      ) : null}
+      )}
     </div>
   );
 }
@@ -3124,7 +3137,6 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
               .filter(d => weekStartFor(d) === ws)
               .sort((a, b) => b.localeCompare(a));
             const expanded = openWeeks.has(ws);
-            const missedNeedNoteInWeek = daysInWeek.filter(d => missedDayNeedsNote(missedMap, d)).length;
             const missedMarkedInWeek = daysInWeek.filter(d => Object.prototype.hasOwnProperty.call(missedMap, d)).length;
             const openDaysInWeek = daysInWeek.filter(d => {
               const hasLog = allByDate[d] && Object.keys(allByDate[d]).length > 0;
@@ -3142,11 +3154,8 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
                   <span style={{ fontSize:12, fontWeight:600, color:T.text, textAlign:"left", lineHeight:1.35 }}>
                     Week · {fmtWeekRange(ws)}
                     <span style={{ fontWeight:400, color:T.muted, marginLeft:8 }}>({daysInWeek.length})</span>
-                    {missedNeedNoteInWeek > 0 ? (
-                      <span style={{ display:"block", fontSize:10, fontWeight:600, color:T.amber, marginTop:3 }}>? {missedNeedNoteInWeek} missed day{missedNeedNoteInWeek !== 1 ? "s" : ""} need a note · expand below</span>
-                    ) : null}
-                    {missedNeedNoteInWeek === 0 && missedMarkedInWeek > 0 ? (
-                      <span style={{ display:"block", fontSize:10, fontWeight:500, color:T.muted, marginTop:3 }}>{missedMarkedInWeek} marked missed (noted)</span>
+                    {missedMarkedInWeek > 0 ? (
+                      <span style={{ display:"block", fontSize:10, fontWeight:500, color:T.muted, marginTop:3 }}>{missedMarkedInWeek} missed</span>
                     ) : null}
                     {missedMarkedInWeek === 0 && openDaysInWeek > 0 ? (
                       <span style={{ display:"block", fontSize:10, fontWeight:500, color:"rgba(230,126,34,0.75)", marginTop:3 }}>? {openDaysInWeek} day{openDaysInWeek !== 1 ? "s" : ""} with no log — check Month or Today</span>
@@ -3167,7 +3176,7 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
 
       {missedEditDate && (
         <div style={{ margin:"0 14px 24px", padding:14, background:T.surface, borderRadius:T.r, border:`0.5px solid ${T.border}` }}>
-          <div style={{ fontSize:12, color:T.text, marginBottom:8 }}><span style={{ color:T.amber, fontWeight:700, marginRight:6 }}>?</span>Missed · {fmtEntryDate(missedEditDate)}</div>
+          <div style={{ fontSize:12, color:T.text, marginBottom:8 }}><span style={{ color:T.amber, fontWeight:700, marginRight:6 }}>✕</span>Missed · {fmtEntryDate(missedEditDate)}</div>
           <textarea
             value={missedNoteDraft}
             onChange={e => setMissedNoteDraft(e.target.value)}
@@ -3928,6 +3937,8 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
   const [weeklyTarget,    setWeeklyTarget]    = useState(3);
   const [createLoading,   setCreateLoading]   = useState(false);
   const [copiedId,        setCopiedId]        = useState(null);
+  const [inviteGoalId,    setInviteGoalId]    = useState(null);
+  const [inviteSentTo,    setInviteSentTo]    = useState(null);
   const [sharedGoalDeleteId, setSharedGoalDeleteId] = useState(null);
   const [deleteSharedLoading, setDeleteSharedLoading] = useState(false);
   const [selectedFriend,  setSelectedFriend]  = useState(null);
@@ -4238,9 +4249,9 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "flex-end" }}>
                     <button
                       type="button"
-                      onClick={() => copyInviteLink(g)}
-                      style={{ padding: "5px 10px", borderRadius: 12, border: `0.5px solid ${T.borderStrong}`, background: "none", color: copiedId === g.id ? T.green : T.sub, fontSize: 11, cursor: "pointer", fontWeight: 500 }}>
-                      {copiedId === g.id ? "✓ Copied" : "Invite"}
+                      onClick={() => { setInviteGoalId(g.id); setInviteSentTo(null); }}
+                      style={{ padding: "5px 10px", borderRadius: 12, border: `0.5px solid ${T.borderStrong}`, background: "none", color: T.sub, fontSize: 11, cursor: "pointer", fontWeight: 500 }}>
+                      Invite friend
                     </button>
                     {isCreator && onDeleteSharedGoal && (
                       sharedGoalDeleteId === g.id ? (
@@ -4306,6 +4317,59 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
           })
         )}
       </div>
+
+      {/* ── Shared goal invite picker ── */}
+      {inviteGoalId && (() => {
+        const invGoal = sharedGoals.find(g => g.id === inviteGoalId);
+        if (!invGoal) return null;
+        const memberIds = new Set((invGoal.members || []).map(m => m.userId));
+        const eligibleFriends = (friends || []).filter(f => !memberIds.has(f.id));
+        return (
+          <div style={{ position:"fixed", inset:0, zIndex:120, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"flex-end" }}
+            onClick={() => setInviteGoalId(null)}>
+            <div style={{ width:"100%", background:T.bg, borderRadius:"16px 16px 0 0", padding:"20px 16px 48px", maxHeight:"65vh", overflowY:"auto" }}
+              onClick={e => e.stopPropagation()}>
+              <div style={{ fontSize:14, fontWeight:700, color:T.text, marginBottom:4 }}>Invite to "{invGoal.name}"</div>
+              <div style={{ fontSize:12, color:T.muted, marginBottom:16 }}>Choose a friend to send them an invite notification.</div>
+              {eligibleFriends.length === 0 && (
+                <div style={{ fontSize:13, color:T.muted, padding:"20px 0", textAlign:"center" }}>
+                  {(friends || []).length === 0 ? "No friends added yet." : "All your friends are already in this goal."}
+                </div>
+              )}
+              {eligibleFriends.map(f => (
+                <button key={f.id} type="button"
+                  onClick={async () => {
+                    if (inviteSentTo === f.id) return;
+                    setInviteSentTo(f.id);
+                    try {
+                      const { data: { session } } = await supabase.auth.getSession();
+                      await fetch("/api/nudge-friend", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+                        body: JSON.stringify({ recipientId: f.id, type: "shared_goal_invite", inviteCode: invGoal.inviteCode, goalName: invGoal.name }),
+                      });
+                    } catch {}
+                    setTimeout(() => setInviteGoalId(null), 1200);
+                  }}
+                  style={{ width:"100%", display:"flex", alignItems:"center", gap:12, padding:"10px 0", background:"none", border:"none", borderBottom:`0.5px solid ${T.border}`, cursor:"pointer", textAlign:"left" }}>
+                  <Avatar name={f.name} avatarUrl={f.avatarUrl} size={36} />
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:13, fontWeight:600, color:T.text }}>{f.name || "Friend"}</div>
+                    {f.streak > 0 && <div style={{ fontSize:11, color:T.muted }}>{f.streak}🔥 streak</div>}
+                  </div>
+                  <span style={{ fontSize:12, color: inviteSentTo === f.id ? T.green : T.accent, fontWeight:600, flexShrink:0 }}>
+                    {inviteSentTo === f.id ? "✓ Sent" : "Invite"}
+                  </span>
+                </button>
+              ))}
+              <button type="button" onClick={() => setInviteGoalId(null)}
+                style={{ marginTop:16, width:"100%", padding:"10px 0", background:"none", border:"none", color:T.muted, fontSize:13, cursor:"pointer" }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Friend profile modal ── */}
       {selectedFriend && (() => {
@@ -7202,13 +7266,17 @@ export default function App() {
       if (error || !data) return { error: "No Forged account found with that email" };
       targetId = data;
     } else {
-      const handle = raw.replace(/^@+/, "").trim();
-      if (!handle) return { error: "Enter a username (letters, numbers, underscore)" };
-      const { data, error } = await supabase.rpc("find_user_by_username", { p_username: handle });
-      if (error || !data) {
-        return { error: "No account with that username. They can set a @handle in Profile → Social." };
+      const handle = raw.replace(/^@+/, "").trim().toLowerCase();
+      if (!handle) return { error: "Enter an @handle or email address." };
+      const { data: profileRow, error: profErr } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("username", handle)
+        .maybeSingle();
+      if (profErr || !profileRow) {
+        return { error: `No account found with @${handle}. They must set their handle in Profile → Social first.` };
       }
-      targetId = data;
+      targetId = profileRow.id;
     }
     if (targetId === uid) return { error: "That's you!" };
     const { data: existing } = await supabase.from("friendships").select("id, status")
