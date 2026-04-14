@@ -3920,7 +3920,7 @@ function SocialTeaserCard({ emoji, title, children }) {
   );
 }
 
-function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests, friendsLoading, onSendRequest, onAccept, onDecline, onRemoveFriend, onCancelSentRequest, sharedGoals, sharedGoalsLoading, onCreateSharedGoal, onJoinSharedGoal, onLogSharedGoal, onShareHabit, currentUserId, onDeleteSharedGoal, onNudgeFriend }) {
+function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests, friendsLoading, onSendRequest, onAccept, onDecline, onRemoveFriend, onCancelSentRequest, sharedGoals, sharedGoalsLoading, sharedGoalInvites, onAcceptGoalInvite, onDeclineGoalInvite, onCreateSharedGoal, onJoinSharedGoal, onLogSharedGoal, onShareHabit, currentUserId, onDeleteSharedGoal, onNudgeFriend }) {
   const [showAddFriend,   setShowAddFriend]   = useState(false);
   const [addEmail,        setAddEmail]        = useState("");
   const [addError,        setAddError]        = useState("");
@@ -4228,6 +4228,34 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
           </div>
         )}
 
+        {/* ── Pending goal invites ── */}
+        {sharedGoalInvites.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={sectionLabel}>Goal invites</div>
+            {sharedGoalInvites.map(inv => (
+              <div key={inv.id} style={{ ...card, display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ fontSize: 28, lineHeight: 1 }}>{inv.goal_emoji || "🎯"}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>{inv.goal_name}</div>
+                  <div style={{ fontSize: 12, color: T.muted, marginTop: 2 }}>{inv.inviter_name} invited you</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onAcceptGoalInvite(inv)}
+                  style={{ padding: "6px 14px", borderRadius: 16, border: "none", background: T.accent, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", marginRight: 6, flexShrink: 0 }}>
+                  Join
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDeclineGoalInvite(inv.id)}
+                  style={{ padding: "6px 10px", borderRadius: 16, border: `0.5px solid ${T.border}`, background: "none", color: T.muted, fontSize: 12, cursor: "pointer", flexShrink: 0 }}>
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         {sharedGoalsLoading ? (
           <div style={{ textAlign: "center", padding: "24px 0", color: T.muted, fontSize: 13 }}>Loading…</div>
         ) : sharedGoals.length === 0 ? (
@@ -4343,11 +4371,25 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
                     setInviteSentTo(f.id);
                     try {
                       const { data: { session } } = await supabase.auth.getSession();
-                      await fetch("/api/nudge-friend", {
+                      const uid = session?.user?.id;
+                      const myName = user?.name || "Someone";
+                      // Store in-app invite record so recipient sees it immediately
+                      await supabase.from("shared_goal_invites").upsert({
+                        goal_id:      invGoal.id,
+                        invite_code:  invGoal.inviteCode,
+                        inviter_id:   uid,
+                        invitee_id:   f.id,
+                        goal_name:    invGoal.name,
+                        goal_emoji:   invGoal.emoji || "🎯",
+                        inviter_name: myName,
+                        status:       "pending",
+                      }, { onConflict: "goal_id,invitee_id" });
+                      // Also send push notification
+                      fetch("/api/nudge-friend", {
                         method: "POST",
                         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
-                        body: JSON.stringify({ recipientId: f.id, type: "shared_goal_invite", inviteCode: invGoal.inviteCode, goalName: invGoal.name }),
-                      });
+                        body: JSON.stringify({ recipientId: f.id, type: "shared_goal_invite", goalName: invGoal.name }),
+                      }).catch(() => {});
                     } catch {}
                     setTimeout(() => setInviteGoalId(null), 1200);
                   }}
@@ -6981,6 +7023,7 @@ export default function App() {
   const [friendsLoading,       setFriendsLoading]       = useState(false);
   const [sharedGoals,          setSharedGoals]          = useState([]);
   const [sharedGoalsLoading,   setSharedGoalsLoading]   = useState(false);
+  const [sharedGoalInvites,    setSharedGoalInvites]    = useState([]);
   /** While linking a habit to a new shared goal (Today → Share) — prevents duplicate goals from double-tap */
   const [sharingHabitId,       setSharingHabitId]       = useState(null);
   const sharingHabitIdRef = useRef(null);
@@ -7072,10 +7115,11 @@ export default function App() {
     loadFriendRequests(uid);
     loadSentRequests(uid);
     loadSharedGoals(uid);
+    loadSharedGoalInvites(uid);
     syncLastActive();
 
     // Real-time: re-fetch friend requests the instant one arrives
-    const channel = supabase
+    const friendChannel = supabase
       .channel(`friend-reqs-${uid}`)
       .on(
         "postgres_changes",
@@ -7084,7 +7128,20 @@ export default function App() {
       )
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    // Real-time: re-fetch shared goal invites the instant one arrives
+    const inviteChannel = supabase
+      .channel(`goal-invites-${uid}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "shared_goal_invites", filter: `invitee_id=eq.${uid}` },
+        () => loadSharedGoalInvites(uid)
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(friendChannel);
+      supabase.removeChannel(inviteChannel);
+    };
   }, [sessionUserId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Handle /join/[code] invite URLs ──────────────────────────────────────────
@@ -7415,6 +7472,33 @@ export default function App() {
     } finally {
       setSharedGoalsLoading(false);
     }
+  }
+
+  async function loadSharedGoalInvites(uid) {
+    const id = uid || userIdRef.current;
+    if (!id) return;
+    try {
+      const { data: invites } = await supabase
+        .from("shared_goal_invites")
+        .select("id, goal_id, invite_code, inviter_id, goal_name, goal_emoji, inviter_name, created_at")
+        .eq("invitee_id", id)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false });
+      setSharedGoalInvites(invites || []);
+    } catch (e) {
+      console.warn("[Forged] loadSharedGoalInvites:", e);
+    }
+  }
+
+  async function acceptSharedGoalInvite(invite) {
+    await joinSharedGoal(invite.invite_code);
+    await supabase.from("shared_goal_invites").update({ status: "accepted" }).eq("id", invite.id);
+    setSharedGoalInvites(prev => prev.filter(i => i.id !== invite.id));
+  }
+
+  async function declineSharedGoalInvite(inviteId) {
+    await supabase.from("shared_goal_invites").update({ status: "declined" }).eq("id", inviteId);
+    setSharedGoalInvites(prev => prev.filter(i => i.id !== inviteId));
   }
 
   async function createSharedGoal({ name, emoji, habitType, weeklyTarget, color }) {
@@ -8906,6 +8990,9 @@ export default function App() {
           onSendRequest={sendFriendRequest} onAccept={acceptFriendRequest}
           onDecline={declineFriendRequest} onRemoveFriend={removeFriend} onCancelSentRequest={cancelFriendRequest}
           sharedGoals={sharedGoals} sharedGoalsLoading={sharedGoalsLoading}
+          sharedGoalInvites={sharedGoalInvites}
+          onAcceptGoalInvite={acceptSharedGoalInvite}
+          onDeclineGoalInvite={declineSharedGoalInvite}
           onCreateSharedGoal={createSharedGoal} onJoinSharedGoal={joinSharedGoal}
           onLogSharedGoal={logSharedGoal}
           onShareHabit={handleShareHabit}

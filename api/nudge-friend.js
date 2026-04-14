@@ -92,13 +92,16 @@ export default async function handler(req, res) {
     return res.status(200).json({ delivered: false, reason: "no_subscription" });
   }
 
+  const { goalName } = req.body || {};
+
   const messages = {
-    nudge: { title: "Forged 💪", body: `${senderName} nudged you — time to log your habits!` },
-    friend_request: { title: "Forged 🤝", body: `${senderName} sent you a friend request on Forged` },
+    nudge:              { title: "Forged 💪", body: `${senderName} nudged you — time to log your habits!`, url: "/" },
+    friend_request:     { title: "Forged 🤝", body: `${senderName} sent you a friend request on Forged`, url: "/" },
+    shared_goal_invite: { title: "Forged 🎯", body: `${senderName} invited you to join "${goalName || "a shared goal"}" — check Social`, url: "/" },
   };
 
-  const { title, body } = messages[type] || messages.nudge;
-  const payload = JSON.stringify({ title, body, url: "/", tag: `forged-social-${type}` });
+  const { title, body, url } = messages[type] || messages.nudge;
+  const payload = JSON.stringify({ title, body, url, tag: `forged-social-${type}` });
 
   try {
     await webpush.sendNotification(subRow.subscription, payload);
