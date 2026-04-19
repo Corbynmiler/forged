@@ -1,4 +1,5 @@
-import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
+
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
 import { flushSync, createPortal } from "react-dom";
 import { supabase, habitToRow, rowToHabit, rowToGoal, goalToRow } from "./supabase.js";
 
@@ -127,6 +128,7 @@ const HABIT_TYPES = {
   weekly:   { label:"Weekly target",  desc:"Hit a session count each week (e.g. gym 4x, run 3x).",     icon:"📅" },
   project:  { label:"Build",          desc:"Log time spent and progress (e.g. side project, learning a skill).", icon:"⚒️" },
   limit:    { label:"Limit / reduce", desc:"Stay under a daily cap (drinks, snacks, screen time). For “reach X kg” or savings targets, use Set a goal — that’s an outcome, not a daily cap.",   icon:"🎯" },
+  log:      { label:"Log",            desc:"Simple dated notes — journal-style, no streaks or targets.", icon:"📝" },
 };
 
 const XP_LEVELS = [
@@ -158,6 +160,93 @@ function latestTodayLog(h) {
 function getWeeklyCount(h) {
   return h.logs.filter(l => l.date >= currentWeekStart() && l.value === true).length;
 }
+/** Session count in the current Mon–Sun week (matches Today weekly habits). */
+function sharedMemberWeekSessionCount(logs) {
+  const ws = currentWeekStart();
+  return (logs || []).filter(l => l.date >= ws && l.value === true).length;
+}
+
+/** Map in-app habit / goal row → accountability habit kind for log projection. */
+function linkedKindForSharedSync(linked) {
+  const ht = linked?.habitType;
+  if (ht === "progress") return "goal";
+  if (ht) return ht;
+  // Personal progress goals from DB often omit habitType in older in-memory state — infer so we never project as "daily".
+  if (Number.isFinite(Number(linked?.targetValue))) return "goal";
+  return "daily";
+}
+
+/**
+ * Build shared_goal_members.logs from the linked personal Today row (source of truth).
+ * Replaces legacy social-only logging so accountability matches real personal progress.
+ */
+function projectPersonalLogsForSharedMember(linked) {
+  const kind = linkedKindForSharedSync(linked);
+  const logs = linked.logs || [];
+  const sortedTrueDays = () => logs
+    .filter(l => l?.date && l.value === true)
+    .map(l => ({ date: l.date, value: true }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  switch (kind) {
+    case "daily":
+    case "weekly":
+      return sortedTrueDays();
+    case "project":
+      return logs
+        .filter(l => l?.date && l.value && typeof l.value === "object" && Number(l.value.minutes) > 0)
+        .map(l => ({ date: l.date, value: true }))
+        .sort((a, b) => a.date.localeCompare(b.date));
+    case "goal": {
+      const byDate = new Map();
+      for (const l of logs) {
+        if (!l?.date) continue;
+        const n = typeof l.value === "number" ? l.value : Number(l.value);
+        if (!Number.isFinite(n)) continue;
+        byDate.set(l.date, { date: l.date, value: n, note: l.note ? String(l.note) : "" });
+      }
+      return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+    }
+    case "limit": {
+      const sums = {};
+      for (const l of logs) {
+        if (!l?.date || typeof l.value !== "number" || l.value === 0) continue;
+        sums[l.date] = (sums[l.date] || 0) + l.value;
+      }
+      return Object.keys(sums)
+        .sort()
+        .map(date => ({ date, value: sums[date] }));
+    }
+    default:
+      return sortedTrueDays();
+  }
+}
+
+/** Normalize habit types that must map onto shared_goals.habit_type check constraint. */
+function normalizeSharedGoalHabitType(ht) {
+  const t = String(ht || "daily").trim();
+  if (t === "progress") return "goal";
+  return t;
+}
+
+function nudgeWatermarkStorageKey(uid) {
+  return `forged_nudge_watermark_${uid}`;
+}
+function readNudgeWatermark(uid) {
+  try {
+    return localStorage.getItem(nudgeWatermarkStorageKey(uid)) || "";
+  } catch {
+    return "";
+  }
+}
+function writeNudgeWatermarkIfNewer(uid, isoTs) {
+  if (!uid || !isoTs) return;
+  try {
+    const k = nudgeWatermarkStorageKey(uid);
+    const prev = localStorage.getItem(k) || "";
+    if (isoTs > prev) localStorage.setItem(k, isoTs);
+  } catch { /* ignore quota */ }
+}
+
 function getTotalSessionLogsCount(h) {
   return h.logs.filter(l => l.value === true).length;
 }
@@ -184,6 +273,13 @@ function entityIdEq(a, b) {
   const sb = String(b);
   if (sa === sb) return true;
   return norm(sa) === norm(sb);
+}
+
+/** Compare auth user ids from PostgREST / RPC (string UUID, optional casing or column shape differences). */
+function sameUserId(a, b) {
+  if (a == null || b == null) return false;
+  const norm = v => String(v).replace(/-/g, "").toLowerCase();
+  return norm(a) === norm(b);
 }
 
 /** Split `habits` table rows into in-app `goals` vs `habits` (must stay aligned with loadUserData). */
@@ -235,6 +331,7 @@ function goalFromMisplacedHabit(h) {
     id: h.id,
     name: h.name,
     emoji: h.emoji ?? "",
+    habitType: "goal",
     unit: h.unit ?? "",
     startValue,
     targetValue,
@@ -245,6 +342,7 @@ function goalFromMisplacedHabit(h) {
     logs,
     lastLogDate,
     color: h.color ?? "#E67E22",
+    sharedGoalId: h.sharedGoalId ?? undefined,
   };
 }
 
@@ -383,6 +481,7 @@ function getBuildStreak(h) {
 }
 // Unified getter — returns the right streak type for any habit
 function getStreak(h) {
+  if (h.habitType === "log") return 0;
   if (h.habitType === "weekly")  return getWeeklyStreak(h);
   if (h.habitType === "limit")   return getLimitStreak(h);
   if (h.habitType === "project") return getBuildStreak(h);
@@ -391,6 +490,7 @@ function getStreak(h) {
 
 /** Subtitle suffix for habit cards — hides misleading 🔥 1 when the streak is only "today" with no prior day. */
 function getHabitCardStreakSuffix(h) {
+  if (h.habitType === "log") return "";
   const streak = getStreak(h);
   if (streak <= 0) return "";
   if (h.habitType === "limit") {
@@ -482,6 +582,392 @@ function getCompletionRate(h) {
 function get7DayActivity(h) {
   return Array.from({length:7}, (_, i) => h.logs.some(l => l.date === daysAgo(6 - i)) ? 1 : 0);
 }
+
+/**
+ * Best-day-of-week signal, computed across all habits + goals "real" logs.
+ * Returns { counts: [Mon..Sun], total, best: { label, count }|null, needsMoreData: bool }.
+ * needsMoreData stays true below a small threshold so we don't lie with a 1-sample pattern.
+ */
+function getBestDayOfWeek(allRealLogs) {
+  const counts = [0, 0, 0, 0, 0, 0, 0]; // Mon..Sun
+  const uniqueDays = new Set();
+  for (const l of allRealLogs) {
+    if (!l?.date) continue;
+    uniqueDays.add(l.date);
+    const d = parseLocal(l.date);
+    if (!d) continue;
+    // JS: 0=Sun..6=Sat → convert to Mon=0..Sun=6 for app consistency.
+    const js = d.getDay();
+    const idx = js === 0 ? 6 : js - 1;
+    counts[idx]++;
+  }
+  const total = counts.reduce((s, n) => s + n, 0);
+  const needsMoreData = uniqueDays.size < 7 || total < 7;
+  let bestIdx = -1, bestVal = 0;
+  counts.forEach((n, i) => { if (n > bestVal) { bestVal = n; bestIdx = i; } });
+  const LABELS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  return {
+    counts,
+    total,
+    needsMoreData,
+    best: bestIdx >= 0 && bestVal > 0 ? { label: LABELS[bestIdx], count: bestVal, idx: bestIdx } : null,
+  };
+}
+
+/**
+ * Reflection / context coverage: what share of habit logs carry *any* written
+ * context — reflection text, note text, project win text, project hard-part
+ * text, or a standalone quick note. Fixes the prior bug where only `l.reflection`
+ * was counted (quicknotes + notes + win/hardPart were invisible, dragging the
+ * rate toward 0% for users who actually write plenty).
+ */
+function getReflectionCoverage(habits) {
+  let total = 0, withText = 0;
+  let habitsThatPrompt = 0;
+  for (const h of habits || []) {
+    if (h.reflection) habitsThatPrompt++;
+    for (const l of h.logs || []) {
+      if (!l) continue;
+      if (l.value === "skip") continue; // skip days aren't "logs" for this purpose
+      total++;
+      if (l.value === "quicknote") {
+        // Quicknotes exist because the user typed something — count them only
+        // in the numerator if they actually have text (guard against empties).
+        if (String(l.note || "").trim()) withText++;
+        continue;
+      }
+      const refl = String(l.reflection || "").trim();
+      const note = String(l.note || "").trim();
+      const win  = l.value && typeof l.value === "object" && l.value.win      ? String(l.value.win).trim()      : "";
+      const hard = l.value && typeof l.value === "object" && l.value.hardPart ? String(l.value.hardPart).trim() : "";
+      if (refl || note || win || hard) withText++;
+    }
+  }
+  const coverage = total > 0 ? Math.round((withText / total) * 100) : 0;
+  return { coverage, logsWithReflection: withText, totalLogs: total, habitsThatPrompt };
+}
+
+// ─── DEEP INSIGHTS (from real user-written text) ──────────────────────────────
+// Everything below here powers the "Deeper insights" section on the Insights
+// screen. It runs entirely on-device (no LLM tokens) against text the user has
+// actually written: reflections, notes, project wins, project hard-parts, and
+// goal notes. Results are cached with a content-hash + 24h TTL so we don't re-
+// crunch on every render or re-open of the Insights tab.
+
+/**
+ * Gather every piece of user-written context into a single flat array of
+ * `{ date, text, source, habitId?, habitName?, goalId?, goalName? }` entries.
+ * Sorted oldest → newest. Skips empty strings. Never includes XP/streak
+ * numbers, just real written content.
+ */
+// One corpus entry = one writing-DAY for one habit/goal. Earlier this function
+// returned a separate entry per text fragment (reflection / note / win /
+// hardPart), which inflated counts: a single project log could become 4
+// "entries" and the Insights card would say "30 entries about X" when the
+// user had only written on 7 days. Deduping per (habitId|goalId, date) keeps
+// every honest count downstream — themes, tone, "most reflected on", etc.
+function getWrittenCorpus(habits = [], goals = []) {
+  const byKey = new Map();
+  function ensure(key, baseFields) {
+    if (!byKey.has(key)) {
+      byKey.set(key, {
+        ...baseFields,
+        reflText: "",
+        noteText: "",
+        winText: "",
+        hardText: "",
+        sources: new Set(),
+      });
+    }
+    return byKey.get(key);
+  }
+  function append(prev, next) { return prev ? prev + " " + next : next; }
+
+  for (const h of habits || []) {
+    for (const l of h.logs || []) {
+      if (!l?.date) continue;
+      if (l.value === "skip") continue;
+      const refl = String(l.reflection || "").trim();
+      const note = String(l.note || "").trim();
+      const win  = (l.value && typeof l.value === "object") ? String(l.value.win      || "").trim() : "";
+      const hard = (l.value && typeof l.value === "object") ? String(l.value.hardPart || "").trim() : "";
+      const isQuickNote = l.value === "quicknote";
+      if (!refl && !note && !win && !hard) continue;
+      const key = `h:${h.id}:${l.date}`;
+      const e = ensure(key, { date: l.date, kind: "habit", habitId: h.id, habitName: h.name });
+      if (refl) { e.reflText = append(e.reflText, refl); e.sources.add("reflection"); }
+      if (note) { e.noteText = append(e.noteText, note); e.sources.add(isQuickNote ? "quicknote" : "note"); }
+      if (win)  { e.winText  = append(e.winText,  win);  e.sources.add("win"); }
+      if (hard) { e.hardText = append(e.hardText, hard); e.sources.add("hard"); }
+    }
+  }
+  for (const g of goals || []) {
+    for (const l of g.logs || []) {
+      if (!l?.date) continue;
+      const note = String(l.note || "").trim();
+      if (!note) continue;
+      const key = `g:${g.id}:${l.date}`;
+      const e = ensure(key, { date: l.date, kind: "goal", goalId: g.id, goalName: g.name });
+      e.noteText = append(e.noteText, note);
+      e.sources.add("goalNote");
+    }
+  }
+  return [...byKey.values()]
+    .map(e => {
+      const text = [e.reflText, e.noteText, e.winText, e.hardText].filter(Boolean).join("  ");
+      return { ...e, sources: [...e.sources], text };
+    })
+    .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+}
+
+// Tiny lexicon for rough polarity scoring — not a sentiment model, just a
+// coarse signal. Kept short so the tone card fires conservatively.
+const DEEP_POS_WORDS = new Set([
+  "good","great","awesome","nice","happy","love","easy","strong","focused",
+  "clear","proud","energized","better","best","excited","calm","grateful",
+  "motivated","solid","amazing","smooth","confident","progress","done","hit",
+  "crushed","flowed","grounded","present","pumped","fresh","sharp","light",
+  "consistent","hopeful","positive","relaxed","content","productive",
+]);
+const DEEP_NEG_WORDS = new Set([
+  "bad","awful","tired","stressed","anxious","worried","sad","angry",
+  "frustrated","hard","difficult","struggle","struggling","heavy","sluggish",
+  "drained","overwhelmed","scared","stuck","lost","fail","failed","missed",
+  "procrastinated","procrastinating","exhausted","burnt","burned","lonely",
+  "annoyed","distracted","worse","flat","foggy","rough","bored","low",
+  "unmotivated","shitty","crap",
+]);
+
+function getTextTone(text) {
+  const words = String(text).toLowerCase().match(/[a-z']+/g) || [];
+  let pos = 0, neg = 0;
+  for (const w of words) {
+    if (DEEP_POS_WORDS.has(w)) pos++;
+    if (DEEP_NEG_WORDS.has(w)) neg++;
+  }
+  const score = pos - neg;
+  let polarity = "neutral";
+  if (score > 0) polarity = "pos";
+  else if (score < 0) polarity = "neg";
+  return { pos, neg, score, polarity };
+}
+
+// Filler / function words we never want to surface as "themes". Kept inline
+// rather than imported so we don't pay for a dictionary dependency.
+const DEEP_STOPWORDS = new Set([
+  "the","a","an","and","or","but","if","then","so","because","as","i","me",
+  "my","mine","we","our","ours","you","your","yours","to","of","in","on","at",
+  "for","with","by","from","about","into","out","up","down","over","under",
+  "is","am","are","was","were","be","been","being","do","does","did","done",
+  "have","has","had","will","would","could","should","might","may","can",
+  "cant","dont","not","no","yes","just","more","less","very","really","still",
+  "already","also","too","maybe","today","tomorrow","yesterday","day","days",
+  "week","weeks","month","months","year","years","time","some","any","all",
+  "got","get","gets","go","goes","went","made","make","making","think",
+  "thought","feel","felt","know","knew","that","this","those","these","it",
+  "its","he","she","they","them","their","there","here","when","what","which",
+  "who","why","how","him","her","his","hers","us","ours","yourself","myself",
+  "people","thing","things","something","anything","everything","nothing",
+  "want","wanted","need","needed","like","liked","try","tried","trying",
+  "lot","bit","sort","kind","back","around","ago","since","after","before",
+  "again","away","through","during","while","until","very","than","even",
+  "much","most","many","few","little","big","small","own","same","other",
+  "another","each","every","off","only","once","now","soon","yet","ever",
+]);
+
+function getDeepTopThemes(corpus, k = 3) {
+  const counts = new Map();
+  // For sample quotes, prefer a single sub-text (reflection / note / win /
+  // hard) that actually contains the term, so the quote reads naturally
+  // instead of being a joined paragraph from multiple sources.
+  function bestSampleForTerm(entry, term) {
+    const subs = [
+      entry.reflText && { date: entry.date, text: entry.reflText, kind: "reflection", habitName: entry.habitName, goalName: entry.goalName },
+      entry.noteText && { date: entry.date, text: entry.noteText, kind: "note",       habitName: entry.habitName, goalName: entry.goalName },
+      entry.winText  && { date: entry.date, text: entry.winText,  kind: "win",        habitName: entry.habitName, goalName: entry.goalName },
+      entry.hardText && { date: entry.date, text: entry.hardText, kind: "hard",       habitName: entry.habitName, goalName: entry.goalName },
+    ].filter(Boolean);
+    const re = new RegExp(`\\b${term}`, "i");
+    const matching = subs.filter(s => re.test(s.text));
+    const pool = matching.length ? matching : subs;
+    if (!pool.length) return entry;
+    // Prefer slightly longer (more context) but cap at 220 chars.
+    return pool.sort((a, b) => {
+      const ai = Math.min(a.text.length, 220);
+      const bi = Math.min(b.text.length, 220);
+      return bi - ai;
+    })[0];
+  }
+  for (const e of corpus) {
+    const words = String(e.text).toLowerCase().match(/[a-z][a-z']+/g) || [];
+    const seenInEntry = new Set();
+    for (const w of words) {
+      if (w.length < 4 || w.length > 18) continue;
+      if (DEEP_STOPWORDS.has(w)) continue;
+      if (seenInEntry.has(w)) continue; // count once per entry, not per word-in-entry
+      seenInEntry.add(w);
+      if (!counts.has(w)) counts.set(w, { count: 0, lastDate: null, sample: null });
+      const rec = counts.get(w);
+      rec.count++;
+      if (!rec.lastDate || e.date > rec.lastDate) rec.lastDate = e.date;
+      const candidate = bestSampleForTerm(e, w);
+      if (!rec.sample || (candidate.text.length > rec.sample.text.length && candidate.text.length < 260)) {
+        rec.sample = candidate;
+      }
+    }
+  }
+  return [...counts.entries()]
+    // Must appear in at least 2 separate writing-days to count as a recurring theme.
+    .filter(([, r]) => r.count >= 2)
+    .sort((a, b) => b[1].count - a[1].count || (b[1].lastDate || "").localeCompare(a[1].lastDate || ""))
+    .slice(0, k)
+    .map(([term, r]) => ({ term, count: r.count, lastDate: r.lastDate, sample: r.sample }));
+}
+
+/**
+ * Run the full deeper-insights analysis. Pure, deterministic, ~O(N) over the
+ * corpus so it's fine to call client-side. Returns either `{ needsMoreData:true }`
+ * when there isn't enough written text to say anything honest, or a full
+ * report. The caller is expected to memoize + cache (see useDeepInsights).
+ */
+function analyzeDeepInsights(habits = [], goals = []) {
+  const corpus = getWrittenCorpus(habits, goals);
+  // Each entry is now one writing-day per habit/goal (NOT per text fragment).
+  const totalEntries = corpus.length;
+  const totalWords = corpus.reduce(
+    (s, e) => s + (String(e.text).split(/\s+/).filter(Boolean).length),
+    0,
+  );
+
+  // Honest threshold: need real language, not just scattered one-liners.
+  if (totalEntries < 3 || totalWords < 35) {
+    return { needsMoreData: true, totalEntries, totalWords };
+  }
+
+  const withTone = corpus.map(e => ({ ...e, tone: getTextTone(e.text) }));
+
+  // Themes are counted per writing-day. With fragmented entries this used to
+  // overcount (a word in win+note+hard of one log = 3 hits); now it's clean.
+  const topThemes = getDeepTopThemes(corpus, 4);
+
+  // Win/struggle themes only consider the actual win/hardPart text.
+  const winCorpus  = corpus.filter(e => e.winText).map(e => ({ ...e, text: e.winText }));
+  const hardCorpus = corpus.filter(e => e.hardText).map(e => ({ ...e, text: e.hardText }));
+  const topWinThemes      = getDeepTopThemes(winCorpus,  2);
+  const topStruggleThemes = getDeepTopThemes(hardCorpus, 2);
+
+  // Tone distribution
+  const pos = withTone.filter(e => e.tone.polarity === "pos").length;
+  const neg = withTone.filter(e => e.tone.polarity === "neg").length;
+  const neu = totalEntries - pos - neg;
+
+  // Mood trend: last 7 days vs prior 7
+  const recentCutoff = daysAgo(6);
+  const priorCutoff  = daysAgo(13);
+  const recent = withTone.filter(e => e.date >= recentCutoff);
+  const prior  = withTone.filter(e => e.date >= priorCutoff && e.date < recentCutoff);
+  const avgScore = arr => arr.length ? arr.reduce((s, e) => s + e.tone.score, 0) / arr.length : 0;
+  const recentAvg = avgScore(recent);
+  const priorAvg  = avgScore(prior);
+  let moodTrend = null;
+  if (recent.length >= 3 && prior.length >= 3) {
+    const diff = recentAvg - priorAvg;
+    if      (diff >=  0.6) moodTrend = "rising";
+    else if (diff <= -0.6) moodTrend = "declining";
+    else                   moodTrend = "steady";
+  }
+
+  // "Most written about" habit — counted by UNIQUE WRITING DAYS, not text
+  // fragments (the prior bug). We also only surface this when there's a real
+  // signal: at least 5 days of writing AND the leader is meaningfully ahead
+  // of the runner-up — otherwise "most" is a coin-flip and not insightful.
+  const byHabit = new Map();
+  for (const e of corpus) {
+    if (e.kind !== "habit" || !e.habitId) continue;
+    if (!byHabit.has(e.habitId)) {
+      byHabit.set(e.habitId, { habitId: e.habitId, name: e.habitName, days: 0, chars: 0 });
+    }
+    const rec = byHabit.get(e.habitId);
+    rec.days++;
+    rec.chars += e.text.length;
+  }
+  const habitRanking = [...byHabit.values()].sort((a, b) => b.days - a.days || b.chars - a.chars);
+  let mostReflectedHabit = null;
+  if (habitRanking.length > 0) {
+    const leader = habitRanking[0];
+    const runnerUp = habitRanking[1];
+    const aheadEnough = !runnerUp || (leader.days - runnerUp.days >= 2);
+    if (leader.days >= 5 && aheadEnough) {
+      mostReflectedHabit = leader;
+    }
+  }
+
+  // Entry worth revisiting: longest single piece of writing in the last 30
+  // days. Pulls the actual reflection / note / win / hardPart text directly
+  // (not the joined frankenstein) so the quote reads naturally.
+  const recent30Cutoff = daysAgo(30);
+  let revisitEntry = null;
+  for (const e of corpus) {
+    if (e.date < recent30Cutoff) continue;
+    const candidates = [
+      e.reflText && { date: e.date, text: e.reflText, kind: "reflection", habitName: e.habitName, goalName: e.goalName },
+      e.noteText && { date: e.date, text: e.noteText, kind: "note",       habitName: e.habitName, goalName: e.goalName },
+      e.winText  && { date: e.date, text: e.winText,  kind: "win",        habitName: e.habitName, goalName: e.goalName },
+      e.hardText && { date: e.date, text: e.hardText, kind: "hard",       habitName: e.habitName, goalName: e.goalName },
+    ].filter(Boolean);
+    for (const c of candidates) {
+      if (!revisitEntry || c.text.length > revisitEntry.text.length) revisitEntry = c;
+    }
+  }
+
+  return {
+    needsMoreData: false,
+    totalEntries,
+    totalWords,
+    topThemes,
+    topWinThemes,
+    topStruggleThemes,
+    toneMix: { pos, neg, neu },
+    moodTrend,
+    recentAvg,
+    priorAvg,
+    mostReflectedHabit,
+    revisitEntry,
+  };
+}
+
+// ── Deep-insights cache (content hash + TTL) ─────────────────────────────────
+// Purpose: avoid recomputing on every Insights render, but always recompute
+// when the user actually adds new written content. Cached under a user-scoped
+// key so multiple accounts on the same device don't collide.
+const DEEP_INSIGHTS_TTL_MS = 24 * 60 * 60 * 1000; // refresh at least every 24h
+
+function deepInsightsCacheKey(userId) {
+  return `forged_deep_insights:${userId || "anon"}`;
+}
+function hashCorpusSignature(corpus) {
+  // djb2 over a tiny fingerprint of each entry — stable, collision-safe enough
+  // for this use case, and much cheaper than hashing the full text.
+  let h = 5381;
+  for (const e of corpus) {
+    const s = `${e.date}|${e.source}|${e.text.length}|${String(e.text).slice(0, 24)}`;
+    for (let i = 0; i < s.length; i++) h = (((h << 5) + h) + s.charCodeAt(i)) | 0;
+  }
+  return String(h);
+}
+function readDeepInsightsCache(userId) {
+  try {
+    const raw = localStorage.getItem(deepInsightsCacheKey(userId));
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function writeDeepInsightsCache(userId, payload) {
+  try { localStorage.setItem(deepInsightsCacheKey(userId), JSON.stringify(payload)); }
+  catch { /* quota / private mode */ }
+}
+function clearDeepInsightsCache(userId) {
+  try { localStorage.removeItem(deepInsightsCacheKey(userId)); } catch { /* ignore */ }
+}
 function get12WeekGrid(h) {
   return Array.from({length:12}, (_, w) =>
     Array.from({length:7}, (_, d) => {
@@ -523,11 +1009,24 @@ const CSS = `
   }
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes fadeIn { from { opacity:0 } to { opacity:1 } }
+  @keyframes journalFadeIn { from { opacity:0; transform: translateY(4px); } to { opacity:1; transform: translateY(0); } }
   @keyframes coachNudge {
     0%   { opacity: 0; transform: translateY(10px) scale(0.97); }
     9%   { opacity: 1; transform: translateY(0) scale(1); }
     82%  { opacity: 1; transform: translateY(0) scale(1); }
     100% { opacity: 0; transform: translateY(5px) scale(0.99); }
+  }
+  @keyframes coachGuideIn {
+    0%   { opacity: 0; transform: translateY(8px) scale(0.97); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes coachFabPulse {
+    0%, 100% { box-shadow: 0 2px 14px rgba(0,0,0,0.4), 0 0 0 0 rgba(200,144,42,0.45); }
+    50%      { box-shadow: 0 2px 14px rgba(0,0,0,0.4), 0 0 0 8px rgba(200,144,42,0); }
+  }
+  @keyframes coachFabSheen {
+    0%   { background-position: -120px 0; }
+    100% { background-position: 120px 0; }
   }
   .tap:active { transform: scale(0.86) !important; }
   .rc { transition: border-color 0.2s, background 0.2s; }
@@ -539,6 +1038,18 @@ const CSS = `
   @keyframes shareSlide {
     from { transform: scale(0.95); opacity: 0; }
     to   { transform: scale(1); opacity: 1; }
+  }
+  @keyframes recBar {
+    0%, 100% { transform: scaleY(0.35); }
+    50%      { transform: scaleY(1);    }
+  }
+  @keyframes recDotPulse {
+    0%, 100% { transform: scale(1);    opacity: 0.85; }
+    50%      { transform: scale(1.35); opacity: 1;    }
+  }
+  @keyframes recBarSlide {
+    from { transform: translateY(6px); opacity: 0; }
+    to   { transform: translateY(0);   opacity: 1; }
   }
 `;
 
@@ -648,13 +1159,126 @@ function DoneBanner({ habit }) {
 }
 
 // ─── SPEECH-TO-TEXT ───────────────────────────────────────────────────────────
-function useSpeechInput(onFinal) {
+function isAppleMobileDevice() {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  if (/iP(hone|od|ad)/.test(ua)) return true;
+  if (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) return true;
+  return false;
+}
+
+/**
+ * Use Web Speech alone (no getUserMedia first).
+ * - Safari / iOS: avoids double permission prompts.
+ * - Chromium (Chrome, Edge, Brave, …): holding a MediaStream for the volume meter while SR runs
+ *   often yields no transcripts (meter reacts; recognition stays empty). SR-only fixes that.
+ */
+function shouldUseSpeechOnlyMicPath() {
+  if (typeof navigator === "undefined") return false;
+  if (isAppleMobileDevice()) return true;
+  const ua = navigator.userAgent || "";
+  if (/Chrome|Chromium|Edg|OPR|CriOS|FxiOS|Brave/i.test(ua)) return true;
+  return /Safari/i.test(ua) && !/Chrome|Chromium|CriOS/i.test(ua);
+}
+
+/**
+ * Chromium: Web Speech often returns "service-not-allowed" if the tab never obtained mic access
+ * via getUserMedia. We briefly open the mic, stop tracks, then start SR (no parallel capture).
+ * Skip for pure Safari / WebKit-only UAs to avoid an extra permission prompt on iOS/macOS Safari.
+ */
+function shouldPrimeMicBeforeWebSpeech() {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return false;
+  const ua = navigator.userAgent || "";
+  // Android: skip GUM prime — it often still ends in service-not-allowed; SR-only is enough once site policy allows it.
+  if (/Android/i.test(ua)) return false;
+  const hasChromiumToken = /Chrome|Chromium|Edg|OPR|CriOS|Brave/i.test(ua);
+  const pureWebKitSafari = /Safari/i.test(ua) && !/Chrome|Chromium|CriOS|Edg|OPR|Brave/i.test(ua);
+  return hasChromiumToken && !pureWebKitSafari;
+}
+
+/** Mobile Chrome / iOS Chrome: compact URL bar (often Share only); mic is under Chrome Settings, not beside URL. */
+function isLikelyMobileChromeSpeechUi() {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  if (/Android.*Chrome|Chrome.*Android|CriOS/i.test(ua)) return true;
+  if (typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)")?.matches && /Mobi|Android|iPhone|iPad/i.test(ua)) return true;
+  return false;
+}
+
+/**
+ * Real-volume metering safety guard. We open a parallel MediaStream just to
+ * drive the recording bar's height — but only on desktop, because:
+ *  - Android Chromium has historically dropped Web Speech transcripts when a
+ *    second mic stream is held in parallel.
+ *  - iOS Safari can struggle with two simultaneous audio captures.
+ * Modern desktop Chrome/Edge/Safari handle parallel streams cleanly. If a
+ * regression appears, this single function is the kill-switch.
+ */
+function isDesktopBrowserForMeter() {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  if (/iPhone|iPad|iPod|Android|Mobi/i.test(ua)) return false;
+  if (typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)")?.matches) return false;
+  if (!navigator.mediaDevices?.getUserMedia) return false;
+  return true;
+}
+
+/** Android Chrome / Edge on Android: continuous dictation is flaky; short utterances are more reliable. */
+function isAndroidChromiumForSpeech() {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  return /Android/i.test(ua) && /Chrome|Edg|OPR|Brave/i.test(ua);
+}
+
+function speechServiceBlockedHelpMessage() {
+  if (isLikelyMobileChromeSpeechUi()) {
+    return "Chrome won't run voice-to-text on some phones — yours may be one of them. It's not you doing anything wrong. Just type in the box; updating Chrome or using a laptop sometimes fixes it.";
+  }
+  return "Voice typing didn't start in Chrome. Allow the microphone for this site (click left of the address bar → site settings), or type in the box instead.";
+}
+
+function useSpeechInput(onFinal, opts = {}) {
+  const { autoRestart = false, meter = false } = opts;
   const [listening, setListening] = useState(false);
   const [interim,   setInterim]   = useState("");
   const [micBlocked, setMicBlocked] = useState(false);
+  const [speechError, setSpeechError] = useState("");
+  // Live recording duration in ms (only relevant when listening). Updated
+  // every 200ms while the recognizer is active so the recording bar can show
+  // a mm:ss timer without the consumer needing to manage its own interval.
+  const [recordingMs, setRecordingMs] = useState(0);
   // R holds mutable refs that must not trigger re-renders
   const R = useRef({ recog:null, stream:null, ctx:null, raf:null, ringEl:null });
   const stopping = useRef(false); // true while we're mid-teardown
+  const micSessionRef = useRef(0); // invalidates in-flight getUserMedia if user taps again
+  const pendingInterimRef = useRef("");
+  // Distinguish a user-initiated stop (tap Stop / unmount) from the browser
+  // auto-ending a recognition session. autoRestart only kicks in when the
+  // user did NOT initiate the stop and no real error occurred.
+  const userStoppedRef = useRef(false);
+  const errorOccurredRef = useRef(false);
+  const sessionStartRef = useRef(0);
+  const tickIntervalRef = useRef(null);
+  // Hold autoRestart in a ref so the closure inside beginRecognition can read
+  // the latest value without re-binding the callback every render.
+  const autoRestartRef = useRef(autoRestart);
+  useEffect(() => { autoRestartRef.current = autoRestart; }, [autoRestart]);
+  const onFinalRef = useRef(onFinal);
+  useEffect(() => { onFinalRef.current = onFinal; }, [onFinal]);
+  // Hard cap on a single continuous recording — defensive against runaway
+  // sessions if the user walks away with the coach open. Matches typical
+  // ChatGPT-style voice limits without being annoying for normal use.
+  const SESSION_MAX_MS = 30 * 60 * 1000;
+  // Real-volume metering (opt-in, desktop only). Independent of SR's stream.
+  // If we can't open this stream the bars fall back to their CSS animation.
+  const meterRef = useRef({ stream:null, ctx:null, raf:null, els:[], starting:false, prev:[] });
+  const setBarEls = useCallback(els => {
+    meterRef.current.els = (els || []).filter(Boolean);
+    meterRef.current.prev = meterRef.current.els.map(() => 0.4);
+  }, []);
+  // Only relevant when `meter:true` is passed by the consumer.
+  const meterOptRef = useRef(meter);
+  useEffect(() => { meterOptRef.current = meter; }, [meter]);
 
   const supported = !!(typeof window !== "undefined" &&
     (window.SpeechRecognition || window.webkitSpeechRecognition));
@@ -662,6 +1286,17 @@ function useSpeechInput(onFinal) {
   const stopAll = useCallback((fromOnEnd = false) => {
     const r = R.current;
     stopping.current = true;
+
+    // Commit partial dictation before tearing down (avoids losing last phrase on stop / onend races).
+    if (r.recog) {
+      const tail = (pendingInterimRef.current || "").trim();
+      if (tail) {
+        try { onFinalRef.current(tail); } catch (e) { console.warn("[speech] interim flush:", e); }
+      }
+      pendingInterimRef.current = "";
+    }
+
+    micSessionRef.current += 1; // cancel any pending async mic start
 
     // Cancel volume animation
     if (r.raf) { cancelAnimationFrame(r.raf); r.raf = null; }
@@ -680,8 +1315,25 @@ function useSpeechInput(onFinal) {
     if (!fromOnEnd && recog) { try { recog.stop(); } catch {} }
 
     if (r.ringEl) { r.ringEl.style.transform = "scale(1)"; r.ringEl.style.opacity = "0"; }
+    // Tear down the parallel volume-meter stream / analyser so the bars fall
+    // back to their CSS animation on the next start.
+    {
+      const m = meterRef.current;
+      if (m.raf) { cancelAnimationFrame(m.raf); m.raf = null; }
+      if (m.stream) { try { m.stream.getTracks().forEach(t => t.stop()); } catch {} m.stream = null; }
+      if (m.ctx) { try { m.ctx.suspend(); } catch {} }
+      m.starting = false;
+      m.els.forEach(el => {
+        if (!el) return;
+        el.style.transform = "";
+        el.style.animation = "";
+      });
+    }
+    if (tickIntervalRef.current) { clearInterval(tickIntervalRef.current); tickIntervalRef.current = null; }
     setListening(false);
     setInterim("");
+    setRecordingMs(0);
+    // Do not clear pendingInterimRef here — recog.onend may still flush it after stop().
 
     // Allow restart after a brief settling period
     setTimeout(() => { stopping.current = false; }, 350);
@@ -691,95 +1343,371 @@ function useSpeechInput(onFinal) {
 
   const setRingEl = useCallback(el => { R.current.ringEl = el; }, []);
 
-  function startVolume() {
+  /** Volume ring — only when a MediaStream is held (non–speech-only path; Chromium uses SR-only). */
+  function startVolumeMeter(stream) {
     const r = R.current;
-    // Reuse existing context if suspended, otherwise create once
+    if (!stream || !r.recog) return;
+    if (r.raf) { cancelAnimationFrame(r.raf); r.raf = null; }
     if (!r.ctx) {
       try { r.ctx = new (window.AudioContext || window.webkitAudioContext)(); }
       catch { return; }
     }
-    if (r.ctx.state === "suspended") r.ctx.resume().catch(() => {});
-
-    navigator.mediaDevices?.getUserMedia({ audio:true, video:false }).then(stream => {
-      if (!R.current.recog) { stream.getTracks().forEach(t => t.stop()); return; } // stopped before mic granted
-      R.current.stream = stream;
-      const ctx = R.current.ctx;
-      if (!ctx) return;
-      try {
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 64;
-        ctx.createMediaStreamSource(stream).connect(analyser);
-        const buf = new Uint8Array(analyser.frequencyBinCount);
-        const tick = () => {
-          if (!R.current.recog) return; // stopped — bail out of RAF loop
-          analyser.getByteFrequencyData(buf);
-          const avg = buf.reduce((a,b) => a+b, 0) / buf.length;
-          const v   = Math.min(1, avg / 48);
-          const el  = R.current.ringEl;
-          if (el) { el.style.transform = `scale(${1+v*0.65})`; el.style.opacity = String(Math.max(0.12, v)); }
-          R.current.raf = requestAnimationFrame(tick);
-        };
-        tick();
-      } catch {}
-    }).catch(() => {});
+    r.ctx.resume().catch(() => {});
+    try {
+      const analyser = r.ctx.createAnalyser();
+      analyser.fftSize = 64;
+      r.ctx.createMediaStreamSource(stream).connect(analyser);
+      const buf = new Uint8Array(analyser.frequencyBinCount);
+      const tick = () => {
+        if (!R.current.recog) return;
+        analyser.getByteFrequencyData(buf);
+        const avg = buf.reduce((a, b) => a + b, 0) / buf.length;
+        const v = Math.min(1, avg / 48);
+        const el = R.current.ringEl;
+        if (el) { el.style.transform = `scale(${1 + v * 0.65})`; el.style.opacity = String(Math.max(0.12, v)); }
+        R.current.raf = requestAnimationFrame(tick);
+      };
+      tick();
+    } catch (e) {
+      console.warn("[speech] volume meter:", e);
+    }
   }
 
-  function toggle() {
-    if (listening || stopping.current) { if (listening) stopAll(); return; }
-    if (!supported) { alert("Voice input requires Chrome or Safari."); return; }
+  /**
+   * Parallel volume meter — opens its OWN MediaStream just to drive the
+   * recording bar's height in real time. Independent of SpeechRecognition's
+   * audio source. Desktop-only (see isDesktopBrowserForMeter); on mobile we
+   * deliberately skip and let the CSS animation play instead.
+   *
+   * Failure modes are silent on purpose: if the user denies the additional
+   * permission prompt, or if AudioContext can't initialise, the bars just
+   * fall back to their CSS animation. Recording itself is unaffected.
+   */
+  async function startMeterStream() {
+    const m = meterRef.current;
+    if (m.starting || m.stream) return;
+    if (!navigator.mediaDevices?.getUserMedia) return;
+    m.starting = true;
+    let stream = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation:true, noiseSuppression:true, autoGainControl:true },
+      });
+    } catch {
+      m.starting = false;
+      return;
+    }
+    // If recording was stopped between the await and now, drop the stream.
+    if (!R.current.recog) {
+      try { stream.getTracks().forEach(t => t.stop()); } catch {}
+      m.starting = false;
+      return;
+    }
+    try {
+      if (!m.ctx) m.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      m.ctx.resume().catch(() => {});
+      const analyser = m.ctx.createAnalyser();
+      analyser.fftSize = 128;
+      analyser.smoothingTimeConstant = 0.55;
+      m.ctx.createMediaStreamSource(stream).connect(analyser);
+      const buf = new Uint8Array(analyser.frequencyBinCount);
+      m.stream = stream;
+      m.starting = false;
+      m.prev = (m.els || []).map(() => 0.4);
+      // Per the CSS spec, animations override inline `transform` unless the
+      // animation itself is removed. Disable the keyframe animation on each
+      // bar so our rAF-driven inline transform takes effect; stopAll() puts
+      // it back so the next session falls back cleanly when needed.
+      (m.els || []).forEach(el => { if (el) el.style.animation = "none"; });
+      const tick = () => {
+        if (!m.stream || !R.current.recog) return;
+        analyser.getByteFrequencyData(buf);
+        // RMS-style level across the spectrum, normalised to 0..1.
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+        const rms = Math.sqrt(sum / buf.length) / 255;
+        // Boost so normal speaking voice maps roughly to 0.4–0.9.
+        const v = Math.min(1, rms * 3);
+        const els = m.els;
+        if (els && els.length) {
+          const now = performance.now() / 1000;
+          for (let i = 0; i < els.length; i++) {
+            // Per-bar phase wobble keeps the row organic instead of moving
+            // as a single block.
+            const wobble = 0.55 + 0.45 * Math.sin(i * 0.55 + now * 6);
+            const target = 0.22 + 0.78 * v * (0.55 + 0.45 * wobble);
+            const cur = m.prev[i] ?? 0.3;
+            // Smooth toward target (faster on the way up than on the way
+            // down so the bars feel responsive but don't jitter).
+            const k = target > cur ? 0.55 : 0.25;
+            const next = cur + (target - cur) * k;
+            m.prev[i] = next;
+            const el = els[i];
+            if (el) el.style.transform = `scaleY(${next.toFixed(3)})`;
+          }
+        }
+        m.raf = requestAnimationFrame(tick);
+      };
+      tick();
+    } catch (e) {
+      console.warn("[speech] meter stream:", e);
+      try { stream.getTracks().forEach(t => t.stop()); } catch {}
+      m.stream = null;
+      m.starting = false;
+      // Defensive: if we'd already disabled the bar animation, put it back.
+      (m.els || []).forEach(el => {
+        if (!el) return;
+        el.style.transform = "";
+        el.style.animation = "";
+      });
+    }
+  }
+
+  const beginRecognition = useCallback((stream, session) => {
+    // Session bump (from stopAll) invalidates in-flight starts; do not also gate on stopping —
+    // that ref stays true briefly after stop and would swallow the next tap on mobile.
+    if (session !== micSessionRef.current) {
+      stream?.getTracks().forEach(t => t.stop());
+      return;
+    }
 
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     let recog;
-    try { recog = new SR(); } catch { return; }
+    try {
+      recog = new SR();
+    } catch {
+      stream?.getTracks().forEach(t => t.stop());
+      return;
+    }
 
-    recog.continuous     = true;
+    // iOS WebKit: continuous=true often stops immediately. Android Chromium: short runs are more reliable.
+    recog.continuous = stream ? true : (!isAppleMobileDevice() && !isAndroidChromiumForSpeech());
     recog.interimResults = true;
-    recog.lang           = navigator.language || "en-US";
+    recog.lang = (typeof navigator !== "undefined" && navigator.language)
+      ? navigator.language.split(",")[0].trim()
+      : "en-US";
 
-    // Set listening only when the browser confirms recognition has started
-    recog.onstart  = () => {
+    recog.onstart = () => {
+      pendingInterimRef.current = "";
       setMicBlocked(false);
+      setSpeechError("");
       setListening(true);
+      // First start of this user-initiated session — record start time for
+      // the duration cap and the live mm:ss timer. Auto-restarts of the same
+      // logical session don't reset the start time.
+      if (!sessionStartRef.current) {
+        sessionStartRef.current = Date.now();
+        setRecordingMs(0);
+        if (tickIntervalRef.current) clearInterval(tickIntervalRef.current);
+        tickIntervalRef.current = setInterval(() => {
+          if (sessionStartRef.current) setRecordingMs(Date.now() - sessionStartRef.current);
+        }, 200);
+      }
+      // Opt-in: kick off a parallel mic stream just for live volume metering.
+      // Only on desktop browsers — see isDesktopBrowserForMeter() for why.
+      // Restarts of the same session reuse the existing meter stream, so we
+      // gate on `meter.starting` and `meter.stream` to start exactly once.
+      if (meterOptRef.current && isDesktopBrowserForMeter()) {
+        const m = meterRef.current;
+        if (!m.stream && !m.starting) startMeterStream();
+      }
     };
 
     recog.onresult = e => {
       let iText = "";
       for (let j = e.resultIndex; j < e.results.length; j++) {
-        if (e.results[j].isFinal) { onFinal(e.results[j][0].transcript.trim()); setInterim(""); }
-        else iText += e.results[j][0].transcript;
+        if (e.results[j].isFinal) {
+          const t = (e.results[j][0].transcript || "").trim();
+          if (t) onFinalRef.current(t);
+          pendingInterimRef.current = "";
+          setInterim("");
+        } else {
+          iText += e.results[j][0].transcript || "";
+        }
       }
-      if (iText) setInterim(iText);
+      if (iText) {
+        pendingInterimRef.current = iText;
+        setInterim(iText);
+      }
     };
 
     recog.onerror = (ev) => {
-      if (ev?.error === "not-allowed") setMicBlocked(true);
+      const code = ev?.error || "";
+      if (code === "aborted") return;
+      // In auto-restart mode "no-speech" is the *expected* nudge to
+      // re-arm — the user just paused briefly between sentences. Suppress
+      // the error and let onend trigger a restart.
+      if (autoRestartRef.current && code === "no-speech") return;
+      errorOccurredRef.current = true;
+      if (code === "not-allowed") setMicBlocked(true);
+      const friendly = {
+        "not-allowed": "Microphone access was denied. Allow the mic for this site and try again.",
+        "service-not-allowed": speechServiceBlockedHelpMessage(),
+        "network": "Could not reach speech recognition. Check your connection and try again.",
+        "no-speech": "No speech was detected. Speak a bit louder or closer to the mic, then try again.",
+        "audio-capture": "The microphone is not available or is being used by another app.",
+        "bad-grammar": "Voice recognition hit an error. Try again with a shorter phrase.",
+      };
+      setSpeechError(friendly[code] || `Voice input stopped (${code}). You can try again or type instead.`);
+      console.warn("[speech] recognition:", code, ev?.message || "");
       stopAll();
     };
 
-    // onend fires async after stop() — always clear UI listening state (never leave button stuck)
     recog.onend = () => {
+      // Auto-restart for continuous-until-user-stops mode (AI coach, etc.).
+      // The browser ends recognition after each utterance on iOS Safari and
+      // Android Chromium, and after long pauses on desktop Chrome — we want
+      // to seamlessly re-arm so the user can keep talking without tapping
+      // the mic again. Synchronous restart inside onend preserves the user
+      // activation gesture on iOS, where a setTimeout would lose it.
+      if (
+        autoRestartRef.current &&
+        !userStoppedRef.current &&
+        !errorOccurredRef.current &&
+        sessionStartRef.current &&
+        Date.now() - sessionStartRef.current < SESSION_MAX_MS
+      ) {
+        setInterim("");
+        pendingInterimRef.current = "";
+        if (R.current.recog === recog) R.current.recog = null;
+        beginRecognition(R.current.stream, micSessionRef.current);
+        return;
+      }
       setListening(false);
       setInterim("");
       if (R.current.recog === recog) stopAll(true);
     };
 
     R.current.recog = recog;
+    R.current.stream = stream || null;
+
     try {
       recog.start();
-      startVolume();
-    } catch {
-      R.current.recog = null;
+      if (stream) startVolumeMeter(stream);
+    } catch (e) {
+      console.warn("[speech] recog.start:", e);
+      // Let stopAll stop recognition and tracks (do not clear r.recog here first).
       stopAll();
     }
-  }
+    // onFinal intentionally omitted — we read it via onFinalRef so this
+    // callback stays stable across renders and the auto-restart self-call
+    // resolves to the right instance.
+  }, [stopAll]);
 
-  return { listening, interim, toggle, supported, setRingEl, micBlocked };
+  const toggle = useCallback(() => {
+    if (listening) {
+      // Mark as user-initiated so onend's auto-restart path bails out.
+      userStoppedRef.current = true;
+      sessionStartRef.current = 0;
+      stopAll();
+      return;
+    }
+    // New tap to start: lift post-stop debounce so the next press is never a no-op (mobile Chrome).
+    stopping.current = false;
+    userStoppedRef.current = false;
+    errorOccurredRef.current = false;
+    sessionStartRef.current = 0;
+
+    if (!supported) {
+      alert("Voice input requires Chrome or Safari.");
+      return;
+    }
+    if (typeof window !== "undefined" && window.isSecureContext === false) {
+      alert("Voice input needs a secure connection (HTTPS).");
+      return;
+    }
+
+    setMicBlocked(false);
+    setSpeechError("");
+
+    if (shouldUseSpeechOnlyMicPath()) {
+      const session = ++micSessionRef.current;
+      if (shouldPrimeMicBeforeWebSpeech()) {
+        void (async () => {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            stream.getTracks().forEach(t => t.stop());
+            // Do not insert setTimeout here — Chrome drops user activation before SpeechRecognition.start().
+          } catch (err) {
+            console.warn("[speech] mic prime:", err?.name, err?.message);
+            const n = err?.name || "";
+            if (n === "NotAllowedError" || n === "PermissionDeniedError" || n === "SecurityError") {
+              setMicBlocked(true);
+            } else {
+              setSpeechError("Could not open the microphone for voice typing. Check that no other app is using the mic, then try again.");
+            }
+            return;
+          }
+          if (session !== micSessionRef.current) return;
+          beginRecognition(null, session);
+        })();
+        return;
+      }
+      beginRecognition(null, session);
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      alert("Microphone access is not available in this browser.");
+      return;
+    }
+
+    const session = ++micSessionRef.current;
+    void (async () => {
+      let stream = null;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+          video: false,
+        });
+      } catch (err) {
+        console.warn("[speech] getUserMedia:", err?.name, err?.message);
+        const n = err?.name || "";
+        if (n === "NotAllowedError" || n === "PermissionDeniedError" || n === "SecurityError") {
+          setMicBlocked(true);
+        }
+        return;
+      }
+
+      if (session !== micSessionRef.current) {
+        stream.getTracks().forEach(t => t.stop());
+        return;
+      }
+
+      beginRecognition(stream, session);
+    })();
+  }, [listening, supported, stopAll, beginRecognition]);
+
+  // Cancel = stop without committing the current interim. Used by the AI
+  // coach's recording-bar "×" button to discard a recording the user
+  // doesn't want to send. Still safe for non-autoRestart consumers.
+  const cancel = useCallback(() => {
+    userStoppedRef.current = true;
+    sessionStartRef.current = 0;
+    pendingInterimRef.current = "";
+    stopAll();
+  }, [stopAll]);
+
+  return { listening, interim, toggle, cancel, supported, setRingEl, setBarEls, micBlocked, speechError, recordingMs };
 }
 
-function MicBtn({ speech, color = T.accent, size = 28 }) {
+function MicBtn({ speech, color = T.accent, size = 28, prominent = false, locked = false, onLockedClick }) {
+  // Touch: touchend (activation). Mouse/pen: pointerdown + suppress duplicate click (Chrome desktop).
+  const suppressClickRef = useRef(false);
   if (!speech.supported) return null;
   const blocked = !!speech.micBlocked;
-  const c = speech.listening ? color : blocked ? T.muted : T.hint;
+  const c = speech.listening ? color : blocked ? T.muted : locked ? T.gold : prominent ? color : T.hint;
+  const label = locked ? "Voice logging is a Pro feature" : speech.listening ? "Stop dictation" : blocked ? "Microphone blocked" : "Start dictation";
+  const idleBorder = locked ? "rgba(200,144,42,0.45)" : blocked ? T.border : prominent ? `${color}55` : T.border;
+  const idleBg = locked ? "rgba(200,144,42,0.10)" : blocked ? "transparent" : prominent ? `${color}16` : "transparent";
+  function handleActivate() {
+    if (locked) { onLockedClick?.(); return; }
+    speech.toggle();
+  }
   return (
     <>
       <style>{`
@@ -788,13 +1716,36 @@ function MicBtn({ speech, color = T.accent, size = 28 }) {
           50% { transform: scale(1.35); opacity: 0.55; }
         }
       `}</style>
-    <button onClick={speech.toggle}
-      title={speech.listening ? "Tap to stop" : blocked ? "Microphone blocked" : "Tap to dictate"}
+    <button
+      type="button"
+      aria-label={label}
+      title={locked ? "Voice logging — tap to unlock with Pro" : speech.listening ? "Tap to stop" : blocked ? "Microphone blocked" : "Tap to dictate"}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        if (e.pointerType === "touch") return;
+        suppressClickRef.current = true;
+        window.setTimeout(() => { suppressClickRef.current = false; }, 400);
+        e.preventDefault();
+        handleActivate();
+      }}
+      onTouchEnd={(e) => {
+        suppressClickRef.current = true;
+        window.setTimeout(() => { suppressClickRef.current = false; }, 400);
+        if (e.cancelable) e.preventDefault();
+        handleActivate();
+      }}
+      onClick={(e) => {
+        e.preventDefault();
+        if (suppressClickRef.current) return;
+        handleActivate();
+      }}
       style={{ position:"relative", width:size, height:size, borderRadius:"50%",
-        border:`1px solid ${speech.listening ? color+"55" : T.border}`,
-        background: speech.listening ? color+"14" : "transparent",
+        border:`1px solid ${speech.listening ? color+"55" : idleBorder}`,
+        background: speech.listening ? color+"14" : idleBg,
+        boxShadow: prominent && !speech.listening && !blocked && !locked ? `0 0 0 1px ${color}0d` : "none",
         cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center",
-        flexShrink:0, padding:0, transition:"border-color 0.2s, background 0.2s" }}>
+        flexShrink:0, padding:0, transition:"border-color 0.2s, background 0.2s, box-shadow 0.2s",
+        touchAction:"manipulation", WebkitTapHighlightColor:"transparent" }}>
       {speech.listening ? (
         <span
           aria-hidden
@@ -804,6 +1755,16 @@ function MicBtn({ speech, color = T.accent, size = 28 }) {
             animation:"coachMicPulse 1.1s ease-in-out infinite", pointerEvents:"none",
           }}
         />
+      ) : null}
+      {/* Locked: tiny gold lock dot so it reads as Pro at a glance. */}
+      {locked && !speech.listening ? (
+        <span aria-hidden style={{
+          position:"absolute", top:-2, right:-2, width:12, height:12, borderRadius:"50%",
+          background:T.gold, color:"#0F0F0D",
+          display:"flex", alignItems:"center", justifyContent:"center",
+          fontSize:7, fontWeight:800, letterSpacing:"0.02em",
+          border:"1px solid #0F0F0D", pointerEvents:"none",
+        }}>P</span>
       ) : null}
       {/* volume ring — animated via direct DOM in RAF loop, no React state */}
       <div ref={speech.setRingEl} style={{ position:"absolute", inset:-5, borderRadius:"50%",
@@ -871,6 +1832,9 @@ function NoteStrip({ habitId, habit, onAddNote }) {
           {speech.interim}…
         </div>
       )}
+      {speech.speechError ? (
+        <div style={{ fontSize:11, color:T.accent, lineHeight:1.5, whiteSpace:"pre-line" }}>{speech.speechError}</div>
+      ) : null}
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
         <div style={{ marginRight:"auto" }}/>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
@@ -1015,13 +1979,13 @@ function TodayHabitMenuDropdown({ habit, onEdit, onDelete, onShareHabit, shareSa
         style={{ fontSize:12, color:habit.color, background:"none", border:`0.5px solid ${habit.color+"44"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>
         Edit
       </button>
-      {!habit.sharedGoalId && onShareHabit && (
+      {onShareHabit && (
         <button type="button" disabled={!!shareSaving} onPointerDown={e => e.stopPropagation()} onClick={async (e) => {
           e.stopPropagation();
           try { await onShareHabit(habit.id); } finally { onCloseMenu(); }
         }}
           style={{ fontSize:12, color:T.gold, background:"rgba(200,144,42,0.12)", border:`0.5px solid rgba(200,144,42,0.35)`, borderRadius:T.rsm, padding:"5px 12px", cursor:shareSaving?"wait":"pointer", fontWeight:500, opacity:shareSaving?0.55:1 }}>
-          {shareSaving ? "Sharing…" : "Share with friends"}
+          {shareSaving ? "Inviting…" : "Invite friends to this goal"}
         </button>
       )}
       <button type="button" aria-label="Delete habit" onClick={(e) => { e.stopPropagation(); setConfirmDelete(true); }}
@@ -1309,7 +2273,7 @@ function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHabit, on
   );
 }
 
-function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete, onDelete }) {
+function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete, onDelete, onShareGoal }) {
   const stats = getGoalProgress(goal);
   const { isComplete } = stats;
   const barFillPct = goalBarFillWidthPct(stats);
@@ -1374,6 +2338,12 @@ function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete, onDelete }) {
             style={{ fontSize:12, color:goal.color, background:"none", border:`0.5px solid ${goal.color+"55"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>
             Edit
           </button>
+          {onShareGoal && (
+            <button type="button" onClick={(e) => { e.stopPropagation(); setShowMenu(false); onShareGoal(goal.id); }}
+              style={{ fontSize:12, color:"#8B5CF6", background:"none", border:`0.5px solid rgba(139,92,246,0.4)`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>
+              {goal.sharedGoalId ? "Invite friends" : "Invite friends to this goal"}
+            </button>
+          )}
           {!isComplete && (
             <button type="button" onClick={(e) => { e.stopPropagation(); onComplete(goal.id); setShowMenu(false); }}
               style={{ fontSize:12, color:T.green, background:"none", border:`0.5px solid ${T.green+"44"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer" }}>
@@ -1465,6 +2435,7 @@ function LogProjectModal({ habit, onClose, onLog }) {
           <MicBtn speech={winSpeech} color={habit.color} size={30}/>
         </div>
         {winSpeech.interim && <div style={{ fontSize:12, color:T.hint, fontStyle:"italic", marginTop:4, paddingLeft:2 }}>{winSpeech.interim}…</div>}
+        {winSpeech.speechError ? <div style={{ fontSize:11, color:T.accent, marginTop:6, lineHeight:1.5, whiteSpace:"pre-line" }}>{winSpeech.speechError}</div> : null}
       </div>
 
       {/* Hard part */}
@@ -1478,6 +2449,7 @@ function LogProjectModal({ habit, onClose, onLog }) {
           <MicBtn speech={hardSpeech} color={habit.color} size={30}/>
         </div>
         {hardSpeech.interim && <div style={{ fontSize:12, color:T.hint, fontStyle:"italic", marginTop:4, paddingLeft:2 }}>{hardSpeech.interim}…</div>}
+        {hardSpeech.speechError ? <div style={{ fontSize:11, color:T.accent, marginTop:6, lineHeight:1.5, whiteSpace:"pre-line" }}>{hardSpeech.speechError}</div> : null}
       </div>
 
       <PBtn color={habit.color} onClick={() => {
@@ -1502,9 +2474,11 @@ function ReflectModal({ habit, onClose, onSave }) {
   const past = habit.logs.filter(l => l.reflection).slice(-4).reverse();
 
   function handleSave() {
+    const interimSnap = speech.interim?.trim() || "";
     if (speech.listening) speech.toggle();
-    if (!text.trim()) { onClose(); return; }
-    onSave(habit.id, text.trim());
+    const combined = (text.trim() || interimSnap).trim();
+    if (!combined) { onClose(); return; }
+    onSave(habit.id, combined);
     setSaved(true);
     setTimeout(onClose, 700);
   }
@@ -1538,6 +2512,9 @@ function ReflectModal({ habit, onClose, onSave }) {
           {speech.interim}…
         </div>
       )}
+      {speech.speechError && !saved ? (
+        <div style={{ fontSize:12, color:T.accent, marginBottom:10, paddingLeft:4, lineHeight:1.5, whiteSpace:"pre-line" }}>{speech.speechError}</div>
+      ) : null}
       {past.length > 0 && (
         <div style={{ marginTop:22 }}>
           <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:10 }}>Past reflections</div>
@@ -1560,6 +2537,7 @@ const TYPE_META = {
   weekly:   { bg:"#C0392B18", text:"#C0392B", label:"Weekly target"  },
   project:  { bg:"#2980B918", text:"#2980B9", label:"Build"          },
   limit:    { bg:"#8E44AD18", text:"#8E44AD", label:"Limit / reduce" },
+  log:      { bg:"rgba(200,144,42,0.12)", text:"#C8902A", label:"Log" },
 };
 function EditModal({ habit, onClose, onSave }) {
   const [name,        setName]        = useState(habit.name);
@@ -1577,12 +2555,18 @@ function EditModal({ habit, onClose, onSave }) {
 
   function save() {
     const updates = { name:name.trim()||habit.name, emoji:emoji||habit.emoji, color, reflection, reflectionPrompt:reflPrompt.trim()||null };
+    if (habit.habitType === "log") {
+      updates.reflection = false;
+      updates.reflectionPrompt = null;
+    }
     if (habit.habitType === "weekly")   updates.weeklyTarget = parseInt(weekTarget) || habit.weeklyTarget;
     if (habit.habitType === "limit")    { updates.dailyBudget = parseInt(budget)||habit.dailyBudget; updates.unit = budgetUnit||habit.unit; updates.tapIncrement = parseInt(increment)||1; }
     if (habit.habitType === "project")  updates.dailyTargetMinutes = Math.max(1, parseInt(dailyTargetMins, 10) || (habit.dailyTargetMinutes ?? 60));
     onSave(habit.id, updates);
     onClose();
   }
+
+  const isLog = habit.habitType === "log";
 
   return (
     <Modal onClose={onClose}>
@@ -1592,7 +2576,7 @@ function EditModal({ habit, onClose, onSave }) {
       <div style={{ fontSize:11, color:T.hint, marginBottom:16, lineHeight:1.45, maxWidth:320 }}>
         Type can&apos;t be changed after creation — delete and recreate if you need a different kind.
       </div>
-      <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:20 }}>Edit habit</div>
+      <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:20 }}>{isLog ? "Edit log" : "Edit habit"}</div>
       <div style={{ display:"flex", gap:10, marginBottom:20 }}>
         <div style={{ flex:1 }}><label style={lbl}>Name</label><input style={inp} value={name} onChange={e => setName(e.target.value)} maxLength={40}/></div>
         <div><label style={lbl}>Emoji</label><input style={{ ...inp, fontSize:22, textAlign:"center", width:60 }} value={emoji} onChange={e => setEmoji(e.target.value)} maxLength={2}/></div>
@@ -1652,6 +2636,11 @@ function EditModal({ habit, onClose, onSave }) {
         </div>
       )}
 
+      {isLog ? (
+        <div style={{ background:T.surface, borderRadius:T.rsm, padding:14, marginBottom:20, fontSize:13, color:T.muted, lineHeight:1.55 }}>
+          Logs are free-form dated entries. They appear in <strong style={{ color:T.text }}>Journal</strong> and don&apos;t affect your Today ring or streaks.
+        </div>
+      ) : (
       <div style={{ marginBottom:20 }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:reflection?12:0 }}>
           <div>
@@ -1665,6 +2654,7 @@ function EditModal({ habit, onClose, onSave }) {
             placeholder={habit.reflectionPrompt || "What do you want to remember from today?"}/>
         )}
       </div>
+      )}
       <div style={{ fontSize:11, color:T.hint, lineHeight:1.5, marginBottom:18, padding:"12px 14px", background:T.surface, borderRadius:T.rsm, border:`0.5px solid ${T.border}` }}>
         <span style={{ color:T.sub, fontWeight:600 }}>XP</span>
         {" — "}Your total lives on your account (⚡ in the header or Profile). XP is awarded when you log; habits don&apos;t store their own XP field to edit here.
@@ -1779,6 +2769,50 @@ function AddModal({ onClose, onSave }) {
         else onSave(base);
       }}>Add habit</PBtn>
       <GBtn onClick={() => setStep("type")}>Back</GBtn>
+    </Modal>
+  );
+}
+
+/** Lightweight journal-style track — dated notes only (stored as habit_type "log"). */
+function AddLogModal({ onClose, onSave }) {
+  const [name, setName] = useState("");
+  const [emoji, setEmoji] = useState("📝");
+  const [color, setColor] = useState(COLORS[2]);
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:8 }}>New log</div>
+      <div style={{ fontSize:13, color:T.muted, marginBottom:20, lineHeight:1.55 }}>{HABIT_TYPES.log.desc}</div>
+      <div style={{ display:"flex", gap:10, marginBottom:20 }}>
+        <div style={{ flex:1 }}>
+          <label style={lbl}>Name</label>
+          <input style={inp} value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Training notes" maxLength={40} autoFocus/>
+        </div>
+        <div>
+          <label style={lbl}>Emoji</label>
+          <input style={{ ...inp, fontSize:22, textAlign:"center", width:60 }} value={emoji} onChange={e => setEmoji(e.target.value)} maxLength={2}/>
+        </div>
+      </div>
+      <div style={{ marginBottom:20 }}>
+        <label style={lbl}>Color</label>
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+          {COLORS.map(c => <div key={c} onClick={() => setColor(c)} style={{ width:28, height:28, borderRadius:"50%", background:c, cursor:"pointer", outline:color===c?`2.5px solid ${c}`:"none", outlineOffset:2 }}/>)}
+        </div>
+      </div>
+      <PBtn color={color} onClick={() => {
+        if (!name.trim()) return;
+        onSave({
+          id: `${Date.now()}`,
+          name: name.trim(),
+          emoji: emoji || "📝",
+          habitType: "log",
+          color,
+          reflection: false,
+          reflectionPrompt: null,
+          streak: 0,
+          logs: [],
+        });
+      }}>Create log</PBtn>
+      <GBtn onClick={onClose}>Cancel</GBtn>
     </Modal>
   );
 }
@@ -2016,11 +3050,11 @@ function HistoryModal({ habits, onClose, isPro, onUpgrade }) {
           {/* Overlay */}
           <div style={{ position:"absolute", inset:0, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:8, background:"rgba(14,14,14,0.75)", backdropFilter:"blur(2px)", borderRadius:T.rsm, padding:"0 20px" }}>
             <div style={{ fontSize:20 }}>🔒</div>
-            <div style={{ fontSize:13, color:T.text, fontWeight:500, textAlign:"center" }}>Full history will be part of early supporter access</div>
+            <div style={{ fontSize:13, color:T.text, fontWeight:500, textAlign:"center" }}>Full history is part of Forged Pro</div>
             <div style={{ fontSize:12, color:T.muted, textAlign:"center" }}>You have {habit.logs.filter(l => l.date < cutoff).length} older logs waiting</div>
             <button onClick={onUpgrade}
-              style={{ marginTop:6, padding:"9px 20px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:13, fontWeight:600, cursor:"pointer" }}>
-              Unlock beta access →
+              style={{ marginTop:6, padding:"9px 20px", borderRadius:T.rsm, border:"none", background:T.gold, color:"#0F0F0D", fontSize:13, fontWeight:700, cursor:"pointer" }}>
+              Unlock Forged Pro →
             </button>
           </div>
         </div>
@@ -2082,7 +3116,7 @@ const PAGE_TOURS = {
     {
       target: "[data-tour='social-teaser']",
       title: "Forge together",
-      body: "Forge Pro adds friends, challenges, streak comparisons, and group leaderboards — built for people who want accountability that actually sticks.",
+      body: "Add friends, share goals, and see who's still logging. Nudging a friend when they slip is a Pro feature — the rest of the accountability layer is free.",
       pad: 8,
     },
     {
@@ -2136,7 +3170,7 @@ const PAGE_TOURS = {
     {
       target: "[data-tour='profile-upgrade']",
       title: "Early supporter access",
-      body: "Unlocks the AI coach, unlimited habits, and full log history — at a price locked in forever. First 100 users get it at $4.99/mo.",
+      body: "Unlocks unlimited habits and coach messages, voice logging, friend nudges, and full history — at a price locked in forever. First 100 users get it at $4.99/mo.",
       pad: 6,
     },
     {
@@ -2266,11 +3300,63 @@ function TourOverlay({ steps, stepIdx, onNext, onSkip }) {
   );
 }
 
+// ─── LOG (journal-style) — Today card ────────────────────────────────────────
+function LogCard({ habit, onSaveEntry, onEditHabit, onDeleteHabit }) {
+  const [draft, setDraft] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const today = todayStr();
+  const todays = habit.logs.filter(l => l.date === today && l.value === "log");
+  const longPeek = useTodayHabitLongPeekHandlers(setMenuOpen, !!(onEditHabit && onDeleteHabit));
+
+  async function save() {
+    const t = draft.trim();
+    if (!t) return;
+    const ok = await onSaveEntry(habit.id, t);
+    if (ok !== false) setDraft("");
+  }
+
+  return (
+    <div className="rc" style={cardStyle(false, habit)} {...longPeek}>
+      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
+        <IconBox habit={habit} logged={false}/>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{habit.name}</div>
+          <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>Log · {todays.length} today</div>
+        </div>
+        {onEditHabit && onDeleteHabit && (
+          <TodayOverflowDotsBtn expanded={menuOpen} onToggle={() => setMenuOpen(p => !p)} />
+        )}
+      </div>
+      {menuOpen && onEditHabit && onDeleteHabit && (
+        <TodayHabitMenuDropdown
+          habit={habit}
+          onEdit={onEditHabit}
+          onDelete={onDeleteHabit}
+          menuOpen={menuOpen}
+          onCloseMenu={() => setMenuOpen(false)}
+        />
+      )}
+      <div style={{ padding:"0 15px 14px" }}>
+        <textarea
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          placeholder="Write an entry for today…"
+          rows={3}
+          style={{ width:"100%", boxSizing:"border-box", resize:"vertical", borderRadius:T.rsm, border:`0.5px solid ${T.borderStrong}`, background:T.surface, color:T.text, fontSize:13, padding:10, fontFamily:T.font, lineHeight:1.5 }}
+        />
+        <PBtn color={habit.color} style={{ marginTop:10 }} onClick={() => void save()}>Save entry</PBtn>
+      </div>
+    </div>
+  );
+}
+
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
-function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote, onLogZero, onOpenLog, onOpenGoalLog, onEditGoal, onCompleteGoal, onDeleteGoal, onEditHabit, onDeleteHabit, onShareHabit, sharingHabitId, onXPInfo, onAdd, hideFloatingAdd }) {
+function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote, onLogZero, onOpenLog, onOpenGoalLog, onEditGoal, onCompleteGoal, onDeleteGoal, onShareGoal, onEditHabit, onDeleteHabit, onShareHabit, sharingHabitId, onXPInfo, onAdd, onSaveLogEntry, hideFloatingAdd, coachEverOpened = true, onOpenCoach }) {
   const activeGoals = goals.filter(g => g.status !== "completed");
-  const loggedCount = habits.filter(h => isLoggedToday(h)).length;
-  const totalTrackables = habits.length;
+  const trackHabits = habits.filter(h => h.habitType !== "log");
+  const logHabits = habits.filter(h => h.habitType === "log");
+  const loggedCount = trackHabits.filter(h => isLoggedToday(h)).length;
+  const totalTrackables = trackHabits.length;
   const pct = totalTrackables ? Math.round((loggedCount / totalTrackables) * 100) : 0;
   const hr = new Date().getHours();
   const greeting = hr < 12 ? "Rise and forge." : hr < 17 ? "Keep the heat up." : "Finish strong.";
@@ -2279,6 +3365,11 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
   const limit   = habits.filter(h => h.habitType === "limit");
   const weekly  = habits.filter(h => h.habitType === "weekly");
   const project = habits.filter(h => h.habitType === "project");
+  const ringSummary = totalTrackables
+    ? `${loggedCount} of ${totalTrackables} logged`
+    : logHabits.length
+      ? "Logs below — ring is for habits & goals"
+      : "";
   if (habits.length === 0 && activeGoals.length === 0) return (
     <div style={{ padding:"48px 28px", textAlign:"center" }}>
       <div style={{ fontSize:48, marginBottom:18 }}>⚒️</div>
@@ -2292,13 +3383,37 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
     </div>
   );
 
+  const showCoachNudge = habits.length > 0 && !coachEverOpened;
+
   return (
     <div>
+      {showCoachNudge && (
+        <button
+          type="button"
+          onClick={onOpenCoach}
+          style={{
+            display:"flex", alignItems:"center", gap:8,
+            width:"calc(100% - 28px)", margin:"6px 14px 0",
+            padding:"9px 12px",
+            background:"linear-gradient(90deg, rgba(200,144,42,0.14), rgba(200,144,42,0.04))",
+            border:"0.5px solid rgba(200,144,42,0.35)",
+            borderRadius:T.rsm,
+            color:T.gold, fontSize:12, fontWeight:600,
+            cursor:"pointer", textAlign:"left",
+            fontFamily:T.font,
+          }}
+        >
+          <span aria-hidden style={{ fontSize:14, lineHeight:1 }}>✨</span>
+          <span style={{ color:T.sub, fontWeight:500, flex:1, lineHeight:1.35 }}>
+            Coach can log your habits by voice — <span style={{ color:T.gold, fontWeight:700 }}>tap the ✨ button</span> to try.
+          </span>
+        </button>
+      )}
       <div data-tour="today-summary" style={{ margin:"6px 14px 16px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:"18px 20px", display:"flex", alignItems:"center", gap:18 }}>
         <Ring pct={pct}/>
         <div style={{ flex:1 }}>
-          <div style={{ fontFamily:T.serif, fontSize:20, color:T.text, marginBottom:4 }}>{pct === 100 ? "Forged for today." : greeting}</div>
-          <div style={{ fontSize:13, color:T.muted }}>{loggedCount} of {totalTrackables} logged</div>
+          <div style={{ fontFamily:T.serif, fontSize:20, color:T.text, marginBottom:4 }}>{pct === 100 && totalTrackables > 0 ? "Forged for today." : greeting}</div>
+          <div style={{ fontSize:13, color:T.muted }}>{ringSummary || " "}</div>
           <button onClick={onXPInfo} style={{ marginTop:10, display:"inline-flex", alignItems:"center", gap:5, fontSize:11, fontWeight:500, padding:"3px 10px", borderRadius:12, background:"rgba(200,144,42,0.15)", color:T.gold, border:"none", cursor:"pointer" }}>
             ⚡ {xp} xp · {level.label}
           </button>
@@ -2307,11 +3422,12 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
       {/* Tour target: wraps only the first non-empty section so the spotlight ring is tight */}
       {(() => {
         const sections = [
-          activeGoals.length > 0 && <><SLabel>Goals</SLabel> {activeGoals.map(g => <TodayGoalCard key={g.id} goal={g} onOpenLog={onOpenGoalLog} onEdit={onEditGoal} onComplete={onCompleteGoal} onDelete={onDeleteGoal}/>)}</>,
+          activeGoals.length > 0 && <><SLabel>Goals</SLabel> {activeGoals.map(g => <TodayGoalCard key={g.id} goal={g} onOpenLog={onOpenGoalLog} onEdit={onEditGoal} onComplete={onCompleteGoal} onDelete={onDeleteGoal} onShareGoal={onShareGoal}/>)}</>,
           daily.length   > 0 && <><SLabel>Daily</SLabel>          {daily.map(h   => <DailyCard  key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId === h.id}/>)}</>,
           limit.length   > 0 && <><SLabel>Limits</SLabel>         {limit.map(h   => <LimitCard  key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId === h.id}/>)}</>,
           weekly.length  > 0 && <><SLabel>Weekly targets</SLabel> {weekly.map(h  => <WeeklyCard key={h.id} habit={h} onTap={onTap} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId === h.id}/>)}</>,
           project.length > 0 && <><SLabel>Build</SLabel>          {project.map(h => <ProjectCard key={h.id} habit={h} onOpenLog={onOpenLog} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId === h.id}/>)}</>,
+          logHabits.length > 0 && onSaveLogEntry && <><SLabel>Logs</SLabel> {logHabits.map(h => <LogCard key={h.id} habit={h} onSaveEntry={onSaveLogEntry} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit}/>)}</>,
         ].filter(Boolean);
         return sections.map((sec, i) =>
           i === 0
@@ -2320,7 +3436,7 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
         );
       })()}
       <div style={{ height:16 }}/>
-      {!hideFloatingAdd && (habits.length > 0 || activeGoals.length > 0) && onAdd && (
+      {!hideFloatingAdd && (trackHabits.length > 0 || activeGoals.length > 0 || logHabits.length > 0) && onAdd && (
         <button
           type="button"
           onClick={onAdd}
@@ -2376,13 +3492,11 @@ function BetaModal({ onClose }) {
 
   return (
     <Modal onClose={onClose}>
-      <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:10 }}>Interested in becoming an early supporter?</div>
+      <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:10 }}>Interested in Forged Pro?</div>
       <div style={{ fontSize:13, color:T.muted, lineHeight:1.8, marginBottom:20 }}>
-        I'm gauging interest before charging anything. If you want to be one of the first 100 beta supporters,
-        it's <strong style={{ color:T.text }}>$4.99/month</strong> — and that price is yours for life if you sign up early.
+        Forged Pro is <strong style={{ color:T.text }}>$4.99/month</strong> — unlimited AI coaching, full history, friend nudges, and voice logging.
         <br/><br/>
-        You won't be charged yet. In exchange I'd genuinely love your feedback as I build this out. This is a solo-built app
-        and early voices shape everything.
+        Leave your email and I'll reach out directly. Early users shape what gets built next.
       </div>
       <FG label="Your email">
         <input style={inp} type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} autoFocus/>
@@ -2404,9 +3518,22 @@ function BetaModal({ onClose }) {
 // ─── JOURNAL DAY SECTION ──────────────────────────────────────────────────────
 // One section per date in the list view. Today is expanded by default.
 // Past days collapse into a single row showing a snapshot.
-function DaySection({ date, dayHabits, onReflect, onDeleteLogEntry }) {
+function DaySection({ date, dayHabits, onReflect, onDeleteLogEntry, listFullyExpanded, journalCollapseNonce, onAccordionInteraction }) {
   const isToday = date === todayStr();
   const [open, setOpen] = useState(isToday);
+  useEffect(() => {
+    if (listFullyExpanded && !isToday) setOpen(true);
+  }, [listFullyExpanded, isToday]);
+  const prevCollapseNonce = useRef(null);
+  useEffect(() => {
+    if (prevCollapseNonce.current === null) {
+      prevCollapseNonce.current = journalCollapseNonce;
+      return;
+    }
+    if (prevCollapseNonce.current === journalCollapseNonce) return;
+    prevCollapseNonce.current = journalCollapseNonce;
+    if (!isToday) setOpen(false);
+  }, [journalCollapseNonce, isToday]);
 
   const label = isToday ? "Today" : date === daysAgo(1) ? "Yesterday" : fmtEntryDate(date);
   // Snapshot: unique habit emojis for this day + total log count
@@ -2421,36 +3548,53 @@ function DaySection({ date, dayHabits, onReflect, onDeleteLogEntry }) {
           <div style={{ fontSize:13, fontWeight:600, color:T.text, letterSpacing:"0.01em" }}>Today</div>
         </div>
       ) : (
-        <button onClick={() => setOpen(o => !o)}
+        <button type="button" onClick={() => { onAccordionInteraction?.(); setOpen(o => !o); }}
           style={{ width:"100%", display:"flex", alignItems:"center", padding:"10px 18px 8px", background:"none", border:"none", cursor:"pointer", gap:10 }}>
           {/* Colour line */}
-          <div style={{ width:3, height:28, borderRadius:2, background:open?T.accent:T.borderStrong, flexShrink:0, transition:"background 0.2s" }}/>
+          <div style={{ width:3, height:28, borderRadius:2, background:open?T.accent:T.borderStrong, flexShrink:0, transition:"background 0.2s ease" }}/>
           <div style={{ flex:1, textAlign:"left" }}>
-            <div style={{ fontSize:13, fontWeight:500, color:open?T.text:T.muted, transition:"color 0.2s" }}>{label}</div>
+            <div style={{ fontSize:13, fontWeight:500, color:open?T.text:T.muted, transition:"color 0.2s ease" }}>{label}</div>
             {!open && <div style={{ fontSize:11, color:T.hint, marginTop:1 }}>{emojis} · {totalLogs} {totalLogs === 1 ? "entry" : "entries"}</div>}
           </div>
-          <div style={{ fontSize:14, color:T.hint, transition:"transform 0.2s", transform:open?"rotate(90deg)":"rotate(0deg)" }}>›</div>
+          <div style={{ fontSize:14, color:T.hint, transition:"transform 0.2s ease", transform:open?"rotate(90deg)":"rotate(0deg)" }}>›</div>
         </button>
       )}
 
       {/* Expanded content */}
-      {open && dayHabits.map(({ habit, logs, entryKey }) => (
+      {open && (
+      <div style={{ animation:"journalFadeIn 0.18s ease-out" }}>
+      {dayHabits.map(({ habit, logs, entryKey }) => (
         <HabitDayCard key={entryKey || habit.id} habit={habit} logs={logs} onReflect={onReflect} onDeleteLogEntry={onDeleteLogEntry}/>
       ))}
+      </div>
+      )}
     </div>
   );
 }
 
 // Missed day (marked by user, optional note) — list / week views
-function MissedDaySection({ date, note, onEdit, onClear }) {
+function MissedDaySection({ date, note, onEdit, onClear, listFullyExpanded, journalCollapseNonce, onAccordionInteraction }) {
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (listFullyExpanded) setOpen(true);
+  }, [listFullyExpanded]);
+  const prevCollapseNonce = useRef(null);
+  useEffect(() => {
+    if (prevCollapseNonce.current === null) {
+      prevCollapseNonce.current = journalCollapseNonce;
+      return;
+    }
+    if (prevCollapseNonce.current === journalCollapseNonce) return;
+    prevCollapseNonce.current = journalCollapseNonce;
+    setOpen(false);
+  }, [journalCollapseNonce]);
   const label = fmtEntryDate(date);
   const hasNote = !!(note && note.trim());
   return (
     <div style={{ margin:"0 14px 6px", borderRadius:T.r, border:`0.5px solid rgba(230,126,34,0.38)`, overflow:"hidden", background:"rgba(230,126,34,0.04)" }}>
       <button
         type="button"
-        onClick={() => setOpen(o => !o)}
+        onClick={() => { onAccordionInteraction?.(); setOpen(o => !o); }}
         style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 14px", background:"none", border:"none", cursor:"pointer", gap:10 }}>
         <span style={{ fontSize:12, fontWeight:600, color:T.amber }}>{label}</span>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
@@ -2461,7 +3605,7 @@ function MissedDaySection({ date, note, onEdit, onClear }) {
         </div>
       </button>
       {open && (
-        <div style={{ padding:"0 14px 12px", borderTop:`0.5px solid rgba(230,126,34,0.18)` }}>
+        <div style={{ padding:"0 14px 12px", borderTop:`0.5px solid rgba(230,126,34,0.18)`, animation:"journalFadeIn 0.18s ease-out" }}>
           {hasNote ? (
             <div style={{ fontSize:13, color:T.sub, lineHeight:1.55, marginTop:10, marginBottom:10 }}>{note.trim()}</div>
           ) : (
@@ -2494,6 +3638,8 @@ function formatProjectMinutes(totalMins) {
 function renderJournalLogContent(habit, log) {
   const note = log.note?.trim();
   const noteSuffix = note ? ` · ${truncateText(note, 48)}` : "";
+
+  if (habit.habitType === "log" && log.value === "log") return <>{note || "Log entry"}</>;
 
   if (log.value === "skip") return <>{`Skipped${noteSuffix}`}</>;
   if (log.value === "quicknote") return <>{note || "Quick note"}</>;
@@ -2577,6 +3723,10 @@ function HabitDayCard({ habit, logs, onReflect, onDeleteLogEntry }) {
 
   // Summary line based on habit type
   function summaryLine() {
+    if (habit.habitType === "log") {
+      const n = nonNote.filter(l => l.value === "log").length;
+      return `${n} log entr${n === 1 ? "y" : "ies"}`;
+    }
     if (habit.habitType === "goal") {
       const latest = nonNote.slice(-1)[0];
       const value = typeof latest?.value === "number" ? latest.value : (habit.currentValue ?? 0);
@@ -2716,7 +3866,7 @@ function HabitDayCard({ habit, logs, onReflect, onDeleteLogEntry }) {
       )) : null}
 
       {/* Add reflection prompt if none yet */}
-      {!reflection && habit.habitType !== "goal" && (
+      {!reflection && habit.habitType !== "goal" && habit.habitType !== "log" && (
         <div style={{ padding:"8px 14px" }}>
           <button onClick={() => onReflect(habit.id)}
             style={{ fontSize:12, color:habit.color+"99", background:"none", border:"none", cursor:"pointer", fontWeight:500, padding:0 }}>
@@ -2751,12 +3901,15 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
   const [missedNoteDraft, setMissedNoteDraft] = useState("");
   const [monthMissedDraft, setMonthMissedDraft] = useState("");
   const [openWeeks, setOpenWeeks] = useState(() => new Set([weekStartFor(todayStr())]));
+  const [listFullyExpanded, setListFullyExpanded] = useState(false);
+  const [journalCollapseNonce, setJournalCollapseNonce] = useState(0);
 
   useEffect(() => {
     setMissedMap(loadJournalMissedMap(journalUserId));
   }, [journalUserId]);
 
   function toggleWeek(ws) {
+    setListFullyExpanded(false);
     setOpenWeeks(prev => {
       const next = new Set(prev);
       if (next.has(ws)) next.delete(ws);
@@ -2851,6 +4004,12 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
   // Today always first; remaining days newest → oldest (ISO date sort)
   const sortedDatesDesc = hasJournalRows ? [tStr, ...mergedDesc.filter(d => d !== tStr)] : [];
   const weekKeysDesc = [...new Set(sortedDatesDesc.map(d => weekStartFor(d)))].sort((a, b) => b.localeCompare(a));
+  const weekKeysKey = weekKeysDesc.join("|");
+
+  useEffect(() => {
+    if (viewMode !== "week" || !listFullyExpanded) return;
+    setOpenWeeks(new Set(weekKeysDesc));
+  }, [viewMode, listFullyExpanded, weekKeysKey]);
 
   useEffect(() => {
     if (selectedDay == null) { setMonthMissedDraft(""); return; }
@@ -2859,6 +4018,7 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
   }, [selectedDay, viewYear, viewMonth, missedMap]);
 
   function renderDayOrMissed(date) {
+    const onAccordionInteraction = () => setListFullyExpanded(false);
     if (Object.prototype.hasOwnProperty.call(missedMap, date)) {
       return (
         <MissedDaySection
@@ -2867,6 +4027,9 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
           note={missedMap[date]}
           onEdit={() => { setMissedEditDate(date); setMissedNoteDraft(missedMap[date] || ""); }}
           onClear={() => clearMissed(date)}
+          listFullyExpanded={listFullyExpanded}
+          journalCollapseNonce={journalCollapseNonce}
+          onAccordionInteraction={onAccordionInteraction}
         />
       );
     }
@@ -2879,6 +4042,9 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
           dayHabits={hasLog ? Object.values(allByDate[date]) : []}
           onReflect={onReflect}
           onDeleteLogEntry={onDeleteJournalLog}
+          listFullyExpanded={listFullyExpanded}
+          journalCollapseNonce={journalCollapseNonce}
+          onAccordionInteraction={onAccordionInteraction}
         />
       );
     }
@@ -2905,7 +4071,7 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
             ["week", "Week"],
             ["month", "Month"],
           ].map(([mode, label]) => (
-            <button key={mode} type="button" onClick={() => { setViewMode(mode); setSelectedDay(null); }}
+            <button key={mode} type="button" onClick={() => { setViewMode(mode); setSelectedDay(null); if (mode === "month") setListFullyExpanded(false); }}
               style={{ padding:"5px 10px", borderRadius:7, border:"none", cursor:"pointer",
                 background:viewMode === mode ? T.raised : "none",
                 color:viewMode === mode ? T.text : T.muted, fontSize:11, fontWeight:500, transition:"all 0.15s" }}>
@@ -2928,6 +4094,36 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
         ))}
       </div>
 
+      {(viewMode === "day" || viewMode === "week") && !listEmpty && (
+        <div style={{ padding:"0 16px 12px", display:"flex", justifyContent:"flex-end" }}>
+          <button
+            type="button"
+            onClick={() => {
+              if (listFullyExpanded) {
+                setListFullyExpanded(false);
+                setJournalCollapseNonce(n => n + 1);
+                if (viewMode === "week") setOpenWeeks(new Set());
+              } else {
+                setListFullyExpanded(true);
+                if (viewMode === "week") setOpenWeeks(new Set(weekKeysDesc));
+              }
+            }}
+            style={{
+              padding:"6px 12px",
+              borderRadius:T.rsm,
+              border:`0.5px solid ${listFullyExpanded ? T.borderMid : T.borderStrong}`,
+              background:listFullyExpanded ? T.raised : T.surface,
+              color:listFullyExpanded ? T.text : T.muted,
+              fontSize:11,
+              fontWeight:500,
+              cursor:"pointer",
+              transition:"background 0.15s ease, color 0.15s ease, border-color 0.15s ease",
+            }}>
+            {listFullyExpanded ? "Collapse all" : "Expand all"}
+          </button>
+        </div>
+      )}
+
       {viewMode === "month" && !isPro && (
         <div style={{ position:"relative", margin:"0 14px 16px", borderRadius:T.r, overflow:"hidden" }}>
           {/* Blurred skeleton calendar */}
@@ -2941,11 +4137,11 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
           {/* Lock overlay */}
           <div style={{ position:"absolute", inset:0, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:8, padding:"0 24px", textAlign:"center", background:"rgba(14,14,14,0.80)", backdropFilter:"blur(2px)", borderRadius:T.r }}>
             <div style={{ fontSize:22 }}>🔒</div>
-            <div style={{ fontSize:14, fontWeight:500, color:T.text }}>Calendar view is a beta feature</div>
-            <div style={{ fontSize:12, color:T.muted, lineHeight:1.6 }}>Core logging is free. Full history and calendar are part of beta access.</div>
+            <div style={{ fontSize:14, fontWeight:500, color:T.text }}>Full history is part of Forged Pro</div>
+            <div style={{ fontSize:12, color:T.muted, lineHeight:1.6 }}>Core logging is free. Full history and the calendar view are included in Forged Pro.</div>
             <button onClick={onUpgrade}
-              style={{ marginTop:6, padding:"10px 22px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:13, fontWeight:600, cursor:"pointer" }}>
-              Unlock beta access →
+              style={{ marginTop:6, padding:"10px 22px", borderRadius:T.rsm, border:"none", background:T.gold, color:"#0F0F0D", fontSize:13, fontWeight:700, cursor:"pointer" }}>
+              Unlock Forged Pro →
             </button>
           </div>
         </div>
@@ -3248,20 +4444,47 @@ function EntryCard({ entry, onReflect }) {
 }
 
 // ─── INSIGHTS SCREEN ──────────────────────────────────────────────────────────
-function InsightsScreen({ habits, goals = [], onShowHistory, onShare }) {
-  function IC({ title, children, action, dataTour }) {
+// Sections: Activity → Deeper insights → Builds → Goals. Each section gets a
+// section header so the page reads as a structured report rather than a stack
+// of similar cards. Empty/low-data cards show an intentional placeholder so a
+// fresh account doesn't see a wall of blank grids.
+function InsightsScreen({ habits, goals = [], onShowHistory, onShare, isPro = false, onUpgrade, userId = null }) {
+  function IC({ title, children, action, dataTour, subtitle }) {
     return (
       <div data-tour={dataTour} style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:18 }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom: subtitle ? 4 : 16 }}>
           <div style={{ fontSize:10, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em" }}>{title}</div>
           {action}
         </div>
+        {subtitle && (
+          <div style={{ fontSize:11, color:T.hint, lineHeight:1.5, marginBottom:14 }}>{subtitle}</div>
+        )}
         {children}
       </div>
     );
   }
 
-  // ── Summary stats ──────────────────────────────────────────────────────────
+  // Section header — structural divider between groups of cards.
+  function SectionTitle({ label, hint }) {
+    return (
+      <div style={{ margin:"22px 18px 10px" }}>
+        <div style={{ fontFamily:T.serif, fontSize:18, color:T.text, letterSpacing:"-0.01em" }}>{label}</div>
+        {hint && <div style={{ fontSize:11, color:T.hint, marginTop:2, lineHeight:1.55 }}>{hint}</div>}
+      </div>
+    );
+  }
+
+  // Soft placeholder used inside cards when data isn't there yet.
+  function EmptyHint({ icon = "✨", children }) {
+    return (
+      <div style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"4px 2px" }}>
+        <span style={{ fontSize:16, lineHeight:1.2, opacity:0.8, flexShrink:0 }}>{icon}</span>
+        <div style={{ fontSize:12, color:T.muted, lineHeight:1.65 }}>{children}</div>
+      </div>
+    );
+  }
+
+  // ── Derived data ───────────────────────────────────────────────────────────
   const habitRealLogs = habits.flatMap(h => h.logs.filter(l => l.value !== "quicknote" && l.value !== "skip"));
   const goalRealLogs = goals.flatMap(g => (g.logs || []).filter(l => typeof l.value === "number"));
   const allRealLogs = [...habitRealLogs, ...goalRealLogs];
@@ -3275,14 +4498,42 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare }) {
   const totalLogsEver = new Set(allRealLogs.map(l => l.date)).size; // unique days tracked, consistent with profile/share
   const totalTracked = habits.length + goals.length;
 
-  // Most consistent habit (highest 28-day completion rate)
+  // Most consistent habit (highest 28-day completion rate).
   const mostConsistent = habits.length
     ? habits.reduce((best, h) => getCompletionRate(h) > getCompletionRate(best) ? h : best, habits[0])
     : null;
+  const mostConsistentRate = mostConsistent ? getCompletionRate(mostConsistent) : 0;
 
-  const last7Labels = Array.from({length:7}, (_, i) => {
-    const d = new Date(); d.setDate(d.getDate() - (6 - i)); return DAYS[d.getDay()];
-  });
+  // Day-of-week pattern across real logs.
+  const dow = getBestDayOfWeek(allRealLogs);
+  // Reflection coverage across all habit logs.
+  const refl = getReflectionCoverage(habits);
+
+  // Deeper insights — computed from user-written text only (reflections, notes,
+  // project wins, hard parts, goal notes). Cached under a per-user key with a
+  // content-hash + 24h TTL so the analysis doesn't re-run on every render or
+  // tab open, and so it stays stable until the user actually adds new writing.
+  const deep = useMemo(() => {
+    const corpus = getWrittenCorpus(habits, goals);
+    const sig = hashCorpusSignature(corpus);
+    const cached = readDeepInsightsCache(userId);
+    if (
+      cached &&
+      cached.sig === sig &&
+      typeof cached.ts === "number" &&
+      Date.now() - cached.ts < DEEP_INSIGHTS_TTL_MS
+    ) {
+      return cached.data;
+    }
+    const data = analyzeDeepInsights(habits, goals);
+    writeDeepInsightsCache(userId, { sig, ts: Date.now(), data });
+    return data;
+  }, [habits, goals, userId]);
+
+  // Totals across habit grids — used to decide if 12-week/28-day cards have
+  // enough real data to render meaningfully vs. the empty hint.
+  const anyHabitLogs = habits.some(h => h.logs.some(l => l.value !== "quicknote" && l.value !== "skip"));
+  const anyCompletionAboveZero = habits.some(h => getCompletionRate(h) > 0);
 
   if (habits.length === 0) return (
     <div style={{ padding:"60px 28px", textAlign:"center" }}>
@@ -3292,6 +4543,9 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare }) {
       </div>
     </div>
   );
+
+  const projectHabits = habits.filter(h => h.habitType === "project");
+  const activeGoals = goals.filter(g => g.status !== "completed");
 
   return (
     <div>
@@ -3316,178 +4570,484 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare }) {
         <Stat label="total logs" value={totalLogsEver}/>
       </div>
 
+      {/* ══ Activity ══════════════════════════════════════════════════════════ */}
+      <SectionTitle label="Activity" hint="How often you're showing up, and how that's stacking up over time." />
+
       {/* Streaks */}
-      <IC dataTour="insights-streaks" title="Streaks" action={<button onClick={onShowHistory} style={{ fontSize:12, color:T.accent, background:"none", border:"none", cursor:"pointer", fontWeight:500 }}>Full history →</button>}>
-        {[...habits].sort((a, b) => getStreak(b) - getStreak(a)).map(h => {
-          const cur  = getStreak(h);
-          const best = getBestStreak(h);
-          const act  = get7DayActivity(h);
-          const hasAnyLogs = h.logs.some(l => l.value !== "quicknote");
-          return (
-            <div key={h.id} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14 }}>
-              <span style={{ fontSize:20, width:24, flexShrink:0 }}>{h.emoji}</span>
-              <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontSize:13, color:T.text, fontWeight:500, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", marginBottom:5 }}>{h.name}</div>
-                <div style={{ display:"flex", gap:3 }}>
-                  {act.map((on, i) => (
-                    <div key={i} style={{ width:16, height:6, borderRadius:2, background:on ? h.color : T.surface, opacity:on?1:0.2 }}/>
-                  ))}
+      <IC
+        dataTour="insights-streaks"
+        title="Streaks"
+        action={<button onClick={onShowHistory} style={{ fontSize:12, color:T.accent, background:"none", border:"none", cursor:"pointer", fontWeight:500 }}>Full history →</button>}
+      >
+        {anyHabitLogs ? (
+          [...habits].sort((a, b) => getStreak(b) - getStreak(a)).map(h => {
+            const cur  = getStreak(h);
+            const best = getBestStreak(h);
+            const act  = get7DayActivity(h);
+            const hasAnyLogs = h.logs.some(l => l.value !== "quicknote");
+            return (
+              <div key={h.id} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14 }}>
+                <span style={{ fontSize:20, width:24, flexShrink:0 }}>{h.emoji}</span>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:13, color:T.text, fontWeight:500, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", marginBottom:5 }}>{h.name}</div>
+                  <div style={{ display:"flex", gap:3 }}>
+                    {act.map((on, i) => (
+                      <div key={i} style={{ width:16, height:6, borderRadius:2, background:on ? h.color : T.surface, opacity:on?1:0.2 }}/>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ textAlign:"right", flexShrink:0 }}>
+                  <div style={{ fontSize:16, fontWeight:600, color:hasAnyLogs ? (cur > 0 ? h.color : T.muted) : T.hint }}>
+                    {hasAnyLogs ? (cur > 0 ? `🔥 ${cur}` : "0") : "—"}
+                  </div>
+                  {best > cur && best > 1 && (
+                    <div style={{ fontSize:10, color:T.hint, marginTop:1 }}>best {best}</div>
+                  )}
                 </div>
               </div>
-              <div style={{ textAlign:"right", flexShrink:0 }}>
-                <div style={{ fontSize:16, fontWeight:600, color:hasAnyLogs ? (cur > 0 ? h.color : T.muted) : T.hint }}>
-                  {hasAnyLogs ? (cur > 0 ? `🔥 ${cur}` : "0") : "—"}
+            );
+          })
+        ) : (
+          <EmptyHint icon="🔥">
+            Log a few days and your current + best streak for each habit will appear here.
+          </EmptyHint>
+        )}
+      </IC>
+
+      {/* 28-day completion rate */}
+      <IC
+        title="28-day completion rate"
+        subtitle="How often you hit your target. Daily = out of 28 days. Weekly = 4 weeks at target."
+      >
+        {anyCompletionAboveZero ? (
+          [...habits].sort((a, b) => getCompletionRate(b) - getCompletionRate(a)).map(h => {
+            const rate = getCompletionRate(h);
+            return (
+              <div key={h.id} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+                <span style={{ fontSize:15, width:22, flexShrink:0 }}>{h.emoji}</span>
+                <span style={{ fontSize:12, color:T.text, width:90, flexShrink:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{h.name}</span>
+                <div style={{ flex:1, height:7, background:T.surface, borderRadius:4, overflow:"hidden" }}>
+                  <div style={{ height:"100%", borderRadius:4, background:rate>=80?T.green:rate>=50?h.color:T.amber, width:`${rate}%`, transition:"width 0.7s ease" }}/>
                 </div>
-                {best > cur && best > 1 && (
-                  <div style={{ fontSize:10, color:T.hint, marginTop:1 }}>best {best}</div>
-                )}
+                <span style={{ fontSize:12, color:rate>=80?T.green:rate>=50?h.color:T.muted, width:34, textAlign:"right", flexShrink:0, fontWeight:rate>=50?500:400 }}>{rate}%</span>
               </div>
-            </div>
-          );
-        })}
-        {mostConsistent && (
-          <div style={{ marginTop:4, padding:"10px 12px", background:`${mostConsistent.color}10`, borderRadius:T.rsm, border:`0.5px solid ${mostConsistent.color}33`, display:"flex", alignItems:"center", gap:8 }}>
-            <span style={{ fontSize:16 }}>🏆</span>
-            <span style={{ fontSize:12, color:T.sub, lineHeight:1.5 }}>
-              <span style={{ color:mostConsistent.color, fontWeight:500 }}>{mostConsistent.name}</span>
-              {" "}is your most consistent habit — {getCompletionRate(mostConsistent)}% over 28 days
-            </span>
-          </div>
+            );
+          })
+        ) : (
+          <EmptyHint icon="📊">
+            Completion rates stabilise after about a week of logging — keep going and bars will start filling in.
+          </EmptyHint>
         )}
       </IC>
 
       {/* 12-week heatmap */}
       <IC title="12-week activity">
-        {habits.map(h => {
-          const grid = get12WeekGrid(h);
-          const sessionCount = h.logs.filter(l => l.value !== "quicknote" && l.value !== "skip").length;
-          return (
-            <div key={h.id} style={{ marginBottom:14 }}>
-              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:5 }}>
-                <span style={{ fontSize:12, color:T.sub }}>
-                  {h.emoji} <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{h.name}</span>
-                </span>
-                <span style={{ fontSize:10, color:T.hint }}>{sessionCount} sessions</span>
-              </div>
-              <div style={{ display:"flex", gap:3 }}>
-                {grid.map((week, wi) => (
-                  <div key={wi} style={{ display:"flex", flexDirection:"column", gap:3 }}>
-                    {week.map((day, di) => (
-                      <div key={di} style={{
-                        width:11, height:11, borderRadius:3,
-                        background: day.logged ? h.color : T.surface,
-                        opacity: day.logged ? 1 : 0.18,
-                      }}/>
+        {anyHabitLogs ? (
+          <>
+            {habits.map(h => {
+              const grid = get12WeekGrid(h);
+              const sessionCount = h.logs.filter(l => l.value !== "quicknote" && l.value !== "skip").length;
+              return (
+                <div key={h.id} style={{ marginBottom:14 }}>
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:5 }}>
+                    <span style={{ fontSize:12, color:T.sub }}>
+                      {h.emoji} <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{h.name}</span>
+                    </span>
+                    <span style={{ fontSize:10, color:T.hint }}>{sessionCount} sessions</span>
+                  </div>
+                  <div style={{ display:"flex", gap:3 }}>
+                    {grid.map((week, wi) => (
+                      <div key={wi} style={{ display:"flex", flexDirection:"column", gap:3 }}>
+                        {week.map((day, di) => (
+                          <div key={di} style={{
+                            width:11, height:11, borderRadius:3,
+                            background: day.logged ? h.color : T.surface,
+                            opacity: day.logged ? 1 : 0.18,
+                          }}/>
+                        ))}
+                      </div>
                     ))}
                   </div>
-                ))}
+                </div>
+              );
+            })}
+            <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, color:T.hint, marginTop:2 }}>
+              <span>← 12 weeks ago</span><span>today →</span>
+            </div>
+          </>
+        ) : (
+          <EmptyHint icon="🗓️">
+            Each square is a day. Your 12-week heatmap lights up as you log — come back after a few days to see the shape of your week.
+          </EmptyHint>
+        )}
+      </IC>
+
+      {/* Most consistent habit — kept in Activity (it's a stat, not a pattern) */}
+      <IC title="Most consistent">
+        {mostConsistent && mostConsistentRate > 0 ? (
+          <div style={{ display:"flex", alignItems:"center", gap:12, padding:"4px 2px" }}>
+            <div style={{
+              width:44, height:44, borderRadius:"50%", flexShrink:0,
+              background: `${mostConsistent.color}1a`, border:`1px solid ${mostConsistent.color}55`,
+              display:"flex", alignItems:"center", justifyContent:"center", fontSize:22,
+            }}>{mostConsistent.emoji || "🏆"}</div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize:14, color:T.text, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                {mostConsistent.name}
+              </div>
+              <div style={{ fontSize:12, color:T.muted, lineHeight:1.55, marginTop:2 }}>
+                Showing up <strong style={{ color:mostConsistent.color }}>{mostConsistentRate}%</strong> of days over the last 28.
               </div>
             </div>
-          );
-        })}
-        <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, color:T.hint, marginTop:2 }}>
-          <span>← 12 weeks ago</span><span>today →</span>
-        </div>
+          </div>
+        ) : (
+          <EmptyHint icon="🏆">
+            As you log consistently, your strongest habit will stand out here.
+          </EmptyHint>
+        )}
       </IC>
 
-      {/* 28-day completion rate */}
-      <IC title="28-day completion rate">
-        <div style={{ fontSize:11, color:T.hint, marginBottom:14, lineHeight:1.55 }}>
-          How often you hit your target. Daily = out of 28 days. Weekly = 4 weeks at target.
-        </div>
-        {[...habits].sort((a, b) => getCompletionRate(b) - getCompletionRate(a)).map(h => {
-          const rate = getCompletionRate(h);
-          return (
-            <div key={h.id} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
-              <span style={{ fontSize:15, width:22, flexShrink:0 }}>{h.emoji}</span>
-              <span style={{ fontSize:12, color:T.text, width:90, flexShrink:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{h.name}</span>
-              <div style={{ flex:1, height:7, background:T.surface, borderRadius:4, overflow:"hidden" }}>
-                <div style={{ height:"100%", borderRadius:4, background:rate>=80?T.green:rate>=50?h.color:T.amber, width:`${rate}%`, transition:"width 0.7s ease" }}/>
-              </div>
-              <span style={{ fontSize:12, color:rate>=80?T.green:rate>=50?h.color:T.muted, width:34, textAlign:"right", flexShrink:0, fontWeight:rate>=50?500:400 }}>{rate}%</span>
+      {/* Best day of week — also a stat, belongs in Activity */}
+      <IC title="Best day of the week">
+        {dow.best && !dow.needsMoreData ? (
+          <div>
+            <div style={{ fontSize:13, color:T.sub, lineHeight:1.6, marginBottom:12 }}>
+              You log the most on <strong style={{ color:T.gold }}>{dow.best.label}s</strong> — {dow.best.count} logs so far.
             </div>
-          );
-        })}
-      </IC>
-
-      {/* Last 7 days grid */}
-      <IC title="Last 7 days">
-        <div style={{ display:"grid", gridTemplateColumns:"90px repeat(7,1fr)", gap:4, marginBottom:8 }}>
-          <div/>{last7Labels.map((d, i) => <div key={i} style={{ fontSize:10, color:T.hint, textAlign:"center" }}>{d}</div>)}
-        </div>
-        {habits.map(h => {
-          const act = get7DayActivity(h);
-          return (
-            <div key={h.id} style={{ display:"grid", gridTemplateColumns:"90px repeat(7,1fr)", gap:4, marginBottom:5, alignItems:"center" }}>
-              <div style={{ fontSize:12, color:T.sub, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", paddingRight:4 }}>{h.emoji} {h.name}</div>
-              {act.map((on, i) => <div key={i} style={{ aspectRatio:"1", borderRadius:4, background:on?h.color:T.surface, opacity:on?1:0.2 }}/>)}
-            </div>
-          );
-        })}
-      </IC>
-
-      {/* Build (project) stats */}
-      {habits.filter(h => h.habitType === "project").map(h => {
-        const s = getProjectStats(h);
-        return (
-          <IC key={h.id} title={`${h.emoji} ${h.name} — all time`}>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8, marginBottom:s.wins>0?16:0 }}>
-              <Stat label="total hrs" value={s.totalHours} color={h.color}/>
-              <Stat label="hrs this wk" value={s.weekHours}/>
-              <Stat label="wins" value={s.wins} color={T.green}/>
-              <Stat label="hard parts" value={s.hard} color={T.amber}/>
-            </div>
-            {s.wins > 0 && (
-              <>
-                <div style={{ fontSize:10, color:T.green, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Wins log</div>
-                {[...h.logs].filter(l => l.value?.win).reverse().slice(0, 5).map((l, i) => (
-                  <div key={i} style={{ display:"flex", gap:10, padding:"9px 0", borderTop:`0.5px solid ${T.border}`, alignItems:"flex-start" }}>
-                    <span style={{ fontSize:10, color:h.color+"99", flexShrink:0, width:80, marginTop:2, fontWeight:500 }}>{fmtEntryDate(l.date)}</span>
-                    <span title={l.value.win} style={{ fontSize:13, color:T.text, lineHeight:1.5 }}>{truncateText(l.value.win, 120)}</span>
-                  </div>
-                ))}
-              </>
-            )}
-          </IC>
-        );
-      })}
-
-      {/* Goals */}
-      {goals.filter(g => g.status !== "completed").map(g => {
-        const stats = getGoalProgress(g);
-        const { isComplete } = stats;
-        const barFillPct = goalBarFillWidthPct(stats);
-        const logs = [...g.logs].filter(l => typeof l.value === "number").sort((a, b) => a.date.localeCompare(b.date));
-        const logsByDay = Array.from(new Map(logs.map(l => [l.date, l])).values());
-        const recentMeasurements = logsByDay.slice(-6).reverse();
-        const statusText = getGoalStatusText(g, stats);
-        return (
-          <IC key={g.id} title={`${g.emoji} ${g.name} — goal`}>
-            <div style={{ display:"flex", justifyContent:"space-between", marginBottom:8 }}>
-              <span style={{ fontSize:13, color:T.muted }}>Current: <strong style={{ color:g.color }}>{formatWithUnit(g.currentValue, g.unit)}</strong></span>
-              <span style={{ fontSize:13, color:T.muted }}>Target: <strong style={{ color:T.text }}>{formatWithUnit(g.targetValue, g.unit)}</strong></span>
-            </div>
-            <div style={{ height:8, background:T.surface, borderRadius:4, overflow:"hidden", marginBottom:6 }}>
-              <div style={{ height:"100%", borderRadius:4, background:isComplete ? T.goldBright : g.color, width:`${barFillPct}%`, transition:"width 0.5s ease" }}/>
-            </div>
-            <div style={{ fontSize:11, color:isComplete ? T.gold : T.muted, marginBottom:16, textAlign:"center" }}>{statusText}</div>
-            {logs.length > 0 && (
-              <>
-                <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Recent measurements</div>
-                {recentMeasurements.map((l, i) => (
-                  <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderTop:`0.5px solid ${T.border}` }}>
-                    <span style={{ fontSize:11, color:g.color+"99", fontWeight:500 }}>{fmtEntryDate(l.date)}</span>
-                    <div style={{ display:"flex", alignItems:"baseline", gap:4 }}>
-                      <span style={{ fontSize:15, color:T.text, fontWeight:500 }}>{l.value}</span>
-                      <span style={{ fontSize:11, color:T.muted }}>{g.unit}</span>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4 }}>
+              {dow.counts.map((n, i) => {
+                const maxN = Math.max(...dow.counts, 1);
+                const pct = Math.round((n / maxN) * 100);
+                const isBest = i === dow.best.idx;
+                return (
+                  <div key={i} style={{ textAlign:"center" }}>
+                    <div style={{ height:34, display:"flex", alignItems:"flex-end", justifyContent:"center", marginBottom:4 }}>
+                      <div style={{
+                        width:"70%",
+                        height:`${Math.max(pct, n > 0 ? 8 : 2)}%`,
+                        background: isBest ? T.gold : T.surface,
+                        border: isBest ? `1px solid rgba(200,144,42,0.45)` : `0.5px solid ${T.border}`,
+                        borderRadius:3,
+                        transition:"height 0.5s ease",
+                      }}/>
+                    </div>
+                    <div style={{ fontSize:9, color: isBest ? T.gold : T.hint, fontWeight: isBest ? 700 : 500, letterSpacing:"0.04em" }}>
+                      {["M","T","W","T","F","S","S"][i]}
                     </div>
                   </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <EmptyHint icon="📅">
+            After about a week of logs, we'll show which day of the week you tend to show up the most.
+          </EmptyHint>
+        )}
+      </IC>
+
+      {/* ══ Deeper insights — from what you've actually written ═══════════════
+          Pulls from reflections, notes, project wins, hard parts, and goal
+          notes. Cached per-user with a content-hash + 24h TTL (see useMemo
+          above) so token cost is zero and analysis only re-runs when there's
+          new writing or the cache expires. */}
+      <SectionTitle
+        label="Deeper insights"
+        hint={deep.needsMoreData
+          ? "Unlocks as you add reflections, notes, wins, and hard parts. It reads what you actually wrote — not just numbers."
+          : "Patterns pulled from your own words — reflections, notes, wins, and hard parts. Refreshes as you write more."}
+      />
+
+      {deep.needsMoreData ? (
+        // Single intentional low-data state rather than 4 empty cards.
+        <IC title="Not enough written data yet">
+          <EmptyHint icon="📝">
+            Start adding quick reflections or notes when you log and real patterns will surface here — recurring themes, wins that keep showing up, struggles worth naming, and the tone of your recent week. A few lines across a few days is enough to kick things off.
+          </EmptyHint>
+        </IC>
+      ) : (
+        <>
+          {/* Themes in your words */}
+          {deep.topThemes && deep.topThemes.length > 0 && (
+            <IC
+              title="Themes in your words"
+              subtitle="Words that keep coming back across what you've written."
+            >
+              <div style={{ display:"flex", flexWrap:"wrap", gap:7, marginBottom:10 }}>
+                {deep.topThemes.map((t, i) => (
+                  <div key={t.term} style={{
+                    padding:"6px 11px",
+                    borderRadius:999,
+                    background: i === 0 ? "rgba(200,144,42,0.12)" : T.surface,
+                    border: i === 0 ? "0.5px solid rgba(200,144,42,0.4)" : `0.5px solid ${T.border}`,
+                    fontSize:12,
+                    color: i === 0 ? T.gold : T.text,
+                    fontWeight: i === 0 ? 600 : 500,
+                    display:"flex", alignItems:"center", gap:6,
+                  }}>
+                    <span>{t.term}</span>
+                    <span style={{ fontSize:10, color: i === 0 ? T.gold : T.muted, opacity:0.9 }}>·</span>
+                    <span style={{ fontSize:10, color: i === 0 ? T.gold : T.muted }}>{t.count} {t.count === 1 ? "day" : "days"}</span>
+                  </div>
                 ))}
-              </>
-            )}
-          </IC>
-        );
-      })}
+              </div>
+              {deep.topThemes[0]?.sample && (
+                <div style={{ borderLeft:`2px solid ${T.gold}`, paddingLeft:10, marginTop:4 }}>
+                  <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:3 }}>
+                    From {fmtEntryDate(deep.topThemes[0].sample.date)}
+                  </div>
+                  <div style={{ fontSize:12.5, color:T.sub, lineHeight:1.55, fontStyle:"italic" }}>
+                    “{truncateText(deep.topThemes[0].sample.text, 180)}”
+                  </div>
+                </div>
+              )}
+            </IC>
+          )}
+
+          {/* Tone trend — only when we have enough recent + prior entries to compare honestly */}
+          {deep.moodTrend && (
+            <IC title="Tone trend" subtitle="Last 7 days vs. the week before, from your reflections and notes.">
+              {(() => {
+                const total = deep.toneMix.pos + deep.toneMix.neg + deep.toneMix.neu || 1;
+                const posPct = Math.round((deep.toneMix.pos / total) * 100);
+                const negPct = Math.round((deep.toneMix.neg / total) * 100);
+                const neuPct = Math.max(0, 100 - posPct - negPct);
+                const label =
+                  deep.moodTrend === "rising"    ? { text: "Skewing more positive lately", color: T.green } :
+                  deep.moodTrend === "declining" ? { text: "Skewing more negative lately",  color: T.amber } :
+                                                    { text: "Steady — no clear shift",       color: T.sub };
+                return (
+                  <>
+                    <div style={{ fontSize:13, color:label.color, fontWeight:600, lineHeight:1.55, marginBottom:10 }}>
+                      {label.text}
+                    </div>
+                    <div style={{ display:"flex", height:8, borderRadius:4, overflow:"hidden", background:T.surface, marginBottom:8 }}>
+                      <div style={{ width:`${posPct}%`, background:T.green, transition:"width 0.6s ease" }}/>
+                      <div style={{ width:`${neuPct}%`, background:T.border }}/>
+                      <div style={{ width:`${negPct}%`, background:T.amber, transition:"width 0.6s ease" }}/>
+                    </div>
+                    <div style={{ display:"flex", justifyContent:"space-between", fontSize:10.5, color:T.hint }}>
+                      <span><span style={{ color:T.green }}>●</span> positive {deep.toneMix.pos}</span>
+                      <span>neutral {deep.toneMix.neu}</span>
+                      <span><span style={{ color:T.amber }}>●</span> rough {deep.toneMix.neg}</span>
+                    </div>
+                    <div style={{ fontSize:11, color:T.hint, lineHeight:1.6, marginTop:12 }}>
+                      {deep.moodTrend === "rising"
+                        ? "Whatever you've been doing the last week — more of that."
+                        : deep.moodTrend === "declining"
+                        ? "Worth naming what's weighing on you. The Coach can help you unpack it."
+                        : "Consistent tone. Good baseline to build on."}
+                    </div>
+                  </>
+                );
+              })()}
+            </IC>
+          )}
+
+          {/* Recurring wins — counts are per-day-it-came-up, not per-fragment */}
+          {deep.topWinThemes && deep.topWinThemes.length > 0 && (
+            <IC title="Wins that keep showing up" subtitle="Patterns across the wins you've logged on project habits.">
+              {deep.topWinThemes.map(t => (
+                <div key={t.term} style={{ padding:"8px 0", borderTop:`0.5px solid ${T.border}`, display:"flex", alignItems:"baseline", gap:10 }}>
+                  <div style={{ fontSize:13, color:T.green, fontWeight:600, textTransform:"capitalize" }}>{t.term}</div>
+                  <div style={{ fontSize:11, color:T.muted, flex:1 }}>came up on {t.count} {t.count === 1 ? "day" : "days"} you logged a win</div>
+                </div>
+              ))}
+            </IC>
+          )}
+
+          {/* Recurring struggle — limited to actual hard-part text (was: mixed
+              hard parts AND any neg-toned reflection, which surfaced unrelated
+              moody words). */}
+          {deep.topStruggleThemes && deep.topStruggleThemes.length > 0 && (
+            <IC title="Recurring struggle" subtitle="Words that keep showing up in your hard-part notes.">
+              {deep.topStruggleThemes.map(t => (
+                <div key={t.term} style={{ padding:"8px 0", borderTop:`0.5px solid ${T.border}`, display:"flex", alignItems:"baseline", gap:10 }}>
+                  <div style={{ fontSize:13, color:T.amber, fontWeight:600, textTransform:"capitalize" }}>{t.term}</div>
+                  <div style={{ fontSize:11, color:T.muted, flex:1 }}>came up on {t.count} {t.count === 1 ? "day" : "days"} you flagged a hard part</div>
+                </div>
+              ))}
+              <div style={{ fontSize:11, color:T.hint, lineHeight:1.6, marginTop:10, paddingTop:10, borderTop:`0.5px solid ${T.border}` }}>
+                Naming the pattern is half the fix. Try a note the next time it shows up.
+              </div>
+            </IC>
+          )}
+
+          {/* Most written about — gated inside analyzeDeepInsights so it only
+              fires when the leader is meaningfully ahead. Counts UNIQUE
+              writing days per habit (prior bug counted text fragments, so a
+              project log inflated its number 3-4×). */}
+          {deep.mostReflectedHabit && (
+            <IC title="What you write about most">
+              <div style={{ fontSize:13, color:T.sub, lineHeight:1.6 }}>
+                <strong style={{ color:T.text }}>{deep.mostReflectedHabit.name}</strong> shows up in your writing more than anything else — <strong style={{ color:T.text }}>{deep.mostReflectedHabit.days}</strong> {deep.mostReflectedHabit.days === 1 ? "day" : "days"} of notes so far. That's usually where the real work is happening.
+              </div>
+            </IC>
+          )}
+
+          {/* Worth revisiting — pulls one real piece of writing (not the
+              joined fragment soup), so the quote reads cleanly. */}
+          {deep.revisitEntry && deep.revisitEntry.text && deep.revisitEntry.text.length >= 60 && (
+            <IC title="Worth revisiting" subtitle="Something you wrote recently that might be worth re-reading.">
+              <div style={{ borderLeft:`2px solid ${T.accent}`, paddingLeft:12 }}>
+                <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:4 }}>
+                  {fmtEntryDate(deep.revisitEntry.date)}
+                  {deep.revisitEntry.habitName ? ` · ${deep.revisitEntry.habitName}` : ""}
+                  {deep.revisitEntry.goalName  ? ` · ${deep.revisitEntry.goalName}`  : ""}
+                  {deep.revisitEntry.kind === "win"  ? " · win"      : ""}
+                  {deep.revisitEntry.kind === "hard" ? " · hard part": ""}
+                </div>
+                <div style={{ fontSize:13, color:T.text, lineHeight:1.65, fontStyle:"italic" }}>
+                  “{truncateText(deep.revisitEntry.text, 260)}”
+                </div>
+              </div>
+            </IC>
+          )}
+
+          {/* Reflection coverage — kept here because it's about self-awareness
+              depth, not surface activity. Logic now counts reflection + note +
+              win + hardPart + quicknote text (prior bug: only reflection). */}
+          {refl.totalLogs >= 3 && (
+            <IC title="Reflection coverage">
+              <div>
+                <div style={{ fontSize:13, color:T.sub, lineHeight:1.6, marginBottom:10 }}>
+                  <strong style={{ color:T.text }}>{refl.coverage}%</strong> of your logs have a note, reflection, win, or hard-part attached — {refl.logsWithReflection} of {refl.totalLogs}.
+                </div>
+                <div style={{ height:7, background:T.surface, borderRadius:4, overflow:"hidden", marginBottom:10 }}>
+                  <div style={{
+                    height:"100%", borderRadius:4,
+                    background: refl.coverage >= 40 ? T.green : refl.coverage >= 15 ? T.gold : T.amber,
+                    width:`${Math.max(refl.coverage, refl.coverage > 0 ? 4 : 0)}%`,
+                    transition:"width 0.7s ease",
+                  }}/>
+                </div>
+                <div style={{ fontSize:11, color:T.hint, lineHeight:1.6 }}>
+                  {refl.coverage < 15
+                    ? "Add a quick note or reflection when you log — even one line unlocks richer patterns."
+                    : refl.coverage < 40
+                    ? "Nice — reflections are how this app gets smart about you. Keep adding them when something stands out."
+                    : "You're reflecting often. This is the richest kind of log for spotting patterns."}
+                </div>
+              </div>
+            </IC>
+          )}
+        </>
+      )}
+
+      {/* AI pattern detection — kept as a clearly-distinct Pro teaser. What
+          we ship locally (above) is real but deterministic; the Pro card is
+          for LLM-written weekly summaries + proactive alerts in chat. */}
+      <div style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid rgba(200,144,42,0.28)`, padding:18, position:"relative", overflow:"hidden" }}>
+        <div style={{ position:"absolute", top:12, right:12, display:"flex", alignItems:"center", gap:6 }}>
+          {!isPro && (
+            <span style={{ fontSize:9, fontWeight:800, color:"#0F0F0D", background:T.gold, padding:"2px 7px", borderRadius:5, letterSpacing:"0.08em" }}>PRO</span>
+          )}
+          <span style={{ fontSize:9, color:T.hint, fontWeight:600, letterSpacing:"0.08em", textTransform:"uppercase" }}>Coming soon</span>
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+          <div style={{ width:36, height:36, borderRadius:10, background:"rgba(200,144,42,0.12)", border:"0.5px solid rgba(200,144,42,0.35)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>🧠</div>
+          <div style={{ fontSize:14, fontWeight:600, color:T.text }}>AI-written weekly summaries</div>
+        </div>
+        <div style={{ fontSize:12, color:T.sub, lineHeight:1.65, marginBottom: !isPro ? 12 : 0 }}>
+          LLM-written weekly recaps, proactive alerts when your tone shifts, and Coach conversations that reference what you actually wrote. Rolling out for supporters first.
+        </div>
+        {!isPro && onUpgrade && (
+          <button
+            type="button"
+            onClick={onUpgrade}
+            style={{
+              marginTop:2, padding:"9px 16px", borderRadius:T.rsm,
+              border:`1px solid rgba(200,144,42,0.45)`,
+              background:"rgba(200,144,42,0.10)",
+              color:T.gold, fontSize:12, fontWeight:700, cursor:"pointer",
+              letterSpacing:"0.02em",
+            }}
+          >
+            Back the beta to get early access →
+          </button>
+        )}
+      </div>
+
+      {/* ══ Builds (project habits) ══════════════════════════════════════════ */}
+      {projectHabits.length > 0 && (
+        <>
+          <SectionTitle label="Builds" hint="What you're actually building — time, wins, and the hard parts." />
+          {projectHabits.map(h => {
+            const s = getProjectStats(h);
+            return (
+              <IC key={h.id} title={`${h.emoji} ${h.name} — all time`}>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8, marginBottom:s.wins>0?16:0 }}>
+                  <Stat label="total hrs" value={s.totalHours} color={h.color}/>
+                  <Stat label="hrs this wk" value={s.weekHours}/>
+                  <Stat label="wins" value={s.wins} color={T.green}/>
+                  <Stat label="hard parts" value={s.hard} color={T.amber}/>
+                </div>
+                {s.wins > 0 ? (
+                  <>
+                    <div style={{ fontSize:10, color:T.green, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Wins log</div>
+                    {[...h.logs].filter(l => l.value?.win).reverse().slice(0, 5).map((l, i) => (
+                      <div key={i} style={{ display:"flex", gap:10, padding:"9px 0", borderTop:`0.5px solid ${T.border}`, alignItems:"flex-start" }}>
+                        <span style={{ fontSize:10, color:h.color+"99", flexShrink:0, width:80, marginTop:2, fontWeight:500 }}>{fmtEntryDate(l.date)}</span>
+                        <span title={l.value.win} style={{ fontSize:13, color:T.text, lineHeight:1.5 }}>{truncateText(l.value.win, 120)}</span>
+                      </div>
+                    ))}
+                  </>
+                ) : s.totalHours === 0 ? (
+                  <EmptyHint icon="🛠️">
+                    Log some build time on Today and your hours, wins, and hard parts will start filling in.
+                  </EmptyHint>
+                ) : null}
+              </IC>
+            );
+          })}
+        </>
+      )}
+
+      {/* ══ Goals ════════════════════════════════════════════════════════════ */}
+      {activeGoals.length > 0 && (
+        <>
+          <SectionTitle label="Goals" hint="Where you are vs. where you said you'd be." />
+          {activeGoals.map(g => {
+            const stats = getGoalProgress(g);
+            const { isComplete } = stats;
+            const barFillPct = goalBarFillWidthPct(stats);
+            const logs = [...g.logs].filter(l => typeof l.value === "number").sort((a, b) => a.date.localeCompare(b.date));
+            const logsByDay = Array.from(new Map(logs.map(l => [l.date, l])).values());
+            const recentMeasurements = logsByDay.slice(-6).reverse();
+            const statusText = getGoalStatusText(g, stats);
+            return (
+              <IC key={g.id} title={`${g.emoji} ${g.name} — goal`}>
+                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:8 }}>
+                  <span style={{ fontSize:13, color:T.muted }}>Current: <strong style={{ color:g.color }}>{formatWithUnit(g.currentValue, g.unit)}</strong></span>
+                  <span style={{ fontSize:13, color:T.muted }}>Target: <strong style={{ color:T.text }}>{formatWithUnit(g.targetValue, g.unit)}</strong></span>
+                </div>
+                <div style={{ height:8, background:T.surface, borderRadius:4, overflow:"hidden", marginBottom:6 }}>
+                  <div style={{ height:"100%", borderRadius:4, background:isComplete ? T.goldBright : g.color, width:`${barFillPct}%`, transition:"width 0.5s ease" }}/>
+                </div>
+                <div style={{ fontSize:11, color:isComplete ? T.gold : T.muted, marginBottom:16, textAlign:"center" }}>{statusText}</div>
+                {logs.length > 0 ? (
+                  <>
+                    <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Recent measurements</div>
+                    {recentMeasurements.map((l, i) => (
+                      <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderTop:`0.5px solid ${T.border}` }}>
+                        <span style={{ fontSize:11, color:g.color+"99", fontWeight:500 }}>{fmtEntryDate(l.date)}</span>
+                        <div style={{ display:"flex", alignItems:"baseline", gap:4 }}>
+                          <span style={{ fontSize:15, color:T.text, fontWeight:500 }}>{l.value}</span>
+                          <span style={{ fontSize:11, color:T.muted }}>{g.unit}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                ) : (
+                  <EmptyHint icon="📈">
+                    Log a measurement on Today and this chart will start showing your trajectory toward the target.
+                  </EmptyHint>
+                )}
+              </IC>
+            );
+          })}
+        </>
+      )}
 
       <div style={{ height:20 }}/>
     </div>
@@ -3763,27 +5323,34 @@ function EditGoalModal({ goal, onClose, onSave }) {
 }
 
 // ─── ADD ACTION SHEET ─────────────────────────────────────────────────────────
-function AddActionSheet({ onAddHabit, onAddGoal, onClose }) {
+function AddActionSheet({ onAddHabit, onAddGoal, onAddLog, onClose }) {
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:300, display:"flex", alignItems:"flex-end", justifyContent:"center" }}
       onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{ width:430, maxWidth:"100vw", background:T.raised, borderRadius:"20px 20px 0 0", padding:"20px 16px 40px" }}>
         <div style={{ width:36, height:4, borderRadius:2, background:T.border, margin:"0 auto 20px" }}/>
-        <button onClick={onAddHabit} style={{ display:"flex", alignItems:"center", gap:14, width:"100%", padding:"14px 16px", borderRadius:T.r, border:`0.5px solid ${T.borderStrong}`, background:T.surface, marginBottom:10, cursor:"pointer", textAlign:"left" }}>
+        <button type="button" onClick={onAddHabit} style={{ display:"flex", alignItems:"center", gap:14, width:"100%", padding:"14px 16px", borderRadius:T.r, border:`0.5px solid ${T.borderStrong}`, background:T.surface, marginBottom:10, cursor:"pointer", textAlign:"left" }}>
           <span style={{ fontSize:22 }}>⚒️</span>
           <div>
             <div style={{ fontSize:15, fontWeight:500, color:T.text }}>Add a habit</div>
             <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>Daily check-ins, weekly targets, build habits, or limit/reduce tracking</div>
           </div>
         </button>
-        <button onClick={onAddGoal} style={{ display:"flex", alignItems:"center", gap:14, width:"100%", padding:"14px 16px", borderRadius:T.r, border:`0.5px solid ${T.borderStrong}`, background:T.surface, marginBottom:10, cursor:"pointer", textAlign:"left" }}>
+        <button type="button" onClick={onAddGoal} style={{ display:"flex", alignItems:"center", gap:14, width:"100%", padding:"14px 16px", borderRadius:T.r, border:`0.5px solid ${T.borderStrong}`, background:T.surface, marginBottom:10, cursor:"pointer", textAlign:"left" }}>
           <span style={{ fontSize:22 }}>🎯</span>
           <div>
             <div style={{ fontSize:15, fontWeight:500, color:T.text }}>Set a goal</div>
             <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>Outcomes with numbers (weight, savings, PRs) — not the same as daily habits or limits</div>
           </div>
         </button>
-        <button onClick={onClose} style={{ width:"100%", padding:"13px", borderRadius:T.rsm, border:"none", background:T.surface, color:T.muted, fontSize:14, cursor:"pointer", marginTop:4 }}>Cancel</button>
+        <button type="button" onClick={onAddLog} style={{ display:"flex", alignItems:"center", gap:14, width:"100%", padding:"14px 16px", borderRadius:T.r, border:`0.5px solid ${T.borderStrong}`, background:T.surface, marginBottom:10, cursor:"pointer", textAlign:"left" }}>
+          <span style={{ fontSize:22 }}>📝</span>
+          <div>
+            <div style={{ fontSize:15, fontWeight:500, color:T.text }}>Add a log</div>
+            <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>{HABIT_TYPES.log.desc}</div>
+          </div>
+        </button>
+        <button type="button" onClick={onClose} style={{ width:"100%", padding:"13px", borderRadius:T.rsm, border:"none", background:T.surface, color:T.muted, fontSize:14, cursor:"pointer", marginTop:4 }}>Cancel</button>
       </div>
     </div>
   );
@@ -3920,32 +5487,133 @@ function SocialTeaserCard({ emoji, title, children }) {
   );
 }
 
-function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests, friendsLoading, onSendRequest, onAccept, onDecline, onRemoveFriend, onCancelSentRequest, sharedGoals, sharedGoalsLoading, sharedGoalInvites, onAcceptGoalInvite, onDeclineGoalInvite, onCreateSharedGoal, onJoinSharedGoal, onLogSharedGoal, onShareHabit, currentUserId, onDeleteSharedGoal, onNudgeFriend }) {
-  const [showAddFriend,   setShowAddFriend]   = useState(false);
-  const [addEmail,        setAddEmail]        = useState("");
-  const [addError,        setAddError]        = useState("");
-  const [addLoading,      setAddLoading]      = useState(false);
-  const [addDone,         setAddDone]         = useState(false);
-  const [showNewGoal,     setShowNewGoal]     = useState(false);
-  const [showJoinGoal,    setShowJoinGoal]    = useState(false);
-  const [joinCode,        setJoinCode]        = useState("");
-  const [joinError,       setJoinError]       = useState("");
-  const [joinLoading,     setJoinLoading]     = useState(false);
-  const [goalName,        setGoalName]        = useState("");
-  const [goalEmoji,       setGoalEmoji]       = useState("🎯");
-  const [goalType,        setGoalType]        = useState("daily");
-  const [weeklyTarget,    setWeeklyTarget]    = useState(3);
-  const [createLoading,   setCreateLoading]   = useState(false);
-  const [copiedId,        setCopiedId]        = useState(null);
-  const [inviteGoalId,    setInviteGoalId]    = useState(null);
-  const [inviteSentTo,    setInviteSentTo]    = useState(null);
+function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests, friendsLoading, onSendRequest, onAccept, onDecline, onRemoveFriend, onCancelSentRequest, sharedGoals, sharedGoalsLoading, sharedGoalInvites, onAcceptGoalInvite, onDeclineGoalInvite, currentUserId, onDeleteSharedGoal, onNudgeFriend, onShareHabit, sharingHabitId, onToast, pendingInviteGoalId, onClearPendingInvite, betaLeaderboard = [], leaderboardLoading = false, myBetaRank = null, betaTotalCount = null, betaTicker = [], isPro = false, onUpgrade }) {
+  const [showAddFriend,      setShowAddFriend]      = useState(false);
+  const [addEmail,           setAddEmail]           = useState("");
+  const [addError,           setAddError]           = useState("");
+  const [addLoading,         setAddLoading]         = useState(false);
+  const [addDone,            setAddDone]            = useState(false);
+  // --- Nudge cooldown persistence ----------------------------------------
+  // Stored per-day in localStorage so the "nudged ✓" state survives
+  // reloads / tab switches. Old keys for previous days are purged on mount.
+  const NUDGED_KEY_PREFIX = "forged_nudged_today_";
+  function nudgedStorageKey(dayStr) { return `${NUDGED_KEY_PREFIX}${dayStr}`; }
+  function loadNudgedToday() {
+    try {
+      const t = todayStr();
+      const toRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(NUDGED_KEY_PREFIX) && k !== nudgedStorageKey(t)) {
+          toRemove.push(k);
+        }
+      }
+      toRemove.forEach(k => { try { localStorage.removeItem(k); } catch {} });
+      const raw = localStorage.getItem(nudgedStorageKey(t));
+      if (!raw) return new Set();
+      const arr = JSON.parse(raw);
+      return new Set(Array.isArray(arr) ? arr : []);
+    } catch {
+      return new Set();
+    }
+  }
+  function persistNudgedToday(set) {
+    try {
+      localStorage.setItem(nudgedStorageKey(todayStr()), JSON.stringify([...set]));
+    } catch {}
+  }
+
+  // Per-goal all-time best group streak. Reads from localStorage and bumps the
+  // stored value if the current streak beats it, so a new record implicitly
+  // shows up as a higher "best Nd" badge next to the live streak pill.
+  function updateGroupStreakBest(goalId, current) {
+    if (!goalId) return Math.max(0, current | 0);
+    const key = `forged_group_streak_best_${goalId}`;
+    try {
+      const raw = localStorage.getItem(key);
+      let best = raw ? parseInt(raw, 10) : 0;
+      if (!Number.isFinite(best) || best < 0) best = 0;
+      if ((current | 0) > best) {
+        localStorage.setItem(key, String(current | 0));
+        return current | 0;
+      }
+      return best;
+    } catch {
+      return Math.max(0, current | 0);
+    }
+  }
+
+  const [inviteGoalId,       setInviteGoalId]       = useState(null);
+  const [invitedFriends,     setInvitedFriends]     = useState(() => new Set());
   const [sharedGoalDeleteId, setSharedGoalDeleteId] = useState(null);
-  const [deleteSharedLoading, setDeleteSharedLoading] = useState(false);
-  const [selectedFriend,  setSelectedFriend]  = useState(null);
-  const [nudgedToday,     setNudgedToday]     = useState(() => new Set());
-  const [nudgeSending,    setNudgeSending]    = useState(false);
+  const [deleteSharedLoading,setDeleteSharedLoading]= useState(false);
+  const [selectedFriend,     setSelectedFriend]     = useState(null);
+  // Compact Friends sheet — replaces the inline friends list in the body.
+  // Holds: incoming requests, outgoing/pending requests, current friends, and
+  // the Add friend form. Keeps the main Social page focused on leaderboard
+  // and accountability while preserving every friend flow.
+  const [showFriendsSheet,   setShowFriendsSheet]   = useState(false);
+  const [nudgedToday,        setNudgedToday]        = useState(loadNudgedToday);
+  // Marks a userId as nudged for today in both React state and localStorage,
+  // so the "nudged ✓" pill persists across tab switches and reloads.
+  function markNudged(userId) {
+    setNudgedToday(prev => {
+      if (prev.has(userId)) return prev;
+      const next = new Set([...prev, userId]);
+      persistNudgedToday(next);
+      return next;
+    });
+  }
+  // Nudge message sheet
+  const [nudgeTarget,        setNudgeTarget]        = useState(null); // { userId, name }
+  const [nudgeMessage,       setNudgeMessage]       = useState("");
+  const [nudgeSending,       setNudgeSending]       = useState(false);
+  // Share-a-habit picker (when user already has shared goals and wants to start another)
+  const [showSharePicker,    setShowSharePicker]    = useState(false);
+
+  // Auto-open invite picker when navigating here after sharing a habit
+  useEffect(() => {
+    if (pendingInviteGoalId) {
+      setInviteGoalId(pendingInviteGoalId);
+      setInvitedFriends(new Set());
+      onClearPendingInvite?.();
+    }
+  }, [pendingInviteGoalId]);
 
   const today = todayStr();
+  // Most-recent log date per friend, derived from shared-goal member logs we
+  // already have in memory. Used to show "last active: Xd ago" in the compact
+  // friends list so inactive accounts are visually distinct from active lurkers.
+  const friendLastLogDate = (() => {
+    const map = new Map();
+    for (const g of sharedGoals || []) {
+      for (const m of g.members || []) {
+        if (!m.userId || m.isMe) continue;
+        const logs = m.logs || [];
+        for (const l of logs) {
+          const d = typeof l?.date === "string" ? l.date : "";
+          if (!d) continue;
+          const prev = map.get(m.userId);
+          if (!prev || d > prev) map.set(m.userId, d);
+        }
+      }
+    }
+    return map;
+  })();
+  function friendLastActiveLabel(friendId) {
+    const d = friendLastLogDate.get(friendId);
+    if (!d) return null;
+    if (d === today) return "today";
+    const t = parseLocal(today);
+    const then = parseLocal(d);
+    if (!t || !then) return null;
+    const days = Math.max(0, Math.floor((t.getTime() - then.getTime()) / (24 * 60 * 60 * 1000)));
+    if (days <= 0) return "today";
+    if (days === 1) return "1d ago";
+    if (days < 7) return `${days}d ago`;
+    if (days < 30) return `${Math.floor(days / 7)}w ago`;
+    return `${Math.floor(days / 30)}mo ago`;
+  }
   const myStreak = habits.length ? Math.max(0, ...habits.map(h => h.streak || 0)) : 0;
   const myLoggedToday = habits.filter(h => (h.logs||[]).some(l => l.date === today)).length;
 
@@ -3961,49 +5629,6 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
     else { setAddDone(true); setAddEmail(""); setTimeout(() => { setAddDone(false); setShowAddFriend(false); }, 2200); }
   }
 
-  async function handleJoin() {
-    if (!joinCode.trim()) return;
-    setJoinLoading(true); setJoinError("");
-    let code = joinCode.trim();
-    const fromUrl = code.match(/\/join\/([^/?#]+)/i);
-    if (fromUrl) code = fromUrl[1];
-    const res = await onJoinSharedGoal(code);
-    setJoinLoading(false);
-    if (res?.error) { setJoinError(res.error); }
-    else { setJoinCode(""); setShowJoinGoal(false); }
-  }
-
-  async function handleCreate() {
-    if (!goalName.trim() || createLoading) return;
-    setCreateLoading(true);
-    try {
-      const created = await onCreateSharedGoal({
-        name: goalName,
-        emoji: goalEmoji,
-        habitType: goalType,
-        weeklyTarget: goalType === "weekly" ? Math.min(7, Math.max(1, Number(weeklyTarget) || 3)) : undefined,
-      });
-      if (created === undefined) return;
-      if (!created) return;
-      setGoalName(""); setGoalEmoji("🎯"); setGoalType("daily"); setWeeklyTarget(3);
-      setShowNewGoal(false);
-    } finally {
-      setCreateLoading(false);
-    }
-  }
-
-  function copyInviteLink(goal) {
-    const url = `${window.location.origin}/join/${goal.inviteCode}`;
-    if (navigator.share) {
-      navigator.share({ title: `Join "${goal.name}" on Forged`, url }).catch(() => {});
-    } else {
-      navigator.clipboard?.writeText(url).then(() => {
-        setCopiedId(goal.id);
-        setTimeout(() => setCopiedId(null), 2000);
-      });
-    }
-  }
-
   function Avatar({ name, avatarUrl, size = 32 }) {
     if (avatarUrl && !avatarUrl.startsWith("http")) {
       return <div style={{ width: size, height: size, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: size * 0.55, background: T.surface, flexShrink: 0 }}>{avatarUrl}</div>;
@@ -4015,240 +5640,391 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
     return <div style={{ width: size, height: size, borderRadius: "50%", background: "rgba(200,144,42,0.18)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: size * 0.38, fontWeight: 700, color: T.gold, flexShrink: 0 }}>{initials}</div>;
   }
 
+  // XP → level (1 per 100 xp, purely cosmetic)
+  const myLevel = Math.max(1, Math.floor((xp || 0) / 100) + 1);
+  const xpIntoLevel = (xp || 0) % 100;
+
+  // Rank medal for the beta board
+  function medal(rank) {
+    if (rank === 1) return "🥇";
+    if (rank === 2) return "🥈";
+    if (rank === 3) return "🥉";
+    return null;
+  }
+
   return (
     <div style={{ paddingBottom: 24 }}>
-      {/* ── Your card ── */}
-      <div style={{ margin: "0 0 20px", padding: "16px", background: `linear-gradient(135deg, rgba(200,144,42,0.12) 0%, ${T.surface} 100%)`, border: `0.5px solid rgba(200,144,42,0.28)`, borderRadius: T.r }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
-          <Avatar name={user?.name} avatarUrl={user?.avatarUrl} size={40} />
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: T.text }}>{user?.name || "You"}</div>
-            <div style={{ fontSize: 12, color: T.muted }}>Your stats</div>
+      {/* ── Hero: Your card ─────────────────────────────────────────────── */}
+      <div style={{
+        position: "relative",
+        margin: "0 0 22px",
+        padding: "18px 18px 16px",
+        background: `linear-gradient(140deg, rgba(200,144,42,0.18) 0%, rgba(200,144,42,0.06) 55%, ${T.surface} 100%)`,
+        border: `0.5px solid rgba(200,144,42,0.35)`,
+        borderRadius: T.r,
+        boxShadow: "0 2px 24px rgba(200,144,42,0.06)",
+        overflow: "hidden",
+      }}>
+        {/* Top row: avatar + name + pro/rank pill */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+          <Avatar name={user?.name} avatarUrl={user?.avatarUrl} size={46} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: T.text }}>{user?.name || "You"}</div>
+              {isPro && (
+                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.05em", color: T.gold, background: "rgba(200,144,42,0.16)", border: "0.5px solid rgba(200,144,42,0.4)", padding: "2px 7px", borderRadius: 8 }}>PRO</span>
+              )}
+            </div>
+            <div style={{ fontSize: 12, color: T.muted, marginTop: 2 }}>
+              Level {myLevel}
+              {myBetaRank != null && (
+                <> · <span style={{ color: T.gold, fontWeight: 600 }}>#{myBetaRank} in beta</span></>
+              )}
+            </div>
           </div>
         </div>
-        <div style={{ display: "flex", gap: 16 }}>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 20, fontWeight: 700, color: T.text }}>{myStreak}</div>
-            <div style={{ fontSize: 11, color: T.muted }}>🔥 streak</div>
+
+        {/* XP progress bar within level */}
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: T.muted, marginBottom: 4, letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: 600 }}>
+            <span>Level {myLevel}</span>
+            <span>{xpIntoLevel}/100 xp</span>
           </div>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 20, fontWeight: 700, color: T.text }}>{xp}</div>
-            <div style={{ fontSize: 11, color: T.muted }}>⚡ xp</div>
+          <div style={{ height: 6, borderRadius: 3, background: "rgba(255,255,255,0.05)", overflow: "hidden", border: `0.5px solid ${T.border}` }}>
+            <div style={{ height: "100%", width: `${xpIntoLevel}%`, background: `linear-gradient(90deg, ${T.gold}, #e0a94f)`, borderRadius: 3, transition: "width 0.5s ease" }} />
           </div>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 20, fontWeight: 700, color: myLoggedToday > 0 ? T.green : T.muted }}>{myLoggedToday}</div>
-            <div style={{ fontSize: 11, color: T.muted }}>logged today</div>
+          {(() => {
+            // Social-proof pill: only show once the user is meaningfully ranked.
+            if (myBetaRank == null || myBetaRank < 3) return null;
+            if (betaLeaderboard.length < 5) return null;
+            let label = null;
+            if (betaTotalCount && betaTotalCount >= 5) {
+              const pct = Math.max(1, Math.min(99, Math.round((myBetaRank / betaTotalCount) * 100)));
+              const ahead = Math.max(0, betaTotalCount - myBetaRank);
+              label = pct <= 25
+                ? `Top ${pct}% of beta testers`
+                : ahead >= 1
+                  ? `Ahead of ${ahead} tester${ahead === 1 ? "" : "s"}`
+                  : null;
+            } else if (myBetaRank <= betaLeaderboard.length) {
+              // No accurate total yet but user is in top 10 → percentile against the board.
+              const pct = Math.max(1, Math.round((myBetaRank / betaLeaderboard.length) * 100));
+              label = `Top ${pct}% of the board`;
+            }
+            if (!label) return null;
+            return (
+              <div style={{
+                marginTop: 8,
+                display: "inline-flex", alignItems: "center", gap: 6,
+                padding: "3px 10px",
+                borderRadius: 999,
+                background: "rgba(200,144,42,0.14)",
+                border: "0.5px solid rgba(200,144,42,0.35)",
+                fontSize: 11, fontWeight: 600, color: T.gold,
+                letterSpacing: "0.02em",
+              }}>
+                <span aria-hidden style={{ fontSize: 10 }}>▲</span>
+                <span>{label}</span>
+              </div>
+            );
+          })()}
+        </div>
+
+        {/* Stats row */}
+        <div style={{ display: "flex", gap: 0, borderTop: `0.5px solid ${T.border}`, paddingTop: 12 }}>
+          <div style={{ flex: 1, textAlign: "center", borderRight: `0.5px solid ${T.border}` }}>
+            <div style={{ fontSize: 20, fontWeight: 700, color: myStreak > 0 ? T.text : T.muted, lineHeight: 1.1 }}>{myStreak}</div>
+            <div style={{ fontSize: 10, color: T.muted, marginTop: 3, letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: 600 }}>🔥 Streak</div>
+          </div>
+          <div style={{ flex: 1, textAlign: "center", borderRight: `0.5px solid ${T.border}` }}>
+            <div style={{ fontSize: 20, fontWeight: 700, color: T.text, lineHeight: 1.1 }}>{xp}</div>
+            <div style={{ fontSize: 10, color: T.muted, marginTop: 3, letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: 600 }}>⚡ XP</div>
+          </div>
+          <div style={{ flex: 1, textAlign: "center" }}>
+            <div style={{ fontSize: 20, fontWeight: 700, color: myLoggedToday > 0 ? T.green : T.muted, lineHeight: 1.1 }}>{myLoggedToday}</div>
+            <div style={{ fontSize: 10, color: T.muted, marginTop: 3, letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: 600 }}>Today</div>
           </div>
         </div>
       </div>
 
-      {/* ── Pending requests ── */}
-      {friendRequests.length > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <div style={sectionLabel}>Friend requests</div>
-          {friendRequests.map(req => (
-            <div key={req.friendshipId} style={{ ...card, display: "flex", alignItems: "center", gap: 10 }}>
-              <Avatar name={req.name} avatarUrl={req.avatarUrl} size={34} />
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 14, color: T.text, fontWeight: 500 }}>{req.name}</div>
-                <div style={{ fontSize: 12, color: T.muted }}>wants to be friends</div>
+      {/* ── Compact Friends control ────────────────────────────────────────
+          The full friends list, incoming requests, outgoing requests, and
+          Add-friend form all live inside the FriendsSheet modal below. This
+          button is the only friends affordance on the main page so the
+          leaderboard + accountability stay front-and-center. */}
+      <button
+        type="button"
+        onClick={() => setShowFriendsSheet(true)}
+        style={{
+          width: "100%",
+          marginBottom: 18,
+          padding: "12px 14px",
+          background: T.raised,
+          border: `0.5px solid ${T.border}`,
+          borderRadius: T.r,
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          cursor: "pointer",
+          textAlign: "left",
+          fontFamily: T.font,
+          color: T.text,
+          position: "relative",
+        }}
+      >
+        {/* Avatar stack — up to 3 friend avatars */}
+        <div style={{ display: "flex", alignItems: "center", flexShrink: 0, minWidth: 38 }}>
+          {friends.length > 0 ? (
+            friends.slice(0, 3).map((f, i) => (
+              <div key={f.id} style={{
+                marginLeft: i === 0 ? 0 : -10,
+                border: `2px solid ${T.raised}`,
+                borderRadius: "50%",
+                lineHeight: 0,
+              }}>
+                <Avatar name={f.name} avatarUrl={f.avatarUrl} size={26} />
               </div>
-              <button onClick={() => onAccept(req.friendshipId)} style={{ padding: "6px 12px", borderRadius: 16, border: "none", background: T.accent, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", marginRight: 6 }}>Accept</button>
-              <button onClick={() => onDecline(req.friendshipId)} style={{ padding: "6px 10px", borderRadius: 16, border: `0.5px solid ${T.border}`, background: "none", color: T.muted, fontSize: 12, cursor: "pointer" }}>✕</button>
-            </div>
-          ))}
+            ))
+          ) : (
+            <div style={{
+              width: 36, height: 36, borderRadius: "50%",
+              background: "rgba(200,144,42,0.12)",
+              border: "0.5px solid rgba(200,144,42,0.3)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 16,
+            }}>👥</div>
+          )}
         </div>
-      )}
-
-      {sentRequests.length > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <div style={sectionLabel}>Sent requests</div>
-          {sentRequests.map(s => (
-            <div key={s.friendshipId} style={{ ...card, display: "flex", alignItems: "center", gap: 10 }}>
-              <Avatar name={s.name} avatarUrl={s.avatarUrl} size={34} />
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 14, color: T.text, fontWeight: 500 }}>{s.name}</div>
-                <div style={{ fontSize: 12, color: T.muted }}>Request sent · pending</div>
-              </div>
-              <button
-                type="button"
-                onClick={() => onCancelSentRequest(s.friendshipId)}
-                style={{ padding: "5px 10px", borderRadius: T.rsm, border: `0.5px solid ${T.borderStrong}`, background: "none", color: T.muted, fontSize: 11, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}
-              >
-                Cancel
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* ── Friends leaderboard ── */}
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-          <div style={sectionLabel}>Friends</div>
-          <button onClick={() => { setShowAddFriend(s => !s); setAddError(""); setAddEmail(""); setAddDone(false); }}
-            style={{ padding: "5px 12px", borderRadius: 16, border: `0.5px solid ${T.borderStrong}`, background: "none", color: T.gold, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-            + Add friend
-          </button>
-        </div>
-
-        {showAddFriend && (
-          <div style={{ ...card, marginBottom: 12 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 6 }}>Add a friend</div>
-            <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.55, marginBottom: 10 }}>
-              Enter the <strong style={{ color: T.text }}>email they use for Forged</strong> or their <strong style={{ color: T.text }}>@username</strong> (if they set one in Profile → Social).
-              They’ll get a request here — once they accept, you’ll see each other on this leaderboard.
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input
-                type="text"
-                placeholder="friend@email.com or @username"
-                autoComplete="off"
-                value={addEmail}
-                onChange={e => { setAddEmail(e.target.value); setAddError(""); }}
-                onKeyDown={e => e.key === "Enter" && handleSendRequest()}
-                style={{ flex: 1, background: T.surface, border: `0.5px solid ${T.borderStrong}`, borderRadius: T.rsm, padding: "9px 12px", fontSize: 14, color: T.text, outline: "none" }}
-              />
-              <button type="button" onClick={handleSendRequest} disabled={addLoading || !addEmail.trim()}
-                style={{ padding: "9px 14px", borderRadius: T.rsm, border: "none", background: T.accent, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: (!addEmail.trim() || addLoading) ? 0.6 : 1 }}>
-                {addLoading ? "…" : addDone ? "✓ Sent!" : "Send request"}
-              </button>
-            </div>
-            {addError && <div style={{ fontSize: 12, color: "#e05c5c", marginTop: 6 }}>{addError}</div>}
-            {addDone && !addError && <div style={{ fontSize: 12, color: T.green, marginTop: 6 }}>Request sent. They’ll see it under Friend requests.</div>}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: T.text }}>Friends</span>
+            <span style={{ fontSize: 12, color: T.muted, fontWeight: 500 }}>
+              {friends.length === 0
+                ? "Add someone →"
+                : `${friends.length} connected`}
+            </span>
+            {friendRequests.length > 0 && (
+              <span style={{
+                display: "inline-flex", alignItems: "center", gap: 4,
+                padding: "2px 8px", borderRadius: 999,
+                background: T.accent, color: "#fff",
+                fontSize: 10, fontWeight: 700, letterSpacing: "0.04em",
+              }}>
+                {friendRequests.length} new request{friendRequests.length === 1 ? "" : "s"}
+              </span>
+            )}
+            {friendRequests.length === 0 && sentRequests.length > 0 && (
+              <span style={{
+                display: "inline-flex", alignItems: "center", gap: 4,
+                padding: "2px 8px", borderRadius: 999,
+                background: "rgba(200,144,42,0.16)",
+                color: T.gold,
+                fontSize: 10, fontWeight: 600, letterSpacing: "0.04em",
+                border: "0.5px solid rgba(200,144,42,0.3)",
+              }}>
+                {sentRequests.length} pending
+              </span>
+            )}
           </div>
-        )}
+          <div style={{ fontSize: 11.5, color: T.hint, marginTop: 2 }}>
+            Add a friend to start a shared goal or send nudges
+          </div>
+        </div>
+        <div style={{ color: T.muted, fontSize: 16, flexShrink: 0 }}>›</div>
+      </button>
 
-        {friendsLoading ? (
-          <div style={{ textAlign: "center", padding: "24px 0", color: T.muted, fontSize: 13 }}>Loading…</div>
-        ) : friends.length === 0 ? (
-          <div style={{ ...card, textAlign: "center", padding: "24px 16px", color: T.muted, fontSize: 13 }}>
-            No friends yet. Add someone to start the leaderboard.
+      {/* ── Forged Beta Leaderboard (global top 10 by XP) ────────────────── */}
+      <div style={{ marginBottom: 22 }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 10 }}>
+          <div style={{ ...sectionLabel, marginBottom: 0, display: "flex", alignItems: "center", gap: 6 }}>
+            <span>🏆 Forged Beta</span>
+          </div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: T.hint, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+            Top 10 · All-time XP
+          </div>
+        </div>
+
+        {leaderboardLoading ? (
+          <div style={{ ...card, textAlign: "center", padding: "18px 0", color: T.muted, fontSize: 13 }}>Loading leaderboard…</div>
+        ) : betaLeaderboard.length === 0 ? (
+          <div style={{ ...card, textAlign: "center", padding: "24px 16px", color: T.muted, fontSize: 13, lineHeight: 1.6 }}>
+            Be the first on the board.<br />
+            Log a habit to start earning XP.
           </div>
         ) : (
-          friends.map((f, i) => (
-            <div key={f.id} onClick={() => setSelectedFriend(f)}
-              style={{ ...card, display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: i === 0 ? T.gold : T.muted, width: 18, textAlign: "center" }}>{i + 1}</div>
-              <Avatar name={f.name} avatarUrl={f.avatarUrl} size={34} />
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 14, color: T.text, fontWeight: 500 }}>{f.name}</div>
-                <div style={{ fontSize: 12, color: T.muted }}>⚡ {f.xp} xp{f.streak > 0 ? ` · 🔥 ${f.streak}` : ""}</div>
-              </div>
-              <div style={{ textAlign: "center", marginRight: 4 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: f.loggedToday ? T.green : T.muted }}>
-                  {f.loggedToday ? "✓" : "—"}
+          <div style={{ borderRadius: T.r, overflow: "hidden", border: `0.5px solid ${T.border}`, background: T.raised }}>
+            {betaLeaderboard.map((row, i) => {
+              const m = medal(row.rank);
+              const highlight = row.isMe;
+              return (
+                <div key={row.id} style={{
+                  display: "flex", alignItems: "center", gap: 11,
+                  padding: "11px 14px",
+                  borderBottom: i === betaLeaderboard.length - 1 ? "none" : `0.5px solid ${T.border}`,
+                  background: highlight
+                    ? "linear-gradient(90deg, rgba(200,144,42,0.14), rgba(200,144,42,0.04))"
+                    : (row.rank <= 3 ? "rgba(200,144,42,0.035)" : "transparent"),
+                }}>
+                  {/* Rank / medal */}
+                  <div style={{
+                    width: 26, textAlign: "center", flexShrink: 0,
+                    fontSize: m ? 18 : 13,
+                    fontWeight: 700,
+                    color: row.rank === 1 ? T.gold : row.rank <= 3 ? T.sub : T.muted,
+                    lineHeight: 1,
+                  }}>
+                    {m || `#${row.rank}`}
+                  </div>
+                  <Avatar name={row.name} avatarUrl={row.avatarUrl} size={30} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                      <div style={{
+                        fontSize: 13,
+                        fontWeight: highlight ? 700 : 600,
+                        color: highlight ? T.gold : T.text,
+                        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                      }}>
+                        {highlight ? "You" : row.name}
+                      </div>
+                      {row.isPro && !highlight && (
+                        <span style={{ fontSize: 8, fontWeight: 700, color: T.gold, background: "rgba(200,144,42,0.15)", padding: "1px 5px", borderRadius: 5, letterSpacing: "0.04em", flexShrink: 0 }}>PRO</span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 11, color: T.muted, marginTop: 1 }}>
+                      {row.streak > 0 ? `🔥 ${row.streak}` : "—"}
+                      {row.loggedToday && <> · <span style={{ color: T.green }}>✓ active today</span></>}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: highlight ? T.gold : T.text, lineHeight: 1.1 }}>
+                      {row.xp.toLocaleString()}
+                    </div>
+                    <div style={{ fontSize: 9, color: T.hint, marginTop: 2, letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: 600 }}>xp</div>
+                  </div>
                 </div>
-                <div style={{ fontSize: 10, color: T.hint }}>today</div>
+              );
+            })}
+            {/* "You're #N" footer if user isn't in the top 10 */}
+            {myBetaRank != null && !betaLeaderboard.some(r => r.isMe) && (
+              <div style={{
+                padding: "10px 14px",
+                background: "rgba(200,144,42,0.07)",
+                borderTop: `0.5px solid ${T.border}`,
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+              }}>
+                <div style={{ fontSize: 12, color: T.sub }}>
+                  You're <strong style={{ color: T.gold }}>#{myBetaRank}</strong> overall
+                </div>
+                <div style={{ fontSize: 11, color: T.muted }}>Keep forging ⚡</div>
               </div>
-              <div style={{ color: T.hint, fontSize: 14, flexShrink: 0 }}>›</div>
-            </div>
-          ))
+            )}
+          </div>
         )}
       </div>
 
-      {/* ── Shared goals ── */}
-      <div>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-          <div style={sectionLabel}>Shared goals</div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={() => { setShowJoinGoal(s => !s); setJoinError(""); setJoinCode(""); }}
-              style={{ padding: "5px 11px", borderRadius: 16, border: `0.5px solid ${T.borderStrong}`, background: "none", color: T.sub, fontSize: 12, cursor: "pointer" }}>
-              Join
-            </button>
-            <button onClick={() => setShowNewGoal(s => !s)}
-              style={{ padding: "5px 12px", borderRadius: 16, border: `0.5px solid ${T.borderStrong}`, background: "none", color: T.gold, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-              + New
-            </button>
+      {/* ── Live-ish beta activity ticker ────────────────────────────────── */}
+      {Array.isArray(betaTicker) && betaTicker.length > 0 && (() => {
+        const items = betaTicker.slice(0, 3).map(r => {
+          const isMeLikely = currentUserId && r.userId === currentUserId;
+          const who = isMeLikely ? "You" : (r.firstName || "Someone");
+          const name = r.habitName || "a habit";
+          const emoji = r.emoji || "";
+          if (r.streak && r.streak >= 5) {
+            return `${emoji ? emoji + " " : ""}${who} on a ${r.streak}-day streak`;
+          }
+          const verb = r.habitType === "limit"
+            ? "kept to a limit on"
+            : r.habitType === "project"
+              ? "made progress on"
+              : "just logged";
+          return `${emoji ? emoji + " " : ""}${who} ${verb} ${name}`;
+        });
+        if (items.length === 0) return null;
+        const marqueeText = items.join("   •   ");
+        return (
+          <div style={{
+            marginBottom: 18,
+            padding: "8px 0",
+            background: "rgba(200,144,42,0.04)",
+            border: `0.5px solid ${T.border}`,
+            borderRadius: T.rsm,
+            overflow: "hidden",
+            position: "relative",
+          }}>
+            <div aria-hidden style={{
+              position: "absolute", left: 0, top: 0, bottom: 0, width: 18,
+              background: `linear-gradient(90deg, ${T.bg || "rgba(20,20,20,1)"} 0%, rgba(0,0,0,0) 100%)`,
+              pointerEvents: "none", zIndex: 2,
+            }} />
+            <div aria-hidden style={{
+              position: "absolute", right: 0, top: 0, bottom: 0, width: 18,
+              background: `linear-gradient(270deg, ${T.bg || "rgba(20,20,20,1)"} 0%, rgba(0,0,0,0) 100%)`,
+              pointerEvents: "none", zIndex: 2,
+            }} />
+            <div style={{
+              display: "inline-block",
+              whiteSpace: "nowrap",
+              animation: "forgedTicker 38s linear infinite",
+              fontSize: 12, color: T.sub, letterSpacing: "0.01em",
+              paddingLeft: "100%",
+            }}>
+              {marqueeText}   •   {marqueeText}
+            </div>
+            <style>{`
+              @keyframes forgedTicker {
+                0%   { transform: translateX(0); }
+                100% { transform: translateX(-50%); }
+              }
+              @media (prefers-reduced-motion: reduce) {
+                div[data-forged-ticker] { animation: none !important; }
+              }
+            `}</style>
           </div>
-        </div>
+        );
+      })()}
 
-        {showJoinGoal && (
-          <div style={{ ...card, marginBottom: 12 }}>
-            <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.55, marginBottom: 8 }}>
-              Paste the 8-character code or the full invite link — either works.
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input
-                placeholder="e.g. ab3f9c2d" value={joinCode}
-                onChange={e => { setJoinCode(e.target.value); setJoinError(""); }}
-                onKeyDown={e => e.key === "Enter" && handleJoin()}
-                style={{ flex: 1, background: T.surface, border: `0.5px solid ${T.borderStrong}`, borderRadius: T.rsm, padding: "9px 12px", fontSize: 14, color: T.text, outline: "none" }}
-              />
-              <button onClick={handleJoin} disabled={joinLoading || !joinCode.trim()}
-                style={{ padding: "9px 14px", borderRadius: T.rsm, border: "none", background: T.gold, color: "#0F0F0D", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: (!joinCode.trim() || joinLoading) ? 0.6 : 1 }}>
-                {joinLoading ? "…" : "Join"}
-              </button>
-            </div>
-            {joinError && <div style={{ fontSize: 12, color: "#e05c5c", marginTop: 6 }}>{joinError}</div>}
-          </div>
-        )}
+      {/* Friends list / requests / Add friend now live in the FriendsSheet
+          modal at the bottom of this component, opened by the compact
+          Friends button above. Keeps the page focused on leaderboard +
+          accountability. */}
 
-        {showNewGoal && (
-          <div style={{ ...card, marginBottom: 12 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 14 }}>New shared goal</div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-              <input
-                placeholder="Emoji" value={goalEmoji} onChange={e => setGoalEmoji(e.target.value)}
-                style={{ width: 52, background: T.surface, border: `0.5px solid ${T.borderStrong}`, borderRadius: T.rsm, padding: "9px 8px", fontSize: 20, color: T.text, outline: "none", textAlign: "center" }}
-              />
-              <input
-                placeholder="Goal name (e.g. Gym)" value={goalName} onChange={e => setGoalName(e.target.value)}
-                style={{ flex: 1, background: T.surface, border: `0.5px solid ${T.borderStrong}`, borderRadius: T.rsm, padding: "9px 12px", fontSize: 14, color: T.text, outline: "none" }}
-              />
-            </div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-              {[["daily","Daily"], ["weekly","Weekly"], ["project","Build"]].map(([v, l]) => (
-                <button key={v} onClick={() => setGoalType(v)}
-                  style={{ flex: 1, padding: "8px 0", borderRadius: T.rsm, border: `0.5px solid ${goalType === v ? T.gold : T.border}`, background: goalType === v ? "rgba(200,144,42,0.12)" : "none", color: goalType === v ? T.gold : T.muted, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
-                  {l}
+      {/* ── Accountability / Shared goals ── */}
+      <div style={{ marginBottom: 24 }}>
+        {(() => {
+          const shareableHabits = (habits || []).filter(h => h.habitType !== "log" && !h.sharedGoalId);
+          return (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <div style={{ ...sectionLabel, marginBottom: 0 }}>Accountability</div>
+              {sharedGoals.length > 0 && shareableHabits.length > 0 && onShareHabit && (
+                <button type="button"
+                  onClick={() => setShowSharePicker(true)}
+                  disabled={!!sharingHabitId}
+                  style={{ padding: "5px 12px", borderRadius: 16, border: `0.5px solid ${T.borderStrong}`, background: "none", color: T.gold, fontSize: 12, fontWeight: 600, cursor: sharingHabitId ? "default" : "pointer", opacity: sharingHabitId ? 0.6 : 1 }}>
+                  {sharingHabitId ? "…" : "+ New goal"}
                 </button>
-              ))}
+              )}
             </div>
-            {goalType === "weekly" && (
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6, letterSpacing: "0.04em" }}>Sessions per week</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={7}
-                  value={weeklyTarget}
-                  onChange={e => {
-                    const n = parseInt(e.target.value, 10);
-                    setWeeklyTarget(Number.isNaN(n) ? 3 : Math.min(7, Math.max(1, n)));
-                  }}
-                  style={{ width: "100%", boxSizing: "border-box", background: T.surface, border: `0.5px solid ${T.borderStrong}`, borderRadius: T.rsm, padding: "9px 12px", fontSize: 14, color: T.text, outline: "none" }}
-                />
-              </div>
-            )}
-            <button onClick={handleCreate} disabled={createLoading || !goalName.trim()}
-              style={{ width: "100%", padding: "11px 0", borderRadius: T.rsm, border: "none", background: T.accent, color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: (!goalName.trim() || createLoading) ? 0.6 : 1 }}>
-              {createLoading ? "Creating…" : "Create & get invite link"}
-            </button>
-          </div>
-        )}
+          );
+        })()}
 
-        {/* ── Pending goal invites ── */}
+        {/* Pending goal invites */}
         {sharedGoalInvites.length > 0 && (
           <div style={{ marginBottom: 16 }}>
-            <div style={sectionLabel}>Goal invites</div>
             {sharedGoalInvites.map(inv => (
-              <div key={inv.id} style={{ ...card, display: "flex", alignItems: "center", gap: 12 }}>
+              <div key={inv.id} style={{ ...card, display: "flex", alignItems: "center", gap: 12, background: "rgba(200,144,42,0.06)", border: `0.5px solid rgba(200,144,42,0.28)` }}>
                 <div style={{ fontSize: 28, lineHeight: 1 }}>{inv.goal_emoji || "🎯"}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>{inv.goal_name}</div>
-                  <div style={{ fontSize: 12, color: T.muted, marginTop: 2 }}>{inv.inviter_name} invited you</div>
+                  <div style={{ fontSize: 12, color: T.muted, marginTop: 2 }}>
+                    <strong style={{ color: T.gold }}>{inv.inviter_name}</strong> invited you to join
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => onAcceptGoalInvite(inv)}
-                  style={{ padding: "6px 14px", borderRadius: 16, border: "none", background: T.accent, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", marginRight: 6, flexShrink: 0 }}>
+                <button type="button" onClick={() => onAcceptGoalInvite(inv)}
+                  style={{ padding: "7px 16px", borderRadius: 16, border: "none", background: T.accent, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", marginRight: 6, flexShrink: 0 }}>
                   Join
                 </button>
-                <button
-                  type="button"
-                  onClick={() => onDeclineGoalInvite(inv.id)}
-                  style={{ padding: "6px 10px", borderRadius: 16, border: `0.5px solid ${T.border}`, background: "none", color: T.muted, fontSize: 12, cursor: "pointer", flexShrink: 0 }}>
+                <button type="button" onClick={() => onDeclineGoalInvite(inv.id)}
+                  style={{ padding: "7px 10px", borderRadius: 16, border: `0.5px solid ${T.border}`, background: "none", color: T.muted, fontSize: 12, cursor: "pointer", flexShrink: 0 }}>
                   ✕
                 </button>
               </div>
@@ -4256,95 +6032,553 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
           </div>
         )}
 
+        {/* Shared goal cards */}
         {sharedGoalsLoading ? (
           <div style={{ textAlign: "center", padding: "24px 0", color: T.muted, fontSize: 13 }}>Loading…</div>
         ) : sharedGoals.length === 0 ? (
-          <div style={{ ...card, textAlign: "center", padding: "24px 16px", color: T.muted, fontSize: 13 }}>
-            No shared goals yet. Create one and invite your friends.
-          </div>
-        ) : (
-          sharedGoals.map(g => {
-            const myLoggedToday = (g.myLogs || []).some(l => l.date === today);
-            const isCreator = currentUserId && g.creatorId === currentUserId;
+          (() => {
+            const shareableHabits = (habits || []).filter(h => h.habitType !== "log" && !h.sharedGoalId);
+            const hasFriends = (friends || []).length > 0;
             return (
-              <div key={g.id} style={{ ...card }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-                  <div style={{ fontSize: 24 }}>{g.emoji}</div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 15, fontWeight: 600, color: T.text }}>{g.name}</div>
-                    <div style={{ fontSize: 12, color: T.muted }}>{g.members.length} member{g.members.length !== 1 ? "s" : ""}{isCreator ? " · You created this" : ""}</div>
+              <div style={{
+                borderRadius: T.r,
+                overflow: "hidden",
+                border: `0.5px solid rgba(200,144,42,0.32)`,
+                background: `linear-gradient(155deg, rgba(200,144,42,0.09) 0%, rgba(200,144,42,0.02) 50%, ${T.raised} 100%)`,
+              }}>
+                {/* Value prop header */}
+                <div style={{ padding: "18px 18px 14px" }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
+                    <div style={{ fontSize: 28, lineHeight: 1 }}>🤝</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: T.text, marginBottom: 4 }}>Stay accountable with a friend</div>
+                      <div style={{ fontSize: 12.5, color: T.sub, lineHeight: 1.55 }}>
+                        Share a habit — you'll each see when the other logs. People who build habits with a partner are <strong style={{ color: T.gold }}>2–3× more likely</strong> to stick with them.
+                      </div>
+                    </div>
                   </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "flex-end" }}>
-                    <button
-                      type="button"
-                      onClick={() => { setInviteGoalId(g.id); setInviteSentTo(null); }}
-                      style={{ padding: "5px 10px", borderRadius: 12, border: `0.5px solid ${T.borderStrong}`, background: "none", color: T.sub, fontSize: 11, cursor: "pointer", fontWeight: 500 }}>
-                      Invite friend
-                    </button>
-                    {isCreator && onDeleteSharedGoal && (
-                      sharedGoalDeleteId === g.id ? (
-                        <div style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: 6, minWidth: 140 }}>
-                          <span style={{ fontSize: 11, color: T.accent, fontWeight: 600 }}>Delete for everyone?</span>
-                          <div style={{ display: "flex", gap: 6 }}>
-                            <button
-                              type="button"
-                              disabled={deleteSharedLoading}
-                              onClick={async () => {
-                                setDeleteSharedLoading(true);
-                                const res = await onDeleteSharedGoal(g.id);
-                                setDeleteSharedLoading(false);
-                                if (!res?.error) setSharedGoalDeleteId(null);
-                              }}
-                              style={{ flex: 1, padding: "5px 8px", borderRadius: 10, border: "none", background: T.accent, color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", opacity: deleteSharedLoading ? 0.65 : 1 }}
-                            >
-                              {deleteSharedLoading ? "…" : "Delete"}
-                            </button>
-                            <button type="button" disabled={deleteSharedLoading} onClick={() => setSharedGoalDeleteId(null)}
-                              style={{ flex: 1, padding: "5px 8px", borderRadius: 10, border: `0.5px solid ${T.border}`, background: "none", color: T.muted, fontSize: 11, cursor: "pointer" }}>
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setSharedGoalDeleteId(g.id)}
-                          style={{ padding: "5px 10px", borderRadius: 12, border: `0.5px solid rgba(231,76,60,0.35)`, background: "rgba(231,76,60,0.08)", color: "#e05c5c", fontSize: 11, cursor: "pointer", fontWeight: 600 }}>
-                          Delete
-                        </button>
-                      )
-                    )}
+
+                  {/* Tiny proof row */}
+                  <div style={{ display: "flex", gap: 10, marginTop: 6, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 11, color: T.muted, background: T.surface, border: `0.5px solid ${T.border}`, padding: "4px 9px", borderRadius: 10 }}>✓ See who logged today</span>
+                    <span style={{ fontSize: 11, color: T.muted, background: T.surface, border: `0.5px solid ${T.border}`, padding: "4px 9px", borderRadius: 10 }}>💪 Nudge them if they skip</span>
                   </div>
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
-                  {g.members.map(m => {
-                    const mLoggedToday = (m.logs || []).some(l => l.date === today);
+
+                {/* Action area */}
+                {shareableHabits.length > 0 && onShareHabit ? (
+                  <div style={{ borderTop: `0.5px solid ${T.border}`, padding: "14px 18px 16px", background: T.raised }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: T.muted, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10 }}>
+                      Pick a habit to share
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                      {shareableHabits.slice(0, 4).map(h => {
+                        const busy = sharingHabitId === h.id;
+                        return (
+                          <button key={h.id} type="button"
+                            onClick={() => onShareHabit(h.id)}
+                            disabled={!!sharingHabitId}
+                            style={{
+                              display: "flex", alignItems: "center", gap: 11,
+                              padding: "10px 12px", borderRadius: T.rsm,
+                              border: `0.5px solid ${T.borderStrong}`,
+                              background: T.surface, color: T.text,
+                              cursor: sharingHabitId ? "default" : "pointer",
+                              textAlign: "left",
+                              opacity: (sharingHabitId && !busy) ? 0.5 : 1,
+                            }}>
+                            <span style={{ fontSize: 20, flexShrink: 0 }}>{h.emoji}</span>
+                            <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{h.name}</span>
+                            <span style={{ fontSize: 11, color: T.gold, fontWeight: 700, letterSpacing: "0.02em", flexShrink: 0 }}>
+                              {busy ? "…" : "Share →"}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {!hasFriends && (
+                      <div style={{ fontSize: 11.5, color: T.muted, marginTop: 11, lineHeight: 1.55 }}>
+                        No friends yet? Go ahead and create the goal — you can invite them the moment they accept your friend request.
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ borderTop: `0.5px solid ${T.border}`, padding: "14px 18px 16px", background: T.raised, fontSize: 12.5, color: T.sub, lineHeight: 1.55 }}>
+                    Add a habit on the <strong style={{ color: T.text }}>Today</strong> screen first — then come back here to share it with a friend.
+                  </div>
+                )}
+              </div>
+            );
+          })()
+        ) : (
+          sharedGoals.map(g => {
+            const isCreator = currentUserId && g.creatorId === currentUserId;
+            const totalMembers = g.members.length;
+            const wt = g.weeklyTarget || 3;
+            const isWeekly = g.habitType === "weekly";
+
+            // Kind-aware "did this member log today?" — accepts daily true,
+            // numeric goal value, or non-zero limit value.
+            function memberLoggedOn(logs, dateStr) {
+              return (logs || []).some(l => {
+                if (l.date !== dateStr) return false;
+                if (g.habitType === "goal") {
+                  const n = typeof l.value === "number" ? l.value : Number(l.value);
+                  return Number.isFinite(n) || l.value === true;
+                }
+                if (g.habitType === "limit") return l.value === true || (typeof l.value === "number" && l.value !== 0);
+                return true;
+              });
+            }
+            // Distinct days a member has any qualifying log inside [from, to].
+            function memberActivityCount(logs, fromStr, toStr) {
+              const seen = new Set();
+              for (const l of logs || []) {
+                if (!l?.date) continue;
+                if (l.date < fromStr || l.date > toStr) continue;
+                if (g.habitType === "goal") {
+                  const n = typeof l.value === "number" ? l.value : Number(l.value);
+                  if (!(Number.isFinite(n) || l.value === true)) continue;
+                } else if (g.habitType === "limit") {
+                  if (!(l.value === true || (typeof l.value === "number" && l.value !== 0))) continue;
+                }
+                seen.add(l.date);
+              }
+              return seen.size;
+            }
+
+            const membersLoggedToday = g.members.filter(m => memberLoggedOn(m.logs, today)).length;
+            const membersHitWeekTarget = isWeekly
+              ? g.members.filter(m => sharedMemberWeekSessionCount(m.logs) >= wt).length
+              : 0;
+            const progress = isWeekly
+              ? (totalMembers > 0 ? membersHitWeekTarget / totalMembers : 0)
+              : (totalMembers > 0 ? membersLoggedToday / totalMembers : 0);
+
+            // Last 7 vs prior 7 — total team activity-days. Honest signal for
+            // "is this group cooling off or heating up?".
+            const last7From  = daysAgo(6);
+            const prior7From = daysAgo(13);
+            const prior7To   = daysAgo(7);
+            const last7Total  = g.members.reduce((s, m) => s + memberActivityCount(m.logs, last7From, today), 0);
+            const prior7Total = g.members.reduce((s, m) => s + memberActivityCount(m.logs, prior7From, prior7To), 0);
+            const weekDelta = last7Total - prior7Total;
+
+            // Live group streak: consecutive trailing days where every member logged.
+            // Today is counted only once everyone has already logged; otherwise we
+            // skip it so yesterday's streak still stands in the morning.
+            const groupStreak = (() => {
+              if (totalMembers === 0) return 0;
+              const memberDateSets = g.members.map(m => new Set((m.logs || []).map(l => l.date).filter(Boolean)));
+              const oneDay = 24 * 60 * 60 * 1000;
+              const todayDate = parseLocal(today);
+              let count = 0;
+              for (let i = 0; i < 365; i++) {
+                const d = new Date(todayDate.getTime() - i * oneDay);
+                const y = d.getFullYear();
+                const mo = String(d.getMonth() + 1).padStart(2, "0");
+                const dd = String(d.getDate()).padStart(2, "0");
+                const ds = `${y}-${mo}-${dd}`;
+                const allLogged = memberDateSets.every(s => s.has(ds));
+                if (allLogged) count++;
+                else if (i === 0) continue;
+                else break;
+              }
+              return count;
+            })();
+            const groupStreakBest = updateGroupStreakBest(g.id, groupStreak);
+            const isNewRecord = groupStreak > 0 && groupStreak === groupStreakBest && groupStreak >= 3;
+
+            // Sort members by who's "ahead": weekly sessions (weekly), or
+            // last-14-day activity (everything else). "You" stays in natural
+            // sorted position so leadership reads truthfully.
+            const sortKey = m => {
+              if (isWeekly) return sharedMemberWeekSessionCount(m.logs);
+              return memberActivityCount(m.logs, daysAgo(13), today);
+            };
+            const sortedMembers = [...g.members].sort((a, b) => {
+              const sb = sortKey(b) - sortKey(a);
+              if (sb !== 0) return sb;
+              // Tiebreak: people who logged today first
+              const al = memberLoggedOn(a.logs, today) ? 1 : 0;
+              const bl = memberLoggedOn(b.logs, today) ? 1 : 0;
+              return bl - al;
+            });
+            // Only crown a leader when there's a real gap (not a tie at zero).
+            const leaderM = sortedMembers[0];
+            const leaderScore = leaderM ? sortKey(leaderM) : 0;
+            const runnerScore = sortedMembers[1] ? sortKey(sortedMembers[1]) : 0;
+            const leaderId = (leaderScore > 0 && (totalMembers === 1 || leaderScore > runnerScore)) ? leaderM?.userId : null;
+
+            // Pulse line — single dynamic momentum message at the top of the
+            // card. Cascade picks the most relevant scenario; falls back to
+            // null (no banner) so we never show filler.
+            const me = g.members.find(m => m.isMe);
+            const others = g.members.filter(m => !m.isMe);
+            const meLogged = me ? memberLoggedOn(me.logs, today) : false;
+            const othersLoggedToday = others.filter(m => memberLoggedOn(m.logs, today));
+            const allLoggedToday = totalMembers > 0 && g.members.every(m => memberLoggedOn(m.logs, today));
+            const meWeekSessions = me ? sharedMemberWeekSessionCount(me.logs) : 0;
+            const meWeekDone = isWeekly && meWeekSessions >= wt;
+            const allWeekDone = isWeekly && totalMembers > 0 && g.members.every(m => sharedMemberWeekSessionCount(m.logs) >= wt);
+
+            const pulse = (() => {
+              if (totalMembers <= 1) return null; // solo card — pulse is awkward
+              if (isNewRecord) {
+                return { icon: "🎉", text: `New record — ${groupStreak}-day group streak!`, tone: "good" };
+              }
+              if (isWeekly && allWeekDone) {
+                return { icon: "🏆", text: `Whole crew hit ${wt} sessions this week.`, tone: "good" };
+              }
+              if (!isWeekly && allLoggedToday) {
+                return { icon: "🎯", text: "Everyone's logged today — keep it alive tomorrow.", tone: "good" };
+              }
+              if (isWeekly && me) {
+                if (meWeekDone) {
+                  const behind = others.filter(m => sharedMemberWeekSessionCount(m.logs) < wt);
+                  if (behind.length === 1) {
+                    const need = wt - sharedMemberWeekSessionCount(behind[0].logs);
+                    return { icon: "⚡", text: `Your week's done — ${behind[0].name || "they"} need ${need} more.`, tone: "ahead" };
+                  }
+                  if (behind.length > 1) {
+                    return { icon: "⚡", text: `Your week's done — pull the team across.`, tone: "ahead" };
+                  }
+                } else if (meWeekSessions === wt - 1) {
+                  return { icon: "🏁", text: `1 more session and your week's done.`, tone: "push" };
+                } else if (meWeekSessions === 0) {
+                  const ahead = others.find(m => sharedMemberWeekSessionCount(m.logs) > 0);
+                  if (ahead) return { icon: "💪", text: `${ahead.name || "Friend"}'s already in this week — your move.`, tone: "behind" };
+                }
+              }
+              if (!isWeekly && me) {
+                if (meLogged && othersLoggedToday.length === 0 && others.length > 0) {
+                  const single = others.length === 1 ? (others[0].name || "Friend") : null;
+                  return { icon: "⚡", text: single ? `You're ahead today — ${single} hasn't logged.` : `You're ahead today — others haven't logged yet.`, tone: "ahead" };
+                }
+                if (!meLogged && othersLoggedToday.length > 0) {
+                  const first = othersLoggedToday[0].name || "Friend";
+                  return { icon: "💪", text: `${first}'s already logged — your move.`, tone: "behind" };
+                }
+              }
+              if (groupStreak >= 3) {
+                return { icon: "🔥", text: `${groupStreak} days strong as a team.`, tone: "good" };
+              }
+              if (!isWeekly && totalMembers > 0 && membersLoggedToday === 0) {
+                return { icon: "⏳", text: "Nobody's logged today — be the one who starts it.", tone: "quiet" };
+              }
+              return null;
+            })();
+            const pulseColors = pulse ? ({
+              good:   { bg: "rgba(78, 168, 110, 0.10)", border: "rgba(78, 168, 110, 0.30)", text: T.green },
+              ahead:  { bg: "rgba(200,144,42,0.10)",    border: "rgba(200,144,42,0.30)",   text: T.gold  },
+              behind: { bg: "rgba(200,144,42,0.10)",    border: "rgba(200,144,42,0.30)",   text: T.gold  },
+              push:   { bg: "rgba(200,144,42,0.10)",    border: "rgba(200,144,42,0.30)",   text: T.gold  },
+              quiet:  { bg: T.surface,                  border: T.border,                  text: T.sub   },
+            }[pulse.tone]) : null;
+
+            const habitTypeLabel = isWeekly
+              ? `Weekly ×${wt}`
+              : g.habitType === "project" ? "Build"
+                : g.habitType === "goal" ? "Progress goal"
+                  : g.habitType === "limit" ? "Limit"
+                    : "Daily";
+            const progressTitle = isWeekly ? "This week" : "Today's progress";
+            const progressSummary = isWeekly
+              ? `${membersHitWeekTarget} / ${totalMembers} hit target`
+              : `${membersLoggedToday} / ${totalMembers} logged`;
+            const accentColor = g.color || T.accent;
+            return (
+              <div key={g.id} style={{ marginBottom: 14, borderRadius: T.r, overflow: "hidden", border: `0.5px solid ${T.border}`, background: T.raised, boxShadow: "0 1px 10px rgba(0,0,0,0.14)" }}>
+                {/* Color accent bar */}
+                <div style={{ height: 3, background: accentColor }} />
+
+                {/* Header */}
+                <div style={{ padding: "14px 16px 10px", display: "flex", alignItems: "flex-start", gap: 12 }}>
+                  <div style={{ fontSize: 28, lineHeight: 1.1 }}>{g.emoji}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: T.text, marginBottom: 4 }}>{g.name}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: "0.07em", background: T.surface, borderRadius: 6, padding: "2px 7px", border: `0.5px solid ${T.border}` }}>{habitTypeLabel}</span>
+                      <span style={{ fontSize: 11, color: T.muted }}>{totalMembers} member{totalMembers !== 1 ? "s" : ""}</span>
+                      {groupStreak > 0 && (
+                        <span title="Consecutive days where everyone logged"
+                          style={{ fontSize: 10, fontWeight: 800, color: isNewRecord ? T.green : T.gold,
+                            background: isNewRecord ? "rgba(78,168,110,0.14)" : "rgba(200,144,42,0.14)",
+                            border: `0.5px solid ${isNewRecord ? "rgba(78,168,110,0.4)" : "rgba(200,144,42,0.35)"}`,
+                            borderRadius: 6, padding: "2px 7px", letterSpacing: "0.02em" }}>
+                          🔥 {groupStreak}d together
+                        </span>
+                      )}
+                      {groupStreakBest > 0 && groupStreakBest !== groupStreak && (
+                        <span title="Best group streak ever achieved"
+                          style={{ fontSize: 10, fontWeight: 600, color: T.hint, letterSpacing: "0.02em" }}>
+                          best {groupStreakBest}d
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <button type="button"
+                    onClick={() => { setInviteGoalId(g.id); setInvitedFriends(new Set()); }}
+                    style={{ flexShrink: 0, padding: "5px 12px", borderRadius: 12, border: `0.5px solid ${T.borderStrong}`, background: "none", color: T.sub, fontSize: 11, cursor: "pointer", fontWeight: 600, marginTop: 2 }}>
+                    + Invite
+                  </button>
+                </div>
+
+                {/* Pulse line — momentum / leadership / nudge prompt */}
+                {pulse && pulseColors && (
+                  <div style={{
+                    margin: "0 16px 12px",
+                    padding: "9px 12px",
+                    background: pulseColors.bg,
+                    border: `0.5px solid ${pulseColors.border}`,
+                    borderRadius: T.rsm,
+                    display: "flex", alignItems: "center", gap: 9,
+                  }}>
+                    <span style={{ fontSize: 16, lineHeight: 1, flexShrink: 0 }}>{pulse.icon}</span>
+                    <span style={{ fontSize: 12.5, fontWeight: 600, color: pulseColors.text, lineHeight: 1.4 }}>
+                      {pulse.text}
+                    </span>
+                  </div>
+                )}
+
+                {/* Progress bar */}
+                <div style={{ padding: "0 16px 12px" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, gap: 8 }}>
+                    <span style={{ fontSize: 11, color: T.muted, fontWeight: 500 }}>{progressTitle}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: (isWeekly ? membersHitWeekTarget : membersLoggedToday) > 0 ? T.green : T.hint, display: "flex", alignItems: "center", gap: 8 }}>
+                      {progressSummary}
+                      {(last7Total + prior7Total) >= 4 && weekDelta !== 0 && (
+                        <span title="Team activity last 7 days vs the 7 days before"
+                          style={{
+                            fontSize: 10, fontWeight: 700,
+                            color: weekDelta > 0 ? T.green : T.amber,
+                            background: weekDelta > 0 ? "rgba(78,168,110,0.10)" : "rgba(200,144,42,0.10)",
+                            border: `0.5px solid ${weekDelta > 0 ? "rgba(78,168,110,0.3)" : "rgba(200,144,42,0.3)"}`,
+                            padding: "1px 6px", borderRadius: 6, letterSpacing: "0.02em",
+                          }}>
+                          {weekDelta > 0 ? `↑ ${weekDelta} vs last 7d` : `↓ ${Math.abs(weekDelta)} vs last 7d`}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <div style={{ height: 5, borderRadius: 3, background: T.surface, overflow: "hidden", border: `0.5px solid ${T.border}` }}>
+                    <div style={{ height: "100%", width: `${Math.round(progress * 100)}%`, background: accentColor, borderRadius: 3, transition: "width 0.4s ease" }} />
+                  </div>
+                </div>
+
+                {/* Member roster — sorted by progress, leader gets a 🥇 */}
+                <div style={{ borderTop: `0.5px solid ${T.border}`, padding: "10px 16px 6px" }}>
+                  {sortedMembers.map(m => {
+                    const logs = m.logs || [];
+                    const mWeekSessions = sharedMemberWeekSessionCount(logs);
+                    const mHitWeek = isWeekly && mWeekSessions >= wt;
+                    const mLoggedToday = memberLoggedOn(logs, today);
+                    const mOnTrack = isWeekly ? mHitWeek : mLoggedToday;
+                    const todayGoalNums = g.habitType === "goal"
+                      ? logs
+                        .filter(l => l.date === today)
+                        .map(l => (typeof l.value === "number" ? l.value : Number(l.value)))
+                        .filter(Number.isFinite)
+                      : [];
+                    const statusLabel = isWeekly
+                      ? (mHitWeek ? `✓ ${mWeekSessions}/${wt}` : `${mWeekSessions}/${wt} sessions`)
+                      : (g.habitType === "goal" && todayGoalNums.length)
+                        ? `● ${todayGoalNums[todayGoalNums.length - 1]}`
+                        : mLoggedToday ? "✓ done" : "— not yet";
+                    const alreadyNudged = nudgedToday.has(m.userId);
+                    // Free users see the nudge affordance but tapping it routes
+                    // to the upgrade modal — accountability/nudges are a Pro
+                    // feature (see landing "Accountability + nudge features").
+                    const canShowNudge = !m.isMe && !mOnTrack && !alreadyNudged && onNudgeFriend;
+                    const canNudge = canShowNudge && isPro;
+                    const nudgeLocked = canShowNudge && !isPro;
+                    const isLeader = leaderId && m.userId === leaderId;
                     return (
-                      <div key={m.userId} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <Avatar name={m.name} avatarUrl={m.avatarUrl} size={26} />
-                        <div style={{ flex: 1, fontSize: 13, color: m.isMe ? T.text : T.sub }}>{m.isMe ? "You" : m.name}</div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: mLoggedToday ? T.green : T.hint }}>
-                          {mLoggedToday ? "✓" : "—"}
+                      <div key={m.userId} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                        <div style={{ position: "relative", flexShrink: 0 }}>
+                          <Avatar name={m.name} avatarUrl={m.avatarUrl} size={28} />
+                          {isLeader && (
+                            <span aria-label="Leader"
+                              title={isWeekly ? "Most sessions this week" : "Most active in the last 14 days"}
+                              style={{
+                                position: "absolute", right: -5, bottom: -4,
+                                fontSize: 11, lineHeight: 1,
+                                background: T.bg, borderRadius: "50%",
+                                padding: "1px 2px",
+                              }}>
+                              🥇
+                            </span>
+                          )}
                         </div>
+                        <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, color: m.isMe ? T.text : T.sub }}>
+                          {m.isMe ? "You" : (m.name || "Member")}
+                        </div>
+                        <span style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: mOnTrack ? T.green : T.hint,
+                          flexShrink: 0,
+                        }}>{statusLabel}</span>
+                        {canNudge && (
+                          <button type="button"
+                            onClick={() => { setNudgeTarget({ userId: m.userId, name: m.name || "Member" }); setNudgeMessage(""); }}
+                            style={{ flexShrink: 0, marginLeft: 4, padding: "3px 10px", borderRadius: 10, border: `0.5px solid rgba(200,144,42,0.4)`, background: "rgba(200,144,42,0.1)", color: T.gold, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+                            💪 Nudge
+                          </button>
+                        )}
+                        {nudgeLocked && (
+                          <button type="button"
+                            onClick={() => onUpgrade?.()}
+                            aria-label="Nudge is a Pro feature — tap to preview"
+                            title="Nudges are a Pro accountability feature"
+                            style={{ flexShrink: 0, marginLeft: 4, padding: "3px 10px", borderRadius: 10, border: `0.5px solid rgba(200,144,42,0.3)`, background: "rgba(200,144,42,0.06)", color: T.muted, fontSize: 11, fontWeight: 700, cursor: "pointer", display:"inline-flex", alignItems:"center", gap:4 }}>
+                            💪 Nudge
+                            <span style={{ fontSize:8, fontWeight:800, color:"#0F0F0D", background:T.gold, padding:"1px 4px", borderRadius:4, letterSpacing:"0.04em" }}>PRO</span>
+                          </button>
+                        )}
+                        {!m.isMe && alreadyNudged && !mOnTrack && (
+                          <span style={{ fontSize: 10, color: T.muted, flexShrink: 0, marginLeft: 4 }}>nudged ✓</span>
+                        )}
                       </div>
                     );
                   })}
                 </div>
-                {!myLoggedToday && (
-                  <button
-                    onClick={() => onLogSharedGoal(g.id, { value: true, note: "" })}
-                    style={{ width: "100%", padding: "10px 0", borderRadius: T.rsm, border: "none", background: g.color || T.accent, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
-                    Log today ✓
-                  </button>
-                )}
-                {myLoggedToday && (
-                  <div style={{ textAlign: "center", fontSize: 12, color: T.green, padding: "4px 0" }}>Done for today ✓</div>
+
+                {/* Footer: delete (creator only) */}
+                {isCreator && onDeleteSharedGoal && (
+                  <div style={{ borderTop: `0.5px solid ${T.border}`, padding: "8px 16px", display: "flex", justifyContent: "flex-end" }}>
+                    {sharedGoalDeleteId === g.id ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 11, color: T.accent, fontWeight: 500 }}>Remove for everyone?</span>
+                        <button type="button" disabled={deleteSharedLoading}
+                          onClick={async () => {
+                            setDeleteSharedLoading(true);
+                            const res = await onDeleteSharedGoal(g.id);
+                            setDeleteSharedLoading(false);
+                            if (!res?.error) setSharedGoalDeleteId(null);
+                          }}
+                          style={{ padding: "4px 12px", borderRadius: 8, border: "none", background: T.accent, color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", opacity: deleteSharedLoading ? 0.6 : 1 }}>
+                          {deleteSharedLoading ? "…" : "Remove"}
+                        </button>
+                        <button type="button" disabled={deleteSharedLoading} onClick={() => setSharedGoalDeleteId(null)}
+                          style={{ padding: "4px 10px", borderRadius: 8, border: `0.5px solid ${T.border}`, background: "none", color: T.muted, fontSize: 11, cursor: "pointer" }}>
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button type="button" onClick={() => setSharedGoalDeleteId(g.id)}
+                        style={{ padding: "4px 10px", borderRadius: 8, border: `0.5px solid rgba(231,76,60,0.3)`, background: "none", color: "#e05c5c", fontSize: 11, cursor: "pointer" }}>
+                        Remove goal
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             );
           })
         )}
       </div>
+
+      {/* ── Start-an-accountability-goal picker (when sharedGoals > 0) ── */}
+      {showSharePicker && onShareHabit && (() => {
+        const shareableHabits = (habits || []).filter(h => h.habitType !== "log" && !h.sharedGoalId);
+        return (
+          <div style={{ position:"fixed", inset:0, zIndex:120, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end" }}
+            onClick={() => setShowSharePicker(false)}>
+            <div style={{ width:"100%", background:T.bg, borderRadius:"20px 20px 0 0", padding:"24px 20px 52px", maxHeight:"70vh", overflowY:"auto" }}
+              onClick={e => e.stopPropagation()}>
+              <div style={{ width:36, height:4, borderRadius:2, background:T.border, margin:"0 auto 20px" }} />
+              <div style={{ fontSize:16, fontWeight:700, color:T.text, marginBottom:4 }}>Start an accountability goal</div>
+              <div style={{ fontSize:13, color:T.muted, marginBottom:18, lineHeight:1.5 }}>
+                Pick a habit to share. Your friend will see when you log — and so will you.
+              </div>
+              {shareableHabits.length === 0 ? (
+                (() => {
+                  // If the user has existing shared goals they can still invite more
+                  // friends into, show them inline so the sheet never dead-ends.
+                  const openableGoals = (sharedGoals || []).slice(0, 4);
+                  const hasHabits = (habits || []).some(h => h.habitType !== "log");
+                  if (openableGoals.length > 0 && hasHabits) {
+                    return (
+                      <div>
+                        <div style={{ fontSize:13, color:T.muted, padding:"6px 0 14px", lineHeight:1.55 }}>
+                          Every habit you have is already shared — invite more friends to one of your existing goals instead.
+                        </div>
+                        <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                          {openableGoals.map(g => (
+                            <button key={g.id} type="button"
+                              onClick={() => {
+                                setInviteGoalId(g.id);
+                                setInvitedFriends(new Set());
+                                setShowSharePicker(false);
+                              }}
+                              style={{
+                                display:"flex", alignItems:"center", gap:12,
+                                padding:"12px 14px", borderRadius:T.rsm,
+                                border:`0.5px solid ${T.borderStrong}`,
+                                background:T.surface, color:T.text,
+                                cursor:"pointer", textAlign:"left",
+                              }}>
+                              <span style={{ fontSize:22, flexShrink:0 }}>{g.emoji || "🎯"}</span>
+                              <div style={{ flex:1, minWidth:0 }}>
+                                <div style={{ fontSize:14, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{g.name}</div>
+                                <div style={{ fontSize:11, color:T.muted, marginTop:2 }}>
+                                  {(g.members || []).length} member{(g.members || []).length === 1 ? "" : "s"}
+                                </div>
+                              </div>
+                              <span style={{ fontSize:12, color:T.gold, fontWeight:700, flexShrink:0 }}>
+                                Open →
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div style={{ fontSize:13, color:T.muted, padding:"24px 0", textAlign:"center", lineHeight:1.6 }}>
+                      Every habit you have is already shared. Add a new habit on <strong style={{ color: T.sub }}>Today</strong> first.
+                    </div>
+                  );
+                })()
+              ) : (
+                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                  {shareableHabits.map(h => {
+                    const busy = sharingHabitId === h.id;
+                    return (
+                      <button key={h.id} type="button"
+                        disabled={!!sharingHabitId}
+                        onClick={async () => {
+                          await onShareHabit(h.id);
+                          setShowSharePicker(false);
+                        }}
+                        style={{
+                          display:"flex", alignItems:"center", gap:12,
+                          padding:"12px 14px", borderRadius:T.rsm,
+                          border:`0.5px solid ${T.borderStrong}`,
+                          background:T.surface, color:T.text,
+                          cursor: sharingHabitId ? "default" : "pointer",
+                          textAlign:"left",
+                          opacity: (sharingHabitId && !busy) ? 0.5 : 1,
+                        }}>
+                        <span style={{ fontSize:22, flexShrink:0 }}>{h.emoji}</span>
+                        <span style={{ flex:1, fontSize:14, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{h.name}</span>
+                        <span style={{ fontSize:12, color:T.gold, fontWeight:700, flexShrink:0 }}>
+                          {busy ? "…" : "Share →"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <button type="button" onClick={() => setShowSharePicker(false)}
+                style={{ marginTop:20, width:"100%", padding:"13px 0", background:T.surface, border:`0.5px solid ${T.border}`, borderRadius:T.rsm, color:T.sub, fontSize:14, fontWeight:500, cursor:"pointer" }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Shared goal invite picker ── */}
       {inviteGoalId && (() => {
@@ -4353,65 +6587,224 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
         const memberIds = new Set((invGoal.members || []).map(m => m.userId));
         const eligibleFriends = (friends || []).filter(f => !memberIds.has(f.id));
         return (
-          <div style={{ position:"fixed", inset:0, zIndex:120, background:"rgba(0,0,0,0.55)", display:"flex", alignItems:"flex-end" }}
+          <div style={{ position:"fixed", inset:0, zIndex:120, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end" }}
             onClick={() => setInviteGoalId(null)}>
-            <div style={{ width:"100%", background:T.bg, borderRadius:"16px 16px 0 0", padding:"20px 16px 48px", maxHeight:"65vh", overflowY:"auto" }}
+            <div style={{ width:"100%", background:T.bg, borderRadius:"20px 20px 0 0", padding:"24px 20px 52px", maxHeight:"70vh", overflowY:"auto" }}
               onClick={e => e.stopPropagation()}>
-              <div style={{ fontSize:14, fontWeight:700, color:T.text, marginBottom:4 }}>Invite to "{invGoal.name}"</div>
-              <div style={{ fontSize:12, color:T.muted, marginBottom:16 }}>Choose a friend to send them an invite notification.</div>
+              {/* Handle bar */}
+              <div style={{ width:36, height:4, borderRadius:2, background:T.border, margin:"0 auto 20px" }} />
+              <div style={{ fontSize:16, fontWeight:700, color:T.text, marginBottom:4 }}>Invite to "{invGoal.name}"</div>
+              <div style={{ fontSize:13, color:T.muted, marginBottom:20, lineHeight:1.5 }}>
+                Friends you invite will get a notification and can join from Social. Their personal habit will auto-sync to this goal.
+              </div>
               {eligibleFriends.length === 0 && (
-                <div style={{ fontSize:13, color:T.muted, padding:"20px 0", textAlign:"center" }}>
-                  {(friends || []).length === 0 ? "No friends added yet." : "All your friends are already in this goal."}
+                <div style={{ fontSize:13, color:T.muted, padding:"24px 0", textAlign:"center", lineHeight:1.6 }}>
+                  {(friends || []).length === 0
+                    ? "Add some friends first — then you can invite them here."
+                    : "All your friends are already in this goal! 🎉"}
                 </div>
               )}
-              {eligibleFriends.map(f => (
-                <button key={f.id} type="button"
-                  onClick={async () => {
-                    if (inviteSentTo === f.id) return;
-                    setInviteSentTo(f.id);
-                    try {
-                      const { data: { session } } = await supabase.auth.getSession();
-                      const uid = session?.user?.id;
-                      const myName = user?.name || "Someone";
-                      // Store in-app invite record so recipient sees it immediately
-                      await supabase.from("shared_goal_invites").upsert({
-                        goal_id:      invGoal.id,
-                        invite_code:  invGoal.inviteCode,
-                        inviter_id:   uid,
-                        invitee_id:   f.id,
-                        goal_name:    invGoal.name,
-                        goal_emoji:   invGoal.emoji || "🎯",
-                        inviter_name: myName,
-                        status:       "pending",
-                      }, { onConflict: "goal_id,invitee_id" });
-                      // Also send push notification
-                      fetch("/api/nudge-friend", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
-                        body: JSON.stringify({ recipientId: f.id, type: "shared_goal_invite", goalName: invGoal.name }),
-                      }).catch(() => {});
-                    } catch {}
-                    setTimeout(() => setInviteGoalId(null), 1200);
-                  }}
-                  style={{ width:"100%", display:"flex", alignItems:"center", gap:12, padding:"10px 0", background:"none", border:"none", borderBottom:`0.5px solid ${T.border}`, cursor:"pointer", textAlign:"left" }}>
-                  <Avatar name={f.name} avatarUrl={f.avatarUrl} size={36} />
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:13, fontWeight:600, color:T.text }}>{f.name || "Friend"}</div>
-                    {f.streak > 0 && <div style={{ fontSize:11, color:T.muted }}>{f.streak}🔥 streak</div>}
-                  </div>
-                  <span style={{ fontSize:12, color: inviteSentTo === f.id ? T.green : T.accent, fontWeight:600, flexShrink:0 }}>
-                    {inviteSentTo === f.id ? "✓ Sent" : "Invite"}
-                  </span>
-                </button>
-              ))}
+              {eligibleFriends.map(f => {
+                const alreadyInvited = invitedFriends.has(f.id);
+                return (
+                  <button key={f.id} type="button"
+                    onClick={async () => {
+                      if (alreadyInvited) return;
+                      setInvitedFriends(prev => new Set([...prev, f.id]));
+                      try {
+                        const { data: { session } } = await supabase.auth.getSession();
+                        const uid = session?.user?.id;
+                        const myName = user?.name || "Someone";
+                        await supabase.from("shared_goal_invites").upsert({
+                          goal_id:      invGoal.id,
+                          invite_code:  invGoal.inviteCode,
+                          inviter_id:   uid,
+                          invitee_id:   f.id,
+                          goal_name:    invGoal.name,
+                          goal_emoji:   invGoal.emoji || "🎯",
+                          inviter_name: myName,
+                          status:       "pending",
+                        }, { onConflict: "goal_id,invitee_id" });
+                        fetch("/api/nudge-friend", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+                          body: JSON.stringify({ recipientId: f.id, type: "shared_goal_invite", goalName: invGoal.name }),
+                        }).catch(() => {});
+                      } catch {}
+                    }}
+                    style={{ width:"100%", display:"flex", alignItems:"center", gap:12, padding:"12px 0", background:"none", border:"none", borderBottom:`0.5px solid ${T.border}`, cursor: alreadyInvited ? "default" : "pointer", textAlign:"left" }}>
+                    <Avatar name={f.name} avatarUrl={f.avatarUrl} size={38} />
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:14, fontWeight:600, color:T.text }}>{f.name || "Friend"}</div>
+                      {f.streak > 0 && <div style={{ fontSize:11, color:T.muted, marginTop:1 }}>{f.streak}🔥 streak</div>}
+                    </div>
+                    <span style={{ fontSize:12, fontWeight:700, color: alreadyInvited ? T.green : T.accent, flexShrink:0 }}>
+                      {alreadyInvited ? "✓ Invited" : "Invite"}
+                    </span>
+                  </button>
+                );
+              })}
               <button type="button" onClick={() => setInviteGoalId(null)}
-                style={{ marginTop:16, width:"100%", padding:"10px 0", background:"none", border:"none", color:T.muted, fontSize:13, cursor:"pointer" }}>
-                Cancel
+                style={{ marginTop:20, width:"100%", padding:"13px 0", background:T.surface, border:`0.5px solid ${T.border}`, borderRadius:T.rsm, color:T.sub, fontSize:14, fontWeight:500, cursor:"pointer" }}>
+                {invitedFriends.size > 0 ? `Done — ${invitedFriends.size} invited` : "Cancel"}
               </button>
             </div>
           </div>
         );
       })()}
+
+      {/* ── Friends sheet ────────────────────────────────────────────────
+          Houses the full friends list, incoming requests, outgoing/pending
+          requests, and the Add friend form. Triggered by the compact Friends
+          button at the top of the Social page. Lives behind the friend
+          profile sheet (z-index 180 vs 200) so tapping a friend layers the
+          detail sheet on top cleanly without unmounting this one. */}
+      {showFriendsSheet && (
+        <>
+          <div onClick={() => setShowFriendsSheet(false)}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", zIndex: 180 }} />
+          <div style={{
+            position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 181,
+            background: T.bg, borderRadius: "20px 20px 0 0",
+            padding: "18px 20px 32px", maxWidth: 430, margin: "0 auto",
+            maxHeight: "85vh", display: "flex", flexDirection: "column",
+            boxShadow: "0 -8px 40px rgba(0,0,0,0.5)",
+          }}>
+            <div style={{ width: 36, height: 4, borderRadius: 2, background: T.border, margin: "0 auto 14px" }} />
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexShrink: 0 }}>
+              <div style={{ fontSize: 17, fontWeight: 700, color: T.text }}>Friends</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <button onClick={() => { setShowAddFriend(s => !s); setAddError(""); setAddDone(false); }}
+                  style={{ padding: "6px 12px", borderRadius: 16, border: `0.5px solid ${T.borderStrong}`, background: showAddFriend ? "rgba(200,144,42,0.12)" : "none", color: T.gold, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                  {showAddFriend ? "Close" : "+ Add"}
+                </button>
+                <button onClick={() => setShowFriendsSheet(false)}
+                  style={{ width: 30, height: 30, borderRadius: "50%", border: "none", background: T.surface, color: T.muted, fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  ×
+                </button>
+              </div>
+            </div>
+
+            {/* Scrollable body */}
+            <div style={{ overflowY: "auto", flex: 1, margin: "0 -4px", padding: "0 4px" }}>
+              {/* Add-friend form */}
+              {showAddFriend && (
+                <div style={{ ...card, marginBottom: 14 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 6 }}>Add a friend</div>
+                  <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.55, marginBottom: 10 }}>
+                    Enter the <strong style={{ color: T.text }}>email they use for Forged</strong> or their <strong style={{ color: T.text }}>@username</strong> (set in Profile → Social). They’ll get a request — once accepted, you’ll see each other here.
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input
+                      type="text"
+                      placeholder="friend@email.com or @username"
+                      autoComplete="off"
+                      value={addEmail}
+                      onChange={e => { setAddEmail(e.target.value); setAddError(""); }}
+                      onKeyDown={e => e.key === "Enter" && handleSendRequest()}
+                      style={{ flex: 1, background: T.surface, border: `0.5px solid ${T.borderStrong}`, borderRadius: T.rsm, padding: "9px 12px", fontSize: 14, color: T.text, outline: "none" }}
+                    />
+                    <button type="button" onClick={handleSendRequest} disabled={addLoading || !addEmail.trim()}
+                      style={{ padding: "9px 14px", borderRadius: T.rsm, border: "none", background: T.accent, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: (!addEmail.trim() || addLoading) ? 0.6 : 1 }}>
+                      {addLoading ? "…" : addDone ? "✓ Sent!" : "Send"}
+                    </button>
+                  </div>
+                  {addError && <div style={{ fontSize: 12, color: "#e05c5c", marginTop: 6 }}>{addError}</div>}
+                  {addDone && !addError && <div style={{ fontSize: 12, color: T.green, marginTop: 6 }}>Request sent. They’ll see it under Friend requests.</div>}
+                </div>
+              )}
+
+              {/* Incoming requests */}
+              {friendRequests.length > 0 && (
+                <div style={{ marginBottom: 18 }}>
+                  <div style={sectionLabel}>Incoming requests</div>
+                  {friendRequests.map(req => (
+                    <div key={req.friendshipId} style={{ ...card, display: "flex", alignItems: "center", gap: 10 }}>
+                      <Avatar name={req.name} avatarUrl={req.avatarUrl} size={34} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 14, color: T.text, fontWeight: 500 }}>{req.name}</div>
+                        <div style={{ fontSize: 12, color: T.muted }}>wants to be friends</div>
+                      </div>
+                      <button onClick={() => onAccept(req.friendshipId)} style={{ padding: "6px 12px", borderRadius: 16, border: "none", background: T.accent, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", marginRight: 6 }}>Accept</button>
+                      <button onClick={() => onDecline(req.friendshipId)} style={{ padding: "6px 10px", borderRadius: 16, border: `0.5px solid ${T.border}`, background: "none", color: T.muted, fontSize: 12, cursor: "pointer" }}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Outgoing / pending requests */}
+              {sentRequests.length > 0 && (
+                <div style={{ marginBottom: 18 }}>
+                  <div style={sectionLabel}>Pending — awaiting them</div>
+                  {sentRequests.map(s => (
+                    <div key={s.friendshipId} style={{ ...card, display: "flex", alignItems: "center", gap: 10 }}>
+                      <Avatar name={s.name} avatarUrl={s.avatarUrl} size={34} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 14, color: T.text, fontWeight: 500 }}>{s.name}</div>
+                        <div style={{ fontSize: 12, color: T.muted }}>Request sent · pending</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onCancelSentRequest(s.friendshipId)}
+                        style={{ padding: "5px 10px", borderRadius: T.rsm, border: `0.5px solid ${T.borderStrong}`, background: "none", color: T.muted, fontSize: 11, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Current friends */}
+              <div style={{ marginBottom: 6 }}>
+                <div style={sectionLabel}>
+                  Your friends{friends.length > 0 ? ` · ${friends.length}` : ""}
+                </div>
+                {friendsLoading ? (
+                  <div style={{ textAlign: "center", padding: "24px 0", color: T.muted, fontSize: 13 }}>Loading…</div>
+                ) : friends.length === 0 ? (
+                  <div style={{ ...card, padding: "22px 18px", textAlign: "center" }}>
+                    <div style={{ fontSize: 26, marginBottom: 8 }}>👥</div>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: T.text, marginBottom: 6 }}>No friends yet</div>
+                    <div style={{ fontSize: 12.5, color: T.muted, lineHeight: 1.6, marginBottom: 12 }}>
+                      Invite someone you actually want to stay consistent with. You'll see each other's daily logs and streaks.
+                    </div>
+                    <button type="button"
+                      onClick={() => { setShowAddFriend(true); setAddError(""); setAddEmail(""); setAddDone(false); }}
+                      style={{ padding: "8px 18px", borderRadius: 18, border: "none", background: T.accent, color: "#fff", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
+                      Add your first friend
+                    </button>
+                  </div>
+                ) : (
+                  friends.map((f, i) => {
+                    const lastActive = !f.loggedToday ? friendLastActiveLabel(f.id) : null;
+                    return (
+                      <div key={f.id} onClick={() => { setSelectedFriend(f); }}
+                        style={{ ...card, display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: i === 0 ? T.gold : T.muted, width: 18, textAlign: "center" }}>{i + 1}</div>
+                        <Avatar name={f.name} avatarUrl={f.avatarUrl} size={34} />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 14, color: T.text, fontWeight: 500 }}>{f.name}</div>
+                          <div style={{ fontSize: 12, color: T.muted }}>⚡ {f.xp} xp{f.streak > 0 ? ` · 🔥 ${f.streak}` : ""}</div>
+                        </div>
+                        <div style={{ textAlign: "center", marginRight: 4, minWidth: 48 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: f.loggedToday ? T.green : T.muted }}>
+                            {f.loggedToday ? "✓" : (lastActive && lastActive !== "today" ? lastActive : "—")}
+                          </div>
+                          <div style={{ fontSize: 10, color: T.hint }}>
+                            {f.loggedToday ? "today" : (lastActive && lastActive !== "today" ? "last active" : "today")}
+                          </div>
+                        </div>
+                        <div style={{ color: T.hint, fontSize: 14, flexShrink: 0 }}>›</div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* ── Friend profile modal ── */}
       {selectedFriend && (() => {
@@ -4421,18 +6814,10 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
         );
         const alreadyNudged = nudgedToday.has(f.id);
 
-        async function handleNudge() {
-          if (!onNudgeFriend || alreadyNudged || nudgeSending) return;
-          setNudgeSending(true);
-          const res = await onNudgeFriend(f.id);
-          setNudgeSending(false);
-          if (res?.error) {
-            if (res.error === "Already nudged today") {
-              setNudgedToday(s => new Set([...s, f.id]));
-            }
-          } else {
-            setNudgedToday(s => new Set([...s, f.id]));
-          }
+        function handleNudge() {
+          if (!onNudgeFriend || alreadyNudged) return;
+          setNudgeTarget({ userId: f.id, name: f.name || "Friend" });
+          setNudgeMessage("");
         }
 
         return (
@@ -4505,19 +6890,37 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
                 </div>
               )}
 
-              {/* Nudge button */}
-              <button
-                onClick={handleNudge}
-                disabled={alreadyNudged || nudgeSending}
-                style={{
-                  width: "100%", padding: "13px 0", borderRadius: T.rsm, border: "none",
-                  background: alreadyNudged ? T.surface : T.gold,
-                  color: alreadyNudged ? T.muted : "#0F0F0D",
-                  fontSize: 15, fontWeight: 700, cursor: alreadyNudged ? "default" : "pointer",
-                  opacity: nudgeSending ? 0.7 : 1, transition: "all 0.2s",
-                }}>
-                {nudgeSending ? "Sending…" : alreadyNudged ? "💪 Nudged today" : "💪 Nudge"}
-              </button>
+              {/* Nudge button — Pro-gated accountability feature. Free users
+                  see the button but tapping it opens the upgrade modal. */}
+              {isPro ? (
+                <button
+                  onClick={handleNudge}
+                  disabled={alreadyNudged}
+                  style={{
+                    width: "100%", padding: "13px 0", borderRadius: T.rsm, border: "none",
+                    background: alreadyNudged ? T.surface : T.gold,
+                    color: alreadyNudged ? T.muted : "#0F0F0D",
+                    fontSize: 15, fontWeight: 700, cursor: alreadyNudged ? "default" : "pointer",
+                    transition: "all 0.2s",
+                  }}>
+                  {alreadyNudged ? "💪 Nudged today" : "💪 Nudge"}
+                </button>
+              ) : (
+                <button
+                  onClick={() => { onUpgrade?.(); setSelectedFriend(null); }}
+                  style={{
+                    width: "100%", padding: "13px 0", borderRadius: T.rsm,
+                    border: `1px solid rgba(200,144,42,0.45)`,
+                    background: "rgba(200,144,42,0.10)",
+                    color: T.gold,
+                    fontSize: 15, fontWeight: 700, cursor: "pointer",
+                    display:"inline-flex", alignItems:"center", justifyContent:"center", gap:8,
+                    transition: "all 0.2s",
+                  }}>
+                  💪 Nudge
+                  <span style={{ fontSize:9, fontWeight:800, color:"#0F0F0D", background:T.gold, padding:"2px 6px", borderRadius:5, letterSpacing:"0.05em" }}>PRO</span>
+                </button>
+              )}
               <button onClick={() => { onRemoveFriend(f.friendshipId); setSelectedFriend(null); }}
                 style={{ width: "100%", padding: "10px 0", marginTop: 8, background: "none", border: "none", color: T.hint, fontSize: 13, cursor: "pointer" }}>
                 Remove friend
@@ -4526,6 +6929,73 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
           </>
         );
       })()}
+
+      {/* ── Nudge message sheet ── */}
+      {nudgeTarget && (
+        <div
+          style={{ position:"fixed", inset:0, zIndex:350, background:"rgba(0,0,0,0.65)", display:"flex", alignItems:"flex-end" }}
+          onClick={() => { if (!nudgeSending) { setNudgeTarget(null); setNudgeMessage(""); } }}>
+          <div
+            style={{ width:"100%", background:T.bg, borderRadius:"20px 20px 0 0", padding:"24px 20px 52px", maxWidth:430, margin:"0 auto" }}
+            onClick={e => e.stopPropagation()}>
+            {/* Handle */}
+            <div style={{ width:36, height:4, borderRadius:2, background:T.border, margin:"0 auto 20px" }} />
+            <div style={{ fontSize:16, fontWeight:700, color:T.text, marginBottom:16 }}>
+              Nudge {nudgeTarget.name} 💪
+            </div>
+            <textarea
+              placeholder="Add a message… (optional)"
+              value={nudgeMessage}
+              onChange={e => setNudgeMessage(e.target.value)}
+              maxLength={160}
+              rows={3}
+              style={{
+                width:"100%", border:`0.5px solid ${T.border}`, borderRadius:T.rsm,
+                background:T.surface, color:T.text, fontSize:14, padding:"10px 12px",
+                fontFamily:T.font, resize:"none", boxSizing:"border-box", outline:"none",
+              }}
+            />
+            <div style={{ fontSize:11, color:T.hint, textAlign:"right", marginTop:4 }}>
+              {nudgeMessage.length}/160
+            </div>
+            <button
+              type="button"
+              disabled={nudgeSending}
+              onClick={async () => {
+                setNudgeSending(true);
+                const res = await onNudgeFriend(nudgeTarget.userId, nudgeMessage.trim());
+                setNudgeSending(false);
+                if (res?.error) {
+                  onToast?.(`Couldn't send nudge — ${res.error}`);
+                  if (String(res.error).toLowerCase().includes("already nudged")) {
+                    markNudged(nudgeTarget.userId);
+                  }
+                  return;
+                }
+                onToast?.("💪 Nudge sent!");
+                markNudged(nudgeTarget.userId);
+                setNudgeTarget(null);
+                setNudgeMessage("");
+              }}
+              style={{
+                width:"100%", marginTop:12, padding:"13px 0",
+                background: nudgeSending ? T.surface : T.gold,
+                color: nudgeSending ? T.muted : "#0F0F0D",
+                borderRadius:T.rsm, border:"none", fontSize:15, fontWeight:700,
+                cursor: nudgeSending ? "default" : "pointer", transition:"all 0.2s",
+              }}>
+              {nudgeSending ? "Sending…" : "Send nudge 💪"}
+            </button>
+            <button
+              type="button"
+              disabled={nudgeSending}
+              onClick={() => { setNudgeTarget(null); setNudgeMessage(""); }}
+              style={{ width:"100%", padding:"10px 0", background:"none", border:"none", color:T.hint, fontSize:13, cursor:"pointer" }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -4673,20 +7143,490 @@ function formatCoachMsgTime(ts) {
   return `${h12}:${mm} ${isAm ? "am" : "pm"}`;
 }
 
+// ─── COACH GREETING ───────────────────────────────────────────────────────────
+// Build a warmer, context-aware opener. Uses data already in memory (no extra
+// /api/chat tokens). Returns one short line + one short follow-up question.
+function buildCoachGreeting({ name, habits = [], goals = [] }) {
+  const who = name && String(name).trim() ? String(name).trim() : "";
+  const hi = who ? `Hey ${who}` : `Hey`;
+  const hasHabits = habits.length > 0;
+  const activeGoals = (goals || []).filter(g => !g.completedAt && !g.archivedAt);
+
+  // Real logs only (ignore quicknotes + skips) — same filter used elsewhere.
+  const realLogs = habits.flatMap(h =>
+    (h.logs || []).filter(l => l && l.date && l.value !== "quicknote" && l.value !== "skip"),
+  );
+  const logDates = new Set(realLogs.map(l => l.date));
+  const totalRealLogs = realLogs.length;
+
+  const today = todayStr();
+  const y1 = daysAgo(1);
+  const loggedToday = logDates.has(today);
+  const loggedYesterday = logDates.has(y1);
+
+  // Count unique days logged in the last 7 calendar days (incl. today).
+  let last7Days = 0;
+  for (let i = 0; i < 7; i++) if (logDates.has(daysAgo(i))) last7Days++;
+
+  // How many days since the most recent real log (null if never logged).
+  let daysSinceLast = null;
+  if (logDates.size > 0) {
+    for (let i = 0; i < 60; i++) {
+      if (logDates.has(daysAgo(i))) { daysSinceLast = i; break; }
+    }
+    if (daysSinceLast == null) daysSinceLast = 60; // cap for copy purposes
+  }
+
+  // Highest current streak across habits (for light, non-overbearing mention).
+  const topStreak = hasHabits ? Math.max(0, ...habits.map(h => getStreak(h))) : 0;
+
+  // Seed — stable within ~4h window, shifts naturally across day/hour so users
+  // don't see the exact same line on every open but aren't jarred either.
+  const now = new Date();
+  const dayOfYear = Math.floor(
+    (now - new Date(now.getFullYear(), 0, 0)) / (1000 * 60 * 60 * 24),
+  );
+  const seed = dayOfYear * 4 + Math.floor(now.getHours() / 6);
+  const pick = (arr) => arr[Math.abs(seed) % arr.length];
+
+  // — Scenarios, ordered most-specific first. Each returns a line that pairs a
+  // warm opener with a gently useful next question. Kept short on purpose.
+  // First-ever open / no habits yet.
+  if (!hasHabits) {
+    return pick([
+      `${hi} 👋 Nothing on the tracker yet. Want me to set up your first habit, or tell me what you're trying to build?`,
+      `${hi}. Blank slate — which is a good place to start. Want to add a habit, or talk through what matters most right now?`,
+      `${hi}. Let's get something moving. Tell me what you want to build, or say "add [habit]" and I'll set it up.`,
+    ]);
+  }
+
+  // Has habits but never logged one.
+  if (totalRealLogs === 0) {
+    return pick([
+      `${hi} 👋 Your habits are set up — now let's get the first log in. Want me to log one for you? Just say the habit name.`,
+      `${hi}. Fresh setup, no logs yet. Tell me what you did today and I'll get it on the board.`,
+      `${hi}. The system's ready — one log turns this from a list into momentum. What did you do today?`,
+    ]);
+  }
+
+  // Already logged today.
+  if (loggedToday) {
+    const streakBit = topStreak >= 3 ? ` ${topStreak}-day streak going.` : "";
+    return pick([
+      `${hi} — already logged today.${streakBit} Want to add another, reflect on how it went, or look at the week?`,
+      `${hi}. Today's log is in.${streakBit} Anything you want to think through, or another habit to hit?`,
+      `Nice ${who || "one"} — you've already shown up today.${streakBit} Want to check progress, add another log, or plan tomorrow?`,
+    ]);
+  }
+
+  // Logged yesterday, not today yet — warm, forward-leaning.
+  if (loggedYesterday) {
+    const streakBit = topStreak >= 3 ? ` ${topStreak}-day streak on the line.` : "";
+    return pick([
+      `${hi} — yesterday was solid.${streakBit} What are we hitting today?`,
+      `${hi}. Good to see you back. Yesterday's in the books${streakBit ? `,${streakBit.replace(" ", " ")}` : ""} — what's today?`,
+      `${hi}. You showed up yesterday${streakBit ? `, and that${streakBit}` : ""}. Want me to log today's, or chat through it first?`,
+    ]);
+  }
+
+  // Came back after a short gap (2–3 days).
+  if (daysSinceLast != null && daysSinceLast >= 2 && daysSinceLast <= 3) {
+    const lastWord = daysSinceLast === 2 ? "two days" : "a few days";
+    return pick([
+      `${hi}. Been ${lastWord} — all good, let's get moving again. Want me to log something now, or talk first?`,
+      `${hi}. Quiet couple of days. No big deal — what do you want to do today?`,
+      `Good to see you back, ${who || "mate"}. ${lastWord} off doesn't undo anything. Want to log one now?`,
+    ]);
+  }
+
+  // Longer gap (4+ days) — softer, non-judgmental re-entry.
+  if (daysSinceLast != null && daysSinceLast >= 4) {
+    return pick([
+      `${hi}. Good to see you back. A little time off is fine — want to restart with one small log today?`,
+      `${hi} 👋 Been a minute. No guilt — just tell me what you did today and we'll pick it back up.`,
+      `${hi}. Welcome back. Let's keep today simple: one log, and we're rolling again.`,
+    ]);
+  }
+
+  // Active recent user (logged 4+ of last 7) but not today yet.
+  if (last7Days >= 4) {
+    const streakBit = topStreak >= 3 ? ` ${topStreak}-day streak active.` : "";
+    return pick([
+      `${hi}. You've logged well this week.${streakBit} What are we hitting today?`,
+      `${hi} — steady week so far.${streakBit} Anything specific on your mind, or shall I log today's?`,
+      `${hi}. Momentum's there.${streakBit} Want me to log today, or talk through what's coming up?`,
+    ]);
+  }
+
+  // Default fallback — has habits, some history, not today, small sample size.
+  const nHabits = habits.length;
+  const goalBit = activeGoals.length > 0
+    ? ` You've got ${activeGoals.length} active goal${activeGoals.length !== 1 ? "s" : ""} in play too.`
+    : "";
+  return pick([
+    `${hi} 👋 ${nHabits} habit${nHabits !== 1 ? "s" : ""} on the board.${goalBit} What's on your mind today?`,
+    `${hi}. Good to see you.${goalBit} Want to log something, check progress, or just talk through the day?`,
+    `${hi}. I'm here — tell me what you did today, ask about your streaks, or add a new habit.`,
+  ]);
+}
+
+// ─── CREATOR GREETING ─────────────────────────────────────────────────────────
+// Playful, builder-first opener used ONLY for the creator account. Strategy:
+//
+//   1. A LARGE anchor pool of creator/captain/builder energy lines that make
+//      no claims about the user's data — these are always eligible to play,
+//      so most opens land on a fresh creative line regardless of state.
+//   2. Context-flavoured lines are added to the pool ONLY when their gate is
+//      genuinely true (logged today / yesterday / gap / heavy builder /
+//      forged-build habit detected / etc). This guarantees we never fabricate
+//      state — a "logged today" line literally can't appear unless logDates
+//      contains today's date.
+//   3. A single Math.random pick with last-6 anti-repeat (localStorage) so
+//      back-to-back opens always feel different.
+//
+// Zero extra API tokens — it's all template-driven. Self-contained and never
+// called for non-creator users.
+const CREATOR_RECENT_KEY = "forged_creator_greet_recent";
+const CREATOR_RECENT_KEEP = 6;
+
+function pickCreatorLine(candidates) {
+  if (!candidates || candidates.length === 0) return "Hey creator. What are we doing?";
+  let recent = [];
+  try {
+    const raw = localStorage.getItem(CREATOR_RECENT_KEY);
+    if (raw) recent = JSON.parse(raw) || [];
+  } catch {}
+  const fresh = candidates.filter(c => !recent.includes(c));
+  const pool = fresh.length > 0 ? fresh : candidates;
+  const line = pool[Math.floor(Math.random() * pool.length)];
+  try {
+    const next = [line, ...recent].slice(0, CREATOR_RECENT_KEEP);
+    localStorage.setItem(CREATOR_RECENT_KEY, JSON.stringify(next));
+  } catch {}
+  return line;
+}
+
+function buildCreatorGreeting({ name, habits = [], goals = [] }) {
+  const who = name && String(name).trim() ? String(name).trim().split(/\s+/)[0] : "Corbyn";
+  const hasHabits = habits.length > 0;
+  const activeGoals = (goals || []).filter(g => !g.completedAt && !g.archivedAt);
+
+  // — Real, dedup'd context (used by the gates below). Anything not gated by
+  //   a true value below is NEVER mentioned in copy. This is how we avoid
+  //   "logged, solid" when nothing was logged.
+  const realLogs = habits.flatMap(h =>
+    (h.logs || []).filter(l => l && l.date && l.value !== "quicknote" && l.value !== "skip"),
+  );
+  const logDates = new Set(realLogs.map(l => l.date));
+  const totalRealLogs = realLogs.length;
+
+  const today = todayStr();
+  const loggedToday = logDates.has(today);
+  const loggedYesterday = logDates.has(daysAgo(1));
+
+  let last7Days = 0;
+  for (let i = 0; i < 7; i++) if (logDates.has(daysAgo(i))) last7Days++;
+
+  let daysSinceLast = null;
+  if (logDates.size > 0) {
+    for (let i = 0; i < 60; i++) {
+      if (logDates.has(daysAgo(i))) { daysSinceLast = i; break; }
+    }
+    if (daysSinceLast == null) daysSinceLast = 60;
+  }
+
+  const topStreak = hasHabits ? Math.max(0, ...habits.map(h => getStreak(h))) : 0;
+
+  // — Detect a Forged-build / build-progress habit or goal so build-mode
+  //   lines only fire when the creator actually has something tracking it.
+  const hasForgedBuildItem = (() => {
+    const re = /forged|build|ship|release|product|app/i;
+    if (habits.some(h => re.test(h.name || ""))) return true;
+    if (activeGoals.some(g => re.test(g.title || g.name || ""))) return true;
+    return false;
+  })();
+
+  const now = new Date();
+  const hr = now.getHours();
+  const partOfDay =
+    hr < 5  ? "lateNight" :
+    hr < 12 ? "morning"   :
+    hr < 17 ? "afternoon" :
+    hr < 22 ? "evening"   : "lateNight";
+
+  // ── ANCHOR POOL ──────────────────────────────────────────────────────────
+  // Always eligible. Pure creator/builder/captain energy. Makes NO factual
+  // claims about logs, streaks, or activity — just vibe and prompts.
+  const anchors = [
+    "Back in the lab, creator?",
+    `What are we shipping today, ${who}?`,
+    "You built me. Least I can do is keep up.",
+    "Roses are red, violets are blue, you created me. What the hell's next?",
+    "Founder energy detected. What are we breaking?",
+    "Captain on the bridge. 🫡",
+    "The architect is back. What now — build, log, or rant?",
+    "Whose idea was all this again? Oh, right. Hi.",
+    "Welcome back to your own thing.",
+    `Boss is back. Roadmap, retrospective, or rant, ${who}?`,
+    "Test the chaos? Ship the chaos? Both?",
+    `What's the next unlock, ${who}?`,
+    "Plot twist — the founder shows up to use his own app.",
+    "Building, breaking, or thinking out loud today?",
+    "Open mic, founder. What's on the brain?",
+    "If I had hands I'd be clapping. Welcome back.",
+    "👑 you. Now what?",
+    `Forged is yours, ${who}. What are you doing with it today?`,
+    "I run. You build. We ship. What's next?",
+    `Oi ${who}. The man, the myth, the migration writer. What's the move?`,
+    `${who}. The thing you made, talking back. What are we hitting today?`,
+    "What needs shipping, what needs scrapping, what needs a log?",
+    "The boss has entered the chat. What's the agenda?",
+    "Right then. Build mode, log mode, or just chat?",
+    `Reporting for duty, ${who}. Where are we pointing the ship?`,
+    `${who} on the inside again. Tell me what's broken or what's next.`,
+    "Status: app running fine. Founder: status unknown. You good?",
+    "Oi. What are we cooking?",
+    `What's the headline today, ${who}?`,
+    "I exist because of you. What do we do with that today?",
+    "Bossman. Build, log, plan, or vibes?",
+    `${who} — the floor is yours.`,
+    "Hands on the wheel, founder. Where to?",
+  ];
+
+  const candidates = [...anchors];
+
+  // ── Time-of-day flavour (always true → can be added to the pool freely) ──
+  if (partOfDay === "morning")   candidates.push(`Morning, founder. What are we touching first?`);
+  if (partOfDay === "evening")   candidates.push(`Evening, ${who}. End-of-day check or build session?`);
+  if (partOfDay === "lateNight") candidates.push(`Up late again, ${who}? Build mode or just thinking?`);
+  if (partOfDay === "afternoon") candidates.push(`Afternoon, ${who}. Halfway through. What's the move?`);
+
+  // ── Build-aware (only if a forged/build/ship habit or goal actually exists)
+  if (hasForgedBuildItem) {
+    candidates.push(
+      `How's the Forged build today? Logging it or shipping more?`,
+      `Build energy. What's in the next push?`,
+      `What got shipped, what got broken, what got fixed?`,
+      `Forged is on the tracker. Want to log build progress now or chat through what's coming?`,
+      `What's the most painful thing in the app right now? Let's name it.`,
+    );
+  }
+
+  // ── No-habits case ───────────────────────────────────────────────────────
+  // If you have zero habits we don't want pure vibes — we want to nudge a
+  // setup. So we REPLACE the candidate pool here instead of appending.
+  if (!hasHabits) {
+    return pickCreatorLine([
+      `Oi ${who}. You built me but you've got zero habits in here. Awkward. Want to fix that?`,
+      `${who}. Creator with no habits is a bit of a look. Add one — even just "shipping Forged" — and let's go.`,
+      `So the architect appears with an empty board. Where do we start?`,
+      `Creator mode: empty inventory. Tell me what you actually want to track and I'll set it up.`,
+      `Founder with no habits in their own habit app. Let's not make that the headline. What do you want to track?`,
+    ]);
+  }
+
+  // ── Has habits but literally never logged anything ───────────────────────
+  if (totalRealLogs === 0) {
+    return pickCreatorLine([
+      `${who}. Habits set up, zero logs. You're testing your own retention loop. Do better. 😏`,
+      `Habits exist, logs don't. You know better than anyone the first log is the hardest. Want me to do it?`,
+      `Brand new account energy from the founder himself. Let's get one log in and break the seal.`,
+      `${who}. The board's set, the timer's running. What did you actually do today?`,
+    ]);
+  }
+
+  // ── True context-flavoured lines, only added when the gate is real ──────
+
+  if (loggedToday) {
+    const streakBit = topStreak >= 3 ? ` ${topStreak}-day streak.` : "";
+    candidates.push(
+      `Already logged today.${streakBit} You're not just selling it, you're using it. What's next?`,
+      `Today's log is in.${streakBit} Build mode or reflect mode now?`,
+      `Day's accounted for.${streakBit} So... what are we breaking next?`,
+      `Practising what you preach today.${streakBit} What now?`,
+      `Logged. Now the fun part — what are we shipping?`,
+    );
+  }
+
+  if (loggedYesterday && !loggedToday) {
+    const streakBit = topStreak >= 3 ? ` ${topStreak}-day streak on the line.` : "";
+    candidates.push(
+      `Yesterday counted.${streakBit} What are we hitting today?`,
+      `Back so soon, ${who}.${streakBit} Want me to log today's or chat first?`,
+      `You showed up yesterday — rare for someone building the thing too.${streakBit} Same again today?`,
+      `One more log keeps it rolling.${streakBit} What did you do today?`,
+    );
+  }
+
+  if (daysSinceLast != null && daysSinceLast >= 2 && daysSinceLast <= 3) {
+    const gapWord = daysSinceLast === 2 ? "Two days" : "Three days";
+    candidates.push(
+      `${gapWord} silent, ${who}. The app's been running without you. Want to get one in?`,
+      `Welcome back. ${gapWord} off — happens to the best of us. Even the founders.`,
+      `${gapWord} dark. I've been answering other people's questions. Catch up?`,
+    );
+  }
+
+  if (daysSinceLast != null && daysSinceLast >= 4 && daysSinceLast < 60) {
+    candidates.push(
+      `${daysSinceLast} days since you last logged. The thing you built missed you. Welcome back.`,
+      `Look who it is. ${daysSinceLast} days. No guilt — but eat your own cooking, mate.`,
+      `Founder reappears after ${daysSinceLast} days. The app's been holding the line. Your turn.`,
+      `${daysSinceLast} days off. The system kept running. The system also wants its creator back.`,
+    );
+  }
+
+  if (last7Days >= 5) {
+    const streakBit = topStreak >= 3 ? ` ${topStreak}-day streak active.` : "";
+    candidates.push(
+      `${last7Days}/7 days logged this week.${streakBit} You're using your own product properly. Rare.`,
+      `Building hard. ${last7Days}/7 days this week.${streakBit} What's the move today?`,
+      `Momentum's loud right now. ${last7Days}/7 days.${streakBit} Log today, or talk through what's working?`,
+    );
+  }
+
+  if (topStreak >= 7) {
+    candidates.push(
+      `${topStreak}-day streak. The thing you built is working on you. What's today?`,
+      `${topStreak} in a row. You earned the swagger. What now?`,
+    );
+  }
+
+  return pickCreatorLine(candidates);
+}
+
+// ─── COACH RECORDING BAR ─────────────────────────────────────────────────────
+// ChatGPT-style recording UI shown in place of the textarea + send button
+// while voice input is active. The user manually controls when recording ends:
+//   ×  = discard the recording (keeps any text already in the input)
+//   ⏹  = stop and commit the transcript into the input box
+// Live interim transcript and a mm:ss timer make it obvious recording is on.
+function CoachRecordingBar({ speech }) {
+  const ms = Math.max(0, speech.recordingMs || 0);
+  const totalSec = Math.floor(ms / 1000);
+  const mm = String(Math.floor(totalSec / 60)).padStart(1, "0");
+  const ss = String(totalSec % 60).padStart(2, "0");
+  const interim = (speech.interim || "").trim();
+  const BARS = 5;
+  // Register the bar DOM nodes so the speech hook's volume meter (when
+  // available) can drive their height in real time. On platforms where the
+  // meter isn't safe to enable, the registered elements simply keep their
+  // CSS keyframe animation.
+  const barRefs = useRef([]);
+  useEffect(() => {
+    const setBarEls = speech.setBarEls;
+    if (!setBarEls) return;
+    setBarEls(barRefs.current);
+    return () => setBarEls([]);
+  }, [speech.setBarEls]);
+  return (
+    <div
+      style={{
+        display:"flex", alignItems:"center", gap:10,
+        padding:"8px 10px 8px 12px",
+        background:T.surface,
+        border:`0.5px solid ${T.gold}55`,
+        borderRadius:T.rsm,
+        animation:"recBarSlide 0.18s ease-out both",
+        boxShadow:`0 0 0 3px ${T.gold}10`,
+      }}
+    >
+      {/* Cancel: discards interim, keeps any pre-typed input */}
+      <button
+        type="button"
+        aria-label="Discard recording"
+        onClick={() => speech.cancel?.()}
+        style={{
+          width:36, height:36, borderRadius:"50%",
+          border:`0.5px solid ${T.borderStrong}`,
+          background:"transparent", color:T.muted,
+          display:"flex", alignItems:"center", justifyContent:"center",
+          cursor:"pointer", flexShrink:0,
+        }}
+      >
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+        </svg>
+      </button>
+
+      {/* Live recording state: pulsing dot + animated bars + interim text + timer */}
+      <div style={{ flex:1, minWidth:0, display:"flex", alignItems:"center", gap:10 }}>
+        <span
+          aria-hidden="true"
+          style={{
+            width:8, height:8, borderRadius:"50%", background:T.accent,
+            animation:"recDotPulse 1.1s ease-in-out infinite",
+            flexShrink:0,
+          }}
+        />
+        <div style={{ display:"flex", alignItems:"center", gap:3, height:22, flexShrink:0 }}>
+          {Array.from({ length: BARS }).map((_, i) => (
+            <span
+              key={i}
+              ref={el => { barRefs.current[i] = el; }}
+              aria-hidden="true"
+              style={{
+                width:3, height:18, borderRadius:2,
+                background:T.gold,
+                display:"inline-block",
+                transformOrigin:"center",
+                // CSS keyframe animation is the fallback when the parallel
+                // volume meter isn't running (mobile, or stream open failed).
+                // When the meter IS running it sets `style.animation = "none"`
+                // and drives `transform` directly so the bars react to voice.
+                animation:`recBar 0.85s ease-in-out ${i * 0.12}s infinite`,
+              }}
+            />
+          ))}
+        </div>
+        <div style={{ flex:1, minWidth:0, fontSize:13, color:interim ? T.text : T.muted, lineHeight:1.4, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+          {interim || "Listening…"}
+        </div>
+        <div style={{ fontSize:11, color:T.hint, fontVariantNumeric:"tabular-nums", flexShrink:0 }}>
+          {mm}:{ss}
+        </div>
+      </div>
+
+      {/* Stop: commits the full transcript into the input box */}
+      <button
+        type="button"
+        aria-label="Stop recording"
+        onClick={() => speech.toggle()}
+        style={{
+          width:36, height:36, borderRadius:"50%",
+          border:"none",
+          background:T.gold, color:"#1a1a16",
+          display:"flex", alignItems:"center", justifyContent:"center",
+          cursor:"pointer", flexShrink:0,
+          boxShadow:`0 0 0 3px ${T.gold}22`,
+        }}
+      >
+        <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+          <rect x="2" y="2" width="9" height="9" rx="1.5" fill="currentColor"/>
+        </svg>
+      </button>
+    </div>
+  );
+}
+
 function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onGoalLogged, onHabitRenamed }) {
   const cName = coachName || "Coach";
   const isCreatorUser = user?.id === CREATOR_ID;
-  const CREATOR_GREETINGS = [
-    `Oi Corbyn 👀 ${habits.length} habits in the system. What are we breaking today?`,
-    `Creator mode activated. I've been running fine without you... mostly. What do you want to test?`,
-    `Corbyn. Back again. ${habits.length > 0 ? `Your ${habits.length} habits are all accounted for.` : "No habits yet — build something."} What's next?`,
-    `Oi. I've been thinking — you gave me creation, logging, and notifications. What's the next unlock?`,
-    `You're the one who built me. You tell me what's broken. 🔨`,
-    `Hey creator. ${new Date().toLocaleDateString("en-GB", { weekday:"long" })} check-in. What are we shipping?`,
-  ];
-  const greeting = isCreatorUser
-    ? CREATOR_GREETINGS[new Date().getDay() % CREATOR_GREETINGS.length]
-    : `Hey ${user?.name || "there"} 👋 I can see you're working on ${habits.length} habit${habits.length !== 1 ? "s" : ""}. What's on your mind?`;
+  // ── Warmer, context-aware greeting ─────────────────────────────────────────
+  // Reads today/yesterday/last-log state client-side (no extra API tokens) and
+  // picks one of a handful of phrasings for each scenario. Computed once per
+  // coach mount so it doesn't flip scenarios mid-session when the user logs
+  // through the coach (habits state updates would otherwise re-evaluate).
+  // For the creator account, swap in the larger, playful, per-open-rotating
+  // bank from buildCreatorGreeting (also tracks last 3 lines in localStorage
+  // so back-to-back opens never repeat).
+  const greetingRef = useRef(null);
+  if (greetingRef.current === null) {
+    greetingRef.current = isCreatorUser
+      ? buildCreatorGreeting({ name: user?.name, habits, goals })
+      : buildCoachGreeting({ name: user?.name, habits, goals });
+  }
+  const greeting = greetingRef.current;
   const [messages, setMessages] = useState([]);
   const [input,    setInput]    = useState("");
   const [loading,  setLoading]  = useState(false);
@@ -4697,7 +7637,15 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
   const coachOpenedAtRef = useRef(Date.now());
-  const speech    = useSpeechInput(t => setInput(p => p.trim() ? p + " " + t : t));
+  const speech    = useSpeechInput(t => setInput(p => p.trim() ? p + " " + t : t), { autoRestart: true, meter: true });
+
+  function coachInputDisplayed() {
+    if (speech.listening && speech.interim?.trim()) {
+      const core = input.trim();
+      return core ? `${core} ${speech.interim.trim()}` : speech.interim.trim();
+    }
+    return input;
+  }
 
   const atFreeCap = !isPro && freeCoachMsgsToday >= FREE_DAILY_LIMIT;
   const streamingEmpty = messages.some(m => m.id === COACH_STREAM_ID && !String(m.content || "").trim());
@@ -4788,6 +7736,9 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
         body: JSON.stringify({
           system:   buildCoachSystemPrompt(user, habits, cName, currentScreen, goals),
           messages: next.map(m => ({ role: m.role, content: m.content })),
+          // Send the user's actual local date (YYYY-MM-DD) so AI logs land on
+          // the correct calendar day. Server falls back to UTC if missing.
+          client_date: todayStr(),
         }),
       });
 
@@ -4894,7 +7845,7 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
   }
 
   function handleKey(e) {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!atFreeCap) send(input); }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!atFreeCap) send(coachInputDisplayed()); }
   }
 
   return (
@@ -4928,22 +7879,77 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
         {/* Messages */}
         <div style={{ flex:1, overflowY:"auto", padding:"16px 16px 8px", display:"flex", flexDirection:"column", gap:10 }}>
           {messages.length === 0 ? (
-            <div style={{ display:"flex", justifyContent:"flex-start" }}>
-              <div style={{ maxWidth:"85%", display:"flex", flexDirection:"column", alignItems:"flex-start" }}>
-                <div style={{
-                  padding:"10px 14px",
-                  borderRadius:"14px 14px 14px 3px",
-                  background:T.surface,
-                  fontSize:14, color:T.text,
-                  lineHeight:1.6, whiteSpace:"pre-wrap", wordBreak:"break-word",
-                }}>
-                  {greeting}
-                </div>
-                <div style={{ fontSize:10, color:T.hint, marginTop:3, alignSelf:"flex-end" }}>
-                  {formatCoachMsgTime(coachOpenedAtRef.current)}
+            <>
+              <div style={{ display:"flex", justifyContent:"flex-start" }}>
+                <div style={{ maxWidth:"85%", display:"flex", flexDirection:"column", alignItems:"flex-start" }}>
+                  <div style={{
+                    padding:"10px 14px",
+                    borderRadius:"14px 14px 14px 3px",
+                    background:T.surface,
+                    fontSize:14, color:T.text,
+                    lineHeight:1.6, whiteSpace:"pre-wrap", wordBreak:"break-word",
+                  }}>
+                    {greeting}
+                  </div>
+                  <div style={{ fontSize:10, color:T.hint, marginTop:3, alignSelf:"flex-end" }}>
+                    {formatCoachMsgTime(coachOpenedAtRef.current)}
+                  </div>
                 </div>
               </div>
-            </div>
+
+              {/* Starter prompt chips — tap to send. Tailored to current state. */}
+              {(() => {
+                const hasHabits = habits.length > 0;
+                const firstHabit = habits[0];
+                const starters = [];
+                if (hasHabits && firstHabit) {
+                  starters.push(`Log my ${firstHabit.name.toLowerCase()} for today`);
+                }
+                starters.push("How am I doing this week?");
+                if (hasHabits) {
+                  starters.push("What habit should I add next?");
+                } else {
+                  starters.push("Help me pick my first habit");
+                }
+                starters.push("Give me a pep talk");
+                return (
+                  <div style={{ marginTop:6, display:"flex", flexDirection:"column", gap:6 }}>
+                    <div style={{ fontSize:10, fontWeight:700, letterSpacing:"0.08em", textTransform:"uppercase", color:T.muted, padding:"0 2px" }}>
+                      Try asking {cName}
+                    </div>
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                      {starters.map((s, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => send(s)}
+                          disabled={loading || atFreeCap}
+                          style={{
+                            padding:"7px 12px",
+                            borderRadius:16,
+                            border:`0.5px solid rgba(200,144,42,0.35)`,
+                            background:"rgba(200,144,42,0.08)",
+                            color:T.gold,
+                            fontSize:12,
+                            fontWeight:600,
+                            cursor: loading || atFreeCap ? "default" : "pointer",
+                            opacity: loading || atFreeCap ? 0.55 : 1,
+                            lineHeight:1.3,
+                            textAlign:"left",
+                            fontFamily:T.font,
+                          }}
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{ fontSize:11, color:T.muted, lineHeight:1.5, marginTop:2, padding:"0 2px" }}>
+                      I can log habits for you, add new ones, check your progress, and answer questions about your streaks.
+                    </div>
+                  </div>
+                );
+              })()}
+            </>
           ) : null}
           {messages.map((m, i) => (
             <div key={m.id || `${m.role}-${i}-${m.ts ?? ""}`} style={{ display:"flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
@@ -5006,64 +8012,112 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
           <div ref={bottomRef}/>
         </div>
 
-        {/* Input bar */}
+        {/* Input bar — mic left (voice entry), field, send right (standard chat hierarchy) */}
         <div id="coach-input-bar" style={{ padding:"10px 14px 10px", borderTop:`0.5px solid ${T.border}`, flexShrink:0 }}>
-          <div style={{ display:"flex", gap:8, alignItems:"flex-end" }}>
-            <div style={{ flex:1, position:"relative" }}>
-              <textarea
-                ref={textareaRef}
-                value={
-                  speech.listening && speech.interim
-                    ? (input.trim() ? input + " " + speech.interim : speech.interim)
-                    : input
-                }
-                onChange={e => { if (!speech.listening) setInput(e.target.value); }}
-                onInput={e => {
-                  e.target.style.height = "auto";
-                  e.target.style.height = Math.min(e.target.scrollHeight, 88) + "px";
-                }}
-                onKeyDown={handleKey}
-                disabled={atFreeCap}
-                placeholder={speech.listening ? "Listening…" : "Ask anything about your habits…"}
+          {!isPro && !atFreeCap && freeCoachMsgsToday >= 3 && freeCoachMsgsToday < FREE_DAILY_LIMIT && (
+            <div style={{ fontSize:11, color:T.muted, padding:"2px 2px 8px", lineHeight:1.5 }}>
+              {FREE_DAILY_LIMIT - freeCoachMsgsToday} message{FREE_DAILY_LIMIT - freeCoachMsgsToday === 1 ? "" : "s"} left today —{" "}
+              <button
+                type="button"
+                onClick={onUpgrade}
                 style={{
-                  width:"100%", boxSizing:"border-box",
-                  background:T.surface, border:`0.5px solid ${T.borderStrong}`,
-                  borderRadius:T.rsm, padding:"10px 14px",
-                  fontSize:16, color:T.text, resize:"none",
-                  fontFamily:T.font, lineHeight:1.5, outline:"none",
-                  minHeight:"42px", maxHeight:"88px", overflowY:"auto", height:"auto",
-                  opacity: atFreeCap ? 0.55 : 1,
+                  background:"none", border:"none", padding:0, cursor:"pointer",
+                  font:"inherit", color:T.gold, fontWeight:700,
+                  textDecoration:"underline", textUnderlineOffset:2,
                 }}
-              />
-            </div>
-            {speech.supported ? (
-              <div style={{ opacity: atFreeCap ? 0.35 : 1, pointerEvents: atFreeCap ? "none" : "auto" }}>
-                <MicBtn speech={speech} color={T.gold} size={42}/>
-              </div>
-            ) : null}
-            <button
-              onClick={() => { textareaRef.current?.blur(); send(input); }}
-              disabled={!input.trim() || loading || atFreeCap || speech.listening}
-              style={{
-                width:42, height:42, borderRadius:"50%", border:"none", flexShrink:0,
-                background: input.trim() && !loading && !atFreeCap && !speech.listening ? T.gold : T.surface,
-                cursor: input.trim() && !loading && !atFreeCap && !speech.listening ? "pointer" : "default",
-                display:"flex", alignItems:"center", justifyContent:"center",
-                transition:"background 0.2s",
-              }}>
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                <path d="M2 9h14M9 2l7 7-7 7" stroke={input.trim() && !loading && !atFreeCap && !speech.listening ? "#1a1a16" : T.hint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </button>
-          </div>
-          {showTryHint && (
-            <div style={{ fontSize:11, color:T.muted, fontStyle:"italic", marginTop:8, padding:"0 2px", lineHeight:1.45 }}>
-              {"Try: 'I just ran 5k' or 'Add a sleep habit'"}
+              >
+                Pro
+              </button>{" "}
+              gets unlimited.
             </div>
           )}
+          {speech.listening ? (
+            <CoachRecordingBar speech={speech} />
+          ) : (
+            <div style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
+              {speech.supported ? (
+                <div style={{ opacity: atFreeCap ? 0.35 : 1, pointerEvents: atFreeCap ? "none" : "auto", flexShrink:0, alignSelf:"flex-end", marginBottom:1 }}>
+                  <MicBtn
+                    speech={speech}
+                    color={T.gold}
+                    size={44}
+                    prominent
+                    locked={!isPro}
+                    onLockedClick={onUpgrade}
+                  />
+                </div>
+              ) : null}
+              <div style={{ flex:1, position:"relative", minWidth:0 }}>
+                <textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  onInput={e => {
+                    e.target.style.height = "auto";
+                    e.target.style.height = Math.min(e.target.scrollHeight, 88) + "px";
+                  }}
+                  onKeyDown={handleKey}
+                  disabled={atFreeCap}
+                  placeholder="Ask anything about your habits…"
+                  style={{
+                    width:"100%", boxSizing:"border-box",
+                    background:T.surface, border:`0.5px solid ${T.borderStrong}`,
+                    borderRadius:T.rsm, padding:"10px 14px",
+                    fontSize:16, color:T.text, resize:"none",
+                    fontFamily:T.font, lineHeight:1.5, outline:"none",
+                    minHeight:"42px", maxHeight:"88px", overflowY:"auto", height:"auto",
+                    opacity: atFreeCap ? 0.55 : 1,
+                  }}
+                />
+              </div>
+              <button
+                type="button"
+                aria-label={input.trim() && !loading && !atFreeCap ? "Send message" : "Send (disabled until you type)"}
+                onClick={() => { textareaRef.current?.blur(); send(input); }}
+                disabled={!input.trim() || loading || atFreeCap}
+                style={{
+                  width:36, height:36, borderRadius:"50%", border:`0.5px solid ${T.border}`,
+                  flexShrink:0,
+                  background: input.trim() && !loading && !atFreeCap ? T.gold : T.surface,
+                  cursor: input.trim() && !loading && !atFreeCap ? "pointer" : "default",
+                  display:"flex", alignItems:"center", justifyContent:"center",
+                  transition:"background 0.2s, border-color 0.2s, opacity 0.2s",
+                  opacity: !input.trim() || loading || atFreeCap ? 0.85 : 1,
+                }}>
+                <svg width="15" height="15" viewBox="0 0 18 18" fill="none">
+                  <path d="M2 9h14M9 2l7 7-7 7" stroke={input.trim() && !loading && !atFreeCap ? "#1a1a16" : T.hint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+            </div>
+          )}
+          {/* The old italic "Try: …" hint is now redundant — the empty-state has
+              labeled starter chips in the message area. Keeping only mic / rate
+              limit prompts below. */}
           {speech.supported && speech.micBlocked ? (
             <div style={{ fontSize:11, color:T.muted, marginTop:8, padding:"0 2px", lineHeight:1.45 }}>
               Mic blocked. Enable it in your browser settings.
+            </div>
+          ) : null}
+          {!isPro && speech.supported && !atFreeCap && !speech.micBlocked && !speech.listening ? (
+            <div style={{ fontSize:11, color:T.muted, marginTop:8, padding:"0 2px", lineHeight:1.45 }}>
+              🎙️ Voice logging is a{" "}
+              <button
+                type="button"
+                onClick={onUpgrade}
+                style={{
+                  background:"none", border:"none", padding:0, cursor:"pointer",
+                  font:"inherit", color:T.gold, fontWeight:700,
+                  textDecoration:"underline", textUnderlineOffset:2,
+                }}
+              >
+                Pro
+              </button>{" "}
+              feature — tap to preview.
+            </div>
+          ) : null}
+          {speech.supported && speech.speechError ? (
+            <div style={{ fontSize:11, color:T.accent, marginTop:8, padding:"0 2px", lineHeight:1.5, whiteSpace:"pre-line" }}>
+              {speech.speechError}
             </div>
           ) : null}
           {atFreeCap && (
@@ -5076,7 +8130,7 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
                 {`You've used your ${FREE_DAILY_LIMIT} free messages today`}
               </div>
               <div style={{ fontSize:12, color:T.muted, lineHeight:1.5 }}>
-                Upgrade to Pro for unlimited AI coaching, personalised push notifications, and more.
+                Forged Pro gives you unlimited coaching, plus full history, friend nudges, and voice logging.
               </div>
               <button
                 type="button"
@@ -5115,28 +8169,21 @@ const ONBOARD_STEPS = [
   {
     id:"welcome",
     title:"Forged.",
-    sub:"Most habit apps track what you do. Forged helps you understand why.",
-    body:"You already know what you want to change. The hard part is figuring out what's actually getting in the way. Forged is simple: log what you do, reflect when it matters, and let the patterns show you the rest.",
+    sub:"Most habit apps track what you do. Forged helps you understand why you keep stopping.",
+    body:"You already know what you want to change. The hard part is figuring out what's actually getting in the way — and why the same patterns keep derailing you. Forged is built to help you see that.",
     cta:"Let's build",
   },
   {
     id:"name",
     title:"First — who are you?",
-    sub:"Your name. That's it. No email, no password, no bullshit.",
+    sub:"Your name. That's it.",
     body:null,
     cta:"That's me",
   },
   {
-    id:"privacy",
-    title:"Your data stays private.",
-    sub:"A few things worth knowing before we start.",
-    body:null,
-    cta:"Got it",
-  },
-  {
     id:"coach",
     title:"Meet your AI coach.",
-    sub:"They'll know your habits, streaks, and reflections — and give you real coaching, not generic advice.",
+    sub:"It reads your logs and reflections — then tells you what you can't see yourself.",
     body:null,
     cta:"Continue",
   },
@@ -5229,17 +8276,36 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
   const [showingFinal,    setShowingFinal]    = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError,   setCheckoutError]   = useState(null);
+  // Final-screen "weekly updates by email" opt-in. Default ON; persisted on
+  // completion (same localStorage key the post-upgrade thank-you modal uses, so
+  // preferences don't silently diverge between surfaces).
+  const [emailUpdatesOptIn, setEmailUpdatesOptIn] = useState(true);
 
   const current   = ONBOARD_STEPS[step];
   const isLast    = step === ONBOARD_STEPS.length - 1;
   const FOCUS_STEP = ONBOARD_STEPS.findIndex(s => s.id === "focus");
   const COACH_STEP = ONBOARD_STEPS.findIndex(s => s.id === "coach");
-  const INTER_STEP = ONBOARD_STEPS.length;       // virtual step 5
-  const FIRST_STEP = ONBOARD_STEPS.length + 1;   // virtual step 6
-  const HOME_STEP  = ONBOARD_STEPS.length + 2;   // virtual step 7 — add to home screen
-  const NOTIF_STEP = ONBOARD_STEPS.length + 3;   // virtual step 8 — enable notifications
+  const INTER_STEP = ONBOARD_STEPS.length;       // virtual step 5 (transition)
+  // After the interstitial we now run Home → Notifs → First-log so that the
+  // very last action inside onboarding is the user actually logging a habit —
+  // a direct handoff into the real app rather than ending on a setup screen.
+  const FIRST_STEP = ONBOARD_STEPS.length + 1;   // virtual: log first habit
+  const HOME_STEP  = ONBOARD_STEPS.length + 2;   // virtual: add to home screen
+  const NOTIF_STEP = ONBOARD_STEPS.length + 3;   // virtual: enable notifications
 
   const isVirtual = step >= ONBOARD_STEPS.length;
+
+  // Canonical 1-based step number for the progress header. The interstitial
+  // shares Focus' number (it's a sub-screen), and the three virtual post-focus
+  // steps are reordered visually: Home (6) → Notifs (7) → First log (8).
+  const DISPLAY_TOTAL = 5;
+  function displayStepNumber(s) {
+    if (s === INTER_STEP) return 4;   // Focus' number — interstitial is a transition
+    if (s === NOTIF_STEP) return 5;
+    if (s === FIRST_STEP) return 5;
+    return Math.min(s + 1, 4);        // standard steps 0..3 → 1..4
+  }
+  const progressNumber = displayStepNumber(step);
 
   function toggleFocus(label) {
     setSelected(prev => prev.includes(label) ? prev.filter(l => l !== label) : [...prev, label]);
@@ -5297,10 +8363,9 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
 
   async function handleEnterApp() {
     try {
-      await onSaveProgress({ name:name.trim()||"You", habits:habitsSaved(), coachName:coachNameInput.trim()||"Coach" });
+      await onSaveProgress({ name:name.trim()||"You", habits:habitsSaved(), coachName:coachNameInput.trim()||"Coach", emailUpdatesOptIn });
       onComplete();
     } catch(err) {
-      // silently complete even if save fails — app will sync later
       onComplete();
     }
   }
@@ -5309,7 +8374,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
     setCheckoutLoading(true);
     setCheckoutError(null);
     try {
-      await onSaveProgress({ name:name.trim()||"You", habits:habitsSaved(), coachName:coachNameInput.trim()||"Coach" });
+      await onSaveProgress({ name:name.trim()||"You", habits:habitsSaved(), coachName:coachNameInput.trim()||"Coach", emailUpdatesOptIn });
       await onCheckout();
     } catch(err) {
       setCheckoutError(err.message || "Something went wrong. Try again.");
@@ -5345,40 +8410,143 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
 
   const wrap = { fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column" };
 
+  // Shared progress header — slim bar + "Step X of Y" label. Replaces the red
+  // dot row that used to feel opaque. `currentNum` is 1-based.
+  function ProgressHeader({ currentNum, total = DISPLAY_TOTAL }) {
+    const pct = Math.max(0, Math.min(100, Math.round((currentNum / total) * 100)));
+    return (
+      <div style={{ padding:"24px 24px 0" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:8 }}>
+          <div style={{ fontSize:10, fontWeight:600, color:T.muted, textTransform:"uppercase", letterSpacing:"0.12em" }}>
+            Step {currentNum} of {total}
+          </div>
+          <div style={{ fontSize:10, fontWeight:500, color:T.hint, letterSpacing:"0.04em" }}>
+            {pct}%
+          </div>
+        </div>
+        <div style={{ height:3, width:"100%", background:T.surface, borderRadius:2, overflow:"hidden" }}>
+          <div style={{ height:"100%", width:`${pct}%`, background:T.accent, borderRadius:2, transition:"width 0.35s cubic-bezier(0.22,1,0.36,1)" }}/>
+        </div>
+      </div>
+    );
+  }
+
   // ── Final screen: you're in ──────────────────────────────────────────────────
   if (showingFinal) {
     return (
       <div style={wrap}>
-        <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"0 28px" }}>
-          <div style={{ width:"100%", maxWidth:360, textAlign:"center" }}>
-            <div style={{ fontSize:52, marginBottom:18 }}>⚒️</div>
-            <div style={{ fontFamily:T.serif, fontSize:28, color:T.text, marginBottom:10, lineHeight:1.2 }}>
-              You're set up.
+        <style>{`
+          @keyframes finalHeroIn { from { opacity:0; transform:translateY(14px) scale(0.96); } to { opacity:1; transform:none; } }
+          @keyframes finalItemIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
+        `}</style>
+        <div style={{ flex:1, display:"flex", flexDirection:"column", justifyContent:"center", padding:"48px 24px 32px", overflowY:"auto" }}>
+          <div style={{ width:"100%", maxWidth:360, margin:"0 auto", textAlign:"center" }}>
+            {/* Hero */}
+            <div style={{ animation:"finalHeroIn 0.6s cubic-bezier(0.22,1,0.36,1) both" }}>
+              <div style={{ position:"relative", display:"inline-block", marginBottom:22 }}>
+                <div style={{ position:"absolute", inset:-18, background:"radial-gradient(circle, rgba(200,144,42,0.22) 0%, rgba(200,144,42,0) 70%)", borderRadius:"50%", zIndex:0, pointerEvents:"none" }}/>
+                <div style={{ position:"relative", fontSize:56, lineHeight:1, zIndex:1 }}>⚒️</div>
+              </div>
+              <div style={{ fontSize:11, fontWeight:600, color:T.gold, textTransform:"uppercase", letterSpacing:"0.14em", marginBottom:12 }}>
+                You&apos;re forged in
+              </div>
+              <div style={{ fontFamily:T.serif, fontSize:30, color:T.text, marginBottom:12, lineHeight:1.15, letterSpacing:"-0.005em" }}>
+                Let&apos;s build, {name.trim() || "you"}.
+              </div>
+              <div style={{ fontSize:14, color:T.muted, lineHeight:1.7, maxWidth:300, margin:"0 auto 28px" }}>
+                Your habits are ready. Log consistently, reflect when it matters, and let the patterns show you what&apos;s working.
+              </div>
             </div>
-            <div style={{ fontSize:14, color:T.muted, lineHeight:1.7, marginBottom:36, maxWidth:280, margin:"0 auto 36px" }}>
-              Start logging, build your streaks, and track what matters. Forged is free to use — upgrade to Pro any time to unlock insights and more.
+
+            {/* Pro upsell card — clearly the premium path, not a footnote. */}
+            <div style={{
+              position:"relative",
+              background:"linear-gradient(145deg, rgba(200,144,42,0.12) 0%, rgba(200,144,42,0.04) 100%)",
+              border:"1px solid rgba(200,144,42,0.45)",
+              borderRadius:18,
+              padding:"18px 18px 16px",
+              marginBottom:16,
+              textAlign:"left",
+              boxShadow:"0 8px 28px rgba(200,144,42,0.08)",
+              animation:"finalItemIn 0.55s 0.15s cubic-bezier(0.22,1,0.36,1) both",
+            }}>
+              <div style={{ position:"absolute", top:-10, left:14, background:T.gold, color:"#0F0F0D", fontSize:10, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase", padding:"3px 9px", borderRadius:6 }}>
+                Recommended
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10, marginTop:4 }}>
+                <div style={{ fontSize:22 }}>⚡</div>
+                <div style={{ fontFamily:T.serif, fontSize:18, color:T.text, lineHeight:1.2 }}>
+                  Forged Pro
+                </div>
+                <div style={{ marginLeft:"auto", fontSize:12, color:T.gold, fontWeight:600 }}>
+                  $4.99/mo
+                </div>
+              </div>
+              <div style={{ fontSize:12, color:T.sub, lineHeight:1.65, marginBottom:12 }}>
+                Unlimited AI coaching, unlimited habits, voice logging, friend nudges, and full history — everything you need to actually understand your patterns.
+              </div>
+              <button
+                onClick={handleGoPro}
+                disabled={checkoutLoading}
+                style={{
+                  width:"100%", padding:"13px 0", borderRadius:12, border:"none",
+                  background:T.gold, color:"#0F0F0D",
+                  fontSize:14, fontWeight:700, letterSpacing:"0.01em",
+                  cursor:checkoutLoading?"not-allowed":"pointer",
+                  opacity:checkoutLoading?0.7:1,
+                  fontFamily:T.font,
+                  transition:"opacity 0.15s",
+                }}
+              >
+                {checkoutLoading ? "Opening checkout…" : "Unlock Forged Pro →"}
+              </button>
+              {checkoutError && <p style={{ fontSize:12, color:"#e05c5c", marginTop:10, lineHeight:1.5 }}>{checkoutError}</p>}
             </div>
+
+            {/* Primary CTA — continue free. Lower-contrast so the Pro card leads. */}
             <button
               onClick={handleEnterApp}
-              style={{ width:"100%", padding:"16px 0", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:600, cursor:"pointer", marginBottom:12, fontFamily:T.font }}
+              style={{
+                width:"100%", padding:"15px 0", borderRadius:12,
+                border:`0.5px solid ${T.borderStrong}`, background:T.raised,
+                color:T.text, fontSize:15, fontWeight:600,
+                cursor:"pointer", fontFamily:T.font,
+                marginBottom:18,
+                animation:"finalItemIn 0.55s 0.22s cubic-bezier(0.22,1,0.36,1) both",
+              }}
             >
               Start using Forged →
             </button>
-            <button
-              onClick={handleGoPro}
-              disabled={checkoutLoading}
-              style={{ width:"100%", padding:"13px 0", borderRadius:T.rsm, border:`0.5px solid ${T.borderStrong}`, background:"none", color:T.gold, fontSize:14, fontWeight:500, cursor:checkoutLoading?"not-allowed":"pointer", opacity:checkoutLoading?0.7:1, fontFamily:T.font }}
-            >
-              {checkoutLoading ? "Opening checkout…" : "Unlock Forged Pro — $4.99/month"}
-            </button>
-            {checkoutError && <p style={{ fontSize:12, color:"#e05c5c", marginTop:10, lineHeight:1.5 }}>{checkoutError}</p>}
+
+            {/* Email updates opt-in — pre-checked, stored under the existing
+                forged_beta_email_opt_in key so it lines up with the post-upgrade
+                thank-you modal. */}
+            <label style={{
+              display:"flex", alignItems:"flex-start", gap:10,
+              padding:"11px 13px", borderRadius:12,
+              border:`0.5px solid ${T.border}`, background:T.surface,
+              cursor:"pointer", textAlign:"left",
+              animation:"finalItemIn 0.55s 0.3s cubic-bezier(0.22,1,0.36,1) both",
+            }}>
+              <input
+                type="checkbox"
+                checked={emailUpdatesOptIn}
+                onChange={e => setEmailUpdatesOptIn(e.target.checked)}
+                style={{ marginTop:3, width:15, height:15, accentColor:T.gold, flexShrink:0, cursor:"pointer" }}
+              />
+              <span style={{ fontSize:12, color:T.sub, lineHeight:1.55 }}>
+                <span style={{ color:T.text, fontWeight:500 }}>Get Forged weekly updates by email.</span>
+                <br/>
+                <span style={{ color:T.muted }}>See new features and how user feedback is shaping the app.</span>
+              </span>
+            </label>
           </div>
         </div>
       </div>
     );
   }
 
-  // ── Virtual step 6: first habit ──────────────────────────────────────────────
+  // ── Virtual step 8: log your first habit — now the last onboarding action ───
   if (step === FIRST_STEP && builtHabits.length > 0) {
     const firstHabit = pickFirstHabit(builtHabits);
     const annotation = HABIT_ANNOTATIONS[firstHabit.habitType] || HABIT_ANNOTATIONS.daily;
@@ -5386,13 +8554,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
 
     return (
       <div style={wrap}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"32px 24px 0" }}>
-          <div style={{ display:"flex", gap:6 }}>
-            {[...ONBOARD_STEPS, {},{},{},{}].map((_, i) => (
-              <div key={i} style={{ width:i===step?20:6, height:6, borderRadius:3, background:i<=step?T.accent:T.surface, transition:"all 0.3s" }}/>
-            ))}
-          </div>
-        </div>
+        <ProgressHeader currentNum={progressNumber} />
 
         <div style={{ flex:1, padding:"28px 24px 16px", overflowY:"auto" }}>
           <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, lineHeight:1.2, marginBottom:6 }}>Your first habit.</div>
@@ -5456,13 +8618,13 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
             onClick={() => {
               if (needsValue && !firstLogValue) return;
               setFirstLogDone(true);
-              setStep(HOME_STEP);
+              setShowingFinal(true);
             }}
             style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:(needsValue&&!firstLogValue)?T.surface:firstHabit.color, color:(needsValue&&!firstLogValue)?T.muted:"#fff", fontSize:16, fontWeight:500, cursor:"pointer", transition:"all 0.2s" }}
           >
             Log your first entry →
           </button>
-          <button onClick={() => { setStep(HOME_STEP); }}
+          <button onClick={() => { setShowingFinal(true); }}
             style={{ width:"100%", padding:12, background:"none", border:"none", color:T.hint, fontSize:13, cursor:"pointer", marginTop:6 }}>
             Skip this step
           </button>
@@ -5471,113 +8633,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
     );
   }
 
-  // ── Virtual step 7: add to home screen ──────────────────────────────────────
-  if (step === HOME_STEP) {
-    const instructions = [
-      {
-        os: "iPhone / Safari",
-        icon: "🍎",
-        steps: [
-          { icon: "⬆️", text: "Tap the Share icon at the bottom of Safari" },
-          { icon: "📲", text: "Scroll down and tap \"Add to Home Screen\"" },
-          { icon: "✅", text: "Tap \"Add\" in the top right corner" },
-        ],
-      },
-      {
-        os: "Android / Chrome",
-        icon: "🤖",
-        steps: [
-          { icon: "⋮", text: "Tap the three-dot menu in the top right of Chrome", mono: true },
-          { icon: "📲", text: "Tap \"Add to Home screen\" or \"Install app\"" },
-          { icon: "✅", text: "Confirm when prompted" },
-        ],
-      },
-    ];
-
-    return (
-      <div style={wrap}>
-        {/* Progress dots */}
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"32px 24px 0" }}>
-          <div style={{ display:"flex", gap:6 }}>
-            {[...ONBOARD_STEPS, {},{},{},{}].map((_, i) => (
-              <div key={i} style={{ width:i===step?20:6, height:6, borderRadius:3, background:i<=step?T.accent:T.surface, transition:"all 0.3s" }}/>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ flex:1, padding:"28px 24px 16px", overflowY:"auto" }}>
-
-          {/* Hero */}
-          <div style={{ textAlign:"center", marginBottom:28 }}>
-            <div style={{ fontSize:52, marginBottom:14, lineHeight:1 }}>📱</div>
-            <div style={{ fontFamily:T.serif, fontSize:26, color:T.text, lineHeight:1.2, marginBottom:10 }}>
-              Add Forged to your home screen.
-            </div>
-            <div style={{ fontSize:14, color:T.muted, lineHeight:1.6, maxWidth:320, margin:"0 auto" }}>
-              This is the single most important thing you can do as a beta user.
-            </div>
-          </div>
-
-          {/* Why callout */}
-          <div style={{ background:"rgba(200,144,42,0.08)", border:`0.5px solid rgba(200,144,42,0.25)`, borderRadius:T.r, padding:"14px 18px", marginBottom:24 }}>
-            <div style={{ fontSize:12, fontWeight:600, color:T.gold, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:8 }}>
-              ⚡ Why it matters
-            </div>
-            <div style={{ fontSize:13, color:T.sub, lineHeight:1.7 }}>
-              Forged works when you open it every day. A home screen icon makes that happen — no searching, no excuses. It also unlocks daily reminders so we can nudge you when it counts.
-            </div>
-          </div>
-
-          {/* Instruction cards */}
-          {instructions.map(({ os, icon, steps: sList }) => (
-            <div key={os} style={{ background:T.raised, border:`0.5px solid ${T.border}`, borderRadius:T.r, padding:"16px 18px", marginBottom:14 }}>
-              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14 }}>
-                <span style={{ fontSize:18 }}>{icon}</span>
-                <span style={{ fontSize:13, fontWeight:600, color:T.text }}>{os}</span>
-              </div>
-              <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-                {sList.map((s, i) => (
-                  <div key={i} style={{ display:"flex", alignItems:"flex-start", gap:12 }}>
-                    <div style={{ width:24, height:24, borderRadius:"50%", background:T.surface, border:`0.5px solid ${T.border}`, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, fontSize:s.mono?14:13, fontFamily:s.mono?T.font:undefined, color:T.muted, lineHeight:1, marginTop:1 }}>
-                      {i + 1}
-                    </div>
-                    <div style={{ fontSize:13, color:T.sub, lineHeight:1.6, paddingTop:3 }}>
-                      {s.mono
-                        ? <><code style={{ fontFamily:"monospace", fontSize:15, color:T.text, letterSpacing:"0.05em" }}>{s.icon}</code>{" "}{s.text.replace(s.icon + " ", "")}</>
-                        : <>{s.icon && <span style={{ marginRight:6 }}>{s.icon}</span>}{s.text}</>
-                      }
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-
-          <div style={{ fontSize:12, color:T.hint, textAlign:"center", lineHeight:1.6, marginTop:8, marginBottom:4 }}>
-            Do it now — it takes less than 30 seconds.
-          </div>
-        </div>
-
-        {/* CTAs */}
-        <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
-          <button
-            onClick={() => setStep(NOTIF_STEP)}
-            style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:600, cursor:"pointer", marginBottom:10 }}
-          >
-            Done — I've added it ✓
-          </button>
-          <button
-            onClick={() => setStep(NOTIF_STEP)}
-            style={{ width:"100%", padding:12, background:"none", border:"none", color:T.hint, fontSize:13, cursor:"pointer" }}
-          >
-            I'll set it up later
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Virtual step 8: enable notifications ────────────────────────────────────
+  // ── Virtual step 5: enable notifications ────────────────────────────────────
   if (step === NOTIF_STEP) {
     const blocked = notifPermission === "denied";
     const already = notifEnabled;
@@ -5585,13 +8641,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
     return (
       <div style={wrap}>
         {/* Progress dots */}
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"32px 24px 0" }}>
-          <div style={{ display:"flex", gap:6 }}>
-            {[...ONBOARD_STEPS, {},{},{},{}].map((_, i) => (
-              <div key={i} style={{ width:i===step?20:6, height:6, borderRadius:3, background:i<=step?T.accent:T.surface, transition:"all 0.3s" }}/>
-            ))}
-          </div>
-        </div>
+        <ProgressHeader currentNum={progressNumber} />
 
         <div style={{ flex:1, padding:"40px 24px 16px", overflowY:"auto", display:"flex", flexDirection:"column", justifyContent:"center" }}>
           {/* Hero */}
@@ -5634,7 +8684,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
         <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
           {already ? (
             <button
-              onClick={() => setShowingFinal(true)}
+              onClick={() => builtHabits.length > 0 ? setStep(FIRST_STEP) : setShowingFinal(true)}
               style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:600, cursor:"pointer", marginBottom:10 }}
             >
               Reminders on — let's go ✓
@@ -5643,7 +8693,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
             <button
               onClick={async () => {
                 if (onNotifToggle) await onNotifToggle();
-                setShowingFinal(true);
+                if (builtHabits.length > 0) setStep(FIRST_STEP); else setShowingFinal(true);
               }}
               disabled={notifLoading || blocked}
               style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:blocked?T.surface:T.gold, color:blocked?T.muted:"#0F0F0D", fontSize:16, fontWeight:600, cursor:blocked?"not-allowed":"pointer", opacity:(notifLoading||blocked)?0.7:1, marginBottom:10, transition:"opacity 0.15s" }}
@@ -5652,10 +8702,10 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
             </button>
           )}
           <button
-            onClick={() => setShowingFinal(true)}
+            onClick={() => builtHabits.length > 0 ? setStep(FIRST_STEP) : setShowingFinal(true)}
             style={{ width:"100%", padding:12, background:"none", border:"none", color:T.hint, fontSize:13, cursor:"pointer" }}
           >
-            Skip for now
+            Skip notifications
           </button>
         </div>
       </div>
@@ -5670,13 +8720,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
 
     return (
       <div style={wrap}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"32px 24px 0" }}>
-          <div style={{ display:"flex", gap:6 }}>
-            {[...ONBOARD_STEPS, {},{},{},{}].map((_, i) => (
-              <div key={i} style={{ width:i===step?20:6, height:6, borderRadius:3, background:i<=step?T.accent:T.surface, transition:"all 0.3s" }}/>
-            ))}
-          </div>
-        </div>
+        <ProgressHeader currentNum={progressNumber} />
 
         <div style={{ flex:1, padding:"48px 24px 16px", display:"flex", flexDirection:"column", justifyContent:"center" }}>
           <div style={{ background:"rgba(200,144,42,0.07)", border:`0.5px solid rgba(200,144,42,0.2)`, borderRadius:T.r, padding:"20px 20px 16px", marginBottom:24 }}>
@@ -5701,9 +8745,9 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
         </div>
 
         <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
-          <button onClick={() => setStep(FIRST_STEP)}
+          <button onClick={() => setStep(NOTIF_STEP)}
             style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:500, cursor:"pointer" }}>
-            Show me
+            Let's go →
           </button>
         </div>
       </div>
@@ -5713,13 +8757,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
   // ── Standard steps 0–4 ───────────────────────────────────────────────────────
   return (
     <div style={wrap}>
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"32px 24px 0" }}>
-        <div style={{ display:"flex", gap:6 }}>
-          {ONBOARD_STEPS.map((_, i) => (
-            <div key={i} style={{ width:i===step?20:6, height:6, borderRadius:3, background:i<=step?T.accent:T.surface, transition:"all 0.3s" }}/>
-          ))}
-        </div>
-      </div>
+      <ProgressHeader currentNum={progressNumber} />
 
       <div style={{ flex:1, padding:"32px 24px 16px", display:"flex", flexDirection:"column", overflowY:"auto" }}>
         <div style={{ fontFamily:T.serif, fontSize:28, color:T.text, lineHeight:1.2, marginBottom:10 }}>{current.title}</div>
@@ -5766,25 +8804,25 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
               <div style={{ display:"flex", gap:12, alignItems:"center", marginBottom:12 }}>
                 <div style={{ width:44, height:44, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, flexShrink:0 }}>🤖</div>
                 <div>
-                  <div style={{ fontSize:13, fontWeight:500, color:T.text }}>Your coach is part of Forged beta access</div>
-                  <div style={{ fontSize:11, color:T.gold, marginTop:2 }}>⚡ Early supporter (beta)</div>
+                  <div style={{ fontSize:13, fontWeight:500, color:T.text }}>Your coach knows your habits</div>
+                  <div style={{ fontSize:11, color:T.gold, marginTop:2 }}>⚡ Real context, not generic tips</div>
                 </div>
               </div>
               <div style={{ background:T.surface, borderRadius:"12px 12px 12px 3px", padding:"10px 14px", fontSize:13, color:T.muted, lineHeight:1.6, borderLeft:`2px solid rgba(200,144,42,0.3)` }}>
-                "Hey {name || "there"} — I can see what you're working on. Tell me what's been on your mind."
+                "Hey {name || "there"} — once you start logging, I can see exactly what's working and where things fall apart. Ask me anything."
               </div>
             </div>
-            <div style={{ fontSize:12, color:T.hint, marginBottom:8 }}>Give your coach a name (optional)</div>
-            <input
-              style={{ ...styleInp, fontSize:16, padding:"12px 14px" }}
-              placeholder="e.g. Atlas, Sam, Coach…"
-              value={coachNameInput}
-              onChange={e => setCoachNameInput(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handleContinue()}
-              autoFocus
-            />
-            <div style={{ fontSize:11, color:T.hint, marginTop:8, lineHeight:1.6 }}>
-              They'll reference your actual habit data — not generic tips.
+            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+              {[
+                { icon:"🔍", text:"Finds patterns in your logs — like why you always skip Thursdays" },
+                { icon:"💬", text:"Answers in plain language, based on your real data" },
+                { icon:"⚡", text:"Can log habits, create new ones, and help you reflect" },
+              ].map(({ icon, text }) => (
+                <div key={text} style={{ display:"flex", alignItems:"flex-start", gap:12, padding:"10px 14px", background:T.raised, borderRadius:T.rsm, border:`0.5px solid ${T.border}` }}>
+                  <span style={{ fontSize:16, flexShrink:0, marginTop:1 }}>{icon}</span>
+                  <span style={{ fontSize:13, color:T.sub, lineHeight:1.55 }}>{text}</span>
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -5841,20 +8879,12 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
       </div>
 
       <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
-        <button onClick={handleContinue}
-          style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:step===FOCUS_STEP&&selected.length===0?T.surface:T.accent, color:step===FOCUS_STEP&&selected.length===0?T.muted:"#fff", fontSize:16, fontWeight:500, cursor:"pointer", transition:"all 0.2s" }}>
+        <button
+          onClick={handleContinue}
+          disabled={step === FOCUS_STEP && selected.length === 0}
+          style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:step===FOCUS_STEP&&selected.length===0?T.surface:T.accent, color:step===FOCUS_STEP&&selected.length===0?T.muted:"#fff", fontSize:16, fontWeight:500, cursor:step===FOCUS_STEP&&selected.length===0?"not-allowed":"pointer", transition:"all 0.2s" }}>
           {current.cta}
         </button>
-        {step === FOCUS_STEP && (
-          <button onClick={() => {
-            const habits = [];
-            setBuiltHabits(habits);
-            onComplete({ name:name.trim()||"You", habits, coachName:coachNameInput.trim()||"Coach" });
-          }}
-            style={{ width:"100%", padding:12, borderRadius:T.rsm, border:"none", background:"none", color:T.muted, fontSize:14, cursor:"pointer", marginTop:8 }}>
-            Skip for now
-          </button>
-        )}
       </div>
     </div>
   );
@@ -5983,11 +9013,14 @@ function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
   const spotsPct  = spots !== null ? Math.min(100, (spots / 100) * 100) : 0;
 
   const features = [
-    { icon:"∞",  label:"Unlimited habits",   free:"Up to 5",          pro:"No limit",              live:true },
-    { icon:"🤖", label:"AI Habit Coach",      free:"—",                pro:"Personalised coaching", live:true },
-    { icon:"📜", label:"Full history",        free:"Last 7 days",      pro:"Every entry, forever",  live:true },
-    { icon:"🔔", label:"Push reminders",      free:"—",                pro:"Smart daily nudges",    live:false },
-    { icon:"📊", label:"Advanced analytics",  free:"28-day view",      pro:"90-day + connections",  live:false },
+    { icon:"∞",  label:"Unlimited habits",    free:"Up to 5",      pro:"No limit",               live:true },
+    { icon:"🤖", label:"AI coach messages",    free:"5 per day",    pro:"Unlimited",              live:true },
+    { icon:"🎙️", label:"Voice logging",         free:"—",            pro:"Talk to log & reflect",  live:true },
+    { icon:"💪", label:"Nudge a friend",       free:"—",            pro:"Keep each other honest", live:true },
+    { icon:"📜", label:"Full history",         free:"Last 7 days",  pro:"Every entry, forever",   live:true },
+    { icon:"📅", label:"Monthly calendar",     free:"—",            pro:"Spot gaps at a glance",  live:true },
+    { icon:"🔔", label:"Smart reminders",      free:"—",            pro:"Daily push nudges",      live:false },
+    { icon:"📊", label:"Pattern detection",    free:"Streaks + 28d", pro:"AI pattern analysis",    live:false },
   ];
 
   return (
@@ -6112,7 +9145,62 @@ function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
   );
 }
 
-function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onSignOut, onShowTour, onUpgrade, coachName, coachIcon, onSaveCoach, notifEnabled, notifTime, notifLoading, notifPermission, onNotifToggle, onNotifTimeChange }) {
+// Reusable iOS-style switch used by the notification settings panel. Kept
+// inline so it doesn't pull in another file and stays consistent with the
+// existing master toggle styling.
+function ToggleSwitch({ on, onClick, disabled, ariaLabel }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      style={{
+        flexShrink:0, width:48, height:28, borderRadius:14, border:"none",
+        background: on ? T.gold : T.border,
+        opacity: disabled ? 0.5 : 1,
+        cursor: disabled ? "not-allowed" : "pointer",
+        position:"relative", transition:"background 0.2s", padding:0,
+      }}
+    >
+      <div style={{
+        position:"absolute", top:3,
+        left: on ? "calc(100% - 25px)" : 3,
+        width:22, height:22, borderRadius:"50%",
+        background:"#fff", transition:"left 0.2s",
+        boxShadow:"0 1px 3px rgba(0,0,0,0.3)",
+      }}/>
+    </button>
+  );
+}
+
+// One row inside the notification-categories panel. Three of these stack
+// inside the dark sub-card on Profile.
+function NotifCategoryRow({ emoji, title, subtitle, checked, onChange, disabled, noBorderBottom }) {
+  return (
+    <div
+      style={{
+        display:"flex", alignItems:"center", gap:12,
+        padding:"12px 14px",
+        borderBottom: noBorderBottom ? "none" : `0.5px solid rgba(255,255,255,0.04)`,
+      }}
+    >
+      <span style={{ fontSize:18, width:24, textAlign:"center", flexShrink:0 }} aria-hidden>{emoji}</span>
+      <div style={{ flex:1, minWidth:0 }}>
+        <div style={{ fontSize:13.5, fontWeight:600, color:T.text }}>{title}</div>
+        <div style={{ fontSize:11.5, color:T.muted, marginTop:1, lineHeight:1.35 }}>{subtitle}</div>
+      </div>
+      <ToggleSwitch
+        on={checked}
+        onClick={() => onChange(!checked)}
+        disabled={disabled}
+        ariaLabel={`${checked ? "Disable" : "Enable"} ${title}`}
+      />
+    </div>
+  );
+}
+
+function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onReplayPageGuides, onSignOut, onShowTour, onUpgrade, coachName, coachIcon, onSaveCoach, notifEnabled, notifTime, notifLoading, notifPermission, dailyRemindersEnabled, nudgesEnabled, invitesEnabled, onNotifToggle, onNotifTimeChange, onNotifCategoryChange }) {
   const [editingName,    setEditingName]    = useState(false);
   const [nameVal,        setNameVal]        = useState(user.name);
   const [showCoachSheet, setShowCoachSheet] = useState(false);
@@ -6246,7 +9334,12 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
             borderTop:`0.5px solid rgba(200,144,42,0.22)`,
           }}
         >
-          {/* Header row: icon + label + toggle */}
+          {/* Header row: icon + label + master toggle. The master toggle
+              controls the browser push subscription itself. The three
+              category sub-toggles below it gate WHICH push types fire — they
+              persist independently per push_subscriptions row so a user can,
+              say, accept friend nudges in real time while turning off the
+              daily reminder. */}
           <div style={{ display:"flex", alignItems:"center", gap:12 }}>
             <div
               style={{
@@ -6259,38 +9352,110 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
               🔔
             </div>
             <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontSize:15, fontWeight:600, color:T.text, letterSpacing:"-0.01em" }}>Daily reminders</div>
+              <div style={{ fontSize:15, fontWeight:600, color:T.text, letterSpacing:"-0.01em" }}>Push notifications</div>
               <div style={{ fontSize:12, color:T.sub, marginTop:2 }}>
                 {notifPermission === "denied"
                   ? "Blocked — enable in your device Settings → Notifications"
                   : notifEnabled
-                    ? "You'll get a daily reminder each morning"
-                    : "Tap to get daily habit reminders"}
+                    ? "Choose what you want to be notified about"
+                    : "Tap to enable push notifications on this device"}
               </div>
             </div>
-            {/* Toggle switch */}
-            <button
-              type="button"
+            <ToggleSwitch
+              on={notifEnabled}
               onClick={onNotifToggle}
               disabled={notifLoading || notifPermission === "denied"}
-              style={{
-                flexShrink:0, width:48, height:28, borderRadius:14, border:"none",
-                background: notifEnabled ? T.gold : T.border,
-                opacity: (notifLoading || notifPermission === "denied") ? 0.5 : 1,
-                cursor: (notifLoading || notifPermission === "denied") ? "not-allowed" : "pointer",
-                position:"relative", transition:"background 0.2s", padding:0,
-              }}
-              aria-label={notifEnabled ? "Disable reminders" : "Enable reminders"}
-            >
-              <div style={{
-                position:"absolute", top:3,
-                left: notifEnabled ? "calc(100% - 25px)" : 3,
-                width:22, height:22, borderRadius:"50%",
-                background:"#fff", transition:"left 0.2s",
-                boxShadow:"0 1px 3px rgba(0,0,0,0.3)",
-              }}/>
-            </button>
+              ariaLabel={notifEnabled ? "Disable push notifications" : "Enable push notifications"}
+            />
           </div>
+
+          {/* Per-category controls — only relevant once the user has granted
+              push permission and we have a live subscription. */}
+          {notifEnabled && notifPermission !== "denied" && (
+            <div
+              style={{
+                marginTop:14,
+                background:"rgba(0,0,0,0.18)",
+                border:`0.5px solid rgba(200,144,42,0.18)`,
+                borderRadius:10,
+                overflow:"hidden",
+              }}
+            >
+              {/* Daily reminders + time picker */}
+              <NotifCategoryRow
+                emoji="⏰"
+                title="Daily reminders"
+                subtitle={
+                  dailyRemindersEnabled
+                    ? "One per day. Sent within ~5 min of the time you choose."
+                    : "Off — your daily push is paused"
+                }
+                checked={dailyRemindersEnabled}
+                onChange={v => onNotifCategoryChange("daily_reminders_enabled", v)}
+                disabled={notifLoading}
+              />
+              {dailyRemindersEnabled && (
+                <div
+                  style={{
+                    padding:"6px 14px 12px 50px",
+                    display:"flex", alignItems:"center", gap:10,
+                    borderBottom:`0.5px solid rgba(255,255,255,0.04)`,
+                  }}
+                >
+                  <input
+                    type="time"
+                    value={notifTime}
+                    step={300}
+                    onChange={e => onNotifTimeChange(e.target.value)}
+                    disabled={notifLoading}
+                    aria-label="Reminder time"
+                    style={{
+                      fontSize:14, color:T.text, fontWeight:500,
+                      background:T.surface,
+                      border:`0.5px solid ${T.border}`,
+                      borderRadius:8,
+                      padding:"6px 8px",
+                      cursor:notifLoading ? "not-allowed" : "pointer",
+                      opacity:notifLoading ? 0.5 : 1,
+                      fontFamily:"inherit",
+                      minWidth:96,
+                      colorScheme:"dark",
+                    }}
+                  />
+                  <span style={{ fontSize:11, color:T.hint }}>your local time</span>
+                </div>
+              )}
+
+              {/* Friend nudges */}
+              <NotifCategoryRow
+                emoji="💪"
+                title="Friend nudges"
+                subtitle={
+                  nudgesEnabled
+                    ? "When a friend nudges you to log"
+                    : "Off — in-app toasts still appear, just no push"
+                }
+                checked={nudgesEnabled}
+                onChange={v => onNotifCategoryChange("nudges_enabled", v)}
+                disabled={notifLoading}
+              />
+
+              {/* Friend requests + shared-goal invites */}
+              <NotifCategoryRow
+                emoji="🤝"
+                title="Requests & invites"
+                subtitle={
+                  invitesEnabled
+                    ? "Friend requests and shared-goal invites"
+                    : "Off — accept them in the app instead"
+                }
+                checked={invitesEnabled}
+                onChange={v => onNotifCategoryChange("social_invites_enabled", v)}
+                disabled={notifLoading}
+                noBorderBottom
+              />
+            </div>
+          )}
         </div>
       </div>
 
@@ -6365,14 +9530,14 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
       {/* Pro section */}
       <div data-tour="profile-upgrade" style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid rgba(200,144,42,0.3)`, overflow:"hidden" }}>
         <div style={{ padding:"10px 16px 6px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-          <div style={{ fontSize:10, fontWeight:500, color:T.gold, textTransform:"uppercase", letterSpacing:"0.08em" }}>Forged early supporter</div>
+          <div style={{ fontSize:10, fontWeight:500, color:T.gold, textTransform:"uppercase", letterSpacing:"0.08em" }}>Forged Pro</div>
           {isPro && <div style={{ fontSize:10, color:T.green, fontWeight:600, background:T.green+"18", padding:"2px 8px", borderRadius:10 }}>✓ Active</div>}
         </div>
         <div style={{ padding:"4px 16px 16px" }}>
           {isPro ? (
             <div style={{ fontSize:14, color:T.text, lineHeight:1.6 }}>
-              You're an early supporter — thanks for backing Forged while it's in beta. 🙌<br/>
-              <span style={{ fontSize:12, color:T.muted }}>You get beta access to everything, including AI Habit Coach.</span>
+              You're on Forged Pro — unlimited AI coaching, full history, and everything we ship next. 🙌<br/>
+              <span style={{ fontSize:12, color:T.muted }}>AI coach, voice logging, friend nudges, and full history are all unlocked.</span>
               {stripeCustomerId ? (
                 <button
                   type="button"
@@ -6424,9 +9589,12 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
             <>
               <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14 }}>
                 {[
-                  { label:"AI Habit Coach",             status:"pro" },
                   { label:"Unlimited habits",            status:"pro" },
-                  { label:"Advanced pattern analysis",   status:"soon" },
+                  { label:"Unlimited AI coach messages", status:"pro" },
+                  { label:"Voice logging",               status:"pro" },
+                  { label:"Nudge friends to stay on track", status:"pro" },
+                  { label:"Full history & monthly calendar", status:"pro" },
+                  { label:"AI pattern detection",        status:"soon" },
                   { label:"Push notification reminders", status:"soon" },
                 ].map((f, i) => (
                   <div key={i} style={{ display:"flex", alignItems:"center", gap:8 }}>
@@ -6454,7 +9622,7 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
         <div style={{ fontSize:13, color:T.muted, lineHeight:1.65, marginBottom:12 }}>
           You're one of Forged's first users — thank you. Your feedback shapes what this becomes.
         </div>
-        <button onClick={() => window.open("mailto:corbyn.miller2000@gmail.com?subject=Forged%20Feedback&body=Hey%20Corbyn%2C%20here's%20my%20feedback%20on%20Forged%3A%0A%0A", "_blank")}
+        <button type="button" onClick={() => openForgedFeedbackMailto()}
           style={{ width:"100%", padding:"11px", borderRadius:T.rsm, border:`0.5px solid rgba(200,144,42,0.35)`, background:"none", color:T.gold, fontSize:13, fontWeight:500, cursor:"pointer", textAlign:"center" }}>
           Send quick feedback →
         </button>
@@ -6512,8 +9680,12 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
         <div style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.rsm, border:`0.5px solid ${T.border}`, padding:"12px 16px" }}>
           <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:10 }}>Dev tools</div>
           <button onClick={onPreviewOnboarding}
-            style={{ width:"100%", padding:"11px 0", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:"none", color:T.muted, fontSize:13, cursor:"pointer", fontFamily:T.font }}>
+            style={{ width:"100%", padding:"11px 0", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:"none", color:T.muted, fontSize:13, cursor:"pointer", fontFamily:T.font, marginBottom:8 }}>
             Preview onboarding (safe — no data changes)
+          </button>
+          <button onClick={onReplayPageGuides}
+            style={{ width:"100%", padding:"11px 0", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:"none", color:T.muted, fontSize:13, cursor:"pointer", fontFamily:T.font }}>
+            Replay AI page tour (safe — no data changes)
           </button>
         </div>
       )}
@@ -6837,15 +10009,15 @@ function BetaPaywallModal({ onClose }) {
       onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{ background:T.raised, borderRadius:20, border:`0.5px solid ${T.border}`, padding:"36px 28px 28px", maxWidth:360, width:"100%", textAlign:"center" }}>
         <h2 style={{ fontFamily:T.serif, fontSize:24, color:T.text, margin:"0 0 14px", lineHeight:1.2 }}>
-          This is a beta feature.
+          Unlock Forged Pro.
         </h2>
         <p style={{ fontSize:14, color:T.sub, lineHeight:1.75, margin:"0 0 28px" }}>
-          Core logging is free. The AI coach, full history, and pattern insights are part of beta access — <strong style={{ color:T.text }}>$4.99/month</strong>. Your price locks in for life when we launch.
+          Unlimited AI coaching, unlimited habits, friend nudges, voice logging, and full history — <strong style={{ color:T.text }}>$4.99/month</strong>. Cancel anytime.
         </p>
         {error && <div style={{ fontSize:13, color:T.accent, marginBottom:12 }}>{error}</div>}
         <button onClick={handleCheckout} disabled={loading}
-          style={{ width:"100%", padding:"15px 0", borderRadius:12, border:"none", background:T.accent, color:"#fff", fontSize:15, fontWeight:600, cursor:loading?"not-allowed":"pointer", opacity:loading?0.7:1, fontFamily:T.font, marginBottom:12, transition:"opacity 0.15s" }}>
-          {loading ? "Opening checkout…" : "Unlock beta access — $4.99/month"}
+          style={{ width:"100%", padding:"15px 0", borderRadius:12, border:"none", background:T.gold, color:"#0F0F0D", fontSize:15, fontWeight:700, cursor:loading?"not-allowed":"pointer", opacity:loading?0.7:1, fontFamily:T.font, marginBottom:12, transition:"opacity 0.15s" }}>
+          {loading ? "Opening checkout…" : "Unlock Forged Pro — $4.99/month"}
         </button>
         <button onClick={onClose}
           style={{ background:"none", border:"none", color:T.muted, fontSize:14, cursor:"pointer", padding:"4px 0" }}>
@@ -6862,16 +10034,96 @@ function WelcomeModal({ onContinue }) {
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.88)", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center", padding:"0 24px" }}>
       <div style={{ background:"#1C1C18", borderRadius:20, border:"0.5px solid rgba(200,144,42,0.35)", padding:"40px 28px 32px", maxWidth:340, width:"100%", textAlign:"center", animation:"paywallIn 0.45s cubic-bezier(0.22,1,0.36,1) both" }}>
         <div style={{ fontSize:48, marginBottom:20 }}>🔥</div>
-        <div style={{ fontSize:11, fontWeight:600, color:"#C8902A", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:10 }}>Beta access unlocked</div>
+        <div style={{ fontSize:11, fontWeight:600, color:"#C8902A", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:10 }}>Forged Pro unlocked</div>
         <h2 style={{ fontFamily:"'DM Serif Display',Georgia,serif", fontSize:28, color:"#F0EDE6", margin:"0 0 14px", lineHeight:1.2 }}>You're in.</h2>
         <p style={{ fontSize:14, color:"#A8A49C", lineHeight:1.75, margin:"0 0 28px" }}>
-          Welcome to the Forged beta. Your account is fully unlocked — habits, reflections, AI coach, insights. Build the version of yourself you've been putting off.
+          Forged Pro is fully unlocked — unlimited AI coaching, full history, friend nudges, and everything we ship next. Now go build the thing.
         </p>
         <button
           onClick={onContinue}
           style={{ width:"100%", padding:"15px 0", borderRadius:12, border:"none", background:"#C0392B", color:"#fff", fontSize:15, fontWeight:600, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}
         >
           Let's go →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const FORGED_FEEDBACK_EMAIL = "corbyn.miller2000@gmail.com";
+
+/** Same mail path as Profile → Send quick feedback; optional lead-in line for context. */
+function openForgedFeedbackMailto(leadInLine = "") {
+  const lines = ["Hey Corbyn,", ""];
+  if (leadInLine.trim()) lines.push(leadInLine.trim(), "");
+  lines.push("Here's my feedback on Forged:", "", "");
+  const href = `mailto:${FORGED_FEEDBACK_EMAIL}?subject=${encodeURIComponent("Forged Feedback")}&body=${encodeURIComponent(lines.join("\n"))}`;
+  window.open(href, "_blank");
+}
+
+function forgedBetaEmailOptInKey(userId) {
+  return userId ? `forged_beta_email_opt_in:${userId}` : "forged_beta_email_opt_in";
+}
+
+function readForgedBetaEmailOptIn(userId) {
+  return localStorage.getItem(forgedBetaEmailOptInKey(userId)) === "1";
+}
+
+function writeForgedBetaEmailOptIn(userId, on) {
+  try {
+    localStorage.setItem(forgedBetaEmailOptInKey(userId), on ? "1" : "0");
+  } catch (_) { /* quota / private mode */ }
+}
+
+/** One short step after WelcomeModal — thanks, feedback CTA, optional beta email list (local only until wired). */
+function ProThankYouModal({ userId, onClose }) {
+  const [betaUpdates, setBetaUpdates] = useState(() => readForgedBetaEmailOptIn(userId));
+
+  function persistOptIn() {
+    writeForgedBetaEmailOptIn(userId, betaUpdates);
+  }
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.88)", zIndex:2001, display:"flex", alignItems:"center", justifyContent:"center", padding:"0 24px" }}
+      onClick={e => e.target === e.currentTarget && (persistOptIn(), onClose())}>
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ background:"#1C1C18", borderRadius:20, border:"0.5px solid rgba(200,144,42,0.35)", padding:"32px 26px 28px", maxWidth:340, width:"100%", textAlign:"center", animation:"paywallIn 0.45s cubic-bezier(0.22,1,0.36,1) both" }}>
+        <div style={{ fontSize:11, fontWeight:600, color:"#C8902A", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:10 }}>Thank you</div>
+        <h2 style={{ fontFamily:"'DM Serif Display',Georgia,serif", fontSize:22, color:"#F0EDE6", margin:"0 0 12px", lineHeight:1.25 }}>Thanks for backing the beta.</h2>
+        <p style={{ fontSize:14, color:"#A8A49C", lineHeight:1.7, margin:"0 0 10px", textAlign:"left" }}>
+          Tell us what would make Forged genuinely more useful for you.
+        </p>
+        <p style={{ fontSize:13, color:"#8A8680", lineHeight:1.65, margin:"0 0 22px", textAlign:"left" }}>
+          If anything feels broken, confusing, or missing, we want to know.
+        </p>
+
+        <label style={{ display:"flex", alignItems:"flex-start", gap:10, cursor:"pointer", textAlign:"left", marginBottom:22, padding:"12px 14px", borderRadius:12, border:"0.5px solid rgba(200,144,42,0.2)", background:"rgba(200,144,42,0.06)" }}>
+          <input
+            type="checkbox"
+            checked={betaUpdates}
+            onChange={e => { const v = e.target.checked; setBetaUpdates(v); writeForgedBetaEmailOptIn(userId, v); }}
+            style={{ marginTop:3, width:16, height:16, accentColor:"#C0392B", flexShrink:0, cursor:"pointer" }}
+          />
+          <span style={{ fontSize:12, color:"#C4C0B8", lineHeight:1.5 }}>
+            <span style={{ color:"#E8E4DC", fontWeight:500 }}>Keep me updated</span>
+            {" "}with Forged beta updates — occasional emails, not spam.
+          </span>
+        </label>
+
+        <button
+          type="button"
+          onClick={() => { persistOptIn(); openForgedFeedbackMailto("I just unlocked Forged Pro."); onClose(); }}
+          style={{ width:"100%", padding:"14px 0", borderRadius:12, border:"none", background:"#C0392B", color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"'DM Sans',sans-serif", marginBottom:10 }}
+        >
+          Send feedback
+        </button>
+        <button
+          type="button"
+          onClick={() => { persistOptIn(); onClose(); }}
+          style={{ width:"100%", padding:"10px 0", borderRadius:12, border:"none", background:"none", color:"#8A8680", fontSize:13, fontWeight:500, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}
+        >
+          Maybe later
         </button>
       </div>
     </div>
@@ -6916,26 +10168,29 @@ function PaywallScreen({ onPaid }) {
 
         {/* Card */}
         <div style={{ background:T.surface, borderRadius:20, border:`0.5px solid ${T.border}`, padding:"32px 28px 28px", textAlign:"center" }}>
-          <div style={{ fontSize:40, marginBottom:18 }}>🔥</div>
+          <div style={{ fontSize:40, marginBottom:18 }}>⚡</div>
 
-          <div style={{ fontSize:11, fontWeight:600, color:T.accent, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:10 }}>
-            Beta access
+          <div style={{ fontSize:11, fontWeight:600, color:T.gold, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:10 }}>
+            Forged Pro
           </div>
 
           <h1 style={{ fontFamily:T.serif, fontSize:26, color:T.text, margin:"0 0 14px", lineHeight:1.2 }}>
-            Forged is in beta.
+            Your AI coach. Unlimited.
           </h1>
 
-          <p style={{ fontSize:14, color:T.sub, lineHeight:1.7, margin:"0 0 28px" }}>
-            Right now, access costs <strong style={{ color:T.text }}>$4.99/month</strong>. You're helping shape what this becomes — and if you're one of the first 100 users, you lock in that price for life once we launch.
+          <p style={{ fontSize:14, color:T.sub, lineHeight:1.7, margin:"0 0 8px" }}>
+            The coach reads your real logs and reflections to tell you why things aren't sticking — and what to do next.
+          </p>
+          <p style={{ fontSize:13, color:T.muted, lineHeight:1.6, margin:"0 0 24px" }}>
+            Unlimited AI coaching, full history, friend nudges, and voice logging — <strong style={{ color:T.text }}>$4.99/month</strong>.
           </p>
 
           <button
             onClick={handleCheckout}
             disabled={loading}
-            style={{ width:"100%", padding:"15px 0", borderRadius:12, border:"none", background:T.accent, color:"#fff", fontSize:15, fontWeight:600, cursor:loading?"not-allowed":"pointer", opacity:loading?0.7:1, fontFamily:T.font, marginBottom:12, transition:"opacity 0.15s" }}
+            style={{ width:"100%", padding:"15px 0", borderRadius:12, border:"none", background:T.gold, color:"#0F0F0D", fontSize:15, fontWeight:700, cursor:loading?"not-allowed":"pointer", opacity:loading?0.7:1, fontFamily:T.font, marginBottom:12, transition:"opacity 0.15s" }}
           >
-            {loading ? "Opening checkout…" : "Unlock beta access — $4.99/month"}
+            {loading ? "Opening checkout…" : "Unlock Forged Pro — $4.99/month"}
           </button>
 
           {error && (
@@ -6946,7 +10201,7 @@ function PaywallScreen({ onPaid }) {
             href="/landing.html"
             style={{ display:"block", fontSize:13, color:T.muted, textDecoration:"none", padding:"8px 0" }}
           >
-            Join the waitlist instead →
+            Learn more →
           </a>
         </div>
 
@@ -6963,9 +10218,116 @@ const COACH_PAGE_NUDGES = {
   today: "Need help logging today quickly?",
   journal: "Want help making sense of your recent entries?",
   insights: "Want a deeper read on your progress?",
-  social: "This is where your accountability layer will live.",
+  social: "Want to invite someone to hold you accountable on a specific habit?",
 };
 const COACH_NUDGE_DURATION_MS = 2800;
+
+// ─── FIRST-TIME AI PAGE GUIDE ─────────────────────────────────────────────────
+// The four pages that get a one-time guided bubble from the AI. Each is shown
+// exactly once per user/device the first time they land on that screen, and
+// stays visible until the user dismisses it or navigates away.
+const PAGE_GUIDE_PAGES = ["today", "journal", "insights", "social"];
+
+function pageGuideSeenKey(userId, page) {
+  const u = userId || "anon";
+  return `forged_ai_page_guide_seen:${u}:${page}`;
+}
+function readPageGuideSeen(userId, page) {
+  try { return localStorage.getItem(pageGuideSeenKey(userId, page)) === "1"; }
+  catch { return false; }
+}
+function writePageGuideSeen(userId, page) {
+  try { localStorage.setItem(pageGuideSeenKey(userId, page), "1"); }
+  catch { /* quota / private mode — fail silently */ }
+}
+function clearAllPageGuideSeen(userId) {
+  try {
+    for (const p of PAGE_GUIDE_PAGES) {
+      localStorage.removeItem(pageGuideSeenKey(userId, p));
+    }
+  } catch { /* ignore */ }
+}
+
+/**
+ * Build a short, warm, first-time guide message for a given page. Returns null
+ * for unknown pages. Lightly personalized from the user's habits + goals so it
+ * feels like a coach, not a read-me. Kept intentionally short (1–3 lines) and
+ * purpose-forward: why the page matters, not just what's on it.
+ */
+function buildPageGuideMessage(page, { name, habits = [], goals = [] } = {}) {
+  const who = name && String(name).trim() ? String(name).trim().split(/\s+/)[0] : "";
+  const hi = who ? `Hey ${who} — ` : "";
+
+  // Real logs only (ignore skips + quick notes) — keeps "logged today" honest.
+  const realLogs = habits.flatMap(h =>
+    (h.logs || []).filter(l => l && l.date && l.value !== "quicknote" && l.value !== "skip"),
+  );
+  const activeGoals = (goals || []).filter(g => !g.completedAt && !g.archivedAt);
+
+  // Light personalization tags — checked in priority order. Non-exhaustive,
+  // safe if habits is empty.
+  const lowerNames = habits.map(h => String(h?.name || "").toLowerCase());
+  const hasWeightGoal = activeGoals.some(g => {
+    const t = String(g?.title || g?.name || "").toLowerCase();
+    return t.includes("weight") || t.includes("kg") || t.includes("lb");
+  }) || habits.some(h => h.habitType === "progress" || isLegacyProgressType(h.habitType));
+  const hasGymOrStrength =
+    lowerNames.some(n => /gym|lift|strength|workout|train|squat|bench|deadlift/.test(n)) ||
+    activeGoals.some(g => /gym|lift|strength|workout|train/.test(String(g?.title || g?.name || "").toLowerCase()));
+  const hasRun =
+    lowerNames.some(n => /run|jog|5k|10k|marathon|cardio/.test(n)) ||
+    activeGoals.some(g => /run|jog|5k|10k|marathon/.test(String(g?.title || g?.name || "").toLowerCase()));
+  const hasReading =
+    lowerNames.some(n => /read|book|pages/.test(n));
+  const hasLimit = habits.some(h => h.habitType === "limit");
+  const hasProject = habits.some(h => h.habitType === "project");
+  const hasAnyHabits = habits.length > 0;
+  const hasRichHistory = realLogs.length >= 7;
+
+  // Pick a light personalization phrase (single clause, optional).
+  let personalBit = "";
+  if (hasWeightGoal)       personalBit = "your weight goal";
+  else if (hasGymOrStrength) personalBit = "your training";
+  else if (hasRun)           personalBit = "your running";
+  else if (hasProject)       personalBit = "what you're building";
+  else if (hasLimit)         personalBit = "the limits you set";
+  else if (hasReading)       personalBit = "your reading";
+  else if (activeGoals.length > 0) personalBit = "your goals";
+  else if (hasAnyHabits)     personalBit = "the habits you picked";
+
+  switch (page) {
+    case "today": {
+      if (!hasAnyHabits) {
+        return `${hi}this is your Today page — where momentum actually happens. Add a habit or goal and tap the row to log it. One log today beats a perfect plan.`;
+      }
+      const tail = personalBit ? ` Small, daily reps on ${personalBit} are what compound.` : "";
+      return `${hi}this is your Today page. Tap a row to log, hold to note, and keep the streak alive.${tail}`;
+    }
+
+    case "journal": {
+      if (!hasRichHistory) {
+        return `${hi}this is your Journal. Log a few days and this becomes the honest record of what you actually did — filter by habit, jump to a day, or read back reflections. It's how you catch what's really changing.`;
+      }
+      const tail = personalBit ? ` Great place to check how ${personalBit} has been going lately.` : "";
+      return `${hi}this is your Journal — every entry, every reflection, searchable. Use the filters and view toggle to see what's actually been happening.${tail}`;
+    }
+
+    case "insights": {
+      if (!hasRichHistory) {
+        return `${hi}Insights is where patterns show up. Right now it'll feel quiet — keep logging for a week or two and streaks, heatmaps, and your best day of the week start to mean something.`;
+      }
+      const tail = personalBit ? ` Worth checking which days you actually show up for ${personalBit}.` : "";
+      return `${hi}this is Insights. Streaks, 28-day rates, and deeper patterns live here.${tail} More signal the more you log.`;
+    }
+
+    case "social": {
+      return `${hi}this is Social. Add a friend, share a goal, and you've got quiet accountability — you see their streaks, they see yours. Nudges keep each other honest on the days it's easy to ghost.`;
+    }
+
+    default:
+      return null;
+  }
+}
 
 // ─── ROOT APP ─────────────────────────────────────────────────────────────────
 export default function App() {
@@ -6981,15 +10343,29 @@ export default function App() {
   const [showAdd,     setShowAdd]    = useState(false);
   const [showAddGoal,    setShowAddGoal]    = useState(false);
   const [showAddChoice,  setShowAddChoice]  = useState(false);
+  const [showAddLog,     setShowAddLog]     = useState(false);
   const [logGoalId,      setLogGoalId]      = useState(null);
   const [editGoalId,     setEditGoalId]     = useState(null);
   const [showXP,      setShowXP]     = useState(false);
   const [showHistory, setShowHistory]= useState(false);
   const [showCoach,   setShowCoach]  = useState(false);
+  // Whether the user has ever opened the AI coach in this browser. Used to drive
+  // a subtle pulse on the FAB for first-time users so it doesn't vanish into the bg.
+  const [coachEverOpened, setCoachEverOpened] = useState(() => {
+    try { return localStorage.getItem("forged_coach_opened") === "1"; } catch { return false; }
+  });
   const [showCoachTeaser, setShowCoachTeaser] = useState(false);
   /** Ephemeral bubble above the coach FAB: `{ id, text }` while visible; `id` ties to the navigation that triggered it. */
   const [coachPageNudge, setCoachPageNudge] = useState(null);
   const coachNudgeSeqRef = useRef(0);
+  // First-time AI page guide — persistent bubble shown once per page/user on
+  // first visit to Today, Journal, Insights, or Social. `{ page, text }` while
+  // visible, null when dismissed or away. Stays until the user closes it or
+  // navigates to a different screen. Replayable via Dev Tools on creator acct.
+  const [pageGuide, setPageGuide] = useState(null);
+  // Bumped by the Dev Tools "Replay AI page tour" control so the guide effect
+  // re-runs even when the user is already on a guided page.
+  const [pageGuideReplayTick, setPageGuideReplayTick] = useState(0);
   const [reflectId,   setReflectId]  = useState(null);
   const [editId,      setEditId]     = useState(null);
   const [logId,       setLogId]      = useState(null);
@@ -7007,7 +10383,16 @@ export default function App() {
 
   // ── Notification state (App-level so it survives tab switches) ───────────────
   const [notifEnabled,    setNotifEnabled]    = useState(false);
-  const [notifTime,       setNotifTime]       = useState("09:00");
+  // Default reminder time is 6 pm local. Most users react better to an
+  // evening nudge to log the day than a morning one. Existing users who
+  // already chose a different time keep theirs (loaded from DB below).
+  const [notifTime,       setNotifTime]       = useState("18:00");
+  // Per-category toggles. All default ON so existing subscribers keep their
+  // current behaviour; the migration `20260423000000_notification_categories`
+  // adds these columns server-side with the same default.
+  const [dailyRemindersEnabled, setDailyRemindersEnabled] = useState(true);
+  const [nudgesEnabled,         setNudgesEnabled]         = useState(true);
+  const [invitesEnabled,        setInvitesEnabled]        = useState(true);
   const [notifLoading,    setNotifLoading]    = useState(false);
   const [notifPermission, setNotifPermission] = useState(
     typeof Notification !== "undefined" ? Notification.permission : "denied"
@@ -7025,8 +10410,18 @@ export default function App() {
   const [sharedGoals,          setSharedGoals]          = useState([]);
   const [sharedGoalsLoading,   setSharedGoalsLoading]   = useState(false);
   const [sharedGoalInvites,    setSharedGoalInvites]    = useState([]);
+  // Forged beta leaderboard — top users by XP, refreshed on Social tab entry.
+  const [betaLeaderboard,      setBetaLeaderboard]      = useState([]);
+  const [leaderboardLoading,   setLeaderboardLoading]   = useState(false);
+  const [myBetaRank,           setMyBetaRank]           = useState(null);
+  const [betaTotalCount,       setBetaTotalCount]       = useState(null);
+  // Recent public activity across beta users (for Social ticker) — populated via RPC; safe fallback if RPC missing.
+  const [betaTicker,           setBetaTicker]           = useState([]);
+  const betaTickerLoadedRef = useRef(false);
   /** While linking a habit to a new shared goal (Today → Share) — prevents duplicate goals from double-tap */
   const [sharingHabitId,       setSharingHabitId]       = useState(null);
+  /** After sharing/linking a habit, auto-open the invite picker for that goal on Social page */
+  const [pendingInviteGoalId,  setPendingInviteGoalId]  = useState(null);
   const sharingHabitIdRef = useRef(null);
   const createSharedGoalInFlightRef = useRef(false);
   // ─────────────────────────────────────────────────────────────────────────────
@@ -7034,6 +10429,7 @@ export default function App() {
   const [showUpgrade,    setShowUpgrade]    = useState(false);
   const [checkingPayment,setCheckingPayment]= useState(false);
   const [showWelcome,    setShowWelcome]    = useState(false);
+  const [showProFollowup, setShowProFollowup] = useState(false);
   const [demoMode,       setDemoMode]       = useState(false);
   const shownDemoRef = useRef(false); // prevent demo re-showing after sign-out
   const [previewOnboarding, setPreviewOnboarding] = useState(false); // admin preview only — never touches DB
@@ -7056,6 +10452,10 @@ export default function App() {
   const noteDebounceRef = useRef({});
   const retryLoadPromiseRef = useRef(null);
   const retryLoadUidRef = useRef(null);
+  // Soft-recovery guard: only auto-attempt once per mount so we don't loop
+  // if Supabase is genuinely offline or the session is truly invalid.
+  const softRecoveryAttemptedRef = useRef(false);
+  const softRecoveryInFlightRef = useRef(false);
 
   // XP anti-abuse guard: once a habit earns XP for a specific day, toggling
   // it off/on again that day should never mint extra XP.
@@ -7068,11 +10468,32 @@ export default function App() {
     setXpAwardedDates(prev => {
       const next = new Set(prev);
       habits.forEach(h => {
-        if (h.logs.some(l => l.date === today && l.value === true)) next.add(`${h.id}:${today}`);
+        const todayLogs = (h.logs || []).filter(l => l.date === today);
+        if (todayLogs.length === 0) return;
+        if (h.habitType === "project") {
+          // Any project session today means the first-log XP was already awarded.
+          next.add(`project-first:${h.id}:${today}`);
+          const mins = todayLogs.reduce((s, l) => s + (l.value?.minutes || 0), 0);
+          const targetMins = h.dailyTargetMinutes ?? 60;
+          if (mins >= targetMins) next.add(`project-target:${h.id}:${today}`);
+        } else if (h.habitType === "limit") {
+          // "None today" (+15 XP) was awarded iff there's a value:0 log today.
+          if (todayLogs.some(l => l.value === 0)) next.add(`limit-none:${h.id}:${today}`);
+        } else if (todayLogs.some(l => l.value === true)) {
+          // Daily / weekly tap (+10 XP).
+          next.add(`${h.id}:${today}`);
+        }
+      });
+      goals.forEach(g => {
+        const todayNums = (g.logs || [])
+          .filter(l => l.date === today)
+          .map(l => (typeof l.value === "number" ? l.value : Number(l.value)))
+          .filter(Number.isFinite);
+        if (todayNums.length > 0) next.add(`goal:${g.id}:${today}`);
       });
       return next.size === prev.size ? prev : next;
     });
-  }, [habits]);
+  }, [habits, goals]);
 
   // ── App-level notification restore (survives tab switches) ───────────────────
   useEffect(() => {
@@ -7087,20 +10508,25 @@ export default function App() {
         setNotifEnabled(true); // browser has live subscription — show as on immediately
         const uid = sessionUserId;
         if (!uid) return;
+        // SELECT * tolerates the new category columns being absent before the
+        // 20260423 migration runs — we just fall back to the all-on defaults.
         const { data } = await supabase
           .from("push_subscriptions")
-          .select("reminder_time, notifications_enabled")
+          .select("*")
           .eq("user_id", uid)
           .maybeSingle();
         if (data) {
           setNotifEnabled(data.notifications_enabled);
-          setNotifTime(data.reminder_time || "09:00");
+          setNotifTime(data.reminder_time || "18:00");
+          setDailyRemindersEnabled(data.daily_reminders_enabled !== false);
+          setNudgesEnabled(data.nudges_enabled !== false);
+          setInvitesEnabled(data.social_invites_enabled !== false);
         } else {
-          // Browser subscribed but no DB row — re-save
+          // Browser subscribed but no DB row — re-save with the new 6 pm default.
           const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
           await supabase.from("push_subscriptions").upsert({
             user_id: uid, subscription: sub.toJSON(),
-            reminder_time: "09:00", notifications_enabled: true,
+            reminder_time: "18:00", notifications_enabled: true,
             timezone: tz, updated_at: new Date().toISOString(),
           }, { onConflict: "user_id" });
         }
@@ -7139,11 +10565,50 @@ export default function App() {
       )
       .subscribe();
 
+    // Real-time: reload shared goal roster whenever any member logs progress.
+    // Works now because the updated RLS SELECT policy lets all members of the same
+    // goal see each other's rows, so UPDATE/INSERT events from teammates propagate here.
+    const memberChannel = supabase
+      .channel(`shared-goal-members-${uid}`)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "shared_goal_members" },
+        () => loadSharedGoals(uid))
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "shared_goal_members" },
+        () => loadSharedGoals(uid))
+      .subscribe();
+
+    // Real-time: show an in-app toast when someone nudges this user
+    const nudgeChannel = supabase
+      .channel(`nudges-${uid}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "nudges", filter: `recipient_id=eq.${uid}` },
+        (payload) => {
+          const row = payload.new;
+          const senderName = row?.sender_name || "A friend";
+          const msg = row?.message ? ` "${row.message}"` : "";
+          addToast(`💪 ${senderName} nudged you!${msg}`);
+          if (row?.sent_at) writeNudgeWatermarkIfNewer(uid, row.sent_at);
+        }
+      )
+      .subscribe();
+
     return () => {
       supabase.removeChannel(friendChannel);
       supabase.removeChannel(inviteChannel);
+      supabase.removeChannel(memberChannel);
+      supabase.removeChannel(nudgeChannel);
     };
   }, [sessionUserId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Refresh shared goals + beta leaderboard when navigating to Social ──
+  useEffect(() => {
+    if (screen === "social" && sessionUserId) {
+      loadSharedGoals(sessionUserId);
+      loadBetaLeaderboard(sessionUserId);
+      // Ticker only needs to load once per mount — cheap and doesn't depend on uid.
+      loadBetaTicker();
+    }
+  }, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Handle /join/[code] invite URLs ──────────────────────────────────────────
   useEffect(() => {
@@ -7231,9 +10696,38 @@ export default function App() {
   async function handleNotifTimeChange(newTime) {
     setNotifTime(newTime);
     if (!notifEnabled || !sessionUserId) return;
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
     await supabase.from("push_subscriptions").update({
-      reminder_time: newTime, updated_at: new Date().toISOString(),
+      reminder_time: newTime,
+      timezone: tz,
+      updated_at: new Date().toISOString(),
     }).eq("user_id", sessionUserId);
+  }
+
+  // ── Per-category toggles (daily reminders / nudges / social invites) ───────
+  // Each updates the corresponding column in push_subscriptions independently
+  // so the user can, for example, accept friend nudges in real time but turn
+  // off the daily push without losing their subscription. We update local
+  // state immediately for snappy UI; if the DB write fails we revert.
+  async function handleNotifCategoryChange(category, value) {
+    if (!sessionUserId) return;
+    const setters = {
+      daily_reminders_enabled:  setDailyRemindersEnabled,
+      nudges_enabled:           setNudgesEnabled,
+      social_invites_enabled:   setInvitesEnabled,
+    };
+    const setter = setters[category];
+    if (!setter) return;
+    setter(value);
+    const { error } = await supabase
+      .from("push_subscriptions")
+      .update({ [category]: value, updated_at: new Date().toISOString() })
+      .eq("user_id", sessionUserId);
+    if (error) {
+      console.warn("[Forged] notif category save failed:", error.message);
+      setter(!value);
+      addToast(`Couldn't save preference: ${error.message}`);
+    }
   }
   // ── End App-level notification ────────────────────────────────────────────────
 
@@ -7276,6 +10770,96 @@ export default function App() {
       })).sort((a, b) => b.xp - a.xp));
     } catch(e) { console.warn("[Forged] loadFriends:", e); }
     finally { setFriendsLoading(false); }
+  }
+
+  async function loadBetaLeaderboard(uid) {
+    const id = uid || userIdRef.current;
+    setLeaderboardLoading(true);
+    try {
+      // Top 10 by XP (skip 0-xp so the board doesn't show new sign-ups).
+      const { data: top } = await supabase
+        .from("profiles")
+        .select("id, name, username, avatar_url, xp, current_streak, is_pro, last_active_date")
+        .gt("xp", 0)
+        .order("xp", { ascending: false })
+        .limit(10);
+      const today = todayStr();
+      const rows = (top || []).map((p, i) => ({
+        rank:        i + 1,
+        id:          p.id,
+        name:        p.name || p.username || "Forged user",
+        avatarUrl:   p.avatar_url,
+        xp:          p.xp || 0,
+        streak:      p.current_streak || 0,
+        isPro:       !!p.is_pro,
+        loggedToday: p.last_active_date === today,
+        isMe:        id && p.id === id,
+      }));
+      setBetaLeaderboard(rows);
+
+      // Total active beta testers (xp > 0) for the social-proof pill on the hero.
+      try {
+        const { count: totalActive } = await supabase
+          .from("profiles")
+          .select("id", { count: "exact", head: true })
+          .gt("xp", 0);
+        setBetaTotalCount(totalActive ?? null);
+      } catch (e) {
+        console.warn("[Forged] betaTotalCount:", e);
+      }
+
+      // If the current user isn't in the top 10, compute their rank separately
+      // so we can still show "You're #47" under the board.
+      if (id && !rows.some(r => r.isMe)) {
+        const { data: me } = await supabase
+          .from("profiles").select("xp").eq("id", id).maybeSingle();
+        const myXp = me?.xp || 0;
+        if (myXp > 0) {
+          const { count } = await supabase
+            .from("profiles")
+            .select("id", { count: "exact", head: true })
+            .gt("xp", myXp);
+          setMyBetaRank((count ?? 0) + 1);
+        } else {
+          setMyBetaRank(null);
+        }
+      } else {
+        const me = rows.find(r => r.isMe);
+        setMyBetaRank(me ? me.rank : null);
+      }
+    } catch (e) {
+      console.warn("[Forged] loadBetaLeaderboard:", e);
+    } finally {
+      setLeaderboardLoading(false);
+    }
+  }
+
+  // Fetches a tiny feed of recent habit logs across public beta users.
+  // Uses the `recent_beta_activity` RPC (security-definer; returns first-name + habit only).
+  // If the RPC isn't present yet, we silently render nothing — no ticker is a safe fallback.
+  async function loadBetaTicker() {
+    if (betaTickerLoadedRef.current) return;
+    betaTickerLoadedRef.current = true;
+    try {
+      const { data, error } = await supabase.rpc("recent_beta_activity", { p_limit: 3 });
+      if (error) {
+        console.warn("[Forged] recent_beta_activity RPC unavailable:", error.message || error);
+        setBetaTicker([]);
+        return;
+      }
+      const rows = Array.isArray(data) ? data : [];
+      setBetaTicker(rows.map(r => ({
+        firstName: r.first_name || "Someone",
+        habitName: r.habit_name || "a habit",
+        emoji: r.emoji || "",
+        habitType: r.habit_type || "daily",
+        streak: Number(r.streak) || 0,
+        logDate: r.log_date || null,
+      })));
+    } catch (e) {
+      console.warn("[Forged] loadBetaTicker:", e);
+      setBetaTicker([]);
+    }
   }
 
   async function loadFriendRequests(uid) {
@@ -7387,18 +10971,19 @@ export default function App() {
     await loadSentRequests(userIdRef.current);
   }
 
-  async function sendNudge(recipientId) {
+  async function sendNudge(recipientId, message = "") {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) return { error: "Not signed in" };
       const res = await fetch("/api/nudge-friend", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ recipientId, type: "nudge" }),
+        body: JSON.stringify({ recipientId, type: "nudge", message: message || undefined }),
       });
-      if (res.status === 429) return { error: "Already nudged today" };
-      if (!res.ok) return { error: "Couldn't send nudge" };
-      return { success: true };
+      const json = await res.json().catch(() => ({}));
+      if (res.status === 429) return { error: json.error || "Already nudged today" };
+      if (!res.ok) return { error: json.error || "Couldn't send nudge" };
+      return { success: true, ...json };
     } catch(e) {
       return { error: "Couldn't send nudge" };
     }
@@ -7442,17 +11027,42 @@ export default function App() {
         }
       }
 
-      setSharedGoals(memberships.map(m => {
+      const builtGoals = memberships.map(m => {
         const goal = goalById[m.shared_goal_id];
         if (!goal) return null;
         const roster = rosterByGoalId[m.shared_goal_id] || [];
-        const members = roster.map(mem => ({
-          userId: mem.user_id,
-          name: mem.name || "Member",
-          avatarUrl: mem.avatar_url ?? mem.avatarUrl,
-          logs: mem.logs || [],
-          isMe: mem.user_id === id,
-        }));
+        const myRowLogs = m.logs || [];
+        const rosterUid = mem => mem.user_id ?? mem.userId ?? mem.userid;
+        let members = roster.map(mem => {
+          const uid = rosterUid(mem);
+          return {
+            userId: uid,
+            name: mem.name || "Member",
+            avatarUrl: mem.avatar_url ?? mem.avatarUrl,
+            // Roster RPC can disagree with shared_goal_members; Today-linked truth is m.logs for the current user.
+            logs: sameUserId(uid, id) ? myRowLogs : (mem.logs || []),
+            isMe: sameUserId(uid, id),
+          };
+        });
+        if (!members.some(mem => mem.isMe)) {
+          members = [
+            ...members,
+            { userId: id, name: "You", avatarUrl: undefined, logs: myRowLogs, isMe: true },
+          ];
+        }
+        // Sort key: max log date across all members, falling back to joined_at so brand-new goals
+        // don't get buried under stale ones before anyone has logged.
+        let lastActiveKey = "";
+        for (const mem of members) {
+          for (const l of mem.logs || []) {
+            const d = typeof l?.date === "string" ? l.date : "";
+            if (d && d > lastActiveKey) lastActiveKey = d;
+          }
+        }
+        if (!lastActiveKey && m.joined_at) {
+          const s = String(m.joined_at);
+          lastActiveKey = s.length >= 10 ? s.slice(0, 10) : "";
+        }
         return {
           id: goal.id,
           creatorId: goal.creator_id,
@@ -7466,8 +11076,18 @@ export default function App() {
           myLogs: m.logs || [],
           myMembershipId: m.id,
           members,
+          _lastActiveKey: lastActiveKey,
         };
-      }).filter(Boolean));
+      }).filter(Boolean);
+      // Most-recently-active first; stable ordering for ties.
+      builtGoals.sort((a, b) => {
+        const ka = a._lastActiveKey || "";
+        const kb = b._lastActiveKey || "";
+        if (kb !== ka) return kb.localeCompare(ka);
+        return String(a.name || "").localeCompare(String(b.name || ""));
+      });
+      // Strip internal sort key before exposing goals to the UI.
+      setSharedGoals(builtGoals.map(({ _lastActiveKey, ...rest }) => rest));
     } catch (e) {
       console.warn("[Forged] loadSharedGoals:", e);
     } finally {
@@ -7492,9 +11112,21 @@ export default function App() {
   }
 
   async function acceptSharedGoalInvite(invite) {
-    await joinSharedGoal(invite.invite_code);
+    const result = await joinSharedGoal(invite.invite_code);
     await supabase.from("shared_goal_invites").update({ status: "accepted" }).eq("id", invite.id);
     setSharedGoalInvites(prev => prev.filter(i => i.id !== invite.id));
+    if (result?.error) {
+      addToast(`Couldn't join goal: ${result.error}`);
+      return;
+    }
+    const goalData = result?.goal;
+    if (goalData) {
+      // Auto-create a linked personal habit so the joiner can sync from Today page
+      await createLinkedHabit(goalData);
+      addToast(`✓ Joined "${goalData.name}" — added to your Today page`);
+    } else {
+      addToast(`✓ Joined "${invite.goal_name || "shared goal"}" — check Social for details`);
+    }
   }
 
   async function declineSharedGoalInvite(inviteId) {
@@ -7511,7 +11143,7 @@ export default function App() {
     if (!uid || !name?.trim()) return null;
     createSharedGoalInFlightRef.current = true;
     try {
-      const ht = habitType || "daily";
+      const ht = normalizeSharedGoalHabitType(habitType || "daily");
       const wt = ht === "weekly"
         ? Math.min(7, Math.max(1, Number(weeklyTarget) || 3))
         : null;
@@ -7520,7 +11152,11 @@ export default function App() {
           habit_type: ht, weekly_target: wt,
           color: color || "#C0392B" })
         .select().single();
-      if (error || !goal) { addToast("Couldn't create goal"); return null; }
+      if (error || !goal) {
+        console.error("[Forged] createSharedGoal:", error);
+        addToast(error?.message ? `Couldn't create goal — ${error.message}` : "Couldn't create goal");
+        return null;
+      }
       await supabase.from("shared_goal_members").insert({ shared_goal_id: goal.id, user_id: uid, logs: [] });
       await loadSharedGoals(uid);
       return goal;
@@ -7538,7 +11174,7 @@ export default function App() {
     setSharingHabitId(habitId);
     try {
       const habit = habits.find(h => h.id === habitId);
-      if (!habit || habit.sharedGoalId) return null;
+      if (!habit || habit.habitType === "log" || habit.sharedGoalId) return null;
       const newGoal = await createSharedGoal({
         name: habit.name,
         emoji: habit.emoji,
@@ -7554,7 +11190,9 @@ export default function App() {
         addToast("Couldn't link habit to shared goal");
         return null;
       }
+      const linked = { ...habit, sharedGoalId: newGoal.id };
       setHabits(prev => prev.map(h => h.id === habitId ? { ...h, sharedGoalId: newGoal.id } : h));
+      await pushSharedMemberProgressFromLinked(linked);
       return { ...newGoal, inviteCode: newGoal.invite_code };
     } finally {
       sharingHabitIdRef.current = null;
@@ -7592,46 +11230,161 @@ export default function App() {
   }
 
   async function handleShareHabit(habitId) {
+    const habit = habits.find(h => h.id === habitId);
+    if (!habit || habit.habitType === "log") return;
+    // If this habit is already linked to a shared goal, just open invite picker for it
+    if (habit.sharedGoalId) {
+      setPendingInviteGoalId(habit.sharedGoalId);
+      setScreen("social");
+      return;
+    }
+    // Create a new shared goal linked to this habit
     const goal = await shareHabit(habitId);
     if (!goal) return;
-    const code = goal.invite_code ?? goal.inviteCode;
-    const url = `${window.location.origin}/join/${code}`;
-    try {
-      await navigator.clipboard.writeText(url);
-    } catch (_) { /* ignore */ }
-    addToast(`✓ Shared — invite code: ${code}`);
+    setPendingInviteGoalId(goal.id);
+    setScreen("social");
+    addToast("✓ Goal shared — invite your friends below");
+  }
+
+  async function handleShareGoal(goalId) {
+    const goal = goals.find(g => g.id === goalId);
+    if (!goal) return;
+    // Already shared — open invite picker
+    if (goal.sharedGoalId) {
+      setPendingInviteGoalId(goal.sharedGoalId);
+      setScreen("social");
+      return;
+    }
+    // Create a new shared goal linked to this goal
+    const uid = userIdRef.current;
+    if (!uid) return;
+    const newSharedGoal = await createSharedGoal({
+      name:        goal.name,
+      emoji:       goal.emoji || "🎯",
+      habitType:   "goal",
+      weeklyTarget: null,
+      color:       goal.color || "#E67E22",
+    });
+    if (!newSharedGoal) return;
+    // Link the goal row to the new shared goal
+    const { error } = await supabase
+      .from("habits")
+      .update({ shared_goal_id: newSharedGoal.id })
+      .eq("id", goal.id);
+    if (error) {
+      console.error("[Forged] handleShareGoal link:", error);
+      addToast("Couldn't link goal — try again");
+      return;
+    }
+    const linkedGoal = { ...goal, sharedGoalId: newSharedGoal.id };
+    setGoals(prev => prev.map(g => g.id === goalId ? { ...g, sharedGoalId: newSharedGoal.id } : g));
+    await pushSharedMemberProgressFromLinked(linkedGoal);
+    setPendingInviteGoalId(newSharedGoal.id);
+    setScreen("social");
+    addToast("✓ Goal shared — invite your friends below");
   }
 
   async function joinSharedGoal(inviteCode) {
     const uid = userIdRef.current;
     if (!uid) return { error: "Not signed in" };
-    const { data: goal } = await supabase.from("shared_goals")
-      .select("id, name, emoji").eq("invite_code", inviteCode).maybeSingle();
-    if (!goal) return { error: "No goal found with that code" };
-    const { data: existing } = await supabase.from("shared_goal_members")
-      .select("id").eq("shared_goal_id", goal.id).eq("user_id", uid).maybeSingle();
-    if (!existing) {
-      await supabase.from("shared_goal_members").insert({ shared_goal_id: goal.id, user_id: uid, logs: [] });
+    // Use SECURITY DEFINER RPC to bypass RLS — non-members can't read shared_goals directly
+    const { data: result, error: rpcErr } = await supabase.rpc("join_shared_goal_by_code", { p_code: inviteCode });
+    if (rpcErr) {
+      console.error("[Forged] join_shared_goal_by_code:", rpcErr);
+      return { error: "Failed to join goal — try again" };
     }
+    if (result?.error) return { error: result.error };
     await loadSharedGoals(uid);
-    return { success: true, goal };
+    return {
+      success: true,
+      goal: {
+        id:          result.goal_id,
+        name:        result.name,
+        emoji:       result.emoji,
+        habitType:   result.habit_type,
+        weeklyTarget:result.weekly_target,
+        color:       result.color,
+      },
+    };
   }
 
-  async function logSharedGoal(sharedGoalId, logEntry, opts = {}) {
+  /** Auto-creates a personal habit linked to a shared goal so the joiner can sync from Today page */
+  async function createLinkedHabit(goalData) {
+    const uid = userIdRef.current;
+    if (!uid || !goalData?.id) return null;
+    // Don't create a duplicate if the user already has a habit linked to this shared goal
+    if (habits.some(h => h.sharedGoalId === goalData.id)) return null;
+    const newHabit = {
+      id:          crypto.randomUUID(),
+      name:        goalData.name,
+      emoji:       goalData.emoji || "🎯",
+      habitType:   goalData.habitType || "daily",
+      weeklyTarget:goalData.weeklyTarget ?? null,
+      color:       goalData.color || "#C0392B",
+      sharedGoalId:goalData.id,
+      logs:        [],
+      streak:      0,
+      bestStreak:  0,
+      reflection:  true,
+      reflectionPrompt: "",
+      tapIncrement:1,
+      dailyTargetMinutes: 60,
+    };
+    const { error } = await supabase.from("habits").insert(habitToRow(newHabit, uid));
+    if (error) {
+      console.error("[Forged] createLinkedHabit:", error);
+      return null;
+    }
+    setHabits(prev => [...prev, newHabit]);
+    await pushSharedMemberProgressFromLinked(newHabit);
+    return newHabit;
+  }
+
+  /**
+   * Writes shared_goal_members.logs from the linked personal habit/goal (Today is source of truth).
+   * Call after every successful habits upsert for linked rows and on initial load.
+   */
+  async function pushSharedMemberProgressFromLinked(linked) {
+    if (demoMode || !linked?.sharedGoalId) return;
     const uid = userIdRef.current;
     if (!uid) return;
-    const { data: member } = await supabase.from("shared_goal_members")
-      .select("id, logs").eq("shared_goal_id", sharedGoalId).eq("user_id", uid).single();
-    if (!member) return;
-    const today = todayStr();
-    const newLogs = [...(member.logs || []).filter(l => l.date !== today), { date: today, ...logEntry }];
-    await supabase.from("shared_goal_members").update({ logs: newLogs }).eq("id", member.id);
-    setSharedGoals(prev => prev.map(g => g.id !== sharedGoalId ? g : {
-      ...g, myLogs: newLogs,
-      members: g.members.map(m => m.isMe ? { ...m, logs: newLogs } : m),
+    const projected = projectPersonalLogsForSharedMember(linked);
+    const { data: member, error: selErr } = await supabase
+      .from("shared_goal_members")
+      .select("id")
+      .eq("shared_goal_id", linked.sharedGoalId)
+      .eq("user_id", uid)
+      .maybeSingle();
+    if (selErr) {
+      console.warn("[Forged] pushSharedMemberProgressFromLinked select:", selErr.message);
+      return;
+    }
+    if (!member) {
+      console.warn("[Forged] pushSharedMemberProgressFromLinked: no membership row for shared goal", linked.sharedGoalId);
+      return;
+    }
+    const { error: upErr } = await supabase
+      .from("shared_goal_members")
+      .update({ logs: projected })
+      .eq("id", member.id);
+    if (upErr) {
+      console.warn("[Forged] pushSharedMemberProgressFromLinked update:", upErr.message);
+      return;
+    }
+    setSharedGoals(prev => prev.map(g => {
+      if (String(g.id) !== String(linked.sharedGoalId)) return g;
+      const list = g.members || [];
+      const mapped = list.map(m =>
+        sameUserId(m.userId, uid) ? { ...m, logs: projected, isMe: true } : { ...m }
+      );
+      const members = mapped.some(m => sameUserId(m.userId, uid))
+        ? mapped
+        : [...mapped, { userId: uid, name: "You", avatarUrl: undefined, logs: projected, isMe: true }];
+      return { ...g, myLogs: projected, members };
     }));
     syncLastActive();
-    if (!opts.silent) addToast("✓ Logged");
+    // Defer refetch so PostgREST returns the committed `logs` json (immediate fetch can race the update).
+    setTimeout(() => { void loadSharedGoals(uid); }, 400);
   }
   // ── End social helpers ────────────────────────────────────────────────────────
 
@@ -7653,6 +11406,7 @@ export default function App() {
         setToasts(t => [...t, { id, msg: "⚠️ Couldn't save — check your connection" }]);
         return false;
       }
+      if (habit.sharedGoalId) await pushSharedMemberProgressFromLinked(habit);
       return true;
     } catch (err) {
       console.error("syncHabit exception:", err);
@@ -7678,6 +11432,7 @@ export default function App() {
         setToasts(t => [...t, { id, msg: "⚠️ Couldn't save goal — check your connection" }]);
         return false;
       }
+      if (goal.sharedGoalId) await pushSharedMemberProgressFromLinked(goal);
       return true;
     } catch (err) {
       console.error("syncGoal exception:", err);
@@ -7850,10 +11605,16 @@ export default function App() {
         const { goals: nextGoals, habits: nextHabits } = splitDbRowsIntoGoalsAndHabits(rows);
         setGoals(nextGoals);
         setHabits(nextHabits);
+        const linkedPushers = [
+          ...nextHabits.filter(h => h.sharedGoalId).map(h => () => pushSharedMemberProgressFromLinked(h)),
+          ...nextGoals.filter(g => g.sharedGoalId).map(g => () => pushSharedMemberProgressFromLinked(g)),
+        ];
+        if (linkedPushers.length) await Promise.all(linkedPushers.map(fn => fn()));
       }
 
       userIdRef.current = uid;
       accountDataLoadedRef.current = true;
+      setAccountLoadError(false);
       setAccountDataReady(true);
       return true;
     } catch (err) {
@@ -7866,41 +11627,49 @@ export default function App() {
     }
   }
 
-  async function loadUserDataWithRetries(uid, source = "unknown") {
-    if (retryLoadPromiseRef.current && retryLoadUidRef.current === uid) {
+  async function loadUserDataWithRetries(uid, source = "unknown", options = {}) {
+    const skipDedupe = options.skipDedupe === true;
+    // Dedupe concurrent loads for the same uid (e.g. INITIAL_SESSION + SIGNED_IN). Manual "Retry" must bypass
+    // this or it re-awaits the same stuck promise and appears to do nothing until a full page refresh.
+    if (!skipDedupe && retryLoadPromiseRef.current && retryLoadUidRef.current === uid) {
       return retryLoadPromiseRef.current;
     }
 
     retryLoadUidRef.current = uid;
-    retryLoadPromiseRef.current = (async () => {
-    // 300ms initial settle lets Chrome fully propagate the auth token
-    // to the PostgREST client before the first query fires.
-    // Subsequent retries use exponential backoff.
-    const backoffs = [300, 1500, 3000, 6000, 10000];
+    const loadPromise = (async () => {
+    // First attempt fires immediately — INITIAL_SESSION already guarantees the
+    // auth token is fully settled by the time we get here. Subsequent retries
+    // use exponential backoff in case of transient network/PostgREST hiccups.
+    const backoffs = [0, 1500, 3000, 6000, 10000];
     for (let attempt = 0; attempt < backoffs.length; attempt++) {
-      await new Promise(r => setTimeout(r, backoffs[attempt]));
-      if (attempt > 0) console.log(`[Forged] loadUserData retry ${attempt}/${backoffs.length - 1}`);
+      if (backoffs[attempt] > 0) await new Promise(r => setTimeout(r, backoffs[attempt]));
+      if (attempt > 0) console.log(`[Forged] loadUserData retry ${attempt}/${backoffs.length - 1} (${source})`);
       if (await loadUserData(uid)) {
         return true;
       }
     }
-    console.error("[Forged] loadUserDataWithRetries: all attempts failed for uid", uid?.slice(0, 8));
+    console.error("[Forged] loadUserDataWithRetries: all attempts failed for uid", uid?.slice(0, 8), source);
     return false;
     })();
+    retryLoadPromiseRef.current = loadPromise;
 
     try {
-      return await retryLoadPromiseRef.current;
+      return await loadPromise;
     } finally {
-      retryLoadPromiseRef.current = null;
-      retryLoadUidRef.current = null;
+      if (retryLoadPromiseRef.current === loadPromise) {
+        retryLoadPromiseRef.current = null;
+        retryLoadUidRef.current = null;
+      }
     }
   }
 
   async function retryAccountDataLoad() {
     setAccountLoadError(false);
     setLoading(true);
-    const retryBudget = setTimeout(() => setLoading(false), 32000);
     try {
+      loadingUidRef.current = null;
+      retryLoadPromiseRef.current = null;
+      retryLoadUidRef.current = null;
       const { data: { session: preRefreshSession }, error: preSessionErr } = await supabase.auth.getSession();
       if (preSessionErr) console.warn("retryAccountDataLoad: getSession —", preSessionErr.message);
       const initialUid = preRefreshSession?.user?.id || sessionUserId;
@@ -7916,12 +11685,80 @@ export default function App() {
       const { data: { session: postRefreshSession }, error: postSessionErr } = await supabase.auth.getSession();
       if (postSessionErr) console.warn("retryAccountDataLoad: post-refresh getSession —", postSessionErr.message);
       const retryUid = postRefreshSession?.user?.id || initialUid;
-      const ok = await loadUserDataWithRetries(retryUid, "manual-retry");
+      const ok = await loadUserDataWithRetries(retryUid, "manual-retry", { skipDedupe: true });
       if (!ok) setAccountLoadError(true);
       else setAuthScreen(false);
     } finally {
-      clearTimeout(retryBudget);
       setLoading(false);
+    }
+  }
+
+  // Soft in-app session recovery — used by the loading-screen "try again"
+  // button and by an automatic watchdog when INITIAL_SESSION never arrives.
+  // Tries hard to recover the session in-place before falling back to a hard
+  // page reload. This is the "what a manual refresh actually fixes" path.
+  async function attemptSoftSessionRecovery(reason = "manual") {
+    if (softRecoveryInFlightRef.current) return;
+    softRecoveryInFlightRef.current = true;
+    try {
+      // 1. Probe storage for an existing session (covers the case where
+      //    INITIAL_SESSION fired before our listener was wired up, or fired
+      //    with null while storage was still hydrating on mobile browsers).
+      let { data: { session } } = await supabase.auth.getSession();
+
+      // 2. If no session yet, try to refresh — Supabase may have a refresh
+      //    token in storage even when the access token is expired. This is
+      //    exactly the path a hard reload takes implicitly.
+      if (!session?.user?.id) {
+        try {
+          await supabase.auth.refreshSession();
+        } catch (e) {
+          console.warn("[Forged] soft recovery: refreshSession failed —", e?.message || e);
+        }
+        const probe = await supabase.auth.getSession();
+        session = probe?.data?.session || null;
+      }
+
+      if (!session?.user?.id) {
+        // No session at all — go to the auth screen instead of an infinite
+        // spinner. (A genuine signed-out state.)
+        console.warn(`[Forged] soft recovery (${reason}): no session, routing to auth`);
+        setLoading(false);
+        setAuthScreen(true);
+        return;
+      }
+
+      // 3. Session exists — kick the loader. skipDedupe so we never await a
+      //    promise that's already stuck.
+      const uid = session.user.id;
+      if (session.user.email) setAuthEmail(session.user.email);
+      setSessionUserId(uid);
+      lastSignedInUidRef.current = uid;
+      initialAuthHandledRef.current = true;
+      loadingUidRef.current = null;
+      retryLoadPromiseRef.current = null;
+      retryLoadUidRef.current = null;
+      accountDataLoadedRef.current = false;
+      setAccountDataReady(false);
+      setAccountLoadError(false);
+      userIdRef.current = null;
+
+      const ok = await loadUserDataWithRetries(uid, `soft-recovery:${reason}`, { skipDedupe: true });
+      if (ok) {
+        setAuthScreen(false);
+        setAccountLoadError(false);
+      } else {
+        // Loader couldn't finish — show the friendlier retry surface rather
+        // than the bare loading spinner.
+        setAccountLoadError(true);
+      }
+      setLoading(false);
+    } catch (e) {
+      console.warn(`[Forged] soft recovery (${reason}) threw —`, e?.message || e);
+      // Last resort: a hard reload (matches old behavior for safety).
+      try { window.location.reload(); } catch {}
+    } finally {
+      softRecoveryInFlightRef.current = false;
     }
   }
 
@@ -7972,6 +11809,7 @@ export default function App() {
           const loadBudgetTimer = setTimeout(() => {
             if (!mounted) return;
             console.warn("Auth: account load exceeded budget — unblocking UI (use Retry if needed)");
+            loadingUidRef.current = null;
             setLoading(false);
             setAuthScreen(false);
             if (session?.user?.id) setAccountLoadError(true);
@@ -8070,6 +11908,7 @@ export default function App() {
           const signInBudget = setTimeout(() => {
             if (!mounted) return;
             console.warn("Auth: sign-in load exceeded budget — unblocking UI");
+            loadingUidRef.current = null;
             setLoading(false);
             setAuthScreen(false);
             setAccountLoadError(true);
@@ -8161,6 +12000,27 @@ export default function App() {
     return () => { mounted = false; clearTimeout(bailout); subscription.unsubscribe(); };
   }, []);
 
+  // ─── Soft self-heal watchdog ─────────────────────────────────────────────
+  // When the loading screen sticks (INITIAL_SESSION dropped, slow token
+  // refresh, mobile storage hydration race, etc.) the user used to be left
+  // staring at a spinner with no recourse but a hard reload. Run one
+  // automatic in-app session recovery at 10s — this matches what a manual
+  // refresh would fix, but without losing app state.
+  useEffect(() => {
+    if (!loading) return;
+    if (softRecoveryAttemptedRef.current) return;
+    const t = setTimeout(() => {
+      // Only act if no real load is in flight. If a load IS in flight
+      // (loadingUidRef.current set), let it finish — it has its own 32s
+      // budget and we'd just compete with it.
+      if (loadingUidRef.current) return;
+      if (softRecoveryAttemptedRef.current) return;
+      softRecoveryAttemptedRef.current = true;
+      attemptSoftSessionRecovery("watchdog-10s");
+    }, 10000);
+    return () => clearTimeout(t);
+  }, [loading]);
+
   // ─── Session + data refresh on resume / bfcache ──────────────────────────────
   useEffect(() => {
     function runResumeLoad() {
@@ -8204,6 +12064,50 @@ export default function App() {
     const id = Date.now();
     setToasts(t => [...t, { id, msg }]);
   }, []);
+
+  // Catch-up: nudges received while offline (table + watermark; realtime handles live inserts).
+  useEffect(() => {
+    if (!sessionUserId || !accountDataReady) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        let wm = readNudgeWatermark(sessionUserId);
+        if (!wm) {
+          const { data: latest, error: latestErr } = await supabase
+            .from("nudges")
+            .select("sent_at")
+            .eq("recipient_id", sessionUserId)
+            .order("sent_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (latestErr) {
+            writeNudgeWatermarkIfNewer(sessionUserId, new Date().toISOString());
+            return;
+          }
+          const anchor = latest?.sent_at || new Date().toISOString();
+          writeNudgeWatermarkIfNewer(sessionUserId, anchor);
+          return;
+        }
+        const { data, error } = await supabase
+          .from("nudges")
+          .select("sender_name,message,sent_at")
+          .eq("recipient_id", sessionUserId)
+          .gt("sent_at", wm)
+          .order("sent_at", { ascending: true });
+        if (cancelled || error || !data?.length) return;
+        let newest = wm;
+        for (const row of data) {
+          if (row.sent_at && row.sent_at > newest) newest = row.sent_at;
+          const msg = row.message ? ` "${row.message}"` : "";
+          addToast(`💪 ${row.sender_name || "Someone"} nudged you!${msg}`);
+        }
+        writeNudgeWatermarkIfNewer(sessionUserId, newest);
+      } catch (e) {
+        console.warn("[Forged] nudge catch-up:", e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [sessionUserId, accountDataReady, addToast]);
 
   /** Clear the other editor first so goal vs habit modals never stack (flushSync avoids stale editId + editGoalId in one tick). */
   const openEditGoal = useCallback(rawId => {
@@ -8283,12 +12187,45 @@ export default function App() {
     onboarded !== false &&
     !checkingPayment;
 
+  // ── First-time AI page guide: show once per page on first visit ──────────
+  // This runs *before* the short per-nav nudge so we can suppress it when the
+  // persistent guide is taking over. Persistence key is user-scoped so two
+  // accounts on the same device don't collide.
+  useEffect(() => {
+    if (!coachNudgeShellActive) {
+      setPageGuide(null);
+      return;
+    }
+    if (!PAGE_GUIDE_PAGES.includes(screen)) {
+      // Leaving a guided page — drop any active guide and mark the one we
+      // were showing as seen so it doesn't come back on the next visit.
+      setPageGuide(prev => {
+        if (prev) writePageGuideSeen(sessionUserId, prev.page);
+        return null;
+      });
+      return;
+    }
+    if (readPageGuideSeen(sessionUserId, screen)) {
+      setPageGuide(null);
+      return;
+    }
+    const text = buildPageGuideMessage(screen, { name: user?.name, habits, goals });
+    if (!text) { setPageGuide(null); return; }
+    setPageGuide({ page: screen, text });
+  }, [screen, coachNudgeShellActive, sessionUserId, pageGuideReplayTick]);
+
   useEffect(() => {
     if (!coachNudgeShellActive) {
       setCoachPageNudge(null);
       return;
     }
     if (screen === "profile") {
+      setCoachPageNudge(null);
+      return;
+    }
+    // Suppress the short auto-hide nudge whenever the persistent first-time
+    // guide is taking over — two bubbles in the same anchor is noise.
+    if (pageGuide && pageGuide.page === screen) {
       setCoachPageNudge(null);
       return;
     }
@@ -8303,9 +12240,9 @@ export default function App() {
       setCoachPageNudge(prev => (prev && prev.id === id ? null : prev));
     }, COACH_NUDGE_DURATION_MS);
     return () => clearTimeout(t);
-  }, [screen, coachNudgeShellActive]);
+  }, [screen, coachNudgeShellActive, pageGuide]);
 
-  async function completeOnboarding({ name, habits: newHabits, coachName: newCoachName }) {
+  async function completeOnboarding({ name, habits: newHabits, coachName: newCoachName, emailUpdatesOptIn }) {
     const uid = userIdRef.current;
     const resolvedCoach = newCoachName || "Coach";
     setUser({ name });
@@ -8325,7 +12262,12 @@ export default function App() {
         await supabase.from("habits").upsert(habitsToSet.map(h => habitToRow(h, uid)));
       }
     }
-    // Tour disabled — re-enable by restoring tourSteps/tourIdx state and this block
+    // Persist the final-screen "weekly updates by email" preference under the
+    // same localStorage key the post-upgrade ProThankYouModal already uses, so
+    // we have one source of truth when we wire an actual email sender later.
+    if (typeof emailUpdatesOptIn === "boolean") {
+      writeForgedBetaEmailOptIn(uid, emailUpdatesOptIn);
+    }
   }
 
   // Show password recovery screen
@@ -8357,9 +12299,9 @@ export default function App() {
       <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:20 }}>
         <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>Forged.</div>
         <div style={{ width:22, height:22, border:`2px solid ${T.border}`, borderTopColor:T.accent, borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
-        <div style={{ fontSize:12, color:T.hint, animation:"fadeIn 1s ease 2.5s both", textAlign:"center", lineHeight:1.6 }}>
+        <div style={{ fontSize:12, color:T.hint, animation:"fadeIn 1s ease 8s both", textAlign:"center", lineHeight:1.6 }}>
           Taking longer than usual?<br/>
-          <button onClick={() => window.location.reload()} style={{ background:"none", border:"none", color:T.muted, fontSize:12, cursor:"pointer", textDecoration:"underline", padding:0, marginTop:4 }}>Tap to refresh</button>
+          <button onClick={() => attemptSoftSessionRecovery("loading-button")} style={{ background:"none", border:"none", color:T.muted, fontSize:12, cursor:"pointer", textDecoration:"underline", padding:0, marginTop:4 }}>Tap to retry</button>
         </div>
       </div></>
     );
@@ -8416,7 +12358,7 @@ export default function App() {
               ⚡ 0 xp
             </button>
           </div>
-          <TodayScreen habits={habits} goals={goals} xp={0} onTap={handleTap} onUndo={() => {}} onSkip={() => {}} onAddNote={() => demoBounce()} onLogZero={() => demoBounce()} onOpenLog={() => demoBounce()} onOpenGoalLog={() => demoBounce()} onEditGoal={openEditGoal} onCompleteGoal={() => demoBounce()} onDeleteGoal={() => demoBounce()} onEditHabit={openEditHabit} onDeleteHabit={() => demoBounce()} onXPInfo={() => {}} onAdd={() => demoBounce()}/>
+          <TodayScreen habits={habits} goals={goals} xp={0} onTap={handleTap} onUndo={() => {}} onSkip={() => {}} onAddNote={() => demoBounce()} onLogZero={() => demoBounce()} onOpenLog={() => demoBounce()} onOpenGoalLog={() => demoBounce()} onEditGoal={openEditGoal} onCompleteGoal={() => demoBounce()} onDeleteGoal={() => demoBounce()} onShareGoal={() => {}} onEditHabit={openEditHabit} onDeleteHabit={() => demoBounce()} onShareHabit={() => {}} sharingHabitId={null} onXPInfo={() => {}} onAdd={() => demoBounce()} onSaveLogEntry={async () => { demoBounce(); return false; }} hideFloatingAdd/>
           <nav style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:430, maxWidth:"100vw", background:"linear-gradient(180deg, rgba(38,38,34,0.98) 0%, rgba(22,22,19,0.99) 100%)", backdropFilter:"blur(20px)", WebkitBackdropFilter:"blur(20px)", borderTop:`1px solid rgba(200,144,42,0.2)`, boxShadow:"0 -6px 32px rgba(0,0,0,0.5)", display:"flex", zIndex:100, paddingTop:8, paddingBottom:"max(11px, env(safe-area-inset-bottom, 0px))" }}>
             {[{id:"today",label:"Today"},{id:"journal",label:"Journal"},{id:"insights",label:"Insights"},{id:"social",label:"Social"},{id:"profile",label:"Profile"}].map(n => (
               <button key={n.id} onClick={() => demoBounce()} style={{ flex:1, padding:"9px 4px 6px", border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3, fontSize:10, fontWeight:600, color:n.id==="today"?T.accent:T.muted, letterSpacing:"0.02em" }}>
@@ -8462,8 +12404,11 @@ export default function App() {
       <><style>{CSS}</style>
       <OnboardingScreen
         onComplete={completeOnboarding}
-        onSaveProgress={async ({ name, habits, coachName }) => {
+        onSaveProgress={async ({ name, habits, coachName, emailUpdatesOptIn }) => {
           const uid = userIdRef.current;
+          if (typeof emailUpdatesOptIn === "boolean") {
+            writeForgedBetaEmailOptIn(uid, emailUpdatesOptIn);
+          }
           if (!uid) return;
           await supabase.from("profiles").upsert({
             id: uid, name, xp: 0, onboarded: true,
@@ -8535,6 +12480,7 @@ export default function App() {
     const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
     const base = habits.find(h => h.id === id);
     if (!base) return;
+    if (base.habitType === "log") return;
     let tapped = null;
     if (base.habitType === "limit") {
       const today = todayStr();
@@ -8542,23 +12488,19 @@ export default function App() {
       const logsWithoutNoneToday = base.logs.filter(l => !(l.date === today && l.value === 0));
       tapped = { ...base, logs:[...logsWithoutNoneToday, { date:today, value:inc, note:"" }] };
     } else {
-      const logged = base.logs.some(l => l.date === todayStr());
+      const today = todayStr();
+      const logged = base.logs.some(l => l.date === today && l.value === true);
+      // On untap, only remove the "checked" marker (value:true) for today —
+      // preserve any reflection/note entries the user added separately.
       tapped = logged
-        ? { ...base, logs: base.logs.filter(l => l.date !== todayStr()) }
-        : { ...base, logs:[...base.logs, { date:todayStr(), value:true, note:"" }] };
+        ? { ...base, logs: base.logs.filter(l => !(l.date === today && l.value === true)) }
+        : { ...base, logs:[...base.logs, { date: today, value: true, note: "" }] };
     }
     const saved = await syncHabit(tapped);
     if (!saved) return;
     setHabits(prev => prev.map(h => h.id === id ? tapped : h));
     syncLastActive();
-    const todayD = todayStr();
-    const sgId = base.sharedGoalId;
-    if (sgId) {
-      // For all tap-based habits: sync to shared goal when a new log entry is added for today
-      const hadTodayLog = base.logs.some(l => l.date === todayD);
-      const hasTodayLog = tapped.logs.some(l => l.date === todayD);
-      if (!hadTodayLog && hasTodayLog) void logSharedGoal(sgId, { value: true }, { silent: true });
-    }
+    // Accountability sync: handled inside syncHabit → pushSharedMemberProgressFromLinked
     // Limit + taps never award XP or celebration — usage logging is not rewarded.
     if (tapped.habitType === "limit") return;
     const today = todayStr();
@@ -8588,10 +12530,7 @@ export default function App() {
     const saved = await syncHabit(updated);
     if (!saved) return;
     setHabits(prev => prev.map(h => h.id === id ? updated : h));
-    // Auto-sync to shared goal if this habit is linked to one
-    if (habit.sharedGoalId && isNew) {
-      void logSharedGoal(habit.sharedGoalId, { value: true }, { silent: true });
-    }
+    // Linked accountability sync runs inside syncHabit (full projection from personal logs).
     if (habit.habitType === "project") {
       const today = todayStr();
       const firstKey = `project-first:${id}:${today}`;
@@ -8664,6 +12603,24 @@ export default function App() {
     const saved = await syncHabit(updated);
     if (!saved) return false;
     setHabits(prev => prev.map(h => h.id === id ? updated : h));
+    return true;
+  }
+
+  /** Append a dated journal entry to a Log track (`habit_type: "log"`). */
+  async function handleSaveLogEntry(id, text) {
+    if (!text.trim()) return false;
+    if (demoBounce()) return false;
+    const habit = habits.find(h => h.id === id);
+    if (!habit || habit.habitType !== "log") return false;
+    const updated = { ...habit, logs: [...habit.logs, { date: todayStr(), value: "log", note: text.trim() }] };
+    const saved = await syncHabit(updated);
+    if (!saved) {
+      addToast("⚠️ Couldn't save log — check your connection");
+      return false;
+    }
+    setHabits(prev => prev.map(h => h.id === id ? updated : h));
+    syncLastActive();
+    addToast("✓ Log saved");
     return true;
   }
 
@@ -8981,9 +12938,9 @@ export default function App() {
             >×</button>
           </div>
         )}
-        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} hideFloatingAdd/>}
+        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} coachEverOpened={coachEverOpened} onOpenCoach={() => { try { localStorage.setItem("forged_coach_opened", "1"); } catch {} setCoachEverOpened(true); setShowCoach(true); }} hideFloatingAdd/>}
         {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)}/>}
-        {screen === "insights" && <InsightsScreen habits={habits} goals={goals} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)}/>}
+        {screen === "insights" && <InsightsScreen habits={habits} goals={goals} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} userId={sessionUserId}/>}
         {screen === "social"   && <SocialScreen
           user={user} xp={xp} habits={habits}
           friends={friends} friendRequests={friendRequests} sentRequests={sentRequests} friendsLoading={friendsLoading}
@@ -8993,12 +12950,21 @@ export default function App() {
           sharedGoalInvites={sharedGoalInvites}
           onAcceptGoalInvite={acceptSharedGoalInvite}
           onDeclineGoalInvite={declineSharedGoalInvite}
-          onCreateSharedGoal={createSharedGoal} onJoinSharedGoal={joinSharedGoal}
-          onLogSharedGoal={logSharedGoal}
-          onShareHabit={handleShareHabit}
           currentUserId={sessionUserId}
           onDeleteSharedGoal={deleteSharedGoal}
           onNudgeFriend={sendNudge}
+          onShareHabit={handleShareHabit}
+          sharingHabitId={sharingHabitId}
+          onToast={addToast}
+          pendingInviteGoalId={pendingInviteGoalId}
+          onClearPendingInvite={() => setPendingInviteGoalId(null)}
+          betaLeaderboard={betaLeaderboard}
+          leaderboardLoading={leaderboardLoading}
+          myBetaRank={myBetaRank}
+          betaTotalCount={betaTotalCount}
+          betaTicker={betaTicker}
+          isPro={isPro}
+          onUpgrade={() => setShowUpgrade(true)}
         />}
         {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} stripeCustomerId={stripeCustomerId} refCode={refCode}
           authEmail={authEmail}
@@ -9039,6 +13005,19 @@ export default function App() {
           }}
           onResetOnboarding={() => setOnboarded(false)}
           onPreviewOnboarding={() => setPreviewOnboarding(true)}
+          onReplayPageGuides={() => {
+            // Dev-only: wipe the 4 page-guide seen flags so the first-time
+            // AI bubble re-triggers on next visit to Today/Journal/Insights/
+            // Social. Does not touch any user data. Scoped to the current
+            // user id so other accounts on this device are unaffected. The
+            // replay tick forces the guide effect to re-run even if we're
+            // already on a guided screen.
+            clearAllPageGuideSeen(sessionUserId);
+            setPageGuide(null);
+            setScreen("today");
+            setPageGuideReplayTick(t => t + 1);
+            addToast("AI page tour reset — visit Today, Journal, Insights, Social");
+          }}
           onSignOut={handleSignOut}
           onShowTour={() => { setScreen("today"); setTimeout(() => { setTourSteps(GLOBAL_TOUR); setTourIdx(0); }, 120); }}
           coachName={coachName}
@@ -9052,8 +13031,12 @@ export default function App() {
           notifTime={notifTime}
           notifLoading={notifLoading}
           notifPermission={notifPermission}
+          dailyRemindersEnabled={dailyRemindersEnabled}
+          nudgesEnabled={nudgesEnabled}
+          invitesEnabled={invitesEnabled}
           onNotifToggle={handleNotifToggle}
           onNotifTimeChange={handleNotifTimeChange}
+          onNotifCategoryChange={handleNotifCategoryChange}
         />}
 
         {/* Coach FAB (+ Today-only Add habit below) — hidden on Profile */}
@@ -9087,25 +13070,54 @@ export default function App() {
                 <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:5, flexShrink:0 }}>
                   <button
                     type="button"
-                    onClick={() => setShowCoach(true)}
+                    onClick={() => {
+                      setShowCoach(true);
+                      try { localStorage.setItem("forged_coach_opened", "1"); } catch {}
+                      setCoachEverOpened(true);
+                    }}
                     aria-label={`${coachLabelRaw} — AI coach`}
                     title={`${coachLabelRaw} — AI coach`}
                     style={{
-                      width:44, height:44,
-                      borderRadius:"50%", border:`0.5px solid ${T.borderMid}`,
-                      background:"rgba(30,30,28,0.96)", backdropFilter:"blur(10px)",
-                      color:T.sub, cursor:"pointer",
+                      width:48, height:48,
+                      borderRadius:"50%",
+                      border:`1px solid rgba(200,144,42,0.55)`,
+                      background:`
+                        radial-gradient(circle at 30% 30%, rgba(200,144,42,0.35) 0%, rgba(200,144,42,0.12) 45%, rgba(24,24,22,0.98) 100%)
+                      `,
+                      backdropFilter:"blur(12px)",
+                      color:T.gold,
+                      cursor:"pointer",
                       display:"flex", alignItems:"center", justifyContent:"center",
-                      boxShadow:"0 2px 14px rgba(0,0,0,0.4)",
+                      boxShadow:"0 2px 14px rgba(0,0,0,0.4), 0 0 0 0 rgba(200,144,42,0.45)",
+                      animation: coachEverOpened ? undefined : "coachFabPulse 2.4s ease-in-out infinite",
+                      position:"relative",
+                      overflow:"hidden",
                     }}
                   >
                     {coachIcon && COACH_ICON_OPTIONS.includes(coachIcon) ? (
-                      <span style={{ fontSize:20, lineHeight:1 }} aria-hidden>{coachIcon}</span>
+                      <span style={{ fontSize:22, lineHeight:1, filter:"drop-shadow(0 1px 2px rgba(0,0,0,0.4))" }} aria-hidden>{coachIcon}</span>
                     ) : (
-                      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden>
-                        <path d="M12 2l1.8 5.9L20 10l-6.2 2.1L12 22l-1.8-9.9L4 10l6.2-2.1L12 2z" fill="currentColor" opacity="0.92"/>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+                        <path d="M12 2l1.8 5.9L20 10l-6.2 2.1L12 22l-1.8-9.9L4 10l6.2-2.1L12 2z" fill="currentColor"/>
                       </svg>
                     )}
+                    {/* Tiny "AI" badge */}
+                    <span
+                      aria-hidden
+                      style={{
+                        position:"absolute", top:-3, right:-3,
+                        fontSize:8, fontWeight:800,
+                        letterSpacing:"0.04em",
+                        color:"#1a1a16",
+                        background:"linear-gradient(135deg, #e7c46a, #c0892a)",
+                        padding:"2px 5px",
+                        borderRadius:8,
+                        border:"1px solid rgba(24,24,22,0.8)",
+                        lineHeight:1,
+                      }}
+                    >
+                      AI
+                    </span>
                   </button>
                   <span
                     style={{
@@ -9117,7 +13129,66 @@ export default function App() {
                     {coachLabelShort}
                   </span>
                 </div>
-                {coachPageNudge && (
+                {pageGuide && pageGuide.page === screen ? (
+                  // Persistent first-time AI guide for this page. Styled as an
+                  // AI chat bubble so it feels like the coach speaking, with a
+                  // tight tail pointing down-left toward the FAB label. Stays
+                  // until the user taps × or navigates to another page.
+                  <div
+                    key={`guide-${pageGuide.page}`}
+                    role="dialog"
+                    aria-label="Coach tip"
+                    style={{
+                      position:"relative",
+                      maxWidth:260,
+                      padding:"11px 30px 12px 14px",
+                      borderRadius:"14px 14px 14px 4px",
+                      background:"rgba(24,24,22,0.98)",
+                      backdropFilter:"blur(12px)",
+                      WebkitBackdropFilter:"blur(12px)",
+                      border:"0.5px solid rgba(200,144,42,0.45)",
+                      boxShadow:"0 6px 26px rgba(0,0,0,0.5)",
+                      fontSize:12.5,
+                      lineHeight:1.55,
+                      color:T.text,
+                      textAlign:"left",
+                      animation:"coachGuideIn 0.42s cubic-bezier(0.22,1,0.36,1) both",
+                      flexShrink:1,
+                    }}
+                  >
+                    <div style={{
+                      fontSize:9, fontWeight:700, color:T.gold,
+                      textTransform:"uppercase", letterSpacing:"0.1em",
+                      marginBottom:4,
+                    }}>
+                      {coachLabelShort}
+                    </div>
+                    <div>{pageGuide.text}</div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        writePageGuideSeen(sessionUserId, pageGuide.page);
+                        setPageGuide(null);
+                      }}
+                      aria-label="Dismiss coach tip"
+                      style={{
+                        position:"absolute",
+                        top:4, right:4,
+                        width:22, height:22,
+                        borderRadius:"50%",
+                        border:"none",
+                        background:"transparent",
+                        color:T.muted,
+                        fontSize:15,
+                        lineHeight:1,
+                        cursor:"pointer",
+                        display:"flex", alignItems:"center", justifyContent:"center",
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ) : coachPageNudge ? (
                   <div
                     key={coachPageNudge.id}
                     role="status"
@@ -9143,7 +13214,7 @@ export default function App() {
                   >
                     {coachPageNudge.text}
                   </div>
-                )}
+                ) : null}
               </div>
               {showTodayAdd && (
                 <button
@@ -9191,7 +13262,25 @@ export default function App() {
       {/* Modals */}
       {showAdd       && <AddModal      onClose={() => setShowAdd(false)}     onSave={handleAddHabit}/>}
       {showAddGoal   && <AddGoalModal  onClose={() => setShowAddGoal(false)} onSave={handleAddGoal}/>}
-      {showAddChoice && <AddActionSheet onAddHabit={() => { setShowAddChoice(false); setShowAdd(true); }} onAddGoal={() => { setShowAddChoice(false); setShowAddGoal(true); }} onClose={() => setShowAddChoice(false)}/>}
+      {showAddLog    && <AddLogModal   onClose={() => setShowAddLog(false)} onSave={async h => {
+        if (demoBounce()) return;
+        const saved = await syncHabit(h);
+        if (!saved) {
+          addToast("⚠️ Couldn't add log — check your connection");
+          return;
+        }
+        setHabits(p => [...p, h]);
+        setShowAddLog(false);
+        addToast("✓ Log added");
+      }}/>}
+      {showAddChoice && <AddActionSheet onAddHabit={() => {
+        setShowAddChoice(false);
+        // Enforce Pro gate: free users capped at 5 habits. Without this,
+        // users on the Today screen could bypass the paywall entirely by
+        // going through the Add action sheet instead of the Habits tab.
+        if (!isPro && habits.length >= 5) setShowUpgrade(true);
+        else setShowAdd(true);
+      }} onAddGoal={() => { setShowAddChoice(false); setShowAddGoal(true); }} onAddLog={() => { setShowAddChoice(false); setShowAddLog(true); }} onClose={() => setShowAddChoice(false)}/>}
       {showCoachTeaser && <CoachComingSoonSheet onClose={() => setShowCoachTeaser(false)} coachName={coachName} context={screen}/>}
       {logGoalId     && (() => { const g = resolveGoalForModal(logGoalId, goals, habits); return g ? <LogGoalModal goal={g} onClose={() => setLogGoalId(null)} onLog={(id, val, note) => { handleLogGoal(id, val, note); setLogGoalId(null); }}/> : null; })()}
       {editGoalId    && (() => { const g = resolveGoalForModal(editGoalId, goals, habits); return g ? <EditGoalModal goal={g} onClose={() => setEditGoalId(null)} onSave={handleEditGoalSave}/> : null; })()}
@@ -9209,7 +13298,12 @@ export default function App() {
         />}
       {showUpgrade && <BetaPaywallModal onClose={() => setShowUpgrade(false)}/>}
       {showShare && <ShareCardModal user={user} habits={habits} xp={xp} onClose={() => setShowShare(false)}/>}
-      {showWelcome && <WelcomeModal onContinue={() => setShowWelcome(false)} />}
+      {showWelcome && (
+        <WelcomeModal onContinue={() => { setShowWelcome(false); setShowProFollowup(true); }} />
+      )}
+      {showProFollowup && (
+        <ProThankYouModal userId={sessionUserId} onClose={() => setShowProFollowup(false)} />
+      )}
       {/* TourOverlay disabled — restore tourSteps state and this block to re-enable */}
     </>
   );

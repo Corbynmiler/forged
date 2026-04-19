@@ -17,7 +17,10 @@ self.addEventListener("push", function (event) {
     data: { url: data.url || "/" },
     vibrate: [150, 80, 150],
     requireInteraction: false,
-    tag: "forged-reminder", // replaces any previous unread reminder
+    // Use the tag the sender specified so nudges, friend requests, and
+    // shared-goal invites don't overwrite an unread daily reminder (and
+    // vice versa). Fall back to the old reminder tag for legacy payloads.
+    tag: data.tag || "forged-reminder",
     renotify: false,
   };
 
