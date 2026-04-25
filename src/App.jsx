@@ -10375,7 +10375,6 @@ function ActivityDots({ last7 }) {
 }
 
 function ClientCard({ client, expanded, onToggle }) {
-  const T = THEME;
   const statusColor = client.daysSinceActive === null ? T.muted
     : client.daysSinceActive === 0 ? "#27AE60"
     : client.daysSinceActive <= 3 ? T.gold
@@ -10467,7 +10466,6 @@ function ClientCard({ client, expanded, onToggle }) {
 }
 
 function CoachDashboard() {
-  const T = THEME;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
