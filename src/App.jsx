@@ -1056,6 +1056,10 @@ const CSS = `
     60%  { transform: scale(1.15); opacity: 1; }
     100% { transform: scale(1);    opacity: 1; }
   }
+  @keyframes coachRefreshSpin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
 `;
 
 // ─── MICRO COMPONENTS ─────────────────────────────────────────────────────────
@@ -10517,6 +10521,43 @@ function CoachClientDetail({ client, onBack }) {
     : client.daysSinceActive === 1 ? "last seen yesterday"
     : `last seen ${client.daysSinceActive}d ago`;
 
+  // ── AI session-prep brief ──────────────────────────────────────────────
+  // Fetched on mount and on the refresh button. Renders below the
+  // client-side `brief` so the coach gets both the deterministic facts and
+  // the model's short take. We don't auto-retry on error — the coach can
+  // hit the refresh button. Aborts in-flight if the component unmounts.
+  const [aiBullets, setAiBullets]   = useState(null);  // string[] | null
+  const [aiLoading, setAiLoading]   = useState(false);
+  const [aiErr, setAiErr]           = useState(null);
+
+  const fetchSummary = useCallback(async (signal) => {
+    setAiLoading(true);
+    setAiErr(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("Not signed in");
+      const res = await fetch(`/api/coach-summary?clientId=${encodeURIComponent(client.id)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal,
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Could not load summary");
+      setAiBullets(Array.isArray(json.summary) ? json.summary : []);
+    } catch (e) {
+      if (e.name === "AbortError") return;
+      setAiErr(e.message);
+    } finally {
+      if (!signal?.aborted) setAiLoading(false);
+    }
+  }, [client.id]);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    fetchSummary(ctrl.signal);
+    return () => ctrl.abort();
+  }, [fetchSummary]);
+
   return (
     <div style={{ padding:"0 16px 40px" }}>
       <button onClick={onBack} style={{ display:"flex", alignItems:"center", gap:6, background:"none", border:"none", color:T.muted, fontSize:13, cursor:"pointer", padding:"16px 0", fontFamily:T.font }}>
@@ -10535,7 +10576,33 @@ function CoachClientDetail({ client, onBack }) {
 
       {/* Before this session */}
       <div style={{ background:T.surface, borderRadius:14, padding:"14px 16px", marginBottom:16, border:`1px solid rgba(255,255,255,0.06)` }}>
-        <div style={{ fontSize:10, fontWeight:700, color:T.gold, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:10 }}>Before this session</div>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+          <div style={{ fontSize:10, fontWeight:700, color:T.gold, textTransform:"uppercase", letterSpacing:"0.07em" }}>
+            Before this session
+          </div>
+          <button
+            type="button"
+            onClick={() => { if (!aiLoading) fetchSummary(); }}
+            disabled={aiLoading}
+            title="Refresh AI brief"
+            style={{
+              display:"flex", alignItems:"center", gap:5,
+              background:"rgba(255,255,255,0.05)", border:`1px solid rgba(255,255,255,0.06)`,
+              borderRadius:8, padding:"4px 9px",
+              fontSize:10, fontWeight:600, color: aiLoading ? T.muted : T.sub,
+              cursor: aiLoading ? "default" : "pointer", fontFamily:T.font,
+            }}
+          >
+            <span style={{
+              fontSize:11,
+              display:"inline-block",
+              animation: aiLoading ? "coachRefreshSpin 1.1s linear infinite" : "none",
+            }}>↻</span>
+            {aiLoading ? "Updating" : "Refresh"}
+          </button>
+        </div>
+
+        {/* Client-side deterministic bullets */}
         {brief.length === 0
           ? <div style={{ fontSize:12, color:T.muted, fontStyle:"italic" }}>No data yet — ask them to log their first habit.</div>
           : brief.map((item, i) => (
@@ -10545,6 +10612,31 @@ function CoachClientDetail({ client, onBack }) {
             </div>
           ))
         }
+
+        {/* AI brief — visually separated, clearly labelled */}
+        <div style={{ marginTop: brief.length > 0 ? 14 : 12, paddingTop: brief.length > 0 ? 12 : 0, borderTop: brief.length > 0 ? `1px solid rgba(255,255,255,0.06)` : "none" }}>
+          <div style={{ fontSize:10, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:8, display:"flex", alignItems:"center", gap:6 }}>
+            <span>AI take</span>
+            <span style={{ fontSize:9, fontWeight:700, color:T.gold, background:"rgba(200,144,42,0.12)", padding:"1px 6px", borderRadius:6 }}>BETA</span>
+          </div>
+          {aiLoading && aiBullets === null && (
+            <div style={{ fontSize:12, color:T.muted, fontStyle:"italic" }}>Generating…</div>
+          )}
+          {aiErr && (
+            <div style={{ fontSize:12, color:"#E74C3C", lineHeight:1.5 }}>
+              Couldn't generate brief — {aiErr}
+            </div>
+          )}
+          {!aiErr && aiBullets && aiBullets.length === 0 && (
+            <div style={{ fontSize:12, color:T.muted, fontStyle:"italic" }}>Not enough data for a useful take yet.</div>
+          )}
+          {!aiErr && aiBullets && aiBullets.map((b, i) => (
+            <div key={i} style={{ display:"flex", gap:10, marginBottom: i < aiBullets.length-1 ? 8 : 0 }}>
+              <span style={{ fontSize:13, flexShrink:0, color:T.gold }}>•</span>
+              <span style={{ fontSize:12, color:T.sub, lineHeight:1.55 }}>{b}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Habits */}
@@ -10579,12 +10671,128 @@ function CoachClientDetail({ client, onBack }) {
   );
 }
 
-function CoachApp({ onExit, isPreview }) {
+// Subscribe screen shown inside CoachApp when the user is flagged is_coach
+// but has no active coach subscription (coach_tier IS NULL). Admins bypass.
+// One plan only: "coach" at $49/month, up to 15 active clients.
+function CoachPaywall() {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  async function startCheckout() {
+    if (busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) { setErr("Not signed in"); setBusy(false); return; }
+      const res = await fetch("/api/create-checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ plan: "coach" }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.url) {
+        setErr(json.error || "Could not start checkout");
+        setBusy(false);
+        return;
+      }
+      window.location.href = json.url;
+    } catch (e) {
+      setErr(e.message || "Checkout failed");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ padding:"32px 16px 48px" }}>
+      {/* Header */}
+      <div style={{ textAlign:"center", marginBottom:28 }}>
+        <div style={{ fontSize:11, fontWeight:700, color:T.gold, letterSpacing:"0.08em", marginBottom:10 }}>
+          FORGED COACH
+        </div>
+        <div style={{ fontFamily:T.serif, fontSize:26, color:T.text, lineHeight:1.2, marginBottom:10 }}>
+          Your clients' habits,<br/>before every session.
+        </div>
+        <div style={{ fontSize:13, color:T.muted, lineHeight:1.6, maxWidth:320, margin:"0 auto" }}>
+          See who's building momentum, who's going quiet, and what's worth asking — without chasing anyone for an update.
+        </div>
+      </div>
+
+      {/* Plan card */}
+      <div style={{
+        background:"linear-gradient(180deg, rgba(200,144,42,0.1), rgba(200,144,42,0.03))",
+        border:`1px solid rgba(200,144,42,0.3)`,
+        borderRadius:18, padding:"22px 20px 20px", marginBottom:12,
+      }}>
+        <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", marginBottom:6 }}>
+          <div style={{ fontSize:16, fontWeight:700, color:T.text }}>Forged Coach</div>
+          <div>
+            <span style={{ fontSize:24, fontWeight:700, color:T.text }}>$49</span>
+            <span style={{ fontSize:12, color:T.muted, marginLeft:3 }}>/month</span>
+          </div>
+        </div>
+        <div style={{ fontSize:12, color:T.muted, marginBottom:16 }}>Up to 15 active clients · cancel any time</div>
+        <ul style={{ listStyle:"none", padding:0, margin:"0 0 18px 0" }}>
+          {[
+            "Client list with live habit data",
+            "7-day activity grids per client",
+            "Pre-session brief — who's on track, who's not, what to ask",
+            "Invite clients via a shareable link",
+            "Streak and gap detection across every habit",
+          ].map((f, i) => (
+            <li key={i} style={{ display:"flex", gap:10, marginBottom:8 }}>
+              <span style={{ color:T.gold, fontSize:12, flexShrink:0, marginTop:1 }}>✓</span>
+              <span style={{ fontSize:12, color:T.sub, lineHeight:1.5 }}>{f}</span>
+            </li>
+          ))}
+        </ul>
+
+        {err && (
+          <div style={{ background:"rgba(231,76,60,0.12)", color:"#E74C3C", padding:"9px 12px", borderRadius:8, fontSize:12, marginBottom:12, textAlign:"center" }}>
+            {err}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={startCheckout}
+          disabled={busy}
+          style={{
+            width:"100%", padding:"13px 14px", borderRadius:12, border:"none",
+            background: busy ? "rgba(200,144,42,0.4)" : T.gold,
+            color:"#1a1a16", fontSize:14, fontWeight:700,
+            cursor: busy ? "default" : "pointer", fontFamily:T.font,
+            transition:"background 0.15s",
+          }}
+        >
+          {busy ? "Opening Stripe…" : "Subscribe — $49/month"}
+        </button>
+      </div>
+
+      <div style={{ fontSize:11, color:T.muted, textAlign:"center", lineHeight:1.6 }}>
+        Secure checkout via Stripe · cancel any time from your account
+      </div>
+    </div>
+  );
+}
+
+function CoachApp({ onExit, isPreview, coachTier, isAdmin }) {
   const [coachScreen, setCoachScreen] = useState("list");
   const [selectedClient, setSelectedClient] = useState(null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
+  // Coach's own user id — used to build the share link. Fetched alongside
+  // the client list so we don't need a second roundtrip.
+  const [coachUserId, setCoachUserId] = useState(null);
+  const [inviteCopied, setInviteCopied] = useState(false);
+
+  // Paywall: coach is flagged is_coach (and not admin/preview) but has no
+  // active coach subscription. Admins always bypass — they're previewing.
+  // We resolve session.user.id even in paywall mode so the subscribe button
+  // can stamp client_reference_id correctly.
+  const showPaywall = !isAdmin && !isPreview && !coachTier;
 
   useEffect(() => {
     (async () => {
@@ -10592,6 +10800,9 @@ function CoachApp({ onExit, isPreview }) {
         const { data: { session } } = await supabase.auth.getSession();
         const token = session?.access_token;
         if (!token) { setErr("Not signed in"); setLoading(false); return; }
+        setCoachUserId(session.user?.id || null);
+        // No point fetching the client list during a paywall — show subscribe screen instead.
+        if (showPaywall) { setLoading(false); return; }
         const res = await fetch("/api/coach-data", { headers: { Authorization: `Bearer ${token}` } });
         const json = await res.json();
         if (!res.ok) { setErr(json.error || "Failed to load"); setLoading(false); return; }
@@ -10599,7 +10810,21 @@ function CoachApp({ onExit, isPreview }) {
       } catch (e) { setErr(e.message); }
       finally { setLoading(false); }
     })();
-  }, []);
+  }, [showPaywall]);
+
+  // Build the invite link from the coach's own user id. base64(uuid) yields a
+  // URL-safe string with no special characters, so no extra escaping needed.
+  const inviteLink = coachUserId
+    ? `https://forged-sage.vercel.app/?coach=${btoa(coachUserId)}`
+    : null;
+
+  function copyInviteLink() {
+    if (!inviteLink) return;
+    navigator.clipboard.writeText(inviteLink).then(() => {
+      setInviteCopied(true);
+      setTimeout(() => setInviteCopied(false), 2000);
+    });
+  }
 
   const { clients = [], stats = {} } = data || {};
 
@@ -10628,7 +10853,9 @@ function CoachApp({ onExit, isPreview }) {
 
       {/* Content */}
       <div style={{ paddingBottom:40 }}>
-        {coachScreen === "detail" && selectedClient ? (
+        {showPaywall ? (
+          <CoachPaywall />
+        ) : coachScreen === "detail" && selectedClient ? (
           <CoachClientDetail
             client={selectedClient}
             onBack={() => { setCoachScreen("list"); setSelectedClient(null); }}
@@ -10695,6 +10922,54 @@ function CoachApp({ onExit, isPreview }) {
                   {clients.length} client{clients.length !== 1 ? "s" : ""} · {data?.asOf ?? "—"} UTC
                 </div>
               )}
+
+              {/* Invite client — sharable link that auto-attaches anyone who
+                  signs up via it as a client of this coach (handled by
+                  /api/accept-coach-invite on first sign-in). Shown to the
+                  coach regardless of whether they have clients yet. */}
+              {!loading && !err && inviteLink && (
+                <div style={{
+                  marginTop:24, padding:"16px 16px 14px",
+                  background:T.surface,
+                  border:`1px solid rgba(255,255,255,0.06)`,
+                  borderRadius:14,
+                }}>
+                  <div style={{ fontSize:13, fontWeight:600, color:T.text, marginBottom:4 }}>
+                    Invite a client
+                  </div>
+                  <div style={{ fontSize:11, color:T.muted, lineHeight:1.5, marginBottom:12 }}>
+                    Anyone who signs up through this link will appear in your client list.
+                  </div>
+                  <div style={{
+                    display:"flex", alignItems:"center", gap:8,
+                    background:T.bg,
+                    border:`1px solid rgba(255,255,255,0.06)`,
+                    borderRadius:10, padding:"8px 10px",
+                  }}>
+                    <div style={{
+                      flex:1, minWidth:0,
+                      fontSize:11, color:T.sub,
+                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                      fontFamily:"ui-monospace, SFMono-Regular, Menlo, monospace",
+                    }}>
+                      {inviteLink}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={copyInviteLink}
+                      style={{
+                        flexShrink:0, padding:"6px 12px", borderRadius:8, border:"none",
+                        background: inviteCopied ? "rgba(39,174,96,0.18)" : T.gold,
+                        color: inviteCopied ? "#27AE60" : "#1a1a16",
+                        fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:T.font,
+                        transition:"background 0.18s, color 0.18s",
+                      }}
+                    >
+                      {inviteCopied ? "Copied" : "Copy"}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </>
         )}
@@ -10752,6 +11027,9 @@ export default function App() {
   const [isPro,          setIsPro]          = useState(false);
   const [isAdmin,        setIsAdmin]        = useState(false);
   const [isCoach,        setIsCoach]        = useState(false);
+  // Active coach subscription tier ("coach" | "coach_pro" | null). Drives the
+  // paywall in CoachApp — coaches without a tier see the subscribe screen.
+  const [coachTier,      setCoachTier]      = useState(null);
   const [previewCoach,   setPreviewCoach]   = useState(false);
   /** From profiles.stripe_customer_id — used for Stripe Customer Portal */
   const [stripeCustomerId, setStripeCustomerId] = useState(null);
@@ -10996,6 +11274,56 @@ export default function App() {
       window.history.replaceState({}, "", "/");
     }
   }, []);
+
+  // ── Handle ?coach=<base64(coachUserId)> invite URLs ─────────────────────────
+  // Stash the raw token on first paint (before auth resolves). After the user
+  // signs in or creates an account the dependent effect below POSTs it to
+  // /api/accept-coach-invite. URL is cleaned synchronously so a refresh or a
+  // share doesn't re-process the same invite.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const coachToken = params.get("coach");
+    if (coachToken) {
+      localStorage.setItem("forged_pending_coach", coachToken);
+      params.delete("coach");
+      const qs = params.toString();
+      const newUrl = window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash;
+      window.history.replaceState({}, "", newUrl);
+    }
+  }, []);
+
+  // Once the user has a session, hand the stashed token to the backend. We
+  // clear localStorage *after* a successful response so a transient network
+  // failure leaves the token in place to retry on next session restore.
+  useEffect(() => {
+    if (!sessionUserId) return;
+    const coachToken = localStorage.getItem("forged_pending_coach");
+    if (!coachToken) return;
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const accessToken = session?.access_token;
+        if (!accessToken) return; // try again on the next session change
+        const res = await fetch("/api/accept-coach-invite", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+          body: JSON.stringify({ coach: coachToken }),
+        });
+        if (res.ok) {
+          localStorage.removeItem("forged_pending_coach");
+          addToast("You're connected with your coach.");
+        } else {
+          // Permanent failure modes: bad token, self-invite, missing coach.
+          // Drop the token so we don't keep retrying every session.
+          if (res.status === 400 || res.status === 404) {
+            localStorage.removeItem("forged_pending_coach");
+          }
+        }
+      } catch {
+        // Transient — leave the token, will retry on next session restore.
+      }
+    })();
+  }, [sessionUserId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!sessionUserId) return;
@@ -11938,6 +12266,7 @@ export default function App() {
         setIsPro(proStatus);
         setIsAdmin(!!profile.is_admin);
         setIsCoach(!!profile.is_coach);
+        setCoachTier(profile.coach_tier || null);
         // Detect a completed payment on any sign-in path (session survived or user re-authenticated)
         if (proStatus && localStorage.getItem('forged_checkout_pending') === '1') {
           localStorage.removeItem('forged_checkout_pending');
@@ -13281,6 +13610,8 @@ export default function App() {
         <CoachApp
           onExit={previewCoach ? () => setPreviewCoach(false) : null}
           isPreview={!!previewCoach}
+          coachTier={coachTier}
+          isAdmin={isAdmin}
         />
       </>
     );
