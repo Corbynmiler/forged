@@ -6,6 +6,23 @@ const SUPABASE_URL = "https://apdmvbzfjuvxworjepze.supabase.co";
 const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFwZG12YnpmanV2eHdvcmplcHplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MzU4MzAsImV4cCI6MjA5MDIxMTgzMH0.s3O-0m7eN9dLTmCagjezHP4Wwn8fdtlCyXITkI82bPU";
 
+// ── Local-date helpers ─────────────────────────────────────────────────────────
+// Logs must always land on the user's local calendar day. Computing "today"
+// server-side from `new Date()` yields the *UTC* date, which is wrong for
+// every timezone east of UTC during the early-morning window (e.g. AU/NZ in
+// the morning is still "yesterday" in UTC). We accept a client-supplied
+// YYYY-MM-DD and fall back to UTC only if it's missing/invalid.
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+function safeClientDate(raw) {
+  if (typeof raw !== "string" || !DATE_RE.test(raw)) return null;
+  // Reject obviously bogus values (e.g. clock totally wrong) by sanity-bounding
+  // to within ±2 days of UTC. This still allows every legitimate local date.
+  const utcToday = new Date().toISOString().slice(0, 10);
+  const dayDiff = Math.abs((Date.parse(raw + "T00:00:00Z") - Date.parse(utcToday + "T00:00:00Z")) / 86400000);
+  if (!Number.isFinite(dayDiff) || dayDiff > 2) return null;
+  return raw;
+}
+
 // ── Tool definitions ───────────────────────────────────────────────────────────
 const COACH_TOOLS = [
   {
@@ -135,13 +152,16 @@ async function executeEditHabit(input, userId, db) {
   return { habit_id: input.habit_id, habit_name: input.habit_name, updates, updatedRow: data };
 }
 
-async function executeLogHabit(input, userId, db) {
+async function executeLogHabit(input, userId, db, clientDate) {
   const { data: row, error } = await db
     .from("habits").select("logs, habit_type")
     .eq("id", input.habit_id).eq("user_id", userId).single();
   if (error || !row) throw new Error(`Habit not found (id: ${input.habit_id})`);
 
-  const today = new Date().toISOString().split("T")[0];
+  // Prefer the client's local date so logs land on the user's actual
+  // calendar day. Fallback to UTC only if no usable client date arrived
+  // (defensive for older cached client builds).
+  const today = clientDate || new Date().toISOString().split("T")[0];
   const logs  = Array.isArray(row.logs) ? row.logs : [];
   const htype = row.habit_type;
   let logValue;
@@ -197,35 +217,84 @@ function sse(res, data) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
+// ── Free-tier server-side rate limit ───────────────────────────────────────────
+// Keep in sync with client-side FREE_DAILY_LIMIT in src/App.jsx.
+const FREE_DAILY_LIMIT = 10;
+
 // ── Handler ────────────────────────────────────────────────────────────────────
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const { messages, system } = req.body;
+  const { messages, system, client_date: rawClientDate } = req.body;
   if (!messages || !Array.isArray(messages)) return res.status(400).json({ error: "Invalid request body" });
+  // Validated YYYY-MM-DD or null. Used both for log entries (so they land on
+  // the user's local day, not UTC) and for daily quota tracking (so quotas
+  // reset at the user's local midnight).
+  const clientDate = safeClientDate(rawClientDate);
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: "AI Coach is not configured yet." });
 
-  // ── Auth — use hardcoded anon key so this always works ───────────────────────
+  // ── Auth: REQUIRED ───────────────────────────────────────────────────────────
+  // Previously anonymous requests were accepted (without tools). That allowed
+  // anyone to burn ANTHROPIC_API_KEY credit by hitting this endpoint with any
+  // payload. Now we require a valid Supabase JWT.
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceRoleKey) return res.status(500).json({ error: "AI Coach is not configured yet." });
+
   const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
+  if (!token) return res.status(401).json({ error: "Not authenticated" });
+
   let userId = null;
-  let db = null;
-  if (token && process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    try {
-      const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-        global: { headers: { Authorization: `Bearer ${token}` } },
+  try {
+    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+    const { data: { user }, error: authErr } = await userClient.auth.getUser();
+    if (authErr || !user?.id) return res.status(401).json({ error: "Invalid token" });
+    userId = user.id;
+  } catch {
+    return res.status(401).json({ error: "Invalid token" });
+  }
+  const db = createClient(SUPABASE_URL, serviceRoleKey);
+
+  // ── Server-side rate limit for free users ───────────────────────────────────
+  // Client-side enforces this too but a malicious caller can clear localStorage
+  // and re-spam. Authoritative check lives here.
+  let isPro = false;
+  try {
+    const { data: prof } = await db
+      .from("profiles")
+      .select("is_pro, is_admin")
+      .eq("id", userId)
+      .maybeSingle();
+    isPro = !!(prof?.is_pro || prof?.is_admin);
+  } catch { /* treat as free */ }
+
+  // Use the client's local date for quota tracking so the counter resets at
+  // the user's actual midnight (matches the client-side cap that uses
+  // localStorage keyed by local todayStr()).
+  const quotaDate = clientDate || new Date().toISOString().slice(0, 10);
+  let usageCount = 0;
+  if (!isPro) {
+    const { data: usage } = await db
+      .from("chat_usage")
+      .select("count")
+      .eq("user_id", userId)
+      .eq("date", quotaDate)
+      .maybeSingle();
+    usageCount = usage?.count ?? 0;
+    if (usageCount >= FREE_DAILY_LIMIT) {
+      return res.status(429).json({
+        error: `Daily free coach limit reached (${FREE_DAILY_LIMIT}/day). Upgrade to Pro for unlimited messages.`,
+        limit: FREE_DAILY_LIMIT,
+        used: usageCount,
       });
-      const { data: { user } } = await userClient.auth.getUser();
-      if (user?.id) {
-        userId = user.id;
-        db = createClient(SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-      }
-    } catch { /* no tools */ }
+    }
   }
 
   const client = new Anthropic({ apiKey: apiKey.trim() });
-  const tools  = userId ? COACH_TOOLS : [];
+  const tools  = COACH_TOOLS;
 
   // Cost control: cap history at last 12 messages (6 turns)
   const trimmedMessages = messages.slice(-12);
@@ -239,12 +308,15 @@ export default async function handler(req, res) {
     });
 
     // ── Tool path ─────────────────────────────────────────────────────────────
-    if (firstResp.stop_reason === "tool_use" && userId && db) {
+    if (firstResp.stop_reason === "tool_use") {
       const toolBlocks = firstResp.content.filter(b => b.type === "tool_use");
       const toolResults = [];
       const actions = { created: null, edited: [], logged: [] };
 
-      await Promise.all(toolBlocks.map(async (tb) => {
+      // Sequential execution: AI sometimes calls create_habit followed by
+      // log_habit on that same new habit in a single turn. Running them in
+      // parallel causes log_habit to race — the habit row may not exist yet.
+      for (const tb of toolBlocks) {
         let result;
         try {
           if (tb.name === "create_habit") {
@@ -256,7 +328,7 @@ export default async function handler(req, res) {
             actions.edited.push(r);
             result = { success: true, habit_name: r.habit_name, fields_updated: Object.keys(r.updates).filter(k => k !== "updated_at") };
           } else if (tb.name === "log_habit") {
-            const r = await executeLogHabit(tb.input, userId, db);
+            const r = await executeLogHabit(tb.input, userId, db, clientDate);
             actions.logged.push(r);
             result = { success: true, habit_name: r.habit_name, habit_type: r.habit_type, date: r.date, value_saved: r.logValue };
           } else {
@@ -266,7 +338,7 @@ export default async function handler(req, res) {
           result = { success: false, error: err.message };
         }
         toolResults.push({ type: "tool_result", tool_use_id: tb.id, content: JSON.stringify(result) });
-      }));
+      }
 
       // Stream confirmation — Claude now knows exact success/failure per action
       res.setHeader("Content-Type", "text/event-stream");
@@ -295,6 +367,15 @@ export default async function handler(req, res) {
         edited:  actions.edited.length  ? actions.edited  : null,
         logged:  actions.logged.length  ? actions.logged  : null,
       });
+      // Count this as one message against the free-tier daily quota.
+      if (!isPro) {
+        try {
+          await db.from("chat_usage").upsert(
+            { user_id: userId, date: quotaDate, count: usageCount + 1 },
+            { onConflict: "user_id,date" }
+          );
+        } catch (e) { console.error("[chat] usage upsert failed:", e?.message || e); }
+      }
       return res.end();
     }
 
@@ -316,6 +397,14 @@ export default async function handler(req, res) {
     }
 
     sse(res, { done: true });
+    if (!isPro) {
+      try {
+        await db.from("chat_usage").upsert(
+          { user_id: userId, date: quotaDate, count: usageCount + 1 },
+          { onConflict: "user_id,date" }
+        );
+      } catch (e) { console.error("[chat] usage upsert failed:", e?.message || e); }
+    }
     return res.end();
 
   } catch (err) {

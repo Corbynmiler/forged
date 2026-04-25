@@ -3375,10 +3375,10 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
       <div style={{ fontSize:48, marginBottom:18 }}>⚒️</div>
       <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, marginBottom:10 }}>Nothing forged yet.</div>
       <div style={{ fontSize:14, color:T.muted, lineHeight:1.75, marginBottom:28 }}>
-        Add your first habit or goal and start building something that lasts.
+        Pick one thing you keep meaning to change. Log it for a week. Then ask the coach what it's already seeing in your notes.
       </div>
       <button onClick={onAdd} style={{ padding:"14px 32px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:15, fontWeight:500, cursor:"pointer" }}>
-        Add your first habit or goal
+        Add your first habit
       </button>
     </div>
   );
@@ -3405,7 +3405,7 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
         >
           <span aria-hidden style={{ fontSize:14, lineHeight:1 }}>✨</span>
           <span style={{ color:T.sub, fontWeight:500, flex:1, lineHeight:1.35 }}>
-            Coach can log your habits by voice — <span style={{ color:T.gold, fontWeight:700 }}>tap the ✨ button</span> to try.
+            Your coach reads your logs and notes — <span style={{ color:T.gold, fontWeight:700 }}>tap to ask</span> what it's already noticed.
           </span>
         </button>
       )}
@@ -4313,7 +4313,7 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
           {listEmpty && (
             <div style={{ padding:"60px 30px", textAlign:"center" }}>
               <div style={{ fontSize:36, marginBottom:14 }}>📓</div>
-              <div style={{ fontSize:14, color:T.muted, lineHeight:1.7 }}>No entries yet. Log on Today, or open <strong style={{ color:T.text }}>Month</strong> — days with a <strong style={{ color:"rgba(230,126,34,0.95)" }}>?</strong> have no logs and can be marked missed.</div>
+              <div style={{ fontSize:14, color:T.muted, lineHeight:1.7 }}>Nothing here yet. Log a habit on <strong style={{ color:T.text }}>Today</strong> and add a line about how it went — that's what the pattern detection reads.</div>
             </div>
           )}
           {!listEmpty && sortedDatesDesc.map(date => renderDayOrMissed(date))}
@@ -4539,7 +4539,7 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare, isPro = fa
     <div style={{ padding:"60px 28px", textAlign:"center" }}>
       <div style={{ fontSize:36, marginBottom:14 }}>📈</div>
       <div style={{ fontSize:14, color:T.muted, lineHeight:1.7 }}>
-        Start logging habits and your stats will appear here.
+        Log a habit on Today and your patterns will start appearing here.
       </div>
     </div>
   );
@@ -4571,7 +4571,7 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare, isPro = fa
       </div>
 
       {/* ══ Activity ══════════════════════════════════════════════════════════ */}
-      <SectionTitle label="Activity" hint="How often you're showing up, and how that's stacking up over time." />
+      <SectionTitle label="Activity" hint="How consistent you've been — and where the gaps are." />
 
       {/* Streaks */}
       <IC
@@ -4752,17 +4752,17 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare, isPro = fa
           above) so token cost is zero and analysis only re-runs when there's
           new writing or the cache expires. */}
       <SectionTitle
-        label="Deeper insights"
+        label="Pattern detection"
         hint={deep.needsMoreData
-          ? "Unlocks as you add reflections, notes, wins, and hard parts. It reads what you actually wrote — not just numbers."
-          : "Patterns pulled from your own words — reflections, notes, wins, and hard parts. Refreshes as you write more."}
+          ? "Add a line when you log — what went well, what didn't. After a few entries this section finds the recurring patterns in what you write."
+          : "Pulled from your own words — reflections, notes, wins, and blockers. Gets more specific the more you write."}
       />
 
       {deep.needsMoreData ? (
         // Single intentional low-data state rather than 4 empty cards.
-        <IC title="Not enough written data yet">
+        <IC title="Write more to unlock this">
           <EmptyHint icon="📝">
-            Start adding quick reflections or notes when you log and real patterns will surface here — recurring themes, wins that keep showing up, struggles worth naming, and the tone of your recent week. A few lines across a few days is enough to kick things off.
+            Add a line or two when you log — what went well, what got in the way. After a few entries, this section finds recurring themes, flags what keeps coming up, and reads the tone behind your week. That's where the useful stuff is.
           </EmptyHint>
         </IC>
       ) : (
@@ -4923,10 +4923,10 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare, isPro = fa
                 </div>
                 <div style={{ fontSize:11, color:T.hint, lineHeight:1.6 }}>
                   {refl.coverage < 15
-                    ? "Add a quick note or reflection when you log — even one line unlocks richer patterns."
+                    ? "One line when you log is enough. The more you write, the more specific the patterns get."
                     : refl.coverage < 40
-                    ? "Nice — reflections are how this app gets smart about you. Keep adding them when something stands out."
-                    : "You're reflecting often. This is the richest kind of log for spotting patterns."}
+                    ? "Reflections are how the app gets specific about you — the patterns sharpen the more you write."
+                    : "You're reflecting consistently. This is the data that makes pattern detection actually work."}
                 </div>
               </div>
             </IC>
@@ -4946,10 +4946,10 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare, isPro = fa
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
           <div style={{ width:36, height:36, borderRadius:10, background:"rgba(200,144,42,0.12)", border:"0.5px solid rgba(200,144,42,0.35)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>🧠</div>
-          <div style={{ fontSize:14, fontWeight:600, color:T.text }}>AI-written weekly summaries</div>
+          <div style={{ fontSize:14, fontWeight:600, color:T.text }}>Weekly pattern summary</div>
         </div>
         <div style={{ fontSize:12, color:T.sub, lineHeight:1.65, marginBottom: !isPro ? 12 : 0 }}>
-          LLM-written weekly recaps, proactive alerts when your tone shifts, and Coach conversations that reference what you actually wrote. Rolling out for supporters first.
+          The coach writes you a weekly brief — what shifted, what held, and what's worth paying attention to going into next week. Based on what you actually logged and wrote.
         </div>
         {!isPro && onUpgrade && (
           <button
@@ -7194,18 +7194,18 @@ function buildCoachGreeting({ name, habits = [], goals = [] }) {
   // First-ever open / no habits yet.
   if (!hasHabits) {
     return pick([
-      `${hi} 👋 Nothing on the tracker yet. Want me to set up your first habit, or tell me what you're trying to build?`,
-      `${hi}. Blank slate — which is a good place to start. Want to add a habit, or talk through what matters most right now?`,
-      `${hi}. Let's get something moving. Tell me what you want to build, or say "add [habit]" and I'll set it up.`,
+      `${hi} 👋 I find patterns from what you log and write — but I need data first. Tell me what you're trying to change and I'll set it up.`,
+      `${hi}. The more you log, the more I can show you. Start with one habit — say "add [habit name]" and I'll create it now.`,
+      `${hi}. Nothing to analyse yet. Tell me what you keep meaning to do and I'll get it on the board.`,
     ]);
   }
 
   // Has habits but never logged one.
   if (totalRealLogs === 0) {
     return pick([
-      `${hi} 👋 Your habits are set up — now let's get the first log in. Want me to log one for you? Just say the habit name.`,
-      `${hi}. Fresh setup, no logs yet. Tell me what you did today and I'll get it on the board.`,
-      `${hi}. The system's ready — one log turns this from a list into momentum. What did you do today?`,
+      `${hi} 👋 Habits are set up but no data yet — I need logs to find patterns. Tell me what you did today and I'll record it.`,
+      `${hi}. No logs yet, which means nothing for me to analyse. Tell me what you actually did today and I'll start the record.`,
+      `${hi}. The habits are there — now I need data. One log is all it takes. What did you do today?`,
     ]);
   }
 
@@ -7213,9 +7213,9 @@ function buildCoachGreeting({ name, habits = [], goals = [] }) {
   if (loggedToday) {
     const streakBit = topStreak >= 3 ? ` ${topStreak}-day streak going.` : "";
     return pick([
-      `${hi} — already logged today.${streakBit} Want to add another, reflect on how it went, or look at the week?`,
-      `${hi}. Today's log is in.${streakBit} Anything you want to think through, or another habit to hit?`,
-      `Nice ${who || "one"} — you've already shown up today.${streakBit} Want to check progress, add another log, or plan tomorrow?`,
+      `${hi} — already logged today.${streakBit} Want to add a note on how it went? The more you write, the more I can find.`,
+      `${hi}. Today's log is in.${streakBit} Anything you want to reflect on, or another habit to hit?`,
+      `Nice ${who || "one"} — you showed up today.${streakBit} Want to add a reflection while it's fresh, or look at how the week's tracking?`,
     ]);
   }
 
