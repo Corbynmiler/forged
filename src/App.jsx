@@ -10365,16 +10365,28 @@ function buildPageGuideMessage(page, { name, habits = [], goals = [] } = {}) {
 }
 
 // ─── COACH DASHBOARD ──────────────────────────────────────────────────────────
-function ActivityDots({ last7 }) {
+// Collapse per-habit last7 arrays into one combined "any logged" row
+function mergedLast7(habits) {
+  if (!habits || habits.length === 0)
+    return Array(7).fill({ date:"", logged:false, skip:false });
+  const base = habits[0].last7 || [];
+  return base.map((day, i) => ({
+    date:   day.date,
+    logged: habits.some(h => h.last7[i]?.logged),
+    skip:   !habits.some(h => h.last7[i]?.logged) && habits.some(h => h.last7[i]?.skip),
+  }));
+}
+
+function ActivityDots({ last7, size = 9 }) {
   return (
     <div style={{ display:"flex", gap:3 }}>
-      {last7.map((d, i) => (
+      {(last7 || []).map((d, i) => (
         <div
           key={i}
           title={d.date}
           style={{
-            width: 8, height: 8, borderRadius: 2,
-            background: d.logged ? "#27AE60" : d.skip ? "rgba(200,144,42,0.5)" : "rgba(255,255,255,0.08)",
+            width:size, height:size, borderRadius:2,
+            background: d.logged ? "#27AE60" : d.skip ? "rgba(200,144,42,0.45)" : "rgba(255,255,255,0.08)",
           }}
         />
       ))}
@@ -10382,96 +10394,64 @@ function ActivityDots({ last7 }) {
   );
 }
 
-function ClientCard({ client, expanded, onToggle }) {
-  const statusColor = client.daysSinceActive === null ? T.muted
-    : client.daysSinceActive === 0 ? "#27AE60"
-    : client.daysSinceActive <= 3 ? T.gold
-    : "#E74C3C";
-
-  const lastSeenLabel = client.daysSinceActive === null ? "never logged"
-    : client.daysSinceActive === 0 ? "active today"
-    : client.daysSinceActive === 1 ? "yesterday"
-    : `${client.daysSinceActive}d ago`;
-
+// Thin progress bar — today's completion ratio
+function CompletionBar({ done, total }) {
+  if (!total) return null;
+  const pct = Math.round((done / total) * 100);
+  const bar = done === total ? "#27AE60" : done > 0 ? T.gold : "rgba(255,255,255,0.08)";
   return (
-    <div style={{ background:T.surface, borderRadius:14, marginBottom:10, overflow:"hidden", border:`1px solid rgba(255,255,255,0.06)` }}>
-      {/* Card header — always visible */}
-      <button
-        onClick={onToggle}
-        style={{ width:"100%", padding:"14px 16px", background:"none", border:"none", cursor:"pointer", textAlign:"left", display:"flex", alignItems:"center", gap:12 }}
-      >
-        {/* Status dot */}
-        <div style={{ width:8, height:8, borderRadius:"50%", background:statusColor, flexShrink:0, marginTop:1 }} />
-
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
-            <span style={{ fontSize:14, fontWeight:600, color:T.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-              {client.name}
-            </span>
-            {client.isPro && (
-              <span style={{ fontSize:9, fontWeight:700, color:T.gold, background:"rgba(200,144,42,0.15)", padding:"2px 7px", borderRadius:8, flexShrink:0 }}>
-                PRO
-              </span>
-            )}
-          </div>
-          <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
-            <span style={{ fontSize:11, color:T.muted }}>
-              {client.loggedTodayCount}/{client.totalHabits} today
-            </span>
-            {client.bestStreak > 0 && (
-              <span style={{ fontSize:11, color:T.sub }}>🔥 {client.bestStreak}d streak</span>
-            )}
-            <span style={{ fontSize:11, color:statusColor }}>{lastSeenLabel}</span>
-          </div>
-        </div>
-
-        <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:6, flexShrink:0 }}>
-          <ActivityDots last7={client.habits.length > 0
-            ? client.habits[0].last7
-            : Array(7).fill({ logged:false, skip:false })} />
-          <span style={{ fontSize:10, color:T.muted }}>{expanded ? "▲" : "▼"}</span>
-        </div>
-      </button>
-
-      {/* Expanded detail */}
-      {expanded && (
-        <div style={{ borderTop:`1px solid rgba(255,255,255,0.06)`, padding:"12px 16px 14px" }}>
-          {client.email && (
-            <div style={{ fontSize:11, color:T.muted, marginBottom:10 }}>{client.email}</div>
-          )}
-          {client.habits.length === 0 ? (
-            <div style={{ fontSize:12, color:T.muted, fontStyle:"italic" }}>No habits yet.</div>
-          ) : (
-            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-              {client.habits.map((h, i) => (
-                <div key={i}>
-                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:4 }}>
-                    <span style={{ fontSize:12, color:h.loggedToday ? T.text : T.sub }}>
-                      {h.emoji} {h.name}
-                      {h.loggedToday && <span style={{ color:"#27AE60", marginLeft:6 }}>✓</span>}
-                    </span>
-                    {h.streak > 0 && (
-                      <span style={{ fontSize:11, color:T.gold }}>🔥 {h.streak}d</span>
-                    )}
-                  </div>
-                  <ActivityDots last7={h.last7} />
-                  {h.recentNote && (
-                    <div style={{ fontSize:11, color:T.muted, fontStyle:"italic", marginTop:4, lineHeight:1.5 }}>
-                      "{h.recentNote.length > 80 ? h.recentNote.slice(0,80)+"…" : h.recentNote}"
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-          <div style={{ marginTop:12, fontSize:11, color:T.muted }}>
-            {client.xp} xp · joined {client.joinedAt ? new Date(client.joinedAt).toLocaleDateString("en-AU", { month:"short", year:"numeric" }) : "—"}
-          </div>
-        </div>
-      )}
+    <div style={{ marginTop:6, height:3, background:"rgba(255,255,255,0.06)", borderRadius:2, overflow:"hidden" }}>
+      <div style={{ width:`${pct}%`, height:"100%", background:bar, borderRadius:2, transition:"width 0.4s" }} />
     </div>
   );
 }
+
+// Single client row in the coach list — left accent border, completion bar, merged 7-day grid
+function CoachClientRow({ client, onClick }) {
+  const dsa = client.daysSinceActive;
+  const accent = dsa === null ? T.hint : dsa === 0 ? "#27AE60" : dsa <= 2 ? T.gold : dsa <= 5 ? T.amber : "#E74C3C";
+  const lastLabel = dsa === null ? "never logged" : dsa === 0 ? "active today" : dsa === 1 ? "yesterday" : `${dsa}d ago`;
+  const merged = mergedLast7(client.habits);
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        width:"100%", textAlign:"left", cursor:"pointer", fontFamily:T.font, display:"block",
+        background:T.surface, borderRadius:12, padding:"13px 14px 12px", marginBottom:8,
+        borderTop:`1px solid rgba(255,255,255,0.06)`,
+        borderRight:`1px solid rgba(255,255,255,0.06)`,
+        borderBottom:`1px solid rgba(255,255,255,0.06)`,
+        borderLeft:`3px solid ${accent}`,
+      }}
+    >
+      {/* Name + meta row */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:7, minWidth:0 }}>
+          <span style={{ fontSize:14, fontWeight:600, color:T.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+            {client.name}
+          </span>
+          {client.isPro && (
+            <span style={{ fontSize:9, fontWeight:700, color:T.gold, background:"rgba(200,144,42,0.15)", padding:"2px 6px", borderRadius:6, flexShrink:0 }}>PRO</span>
+          )}
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+          {client.bestStreak >= 3 && <span style={{ fontSize:11, color:T.gold }}>🔥 {client.bestStreak}d</span>}
+          <span style={{ fontSize:11, color:accent, fontWeight:dsa === 0 ? 600 : 400 }}>{lastLabel}</span>
+          <span style={{ fontSize:14, color:T.muted }}>›</span>
+        </div>
+      </div>
+      {/* Activity row */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+        <span style={{ fontSize:11, color: client.totalHabits === 0 ? T.muted : client.loggedTodayCount === client.totalHabits && client.totalHabits > 0 ? "#27AE60" : T.muted }}>
+          {client.totalHabits === 0 ? "No habits yet" : `${client.loggedTodayCount}/${client.totalHabits} today`}
+        </span>
+        <ActivityDots last7={merged} size={8} />
+      </div>
+      {client.totalHabits > 0 && <CompletionBar done={client.loggedTodayCount} total={client.totalHabits} />}
+    </button>
+  );
+}
+
 
 // ─── COACH WORKSPACE ──────────────────────────────────────────────────────────
 // Separate shell — replaces the consumer nav for is_coach accounts.
@@ -10778,20 +10758,14 @@ function CoachPaywall() {
 }
 
 function CoachApp({ onExit, isPreview, coachTier, isAdmin }) {
-  const [coachScreen, setCoachScreen] = useState("list");
+  const [coachScreen,    setCoachScreen]    = useState("list");
   const [selectedClient, setSelectedClient] = useState(null);
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState(null);
-  // Coach's own user id — used to build the share link. Fetched alongside
-  // the client list so we don't need a second roundtrip.
-  const [coachUserId, setCoachUserId] = useState(null);
-  const [inviteCopied, setInviteCopied] = useState(false);
+  const [data,           setData]           = useState(null);
+  const [loading,        setLoading]        = useState(true);
+  const [err,            setErr]            = useState(null);
+  const [coachUserId,    setCoachUserId]    = useState(null);
+  const [inviteCopied,   setInviteCopied]   = useState(false);
 
-  // Paywall: coach is flagged is_coach (and not admin/preview) but has no
-  // active coach subscription. Admins always bypass — they're previewing.
-  // We resolve session.user.id even in paywall mode so the subscribe button
-  // can stamp client_reference_id correctly.
   const showPaywall = !isAdmin && !isPreview && !coachTier;
 
   useEffect(() => {
@@ -10801,7 +10775,6 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin }) {
         const token = session?.access_token;
         if (!token) { setErr("Not signed in"); setLoading(false); return; }
         setCoachUserId(session.user?.id || null);
-        // No point fetching the client list during a paywall — show subscribe screen instead.
         if (showPaywall) { setLoading(false); return; }
         const res = await fetch("/api/coach-data", { headers: { Authorization: `Bearer ${token}` } });
         const json = await res.json();
@@ -10812,8 +10785,6 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin }) {
     })();
   }, [showPaywall]);
 
-  // Build the invite link from the coach's own user id. base64(uuid) yields a
-  // URL-safe string with no special characters, so no extra escaping needed.
   const inviteLink = coachUserId
     ? `https://forged-sage.vercel.app/?coach=${btoa(coachUserId)}`
     : null;
@@ -10828,31 +10799,51 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin }) {
 
   const { clients = [], stats = {} } = data || {};
 
-  const statusColor = (d) =>
-    d === null ? T.muted : d === 0 ? "#27AE60" : d <= 3 ? T.gold : "#E74C3C";
+  // Group clients by how recently they were active
+  const activeToday   = clients.filter(c => c.daysSinceActive === 0);
+  const recentClients = clients.filter(c => c.daysSinceActive !== null && c.daysSinceActive > 0 && c.daysSinceActive <= 4);
+  const quietClients  = clients.filter(c => c.daysSinceActive === null || c.daysSinceActive > 4);
+
+  function SectionLabel({ label, count, color }) {
+    const bg = color === "#27AE60" ? "#27AE60" : color === T.gold ? T.gold : "#E74C3C";
+    return (
+      <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:9, marginTop:4 }}>
+        <span style={{ fontSize:10, fontWeight:700, color, textTransform:"uppercase", letterSpacing:"0.07em" }}>{label}</span>
+        <span style={{ fontSize:10, fontWeight:700, color:"#1a1a16", background:bg, borderRadius:10, padding:"1px 7px" }}>{count}</span>
+      </div>
+    );
+  }
 
   return (
     <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg }}>
-      {/* Coach header */}
-      <div style={{ padding:"20px 18px 14px", borderBottom:`0.5px solid rgba(255,255,255,0.08)` }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+
+      {/* ── Header ─────────────────────────────────────────────────────── */}
+      <div style={{ padding:"18px 18px 14px", borderBottom:`0.5px solid rgba(255,255,255,0.08)` }}>
+        <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between" }}>
           <div>
-            <div style={{ fontFamily:T.serif, fontSize:26, color:T.text, letterSpacing:"-0.01em" }}>Forged</div>
-            <div style={{ fontSize:10, color:T.gold, fontWeight:700, letterSpacing:"0.07em", marginTop:1 }}>
-              COACH{isPreview ? " · PREVIEW" : ""}
+            <div style={{ display:"flex", alignItems:"center", gap:9, marginBottom:3 }}>
+              <span style={{ fontFamily:T.serif, fontSize:24, color:T.text, letterSpacing:"-0.01em" }}>Forged</span>
+              <span style={{
+                fontSize:9, fontWeight:700, color:"#1a1a16",
+                background:T.gold, padding:"3px 8px", borderRadius:6,
+                letterSpacing:"0.07em",
+              }}>
+                COACH{isPreview ? " · PREVIEW" : ""}
+              </span>
             </div>
+            <div style={{ fontSize:12, color:T.muted }}>{fmtDateLong()}</div>
           </div>
           <button
             onClick={isPreview ? onExit : () => supabase.auth.signOut()}
             style={{ background:"rgba(255,255,255,0.06)", border:"none", borderRadius:20, padding:"7px 14px", fontSize:12, color:T.muted, cursor:"pointer", fontFamily:T.font }}
           >
-            {isPreview ? "← Exit preview" : "Sign out"}
+            {isPreview ? "← Exit" : "Sign out"}
           </button>
         </div>
       </div>
 
-      {/* Content */}
-      <div style={{ paddingBottom:40 }}>
+      {/* ── Content ────────────────────────────────────────────────────── */}
+      <div style={{ paddingBottom:52 }}>
         {showPaywall ? (
           <CoachPaywall />
         ) : coachScreen === "detail" && selectedClient ? (
@@ -10862,18 +10853,40 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin }) {
           />
         ) : (
           <>
-            {/* Stats */}
-            {!loading && !err && (
-              <div style={{ padding:"16px 16px 0" }}>
-                <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:16 }}>
+            {/* Stats row */}
+            {!loading && !err && data && (
+              <div style={{ padding:"16px 16px 4px" }}>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:18 }}>
                   {[
-                    { label:"Clients",     value: stats.totalClients ?? 0 },
-                    { label:"Active today", value: stats.activeToday  ?? 0, gold:(stats.activeToday??0) > 0 },
-                    { label:"Avg streak",  value: `${stats.avgStreak ?? 0}d` },
+                    {
+                      label: "Clients",
+                      value: stats.totalClients ?? 0,
+                      valueColor: T.text,
+                      topColor: "rgba(255,255,255,0.12)",
+                    },
+                    {
+                      label: "Active today",
+                      value: stats.activeToday ?? 0,
+                      valueColor: (stats.activeToday ?? 0) > 0 ? "#27AE60" : T.muted,
+                      topColor: (stats.activeToday ?? 0) > 0 ? "rgba(39,174,96,0.6)" : "rgba(255,255,255,0.08)",
+                    },
+                    {
+                      label: "Avg streak",
+                      value: `${stats.avgStreak ?? 0}d`,
+                      valueColor: (stats.avgStreak ?? 0) >= 7 ? T.gold : T.text,
+                      topColor: (stats.avgStreak ?? 0) >= 7 ? "rgba(200,144,42,0.6)" : "rgba(255,255,255,0.08)",
+                    },
                   ].map(s => (
-                    <div key={s.label} style={{ background:T.surface, borderRadius:12, padding:"12px 10px", textAlign:"center", border:`1px solid rgba(255,255,255,0.06)` }}>
-                      <div style={{ fontSize:20, fontWeight:700, color:s.gold ? T.gold : T.text, marginBottom:2 }}>{s.value}</div>
-                      <div style={{ fontSize:10, color:T.muted }}>{s.label}</div>
+                    <div key={s.label} style={{
+                      background: T.surface,
+                      borderTop:`2px solid ${s.topColor}`,
+                      borderRight:`1px solid rgba(255,255,255,0.06)`,
+                      borderBottom:`1px solid rgba(255,255,255,0.06)`,
+                      borderLeft:`1px solid rgba(255,255,255,0.06)`,
+                      borderRadius:12, padding:"13px 10px 11px", textAlign:"center",
+                    }}>
+                      <div style={{ fontSize:22, fontWeight:700, color:s.valueColor, lineHeight:1, marginBottom:5 }}>{s.value}</div>
+                      <div style={{ fontSize:10, color:T.muted, lineHeight:1.2 }}>{s.label}</div>
                     </div>
                   ))}
                 </div>
@@ -10882,73 +10895,75 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin }) {
 
             {/* Client list */}
             <div style={{ padding:"0 16px" }}>
-              {loading && <div style={{ textAlign:"center", padding:48, color:T.muted, fontSize:13 }}>Loading clients…</div>}
-              {err && <div style={{ textAlign:"center", padding:48, color:"#E74C3C", fontSize:13 }}>{err}</div>}
-              {!loading && !err && clients.length === 0 && (
-                <div style={{ textAlign:"center", padding:48, color:T.muted, fontSize:13 }}>
-                  No clients yet. Share the app and they'll appear here.
-                </div>
+              {loading && (
+                <div style={{ textAlign:"center", padding:52, color:T.muted, fontSize:13 }}>Loading clients…</div>
               )}
-              {!loading && !err && clients.map(c => {
-                const sc = statusColor(c.daysSinceActive);
-                const lbl = c.daysSinceActive === null ? "never logged"
-                  : c.daysSinceActive === 0 ? "active today"
-                  : c.daysSinceActive === 1 ? "yesterday"
-                  : `${c.daysSinceActive}d ago`;
-                return (
-                  <button
-                    key={c.id}
-                    onClick={() => { setSelectedClient(c); setCoachScreen("detail"); }}
-                    style={{ width:"100%", background:T.surface, border:`1px solid rgba(255,255,255,0.06)`, borderRadius:14, padding:"14px 16px", marginBottom:10, cursor:"pointer", textAlign:"left", fontFamily:T.font, display:"flex", alignItems:"center", gap:12 }}
-                  >
-                    <div style={{ width:8, height:8, borderRadius:"50%", background:sc, flexShrink:0 }} />
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
-                        <span style={{ fontSize:14, fontWeight:600, color:T.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.name}</span>
-                        {c.isPro && <span style={{ fontSize:9, fontWeight:700, color:T.gold, background:"rgba(200,144,42,0.15)", padding:"2px 7px", borderRadius:8, flexShrink:0 }}>PRO</span>}
-                      </div>
-                      <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
-                        <span style={{ fontSize:11, color:T.muted }}>{c.loggedTodayCount}/{c.totalHabits} today</span>
-                        {c.bestStreak > 0 && <span style={{ fontSize:11, color:T.sub }}>🔥 {c.bestStreak}d</span>}
-                        <span style={{ fontSize:11, color:sc }}>{lbl}</span>
-                      </div>
-                    </div>
-                    <ActivityDots last7={c.habits.length > 0 ? c.habits[0].last7 : Array(7).fill({ logged:false, skip:false })} />
-                  </button>
-                );
-              })}
-              {!loading && !err && clients.length > 0 && (
-                <div style={{ fontSize:10, color:T.muted, textAlign:"center", marginTop:4 }}>
-                  {clients.length} client{clients.length !== 1 ? "s" : ""} · {data?.asOf ?? "—"} UTC
+              {err && (
+                <div style={{ textAlign:"center", padding:52, color:"#E74C3C", fontSize:13 }}>{err}</div>
+              )}
+
+              {!loading && !err && clients.length === 0 && (
+                <div style={{ textAlign:"center", padding:"36px 16px 24px" }}>
+                  <div style={{ fontSize:36, marginBottom:12 }}>👥</div>
+                  <div style={{ fontSize:15, fontWeight:600, color:T.text, marginBottom:6 }}>No clients yet</div>
+                  <div style={{ fontSize:13, color:T.muted, lineHeight:1.65, maxWidth:260, margin:"0 auto" }}>
+                    Share your invite link below and clients will appear here as they sign up.
+                  </div>
                 </div>
               )}
 
-              {/* Invite client — sharable link that auto-attaches anyone who
-                  signs up via it as a client of this coach (handled by
-                  /api/accept-coach-invite on first sign-in). Shown to the
-                  coach regardless of whether they have clients yet. */}
+              {!loading && !err && clients.length > 0 && (
+                <>
+                  {activeToday.length > 0 && (
+                    <div style={{ marginBottom:8 }}>
+                      <SectionLabel label="Active today" count={activeToday.length} color="#27AE60" />
+                      {activeToday.map(c => (
+                        <CoachClientRow key={c.id} client={c} onClick={() => { setSelectedClient(c); setCoachScreen("detail"); }} />
+                      ))}
+                    </div>
+                  )}
+
+                  {recentClients.length > 0 && (
+                    <div style={{ marginBottom:8 }}>
+                      <SectionLabel label="Recent" count={recentClients.length} color={T.gold} />
+                      {recentClients.map(c => (
+                        <CoachClientRow key={c.id} client={c} onClick={() => { setSelectedClient(c); setCoachScreen("detail"); }} />
+                      ))}
+                    </div>
+                  )}
+
+                  {quietClients.length > 0 && (
+                    <div style={{ marginBottom:8 }}>
+                      <SectionLabel label="Going quiet" count={quietClients.length} color="#E74C3C" />
+                      {quietClients.map(c => (
+                        <CoachClientRow key={c.id} client={c} onClick={() => { setSelectedClient(c); setCoachScreen("detail"); }} />
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{ fontSize:10, color:T.muted, textAlign:"center", marginTop:6, marginBottom:4 }}>
+                    {clients.length} client{clients.length !== 1 ? "s" : ""} · as of {data?.asOf ?? "—"}
+                  </div>
+                </>
+              )}
+
+              {/* Invite link */}
               {!loading && !err && inviteLink && (
                 <div style={{
-                  marginTop:24, padding:"16px 16px 14px",
-                  background:T.surface,
-                  border:`1px solid rgba(255,255,255,0.06)`,
-                  borderRadius:14,
+                  marginTop: clients.length === 0 ? 4 : 20,
+                  padding:"16px", background:T.surface,
+                  border:`1px solid rgba(255,255,255,0.06)`, borderRadius:14,
                 }}>
-                  <div style={{ fontSize:13, fontWeight:600, color:T.text, marginBottom:4 }}>
-                    Invite a client
-                  </div>
-                  <div style={{ fontSize:11, color:T.muted, lineHeight:1.5, marginBottom:12 }}>
-                    Anyone who signs up through this link will appear in your client list.
+                  <div style={{ fontSize:13, fontWeight:600, color:T.text, marginBottom:3 }}>Invite a client</div>
+                  <div style={{ fontSize:11, color:T.muted, lineHeight:1.55, marginBottom:12 }}>
+                    Anyone who signs up through this link will appear in your client list automatically.
                   </div>
                   <div style={{
                     display:"flex", alignItems:"center", gap:8,
-                    background:T.bg,
-                    border:`1px solid rgba(255,255,255,0.06)`,
-                    borderRadius:10, padding:"8px 10px",
+                    background:T.bg, border:`1px solid rgba(255,255,255,0.06)`, borderRadius:10, padding:"8px 10px",
                   }}>
                     <div style={{
-                      flex:1, minWidth:0,
-                      fontSize:11, color:T.sub,
+                      flex:1, minWidth:0, fontSize:11, color:T.sub,
                       overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
                       fontFamily:"ui-monospace, SFMono-Regular, Menlo, monospace",
                     }}>
@@ -10965,7 +10980,7 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin }) {
                         transition:"background 0.18s, color 0.18s",
                       }}
                     >
-                      {inviteCopied ? "Copied" : "Copy"}
+                      {inviteCopied ? "Copied ✓" : "Copy"}
                     </button>
                   </div>
                 </div>
