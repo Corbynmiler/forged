@@ -1051,6 +1051,11 @@ const CSS = `
     from { transform: translateY(6px); opacity: 0; }
     to   { transform: translateY(0);   opacity: 1; }
   }
+  @keyframes focusCheckPop {
+    0%   { transform: scale(0.4); opacity: 0; }
+    60%  { transform: scale(1.15); opacity: 1; }
+    100% { transform: scale(1);    opacity: 1; }
+  }
 `;
 
 // ─── MICRO COMPONENTS ─────────────────────────────────────────────────────────
@@ -8311,6 +8316,34 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
     setSelected(prev => prev.includes(label) ? prev.filter(l => l !== label) : [...prev, label]);
   }
 
+  // ── One-tap focus picker ─────────────────────────────────────────────────────
+  // Tapping a focus tile now:
+  //   1. (If we haven't already built a starter habit this session) builds one
+  //      synchronously from the tile's own per-tile defaults via
+  //      buildHabitFromOption — preserves habitType (weekly/project/limit/etc),
+  //      emoji, color, and reflectionPrompt. No DB write here; the habit is
+  //      committed atomically with the rest of onboarding via onSaveProgress
+  //      at the very end, so a user who bails out of onboarding doesn't leave
+  //      orphan rows behind.
+  //   2. Marks the tile as selected (drives the existing checkmark UI) and
+  //      runs a brief confirm-pulse so the tap feels acknowledged.
+  //   3. Advances to INTER_STEP after a short beat.
+  // If a starter habit already exists in builtHabits (e.g. user navigated back
+  // to FOCUS_STEP somehow), we skip the build and just advance.
+  const [tappedFocus, setTappedFocus] = useState(null);
+  const [advancing,   setAdvancing]   = useState(false);
+  function pickFocusAndAdvance(opt) {
+    if (advancing) return; // guard against double-tap
+    if (builtHabits.length === 0) {
+      const habit = buildHabitFromOption(opt, weightGoal, limitBudget);
+      setBuiltHabits([habit]);
+    }
+    setSelected([opt.label]);
+    setTappedFocus(opt.label);
+    setAdvancing(true);
+    setTimeout(() => setStep(INTER_STEP), 280);
+  }
+
   function buildHabitFromOption(opt, wg, lb) {
     const base = {
       id: Date.now() + Math.random() + "",
@@ -8832,11 +8865,29 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:16 }}>
               {FOCUS_OPTIONS.map(opt => {
                 const isOn = selected.includes(opt.label);
+                const wasTapped = tappedFocus === opt.label;
                 return (
-                  <button key={opt.label} onClick={() => toggleFocus(opt.label)}
-                    style={{ padding:"14px 12px", borderRadius:T.rsm, border:`1.5px solid ${isOn?opt.color:T.borderStrong}`, background:isOn?opt.color+"20":T.surface, cursor:"pointer", textAlign:"left", transition:"all 0.15s", position:"relative" }}>
+                  <button key={opt.label} onClick={() => pickFocusAndAdvance(opt)}
+                    disabled={advancing && !wasTapped}
+                    style={{
+                      padding:"14px 12px", borderRadius:T.rsm,
+                      border:`1.5px solid ${isOn?opt.color:T.borderStrong}`,
+                      background:isOn?opt.color+"20":T.surface,
+                      cursor: advancing ? "default" : "pointer",
+                      textAlign:"left",
+                      transition:"transform 0.18s ease-out, background 0.15s, border 0.15s, opacity 0.15s",
+                      opacity: advancing && !wasTapped ? 0.4 : 1,
+                      transform: wasTapped ? "scale(1.02)" : "scale(1)",
+                      position:"relative",
+                    }}>
                     {isOn && (
-                      <div style={{ position:"absolute", top:8, right:8, width:18, height:18, borderRadius:"50%", background:opt.color, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                      <div style={{
+                        position:"absolute", top:8, right:8,
+                        width:18, height:18, borderRadius:"50%",
+                        background:opt.color,
+                        display:"flex", alignItems:"center", justifyContent:"center",
+                        animation: wasTapped ? "focusCheckPop 0.3s ease-out" : "none",
+                      }}>
                         <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2 2 4-4" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                       </div>
                     )}
@@ -8846,46 +8897,22 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
                 );
               })}
             </div>
-
-            {hasWeight && (
-              <div style={{ background:T.raised, borderRadius:T.rsm, padding:14, marginBottom:10 }}>
-                <div style={{ fontSize:11, color:T.hint, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:10 }}>Weight goal</div>
-                <div style={{ display:"flex", gap:8 }}>
-                  <div style={{ flex:1 }}><div style={{ fontSize:10, color:T.hint, marginBottom:5 }}>CURRENT</div><input style={styleInp} type="number" step="0.1" placeholder="74.5" value={weightGoal.start} onChange={e => setWeightGoal(g=>({...g,start:e.target.value}))}/></div>
-                  <div style={{ flex:1 }}><div style={{ fontSize:10, color:T.hint, marginBottom:5 }}>TARGET</div><input style={styleInp} type="number" step="0.1" placeholder="80" value={weightGoal.target} onChange={e => setWeightGoal(g=>({...g,target:e.target.value}))}/></div>
-                  <div style={{ width:60 }}><div style={{ fontSize:10, color:T.hint, marginBottom:5 }}>UNIT</div><input style={styleInp} value={weightGoal.unit} onChange={e => setWeightGoal(g=>({...g,unit:e.target.value}))}/></div>
-                </div>
-              </div>
-            )}
-
-            {hasLimit && (
-              <div style={{ background:T.raised, borderRadius:T.rsm, padding:14, marginBottom:10 }}>
-                <div style={{ fontSize:11, color:T.hint, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:10 }}>What are you limiting?</div>
-                <div style={{ marginBottom:8 }}><div style={{ fontSize:10, color:T.hint, marginBottom:5 }}>NAME</div><input style={styleInp} placeholder="e.g. Social media" value={limitBudget.name} onChange={e => setLimitBudget(b=>({...b,name:e.target.value}))}/></div>
-                <div style={{ display:"flex", gap:8 }}>
-                  <div style={{ flex:1 }}><div style={{ fontSize:10, color:T.hint, marginBottom:5 }}>DAILY BUDGET</div><input style={styleInp} type="number" value={limitBudget.budget} onChange={e => setLimitBudget(b=>({...b,budget:e.target.value}))}/></div>
-                  <div style={{ width:80 }}><div style={{ fontSize:10, color:T.hint, marginBottom:5 }}>UNIT</div><input style={styleInp} value={limitBudget.unit} onChange={e => setLimitBudget(b=>({...b,unit:e.target.value}))}/></div>
-                </div>
-              </div>
-            )}
-
-            {selected.length > 0 && (
-              <div style={{ fontSize:12, color:T.muted, textAlign:"center", marginBottom:4 }}>
-                {selected.length} selected — you can add more later
-              </div>
-            )}
+            <div style={{ fontSize:12, color:T.muted, textAlign:"center", marginTop:4 }}>
+              Tap one to get started — you can add more inside the app.
+            </div>
           </>
         )}
       </div>
 
-      <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
-        <button
-          onClick={handleContinue}
-          disabled={step === FOCUS_STEP && selected.length === 0}
-          style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:step===FOCUS_STEP&&selected.length===0?T.surface:T.accent, color:step===FOCUS_STEP&&selected.length===0?T.muted:"#fff", fontSize:16, fontWeight:500, cursor:step===FOCUS_STEP&&selected.length===0?"not-allowed":"pointer", transition:"all 0.2s" }}>
-          {current.cta}
-        </button>
-      </div>
+      {step !== FOCUS_STEP && (
+        <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
+          <button
+            onClick={handleContinue}
+            style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:500, cursor:"pointer", transition:"all 0.2s" }}>
+            {current.cta}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -10329,6 +10356,314 @@ function buildPageGuideMessage(page, { name, habits = [], goals = [] } = {}) {
   }
 }
 
+// ─── COACH DASHBOARD ──────────────────────────────────────────────────────────
+function ActivityDots({ last7 }) {
+  return (
+    <div style={{ display:"flex", gap:3 }}>
+      {last7.map((d, i) => (
+        <div
+          key={i}
+          title={d.date}
+          style={{
+            width: 8, height: 8, borderRadius: 2,
+            background: d.logged ? "#27AE60" : d.skip ? "rgba(200,144,42,0.5)" : "rgba(255,255,255,0.08)",
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ClientCard({ client, expanded, onToggle }) {
+  const T = THEME;
+  const statusColor = client.daysSinceActive === null ? T.muted
+    : client.daysSinceActive === 0 ? "#27AE60"
+    : client.daysSinceActive <= 3 ? T.gold
+    : "#E74C3C";
+
+  const lastSeenLabel = client.daysSinceActive === null ? "never logged"
+    : client.daysSinceActive === 0 ? "active today"
+    : client.daysSinceActive === 1 ? "yesterday"
+    : `${client.daysSinceActive}d ago`;
+
+  return (
+    <div style={{ background:T.surface, borderRadius:14, marginBottom:10, overflow:"hidden", border:`1px solid rgba(255,255,255,0.06)` }}>
+      {/* Card header — always visible */}
+      <button
+        onClick={onToggle}
+        style={{ width:"100%", padding:"14px 16px", background:"none", border:"none", cursor:"pointer", textAlign:"left", display:"flex", alignItems:"center", gap:12 }}
+      >
+        {/* Status dot */}
+        <div style={{ width:8, height:8, borderRadius:"50%", background:statusColor, flexShrink:0, marginTop:1 }} />
+
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
+            <span style={{ fontSize:14, fontWeight:600, color:T.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+              {client.name}
+            </span>
+            {client.isPro && (
+              <span style={{ fontSize:9, fontWeight:700, color:T.gold, background:"rgba(200,144,42,0.15)", padding:"2px 7px", borderRadius:8, flexShrink:0 }}>
+                PRO
+              </span>
+            )}
+          </div>
+          <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+            <span style={{ fontSize:11, color:T.muted }}>
+              {client.loggedTodayCount}/{client.totalHabits} today
+            </span>
+            {client.bestStreak > 0 && (
+              <span style={{ fontSize:11, color:T.sub }}>🔥 {client.bestStreak}d streak</span>
+            )}
+            <span style={{ fontSize:11, color:statusColor }}>{lastSeenLabel}</span>
+          </div>
+        </div>
+
+        <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:6, flexShrink:0 }}>
+          <ActivityDots last7={client.habits.length > 0
+            ? client.habits[0].last7
+            : Array(7).fill({ logged:false, skip:false })} />
+          <span style={{ fontSize:10, color:T.muted }}>{expanded ? "▲" : "▼"}</span>
+        </div>
+      </button>
+
+      {/* Expanded detail */}
+      {expanded && (
+        <div style={{ borderTop:`1px solid rgba(255,255,255,0.06)`, padding:"12px 16px 14px" }}>
+          {client.email && (
+            <div style={{ fontSize:11, color:T.muted, marginBottom:10 }}>{client.email}</div>
+          )}
+          {client.habits.length === 0 ? (
+            <div style={{ fontSize:12, color:T.muted, fontStyle:"italic" }}>No habits yet.</div>
+          ) : (
+            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+              {client.habits.map((h, i) => (
+                <div key={i}>
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:4 }}>
+                    <span style={{ fontSize:12, color:h.loggedToday ? T.text : T.sub }}>
+                      {h.emoji} {h.name}
+                      {h.loggedToday && <span style={{ color:"#27AE60", marginLeft:6 }}>✓</span>}
+                    </span>
+                    {h.streak > 0 && (
+                      <span style={{ fontSize:11, color:T.gold }}>🔥 {h.streak}d</span>
+                    )}
+                  </div>
+                  <ActivityDots last7={h.last7} />
+                  {h.recentNote && (
+                    <div style={{ fontSize:11, color:T.muted, fontStyle:"italic", marginTop:4, lineHeight:1.5 }}>
+                      "{h.recentNote.length > 80 ? h.recentNote.slice(0,80)+"…" : h.recentNote}"
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ marginTop:12, fontSize:11, color:T.muted }}>
+            {client.xp} xp · joined {client.joinedAt ? new Date(client.joinedAt).toLocaleDateString("en-AU", { month:"short", year:"numeric" }) : "—"}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CoachDashboard() {
+  const T = THEME;
+  const [data, setData] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [err, setErr] = React.useState(null);
+  const [expandedId, setExpandedId] = React.useState(null);
+  const [tab, setTab] = React.useState("clients");
+
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        if (!token) { setErr("Not signed in"); setLoading(false); return; }
+        const res = await fetch("/api/coach-data", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const json = await res.json();
+        if (!res.ok) { setErr(json.error || "Failed to load"); setLoading(false); return; }
+        setData(json);
+      } catch (e) {
+        setErr(e.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  if (loading) return (
+    <div style={{ padding:40, textAlign:"center", color:T.muted, fontSize:14 }}>Loading dashboard…</div>
+  );
+  if (err) return (
+    <div style={{ padding:40, textAlign:"center", color:"#E74C3C", fontSize:13 }}>{err}</div>
+  );
+
+  const { clients = [], stats = {} } = data || {};
+
+  return (
+    <div style={{ padding:"0 16px 24px" }}>
+      {/* Tab switcher */}
+      <div style={{ display:"flex", gap:8, marginBottom:18 }}>
+        {[{id:"clients",label:"Clients"},{id:"pricing",label:"Pricing model"}].map(t => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            style={{
+              padding:"7px 16px", borderRadius:20, border:"none", cursor:"pointer",
+              fontSize:12, fontWeight:600,
+              background: tab === t.id ? T.gold : "rgba(255,255,255,0.07)",
+              color: tab === t.id ? "#0F0F0D" : T.sub,
+            }}
+          >{t.label}</button>
+        ))}
+      </div>
+
+      {tab === "clients" && (
+        <>
+          {/* Stats row */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8, marginBottom:18 }}>
+            {[
+              { label:"Users",       value: stats.totalClients ?? 0 },
+              { label:"Active today", value: stats.activeToday   ?? 0, highlight: stats.activeToday > 0 },
+              { label:"Pro",          value: stats.proCount       ?? 0, highlight: stats.proCount > 0 },
+              { label:"Avg streak",   value: `${stats.avgStreak ?? 0}d` },
+            ].map(s => (
+              <div key={s.label} style={{ background:T.surface, borderRadius:12, padding:"12px 10px", textAlign:"center" }}>
+                <div style={{ fontSize:20, fontWeight:700, color: s.highlight ? T.gold : T.text, marginBottom:2 }}>
+                  {s.value}
+                </div>
+                <div style={{ fontSize:10, color:T.muted, lineHeight:1.3 }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Legend */}
+          <div style={{ display:"flex", gap:14, marginBottom:14 }}>
+            {[
+              { color:"#27AE60", label:"active today" },
+              { color:T.gold,    label:"recent (≤3d)" },
+              { color:"#E74C3C", label:"dormant (4d+)" },
+            ].map(l => (
+              <div key={l.label} style={{ display:"flex", alignItems:"center", gap:5 }}>
+                <div style={{ width:7, height:7, borderRadius:"50%", background:l.color }} />
+                <span style={{ fontSize:10, color:T.muted }}>{l.label}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Client list */}
+          {clients.length === 0 ? (
+            <div style={{ textAlign:"center", padding:40, color:T.muted, fontSize:13 }}>
+              No users yet. Share the app and they'll appear here.
+            </div>
+          ) : (
+            clients.map(c => (
+              <ClientCard
+                key={c.id}
+                client={c}
+                expanded={expandedId === c.id}
+                onToggle={() => setExpandedId(expandedId === c.id ? null : c.id)}
+              />
+            ))
+          )}
+
+          <div style={{ fontSize:10, color:T.muted, textAlign:"center", marginTop:8 }}>
+            Data as of {data?.asOf ?? "—"} UTC · admin only
+          </div>
+        </>
+      )}
+
+      {tab === "pricing" && (
+        <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+          {/* Context */}
+          <div style={{ background:T.surface, borderRadius:14, padding:16 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:T.text, marginBottom:6 }}>How the coach layer works</div>
+            <div style={{ fontSize:12, color:T.sub, lineHeight:1.65 }}>
+              Coaches pay a monthly subscription to get a dashboard like this one — showing their clients' habit data, streaks, and reflections in real time. Clients use the same Forged app they already know. No separate product to build.
+            </div>
+          </div>
+
+          {/* Tiers */}
+          {[
+            {
+              name:  "Forged Coach",
+              price: "$29 / month",
+              desc:  "For coaches with up to 10 active clients.",
+              items: [
+                "Client progress dashboard",
+                "7-day activity grids per habit",
+                "Streak + last-active tracking",
+                "Client reflection excerpts",
+                "Up to 10 clients",
+              ],
+              accent: false,
+            },
+            {
+              name:  "Forged Coach Pro",
+              price: "$79 / month",
+              desc:  "For coaches running a serious client base.",
+              items: [
+                "Everything in Forged Coach",
+                "Unlimited clients",
+                "AI-written weekly client reports",
+                "Nudge clients from the dashboard",
+                "Custom coach branding (name + icon)",
+                "Early access to new features",
+              ],
+              accent: true,
+            },
+          ].map(tier => (
+            <div
+              key={tier.name}
+              style={{
+                background: tier.accent ? "rgba(200,144,42,0.1)" : T.surface,
+                border: tier.accent ? `1px solid rgba(200,144,42,0.35)` : `1px solid rgba(255,255,255,0.06)`,
+                borderRadius:14, padding:16,
+              }}
+            >
+              <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", marginBottom:4 }}>
+                <div style={{ fontSize:14, fontWeight:700, color: tier.accent ? T.gold : T.text }}>{tier.name}</div>
+                <div style={{ fontSize:13, fontWeight:700, color: tier.accent ? T.gold : T.sub }}>{tier.price}</div>
+              </div>
+              <div style={{ fontSize:12, color:T.muted, marginBottom:10 }}>{tier.desc}</div>
+              {tier.items.map(item => (
+                <div key={item} style={{ display:"flex", alignItems:"flex-start", gap:8, marginBottom:5 }}>
+                  <span style={{ color: tier.accent ? T.gold : "#27AE60", fontSize:11, marginTop:1 }}>✓</span>
+                  <span style={{ fontSize:12, color:T.sub, lineHeight:1.5 }}>{item}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+
+          {/* Consumer reminder */}
+          <div style={{ background:T.surface, borderRadius:14, padding:16 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:T.text, marginBottom:6 }}>Consumer tiers (unchanged)</div>
+            <div style={{ display:"flex", gap:10 }}>
+              {[
+                { name:"Free", price:"$0", desc:"5 habits, 10 AI msgs/day" },
+                { name:"Forged Pro", price:"$4.99/mo", desc:"Unlimited habits + AI, full history, nudges" },
+              ].map(t => (
+                <div key={t.name} style={{ flex:1, background:"rgba(255,255,255,0.04)", borderRadius:10, padding:12 }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:T.text, marginBottom:3 }}>{t.name}</div>
+                  <div style={{ fontSize:12, color:T.gold, fontWeight:600, marginBottom:4 }}>{t.price}</div>
+                  <div style={{ fontSize:11, color:T.muted, lineHeight:1.5 }}>{t.desc}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ fontSize:11, color:T.muted, textAlign:"center", lineHeight:1.6, padding:"0 8px" }}>
+            Coach subscriptions aren't live yet. When you're ready to sell access, add Stripe products for these tiers and gate the dashboard behind coach_tier on profiles.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── ROOT APP ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [onboarded,   setOnboarded]  = useState(null);
@@ -10376,6 +10711,7 @@ export default function App() {
   // Tour temporarily disabled — state kept for re-enabling
   const [showShare,   setShowShare]   = useState(false);
   const [isPro,          setIsPro]          = useState(false);
+  const [isAdmin,        setIsAdmin]        = useState(false);
   /** From profiles.stripe_customer_id — used for Stripe Customer Portal */
   const [stripeCustomerId, setStripeCustomerId] = useState(null);
   const [coachName,      setCoachName]      = useState("Coach");
@@ -11559,6 +11895,7 @@ export default function App() {
         setXp(profile.xp ?? 0);
         const proStatus = !!(profile.is_pro || profile.is_admin);
         setIsPro(proStatus);
+        setIsAdmin(!!profile.is_admin);
         // Detect a completed payment on any sign-in path (session survived or user re-authenticated)
         if (proStatus && localStorage.getItem('forged_checkout_pending') === '1') {
           localStorage.removeItem('forged_checkout_pending');
@@ -11945,6 +12282,7 @@ export default function App() {
           setCoachIcon("");
           setOnboarded(null);
           setIsPro(false);
+          setIsAdmin(false);
           setStripeCustomerId(null);
           setRefCode(null);
           setAuthEmail(null);
@@ -12894,6 +13232,7 @@ export default function App() {
     { id:"insights", label:"Insights", icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 15l4-5 3 3 4-6 3 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg> },
     { id:"social",   label:"Social",   icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden><circle cx="7.5" cy="7" r="2.5" stroke="currentColor" strokeWidth="1.5"/><path d="M3 16.5c0-2.5 2-4.5 4.5-4.5s4.5 2 4.5 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><circle cx="14.5" cy="6.5" r="2" stroke="currentColor" strokeWidth="1.5"/><path d="M11 16.5c0-1.7 1.1-3.1 2.6-3.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
     { id:"profile",  label:"Profile",  icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="7" r="3" stroke="currentColor" strokeWidth="1.5"/><path d="M4 17c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
+    ...(isAdmin ? [{ id:"coach", label:"Coach", icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 2L3 7v11h14V7L10 2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/><path d="M7 18v-5h6v5" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/></svg> }] : []),
   ];
 
   return (
@@ -12911,7 +13250,9 @@ export default function App() {
             <div style={{ fontSize:12, color:T.muted, marginTop:1, lineHeight:1.35 }}>
               {screen === "today"
                 ? fmtDateLong()
-                : screen === "profile" ? user.name : screen.charAt(0).toUpperCase()+screen.slice(1)}
+                : screen === "profile" ? user.name
+                : screen === "coach" ? "Admin only"
+                : screen.charAt(0).toUpperCase()+screen.slice(1)}
             </div>
           </div>
           <button onClick={() => setShowXP(true)} style={{ display:"flex", alignItems:"center", gap:6, background:"rgba(200,144,42,0.12)", borderRadius:20, padding:"6px 13px", fontSize:13, fontWeight:500, color:T.gold, border:"none", cursor:"pointer" }}>
@@ -12966,6 +13307,7 @@ export default function App() {
           isPro={isPro}
           onUpgrade={() => setShowUpgrade(true)}
         />}
+        {screen === "coach"    && isAdmin && <CoachDashboard />}
         {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} stripeCustomerId={stripeCustomerId} refCode={refCode}
           authEmail={authEmail}
           onUpgrade={() => setShowUpgrade(true)}
