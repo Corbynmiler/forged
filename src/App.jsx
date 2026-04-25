@@ -11496,6 +11496,9 @@ export default function App() {
   const [authEmail,   setAuthEmail]   = useState(null);
   /** Supabase auth user id when signed in; null when logged out */
   const [sessionUserId, setSessionUserId] = useState(null);
+  /** Incremented when a ?coach= param lands while the user is already signed in,
+   *  so the accept-invite effect re-fires even though sessionUserId didn't change. */
+  const [coachInviteTick, setCoachInviteTick] = useState(0);
   const [xpAwardedDates, setXpAwardedDates] = useState(() => new Set());
   /** True only after profile/habits load succeeded for this session (never true while data is missing) */
   const [accountDataReady, setAccountDataReady] = useState(false);
@@ -11693,8 +11696,12 @@ export default function App() {
       const qs = params.toString();
       const newUrl = window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash;
       window.history.replaceState({}, "", newUrl);
+      // If the user is already signed in when they land on the invite link,
+      // sessionUserId won't change so the accept-invite effect below won't
+      // fire. Bump the tick to force it to re-run.
+      setCoachInviteTick(t => t + 1);
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Once the user has a session, hand the stashed token to the backend. We
   // clear localStorage *after* a successful response so a transient network
@@ -11747,7 +11754,7 @@ export default function App() {
         // Transient — leave the token, will retry on next session restore.
       }
     })();
-  }, [sessionUserId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sessionUserId, coachInviteTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!sessionUserId) return;
