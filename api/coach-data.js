@@ -63,20 +63,39 @@ export default async function handler(req, res) {
   const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
   if (authErr || !user) return res.status(401).json({ error: "Invalid token" });
 
-  // Guard: caller must be is_admin
-  const { data: callerProfile } = await supabase
+  // Guard: caller must be a coach OR admin. Accept any of three signals:
+  //  • is_admin  — dev / support override
+  //  • is_coach  — boolean flag set by Stripe webhook on checkout
+  //  • coach_tier IS NOT NULL — belt-and-suspenders in case is_coach got out of sync
+  const { data: callerProfile, error: profileErr } = await supabase
     .from("profiles")
-    .select("is_admin")
+    .select("is_admin, is_coach, coach_tier")
     .eq("id", user.id)
     .single();
-  if (!callerProfile?.is_admin) return res.status(403).json({ error: "Forbidden" });
+
+  const hasAccess =
+    callerProfile?.is_admin ||
+    callerProfile?.is_coach ||
+    !!callerProfile?.coach_tier;
+
+  if (!hasAccess) {
+    console.warn("[coach-data] 403 for user", user.id,
+      "| callerProfile:", JSON.stringify(callerProfile),
+      "| profileErr:", profileErr?.message ?? "none");
+    return res.status(403).json({ error: "Forbidden" });
+  }
 
   const todayYmd = ymdToday();
 
-  // ── Fetch all profiles ───────────────────────────────────────────────────
+  // ── Fetch profiles assigned to this coach ────────────────────────────────
+  // Filter happens in SQL via coach_id = caller.id (set when a user signs up
+  // via this coach's invite link, see /api/accept-coach-invite). Profiles
+  // with coach_id IS NULL are excluded by the equality predicate, which is
+  // what we want — unaffiliated users should not appear in any coach's list.
   const { data: profiles, error: profilesErr } = await supabase
     .from("profiles")
     .select("id, name, xp, is_pro, is_admin, current_streak, created_at")
+    .eq("coach_id", user.id)
     .order("xp", { ascending: false });
   if (profilesErr) return res.status(500).json({ error: profilesErr.message });
 
@@ -110,8 +129,9 @@ export default async function handler(req, res) {
   // ── Build client summaries ───────────────────────────────────────────────
   const TRACKABLE = ["daily", "weekly", "project", "limit"];
 
+  // No further JS-side filtering needed — the coach_id = caller.id SQL
+  // predicate already scopes the result to this coach's assigned clients.
   const clients = (profiles || [])
-    .filter(p => !p.is_admin)
     .map(p => {
       const userHabits = (habitsByUser[p.id] || []).filter(h => TRACKABLE.includes(h.habit_type));
 
