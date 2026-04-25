@@ -8272,7 +8272,7 @@ const HABIT_ANNOTATIONS = {
   limit: "Limit habits track what you're reducing. Each tap logs one unit against your daily budget. Streaks increase only on days you log and stay at or under your limit.",
 };
 
-function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, notifEnabled, notifLoading, notifPermission, onNotifToggle }) {
+function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, notifEnabled, notifLoading, notifPermission, onNotifToggle, isCoachClient = false }) {
   const [step,            setStep]            = useState(0);
   const [name,            setName]            = useState("");
   const [coachNameInput,  setCoachNameInput]  = useState("");
@@ -8285,6 +8285,7 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
   const [showingFinal,    setShowingFinal]    = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError,   setCheckoutError]   = useState(null);
+  const [enteringApp,     setEnteringApp]     = useState(false);
   // Final-screen "weekly updates by email" opt-in. Default ON; persisted on
   // completion (same localStorage key the post-upgrade thank-you modal uses, so
   // preferences don't silently diverge between surfaces).
@@ -8399,10 +8400,15 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
   }
 
   async function handleEnterApp() {
+    if (enteringApp) return;
+    setEnteringApp(true);
     try {
-      await onSaveProgress({ name:name.trim()||"You", habits:habitsSaved(), coachName:coachNameInput.trim()||"Coach", emailUpdatesOptIn });
+      await Promise.race([
+        onSaveProgress({ name:name.trim()||"You", habits:habitsSaved(), coachName:coachNameInput.trim()||"Coach", emailUpdatesOptIn }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 4000)),
+      ]);
       onComplete();
-    } catch(err) {
+    } catch {
       onComplete();
     }
   }
@@ -8495,64 +8501,101 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
               </div>
             </div>
 
-            {/* Pro upsell card — clearly the premium path, not a footnote. */}
-            <div style={{
-              position:"relative",
-              background:"linear-gradient(145deg, rgba(200,144,42,0.12) 0%, rgba(200,144,42,0.04) 100%)",
-              border:"1px solid rgba(200,144,42,0.45)",
-              borderRadius:18,
-              padding:"18px 18px 16px",
-              marginBottom:16,
-              textAlign:"left",
-              boxShadow:"0 8px 28px rgba(200,144,42,0.08)",
-              animation:"finalItemIn 0.55s 0.15s cubic-bezier(0.22,1,0.36,1) both",
-            }}>
-              <div style={{ position:"absolute", top:-10, left:14, background:T.gold, color:"#0F0F0D", fontSize:10, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase", padding:"3px 9px", borderRadius:6 }}>
-                Recommended
-              </div>
-              <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10, marginTop:4 }}>
-                <div style={{ fontSize:22 }}>⚡</div>
-                <div style={{ fontFamily:T.serif, fontSize:18, color:T.text, lineHeight:1.2 }}>
-                  Forged Pro
+            {/* Coach client: skip paywall, show "full access included" card */}
+            {isCoachClient ? (
+              <div style={{
+                position:"relative",
+                background:"linear-gradient(145deg, rgba(39,174,96,0.13) 0%, rgba(39,174,96,0.04) 100%)",
+                border:"1px solid rgba(39,174,96,0.45)",
+                borderRadius:18,
+                padding:"18px 18px 16px",
+                marginBottom:16,
+                textAlign:"left",
+                boxShadow:"0 8px 28px rgba(39,174,96,0.08)",
+                animation:"finalItemIn 0.55s 0.15s cubic-bezier(0.22,1,0.36,1) both",
+              }}>
+                <div style={{ position:"absolute", top:-10, left:14, background:"#27AE60", color:"#fff", fontSize:10, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase", padding:"3px 9px", borderRadius:6 }}>
+                  Included with your coach
                 </div>
-                <div style={{ marginLeft:"auto", fontSize:12, color:T.gold, fontWeight:600 }}>
-                  $4.99/mo
+                <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10, marginTop:4 }}>
+                  <div style={{ fontSize:22 }}>⚡</div>
+                  <div style={{ fontFamily:T.serif, fontSize:18, color:T.text, lineHeight:1.2 }}>
+                    Forged Pro — Free
+                  </div>
+                  <div style={{ marginLeft:"auto", fontSize:12, color:"#27AE60", fontWeight:600 }}>
+                    $0/mo
+                  </div>
+                </div>
+                <div style={{ fontSize:12, color:T.sub, lineHeight:1.65 }}>
+                  Your coach has unlocked full access for you — unlimited habits, AI coaching, voice logging, and complete history.
                 </div>
               </div>
-              <div style={{ fontSize:12, color:T.sub, lineHeight:1.65, marginBottom:12 }}>
-                Unlimited AI coaching, unlimited habits, voice logging, friend nudges, and full history — everything you need to actually understand your patterns.
+            ) : (
+              /* Pro upsell card — clearly the premium path, not a footnote. */
+              <div style={{
+                position:"relative",
+                background:"linear-gradient(145deg, rgba(200,144,42,0.12) 0%, rgba(200,144,42,0.04) 100%)",
+                border:"1px solid rgba(200,144,42,0.45)",
+                borderRadius:18,
+                padding:"18px 18px 16px",
+                marginBottom:16,
+                textAlign:"left",
+                boxShadow:"0 8px 28px rgba(200,144,42,0.08)",
+                animation:"finalItemIn 0.55s 0.15s cubic-bezier(0.22,1,0.36,1) both",
+              }}>
+                <div style={{ position:"absolute", top:-10, left:14, background:T.gold, color:"#0F0F0D", fontSize:10, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase", padding:"3px 9px", borderRadius:6 }}>
+                  Recommended
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10, marginTop:4 }}>
+                  <div style={{ fontSize:22 }}>⚡</div>
+                  <div style={{ fontFamily:T.serif, fontSize:18, color:T.text, lineHeight:1.2 }}>
+                    Forged Pro
+                  </div>
+                  <div style={{ marginLeft:"auto", fontSize:12, color:T.gold, fontWeight:600 }}>
+                    $4.99/mo
+                  </div>
+                </div>
+                <div style={{ fontSize:12, color:T.sub, lineHeight:1.65, marginBottom:12 }}>
+                  Unlimited AI coaching, unlimited habits, voice logging, friend nudges, and full history — everything you need to actually understand your patterns.
+                </div>
+                <button
+                  onClick={handleGoPro}
+                  disabled={checkoutLoading}
+                  style={{
+                    width:"100%", padding:"13px 0", borderRadius:12, border:"none",
+                    background:T.gold, color:"#0F0F0D",
+                    fontSize:14, fontWeight:700, letterSpacing:"0.01em",
+                    cursor:checkoutLoading?"not-allowed":"pointer",
+                    opacity:checkoutLoading?0.7:1,
+                    fontFamily:T.font,
+                    transition:"opacity 0.15s",
+                  }}
+                >
+                  {checkoutLoading ? "Opening checkout…" : "Unlock Forged Pro →"}
+                </button>
+                {checkoutError && <p style={{ fontSize:12, color:"#e05c5c", marginTop:10, lineHeight:1.5 }}>{checkoutError}</p>}
               </div>
-              <button
-                onClick={handleGoPro}
-                disabled={checkoutLoading}
-                style={{
-                  width:"100%", padding:"13px 0", borderRadius:12, border:"none",
-                  background:T.gold, color:"#0F0F0D",
-                  fontSize:14, fontWeight:700, letterSpacing:"0.01em",
-                  cursor:checkoutLoading?"not-allowed":"pointer",
-                  opacity:checkoutLoading?0.7:1,
-                  fontFamily:T.font,
-                  transition:"opacity 0.15s",
-                }}
-              >
-                {checkoutLoading ? "Opening checkout…" : "Unlock Forged Pro →"}
-              </button>
-              {checkoutError && <p style={{ fontSize:12, color:"#e05c5c", marginTop:10, lineHeight:1.5 }}>{checkoutError}</p>}
-            </div>
+            )}
 
-            {/* Primary CTA — continue free. Lower-contrast so the Pro card leads. */}
+            {/* Primary CTA — enter app */}
             <button
               onClick={handleEnterApp}
+              disabled={enteringApp}
               style={{
                 width:"100%", padding:"15px 0", borderRadius:12,
-                border:`0.5px solid ${T.borderStrong}`, background:T.raised,
-                color:T.text, fontSize:15, fontWeight:600,
-                cursor:"pointer", fontFamily:T.font,
+                border:`1.5px solid ${isCoachClient ? "#27AE60" : T.accent}`,
+                background: enteringApp ? T.raised : isCoachClient ? "rgba(39,174,96,0.12)" : T.raised,
+                color: enteringApp ? T.muted : T.text,
+                fontSize:15, fontWeight:600,
+                cursor: enteringApp ? "not-allowed" : "pointer",
+                fontFamily:T.font,
                 marginBottom:18,
+                opacity: enteringApp ? 0.7 : 1,
+                transition:"opacity 0.15s, background 0.15s",
                 animation:"finalItemIn 0.55s 0.22s cubic-bezier(0.22,1,0.36,1) both",
               }}
             >
-              Start using Forged →
+              {enteringApp ? "Setting up…" : "Start using Forged →"}
             </button>
 
             {/* Email updates opt-in — pre-checked, stored under the existing
@@ -11326,7 +11369,17 @@ export default function App() {
         });
         if (res.ok) {
           localStorage.removeItem("forged_pending_coach");
-          addToast("You're connected with your coach.");
+          try {
+            const json = await res.json();
+            if (json.isProGranted) {
+              setIsPro(true);
+              addToast("✓ Connected with your coach — Forged Pro unlocked!");
+            } else {
+              addToast("You're connected with your coach.");
+            }
+          } catch {
+            addToast("You're connected with your coach.");
+          }
         } else {
           // Permanent failure modes: bad token, self-invite, missing coach.
           // Drop the token so we don't keep retrying every session.
@@ -13165,6 +13218,7 @@ export default function App() {
         notifLoading={notifLoading}
         notifPermission={notifPermission}
         onNotifToggle={handleNotifToggle}
+        isCoachClient={!!localStorage.getItem("forged_pending_coach")}
       /></>
     );
   }
