@@ -1,5 +1,6 @@
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
+import { withSentry } from "./_lib/sentry.js";
 
 /** Verify with STRIPE_WEBHOOK_SECRET (live) when set; STRIPE_WEBHOOK_KEY is legacy fallback. */
 // Disable body parsing — Stripe needs the raw body to verify signatures
@@ -14,7 +15,7 @@ function getRawBody(req) {
   });
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
 
   const sig = req.headers["stripe-signature"];
@@ -172,3 +173,5 @@ export default async function handler(req, res) {
 
   return res.status(200).json({ received: true });
 }
+
+export default withSentry(handler, "stripe-webhook");

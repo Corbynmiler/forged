@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
+import { withSentry, captureException } from "./_lib/sentry.js";
 
 const SUPABASE_URL = "https://apdmvbzfjuvxworjepze.supabase.co";
 // Anon key is public — safe to hardcode (already hardcoded in src/supabase.js)
@@ -98,8 +99,23 @@ const COACH_TOOLS = [
       },
       required: ["habit_id", "habit_name"],
     },
+    // Prompt caching: marking the LAST tool with cache_control caches the
+    // entire tools array (~700+ tokens of stable JSON) for ~5 minutes. Repeat
+    // chat turns within that window pay ~10% of the normal input price for
+    // this prefix. Saves a large fraction of our Anthropic spend on chat.js
+    // because the tools schema is identical on every call.
+    cache_control: { type: "ephemeral" },
   },
 ];
+
+// Convert a plain-string system prompt into the typed-array form Anthropic
+// expects when attaching cache_control. Returns "" unchanged so we don't
+// send an empty cache breakpoint when the client omits a system prompt.
+function cachedSystem(system) {
+  const text = typeof system === "string" ? system : "";
+  if (!text.trim()) return "";
+  return [{ type: "text", text, cache_control: { type: "ephemeral" } }];
+}
 
 // ── Executors ──────────────────────────────────────────────────────────────────
 
@@ -222,7 +238,7 @@ function sse(res, data) {
 const FREE_DAILY_LIMIT = 10;
 
 // ── Handler ────────────────────────────────────────────────────────────────────
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   const { messages, system, client_date: rawClientDate } = req.body;
@@ -301,15 +317,52 @@ export default async function handler(req, res) {
 
   try {
     // ── First call — detect tool_use ─────────────────────────────────────────
+    // max_tokens MUST be generous enough to fit ALL tool_use blocks the model
+    // wants to emit. Each tool_use is ~50-100 tokens of JSON. A multi-log
+    // request (e.g. build + gym + calories + weight) easily needs 400+. If
+    // we run out of tokens mid-response, stop_reason flips to "max_tokens"
+    // (NOT "tool_use") and the tool-execution branch below is skipped —
+    // which historically caused silent log failures while the model still
+    // produced a confirmation-style text reply. 1500 fits ~15 tool calls.
     const firstResp = await client.messages.create({
-      model: "claude-haiku-4-5", max_tokens: 250,
-      system: system || "", tools,
+      model: "claude-haiku-4-5", max_tokens: 1500,
+      system: cachedSystem(system), tools,
       messages: trimmedMessages,
     });
 
+    const firstToolBlocks = (firstResp.content || []).filter(b => b.type === "tool_use");
+    console.log("[chat] firstResp", {
+      userId,
+      stop_reason: firstResp.stop_reason,
+      tool_blocks: firstToolBlocks.length,
+      tools_requested: firstToolBlocks.map(t => t.name),
+      input_messages: trimmedMessages.length,
+      // Prompt-cache visibility — confirms the tools/system prefix is being
+      // re-used across turns. cache_read_input_tokens billed at ~10% of normal.
+      cache_read_input_tokens:    firstResp.usage?.cache_read_input_tokens    ?? 0,
+      cache_creation_input_tokens:firstResp.usage?.cache_creation_input_tokens?? 0,
+      input_tokens:               firstResp.usage?.input_tokens               ?? 0,
+      output_tokens:              firstResp.usage?.output_tokens              ?? 0,
+    });
+
+    // ── Defensive: tool blocks present but the model was cut off ────────────
+    // If max_tokens fires while emitting tool_use, the partial JSON in the
+    // input field is usually unparseable. Either way we cannot trust those
+    // tool calls. Surface a clear error rather than silently ignoring them.
+    if (firstResp.stop_reason !== "tool_use" && firstToolBlocks.length > 0) {
+      console.warn("[chat] truncated tool_use detected", {
+        userId,
+        stop_reason: firstResp.stop_reason,
+        partial_tools: firstToolBlocks.map(t => t.name),
+      });
+      return res.status(502).json({
+        error: "That message had too many actions for one turn. Try logging two or three at a time.",
+      });
+    }
+
     // ── Tool path ─────────────────────────────────────────────────────────────
     if (firstResp.stop_reason === "tool_use") {
-      const toolBlocks = firstResp.content.filter(b => b.type === "tool_use");
+      const toolBlocks = firstToolBlocks;
       const toolResults = [];
       const actions = { created: null, edited: [], logged: [] };
 
@@ -337,17 +390,39 @@ export default async function handler(req, res) {
         } catch (err) {
           result = { success: false, error: err.message };
         }
+        // Per-tool trace so we can pinpoint failures in Vercel logs without
+        // leaking sensitive data (no notes / reflection text).
+        console.log("[chat] tool result", {
+          userId,
+          tool: tb.name,
+          habit_name: tb.input?.habit_name || tb.input?.name || null,
+          success: result.success,
+          error: result.success ? null : result.error,
+        });
         toolResults.push({ type: "tool_result", tool_use_id: tb.id, content: JSON.stringify(result) });
       }
 
-      // Stream confirmation — Claude now knows exact success/failure per action
+      console.log("[chat] tool summary", {
+        userId,
+        created: actions.created ? 1 : 0,
+        edited: actions.edited.length,
+        logged: actions.logged.length,
+        failures: toolResults.filter(r => {
+          try { return JSON.parse(r.content).success === false; } catch { return false; }
+        }).length,
+      });
+
+      // Stream confirmation — Claude now knows exact success/failure per action.
+      // We intentionally leave `tools` available so Claude can chain a follow-up
+      // tool call if needed (rare). max_tokens raised to 600 — 350 was tight
+      // for confirmations covering 4+ actions.
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("X-Accel-Buffering", "no");
 
       const confirmStream = client.messages.stream({
-        model: "claude-haiku-4-5", max_tokens: 350,
-        system: system || "", tools,
+        model: "claude-haiku-4-5", max_tokens: 600,
+        system: cachedSystem(system), tools,
         messages: [
           ...trimmedMessages,
           { role: "assistant", content: firstResp.content },
@@ -386,7 +461,7 @@ export default async function handler(req, res) {
 
     const chatStream = client.messages.stream({
       model: "claude-haiku-4-5", max_tokens: 500,
-      system: system || "", tools,
+      system: cachedSystem(system), tools,
       messages: trimmedMessages,
     });
 
@@ -409,9 +484,12 @@ export default async function handler(req, res) {
 
   } catch (err) {
     console.error("[chat] error:", err?.status, err?.message);
+    captureException(err, { route: "chat", userId, status: err?.status });
     const msg = err?.error?.message || err?.message || "Something went wrong.";
     if (!res.headersSent) return res.status(err?.status || 500).json({ error: msg });
     sse(res, { error: msg, done: true });
     return res.end();
   }
 }
+
+export default withSentry(handler, "chat");

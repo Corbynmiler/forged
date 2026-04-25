@@ -1,6 +1,7 @@
 import webpush from "web-push";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
+import { withSentry } from "./_lib/sentry.js";
 
 const SUPABASE_URL = "https://apdmvbzfjuvxworjepze.supabase.co";
 
@@ -167,6 +168,17 @@ function getDailyStreak(h, todayYmd) {
 // Swear words intentional — this is a personal dev customisation.
 const DEV_OWNER_ID = "5e9b4ba7-bf15-4e94-ab05-fe3306496973";
 
+// Bumped whenever the dev pool content changes. Surfaces in cron logs so
+// you can confirm production is running the latest pool, not a stale build.
+const DEV_POOL_VERSION = "v3-2026-04-25";
+
+// Distinct titles ONLY used by the dev-owner branch so notifications are
+// visually distinguishable from the generic pool. If a notification ever
+// arrives titled "Forged 🔥" / "Forged ✅" / "Forged 🎯", that means the
+// generic branch fired (something's wrong). Captain titles = dev branch.
+const DEV_TITLE_DEFAULT     = "Forged ⚡ Captain";
+const DEV_TITLE_ALL_LOGGED  = "Forged 🔨 Captain";
+
 // Set true to send every hour (for testing whether hourly reminders motivate or annoy).
 // When false, reverts to single daily send at DEV_OWNER_SINGLE_HOUR.
 const DEV_OWNER_HOURLY_MODE = true;
@@ -197,166 +209,347 @@ function getTimeSlot(hour) {
 }
 
 // Deterministic hourly pick — same message within a given hour, different each hour/day.
-// Prime multiplier keeps the spread varied across small pools.
+// `dateSeed * 17` rotates the whole pool day-over-day so consecutive days don't
+// cluster on the same indices, and `hour * 37` spreads picks within a single day.
+// With pool sizes of 10–18 this gives a different message virtually every hour
+// across a week without ever repeating during a single day.
 function devPick(pool, todayYmd, hour) {
   const dateSeed = parseInt(todayYmd.replace(/-/g, ""), 10);
-  const seed = dateSeed + hour * 37;
-  return pool[seed % pool.length];
+  const seed = dateSeed * 17 + hour * 37;
+  return pool[Math.abs(seed) % pool.length];
 }
 
 // ── Message pools ──────────────────────────────────────────────────────────────
 // Keys: getTimeSlot() values. Each has `weekday` and `weekend` arrays.
+//
+// Pool design notes (creator account only):
+//   - Pools sit at 10–18 entries each so the deterministic picker virtually
+//     never repeats within a single day, and rotates fully across a week.
+//   - ~30–40% of weekday lines carry ≥ 2 swears; weekend tends slightly
+//     softer but still has bite.
+//   - Each block has one or two "fun fact" / curveball lines so the user
+//     occasionally gets something they didn't expect.
+//   - Tone: chaotic-good mate, builder/captain energy, dark humour, direct
+//     callouts. Useful, not random for the sake of it.
+//   - Time-block intent:
+//       early_morning : wake the fuck up
+//       morning       : pre-work, set the day on your terms
+//       work_am/pm    : survive, keep the bigger mission alive
+//       lunch         : quick reset, don't drift
+//       after_work    : come home and BUILD, don't waste the night
+//       evening       : one more push or consciously switch off
+//       night         : log + sleep, no mid-zone
+//       weekend       : freedom / make it count
 const DEV_POOLS = {
   early_morning: {
     weekday: [
-      "5am. You set this alarm. Don't waste it.",
-      "Up before the job owns you. That's the edge. Use it.",
-      "Early window. Nobody's asking for anything yet. Log it and build.",
-      "Most people are asleep. You're not. That's the whole move.",
-      "Rise before the boss does. That's how you escape the boss.",
-      "5am. Log it, then go earn the commute.",
-      "Before the world wants a piece of you — this hour belongs to you.",
+      "Oi captain, get the fuck up. You've got shit to do.",
+      "5am. The world's still asleep. Move while no fucker can stop you.",
+      "Up before the boss. Up before the bullshit. That's the whole game.",
+      "Eyes open. Phone down. Build something before the world's noise kicks in.",
+      "Pre-dawn hour. Nobody's emailing yet. Ship some shit quietly.",
+      "If you want out, you don't get to sleep through the only quiet fucking hour.",
+      "Wake up properly. Stretch. Log it. Then go fucking earn it.",
+      "5am isn't punishment. It's the head start nobody else takes.",
+      "You set the alarm. Honour the version of you that wanted this.",
+      "Most of the world is unconscious. You're early — act like it fucking matters.",
+      "Before the inbox. Before the meetings. Before the bullshit. This is your hour.",
+      "Don't piss away the only time of day that's actually quiet.",
+      "Up at 5? Good. Now don't fuck it off on TikTok. Build.",
+      "Coffee, log, build. In that order. No phone for ten.",
+      "Fun fact: cortisol peaks 30 mins after waking. Use the spike before it bails on you.",
+      "Fun fact: nearly every founder you've heard of woke up early. Mostly because they actually wanted it.",
     ],
     weekend: [
-      "5am on a free day. Dream window. Open the laptop.",
-      "Weekend morning. No commute. Just you and the build.",
-      "Up early on a weekend — that's not normal. Good. Make it count.",
-      "Free time starts now. Don't sleep through the best part of the day.",
-      "Weekend 5am. Rarer than you think. Use every minute.",
+      "5am on a free day. Mate, that's a fucking flex. Don't waste the shit.",
+      "Weekend. Pre-dawn. Zero excuses, zero distractions. Open the laptop.",
+      "No one's awake. No one's expecting any shit from you. Best window of the week.",
+      "Weekend morning while the lazy world sleeps. That's your fucking edge.",
+      "5am on a Saturday is rare. Spend it on the thing that matters.",
+      "Up early on a free day — most people only dream about this. Don't waste it dreaming.",
+      "No alarm. No boss. Just you and the work. Get to it.",
+      "Weekend dawn. The kind of hour where careers get fucking made.",
+      "Free hours start now. Spend them on the future you actually want.",
+      "Up before the world on a weekend. That's character. Now act like it.",
+      "Pre-dawn weekend window. Don't fuck it off for sleep.",
+      "Fun fact: you'll forget 90% of weekends. Make this one a 10-percenter.",
     ],
   },
   morning: {
     weekday: [
-      "Before work takes over — what are you building?",
-      "Log it. Then go be employed for a bit.",
-      "Quick. Before the day gets away from you.",
-      "Morning window closing. Get the habits in.",
-      "The inbox can wait 2 minutes. Log it first.",
-      "Log before you check your phone. That's the order.",
+      "Morning. The day's about to ask shit of you. Get yours in fucking first.",
+      "Quick log before the boss owns your inbox. Two minutes, do the damn thing.",
+      "Morning window's closing. Don't roll into work having logged jack shit.",
+      "Phone down. Habits in. Then go pretend to give a fuck about meetings.",
+      "If even you don't open this app first thing, who the fuck will?",
+      "Morning routines aren't soft shit. They're the only thing keeping you sane.",
+      "Log it before you scroll. That's the whole damn rule.",
+      "You can't outwork chaos at 5pm. So set the day up now, you absolute donkey.",
+      "Two minutes. That's all this needs. Don't be a wet fucking rag about it.",
+      "Coffee, habits, plan. Then the day can come at you with whatever shit it has.",
+      "The version of you at 7am makes the version at 7pm. Choose well.",
+      "Get the easy wins in early so you can fight bigger battles later.",
+      "Don't start the day on someone else's terms. Log first.",
+      "Up. Move. Log. Then you can hate Monday like everyone else.",
+      "Fun fact: how you spend the first hour decides the next twelve. Spend it well.",
+      "Fun fact: a logged habit triggers dopamine. Basically free drugs. Take it.",
     ],
     weekend: [
-      "Free morning. No meetings. Just time. Use it.",
-      "Weekend morning hours are gold. Don't waste them.",
-      "Coffee, habits, build. That's the order.",
-      "No commute today. Trade the time for something real.",
+      "Free morning. No meetings. No commute. Stop fucking scrolling.",
+      "Weekend morning. The most expensive hours you ever sleep through.",
+      "Coffee, habits, build. In that fucking order.",
+      "No one needs your shit for two hours. Use that like it's gold. Because it is.",
+      "Saturday morning is a cheat code. Open the damn laptop.",
+      "Weekend dawn slipped past. Catch the next window. Move.",
+      "Quiet morning. Empty calendar. This is when real shit gets done.",
+      "If your weekend starts on the couch, that's how it ends. Get the fuck up.",
+      "Morning hours on a free day are the most leveraged. Don't blow them.",
+      "You don't need anyone's permission to build. Open the damn thing.",
+      "Free morning. Trade the time for actual progress, not vibes and bullshit.",
+      "Fun fact: most weekend builders ship more than 9-to-5 employees do all week.",
     ],
   },
   work_am: {
     weekday: [
-      "At work. Fine. Remember what you're working toward.",
-      "Punched in. Tonight, you work for yourself.",
-      "The 9-to-5 pays rent. The side work buys the exit.",
-      "Morning shift. Build something tonight.",
-      "Survive the morning. Come home and make something.",
-      "Clock's ticking on someone else's time. Yours starts later.",
-      "If even you don't use this app, who the fuck will? Log it.",
+      "At work. Fine. Don't forget this isn't the whole fucking story.",
+      "Punched in for them. Your real fucking job starts after 5.",
+      "The 9-to-5 pays the rent. The side work buys the exit. Remember that shit.",
+      "Look productive. Stay quiet. Save the real fight for tonight.",
+      "Survive the morning. Save your good ideas for when you're not paid to give them away.",
+      "If you won't use your own app at work, who the fuck is going to?",
+      "Office shit. Boring. Fine. The mission's still alive — log it.",
+      "Two minutes between meetings is a free habit log. Use the damn thing.",
+      "Don't let the morning grind kill the evening's plan.",
+      "You're trading hours for money right now. Make the hours after fucking worth it.",
+      "Stay sharp. They don't pay you enough to give them all your fucking brain.",
+      "Mid-shift. The escape plan doesn't pause because you're at work. Log it.",
+      "Boring meeting? Log a habit under the damn table. Pure rebellion.",
+      "Slipping into the workday autopilot? Snap the fuck out. Log something.",
+      "The cubicle isn't permanent. Unless you treat it like it is.",
+      "Fun fact: most of your boss's bosses also have side projects. You're not weird, you're early.",
     ],
     weekend: [
-      "Mid-morning on a free day. Habits logged? Good. What are you building?",
-      "No boss watching. That's a privilege. Don't squander it.",
-      "Weekend mid-morning. What have you actually shipped today?",
-      "Free hours passing. Log it and open the laptop.",
+      "Mid-morning, free day. What are you actually fucking building?",
+      "No one's emailing. No one's tracking your time. So fucking move.",
+      "Weekend mid-morning. Don't blow the best hours pretending to relax.",
+      "Free hours. Open the project that scares you a bit. That's the right one.",
+      "You've already wasted half a Saturday morning. Don't fuck the other half.",
+      "Quiet weekend hours. Build. Log. Repeat. That's the whole damn formula.",
+      "No boss watching. No alarm. Just you and what you said you'd build.",
+      "Mid-morning weekend. Either build, or be honest you're not going to.",
+      "Free time is sacred. Don't waste it on someone else's content.",
+      "Saturday morning hours are pure gold. Mine the shit out of them.",
+      "The weekend version of you should be the most ruthless. Act like it.",
+      "Fun fact: most progress happens in unscheduled, uncool hours. Like this one.",
     ],
   },
   lunch: {
     weekday: [
-      "Lunch. Don't scroll — remember the mission.",
-      "Half the day gone. Tonight still belongs to you.",
-      "Quick log. Then eat. Don't let the day slip.",
-      "Midday. Log it now before you forget.",
-      "Halfway through someone else's schedule. Keep your own.",
-      "One more shift to get through. Then you build.",
+      "Lunch. Don't fucking scroll. Log it. Eat. Reset.",
+      "Half the workday gone. Tonight still belongs to you. Don't fucking forget.",
+      "Midday slump incoming. Log first, then nap on the damn thing.",
+      "Twelve hours of life left today. Make the back half count.",
+      "Eat properly. Log it. Then go survive the afternoon.",
+      "Lunch break is for you, not your phone. Two minutes, log, then breathe.",
+      "Halfway through someone else's day. Yours starts in five hours. Be fucking ready.",
+      "Don't waste lunch reading shit you'll forget in an hour.",
+      "Quick log before the food coma. Future you will thank you.",
+      "Midday window. Reset. The afternoon can be a slog or a setup. Your fucking call.",
+      "Eat. Log. Walk. Don't scroll. That's the play.",
+      "Lunch is the cheapest reset of the day. Don't waste it hunched over a damn screen.",
+      "If you scroll through lunch, you'll scroll through tonight too. Break the chain.",
+      "One log. Ten minutes outside. Game on, you donkey.",
+      "Half the workday survived. The mission's still alive. Stay sharp.",
+      "Fun fact: a 10-minute walk after eating crushes the slump. You're welcome.",
     ],
     weekend: [
-      "Afternoon already. What have you built today?",
-      "Half the day's gone. The other half is yours.",
-      "Log it. Then actually build something this afternoon.",
-      "Lunchtime on a free day. Time to show up for yourself.",
+      "Lunchtime on a free day. What have you actually fucking built so far?",
+      "Half the day's gone. Don't fuck the other half.",
+      "No one's stopping you from working all weekend if you want to. Most won't. Be one who does.",
+      "Quick lunch. Then back to it. The weekend isn't fucking infinite.",
+      "Free time is finite. Spend it like a millionaire spends money — carefully.",
+      "Midday weekend slump. Log it. Build through the shit. Done.",
+      "Saturday lunch. The afternoon's still virgin territory. Use it.",
+      "Eat. Log. Move. Build. Any order. Just do them all.",
+      "If you nap through Saturday afternoon, that's the whole damn weekend gone.",
+      "Lunchtime weekend. Two more good hours and the day's been worth it.",
+      "Free day, free hands. Don't fucking sit on them.",
+      "Fun fact: the average person watches four hours of TV on weekends. You're not the average.",
     ],
   },
   work_pm: {
     weekday: [
-      "Home stretch at work. Then your real job starts.",
-      "One more shift. Then build your own shit.",
-      "Almost out. Don't forget what comes after.",
-      "Afternoon at someone else's desk. Soon it'll be your own.",
-      "Nearly done. The evening belongs to you — protect it.",
-      "Stop fucking drifting at work. Think about what you're building tonight.",
-      "End of shift incoming. Line up what you're shipping tonight.",
+      "Stop fucking drifting. The afternoon's where weak weeks die.",
+      "Home stretch. Don't lose the fucking plot now. The evening's coming.",
+      "One more shift. Then you build your own shit. Hold the damn line.",
+      "Afternoon at someone else's desk. Soon enough it'll be your own.",
+      "Don't crash into 5pm exhausted. Save fuel for the evening.",
+      "Boredom is the cost of the day job. Don't let it eat your fucking night.",
+      "Almost out. Plan one thing you'll ship tonight. Just one.",
+      "Coffee, focus, finish. Then go work on the thing that actually matters.",
+      "If the afternoon kills your spark, the evening's already lost. Hold.",
+      "Halfway through the worst part of the day. Push the fuck through.",
+      "Don't fall asleep at the wheel. Both literally and metaphorically, you donkey.",
+      "End-of-shift drift incoming. Snap out. Log a habit. Reset.",
+      "The afternoon you waste is the evening you can't have. Move.",
+      "Survive. Just survive. The good hours are after this.",
+      "Three more hours of pretending to give a shit. Then you get the real thing.",
+      "Fun fact: post-lunch energy crashes are universal. So is the option to push through them.",
     ],
     weekend: [
-      "Weekend afternoon — still time to build something worth doing.",
-      "Free hours passing. Log it and get to work.",
-      "This is your time. Don't drift through it.",
-      "Afternoon on a free day. Make something real.",
+      "Weekend afternoon — still time. Don't fucking drift now.",
+      "Free afternoon hours are the most underused asset of your week. Use them.",
+      "Stop fucking drifting on a Saturday. Build something real.",
+      "If you waste a weekend afternoon, that's a Tuesday morning of regret.",
+      "Two good hours this afternoon beats four wasted. You know which is which.",
+      "Weekend 3pm. The day's not over. The work isn't done. Get back to the damn thing.",
+      "Free afternoon. No fucking excuses. Build.",
+      "Saturday afternoon slump. Hard pass. Get up and log.",
+      "If you nap through this, you nap through the weekend. Move.",
+      "Free hours bleeding away. Plug the leak. Log something.",
+      "This is the time you wished you had on a Wednesday. You have it now. Use the shit out of it.",
+      "Fun fact: you'll remember what you built this weekend. Not what you watched.",
     ],
   },
   after_work: {
     weekday: [
-      "Shift's done. Open the laptop.",
-      "Home time. Build your thing.",
-      "You survived work. Now do your real job.",
-      "Evening's yours. Don't give it to Netflix.",
-      "This is it — the hours you spent all day waiting for.",
-      "No boss from here. Just you and what you're building.",
-      "Clock out from them. Clock in for you.",
-      "The escape hatch doesn't build itself. Get to it.",
-      "You're not going to get out by doing nothing every evening.",
+      "Shift's done. Open the fucking laptop. The real day starts now.",
+      "Home time. The escape plan doesn't build itself, you donkey.",
+      "Clock out from them. Clock in for you. That's the fucking deal.",
+      "No boss tonight. Good. Now stop fucking drifting.",
+      "You survived work. The night belongs to you. Don't piss it on Netflix.",
+      "If you won't use your own app right now, who the fuck will?",
+      "This is the hour you complained about not having all day. You have it. Use the shit out of it.",
+      "Evening's yours. Build the thing. Or admit you don't actually want out.",
+      "You said you wanted out. Cool. Build like it.",
+      "Came home. Sat down. The easy choice is nothing. Make the hard one.",
+      "Two hours of actual work tonight beats a week of good fucking intentions.",
+      "Open the laptop before you open the fridge. That's the order.",
+      "Six hours till bedtime. That's a lot of time to build. Or waste. Pick.",
+      "After-work autopilot is the killer. Snap the fuck out. Open the thing.",
+      "Tonight you either move forward or stay in this exact same spot. Choose.",
+      "The evening's a window, not a fucking couch. Use it.",
+      "Forged works because somebody built the damn thing. Build the next one.",
+      "Fun fact: this exact hour is when most failed founders give up. Don't be one.",
     ],
     weekend: [
-      "Weekend evening. Still time. Don't drift.",
-      "Evening on a free day — this is the window. Use it.",
-      "After-hours on a weekend. Build something.",
-      "Free evening. Rarer than it feels. Don't waste it.",
+      "Weekend evening. Still hours left. Don't fucking drift.",
+      "Free evening on a free day. The luxury you said you wanted. Use the shit out of it.",
+      "Saturday night. The world wants you to spend money on shit. Don't. Build instead.",
+      "Evening on a weekend — rarer than it feels. Don't waste it.",
+      "After-hours on a weekend. You should be unstoppable right now. Are you?",
+      "Free evening. No fucking excuses. Open the project.",
+      "Most people are at the pub. Most people aren't building shit either. Connect those fucking dots.",
+      "Weekend night. Build first. Reward later. Always that fucking order.",
+      "Free hours are the most expensive hours, because you don't notice them passing. Move.",
+      "Saturday evening. Worth fighting for. Get to work.",
+      "Sunday evening. Last big window before the week. Don't fumble the damn thing.",
+      "Fun fact: you'll never get this exact evening back. Spend it accordingly.",
     ],
   },
   evening: {
     weekday: [
-      "Evening's ticking. One good hour beats zero.",
-      "Stop fucking drifting. Make something tonight.",
-      "Don't waste the night. One push.",
-      "Last real window today. Use it.",
-      "You've still got time. Own it or own the fact that you didn't.",
-      "It's not too late. Log it and do one thing.",
-      "This is your shot. Don't waste it.",
-      "One hour of real work tonight beats a week of good intentions.",
+      "Evening's ticking. One real fucking push. Then you can switch off.",
+      "Stop fucking drifting. Either build or rest. Don't mid-zone.",
+      "Don't waste the night. One thing. Just one, you donkey.",
+      "You've still got time. Own it or own the fact you didn't.",
+      "It's not too late to log it. Two minutes. Do the damn thing.",
+      "One real hour tonight beats a week of good fucking intentions.",
+      "Last real window. Use it or admit you didn't want to.",
+      "If you start now, you can ship one thing before bed. Just fucking start.",
+      "Either go hard or shut down properly. Don't half-arse this hour.",
+      "Brain's tired. Cool. Hands still work. Type some shit.",
+      "Tonight you choose: progress or scroll. There's no third fucking option.",
+      "End of day. Either log it now or lose the data point. Two minutes, move.",
+      "You're going to remember either tonight's progress or tonight's scroll. Pick now.",
+      "Last call. Make this hour count or close the damn laptop properly.",
+      "One small win before bed. That's all. Then sleep wins.",
+      "Fun fact: the last hour before bed often produces the cleanest work. Try it.",
     ],
     weekend: [
-      "Weekend's almost done. Make the last hours count.",
+      "Weekend's almost done. Make the last hours fucking count.",
       "Sunday evening is both a gift and a threat. Use it.",
-      "Last stretch of the weekend. Go hard.",
-      "Still building? Good. Don't stop now.",
-      "Night closing in on the weekend. What did you actually ship?",
+      "Last stretch of the weekend. Either go hard or wind down. Not in between.",
+      "Still building? Good. Don't fucking stop now.",
+      "Night closing on the weekend. What did you actually ship today?",
+      "Weekend evening. The fork in the road. Pick build or pick rest. Both fine. Drifting isn't.",
+      "If the weekend ends on the couch, the week starts there too. Connect the damn dots.",
+      "Last good hour of a free day. Use it like it costs money. Because it kind of does.",
+      "Sunday night = setup for the next week. Don't half-arse the damn thing.",
+      "Free hours running out. One last fucking push before sleep.",
+      "Weekend over soon. Whatever you didn't do — that's on you. Move.",
+      "Fun fact: how you end the weekend predicts how you start the week. Now you know.",
     ],
   },
   night: {
     weekday: [
-      "Late. Log it or sleep — both are better than drifting.",
-      "Still up? Log it. Then rest. You've got work tomorrow.",
-      "Night mode. Quick log, then sleep. Come back sharp.",
-      "Late but not wasted if you log it now.",
+      "Late. Log it or sleep. Both beat fucking drifting.",
+      "Still up? Either ship or sleep. Don't mid-zone, you donkey.",
+      "Night mode. Quick log. Then close the fucking laptop.",
+      "Late but not wasted if you log it right now.",
+      "It's late. You have work tomorrow. Log and shut the shit down.",
+      "Up late on a school night? Honour it — log, then sleep hard.",
+      "Don't be the dickhead who's fucking exhausted tomorrow because they scrolled tonight.",
+      "Last call. Log or lose the data point. Then sleep.",
+      "Night. The honest hour. Did you build today? Yes or no? Then sleep on the damn answer.",
+      "Two minutes to log. Then sleep — properly, not while scrolling shit.",
+      "Late night. Quick log. Lights out. Repeat tomorrow.",
+      "Fun fact: missing sleep is one of the few things you can't outwork. Sleep.",
     ],
     weekend: [
-      "Late on a free day. Log it and wind down. Tomorrow's another shot.",
-      "Night. Log it quick before you crash.",
-      "Late night. Log it. Sleep. Do it again tomorrow.",
+      "Late on a free day. Log the shit and crash. Tomorrow's another window.",
+      "Night. Log it before you forget. Then sleep.",
+      "Late night weekend. Either keep building or wind down properly.",
+      "If you're still up on a weekend, make the awake hours fucking worth it. Or sleep.",
+      "Late hour. Last log of the day. Then bed.",
+      "Sunday late night. Big choice — finish strong or rest hard. Either's fine.",
+      "Night. Either you've done the work or you haven't. Log either way, you donkey.",
+      "End of weekend. Quick log. Big sleep. Monday wants the best version of you.",
+      "Late. Free day done. Log. Sleep. Restart. That's the loop.",
+      "Fun fact: late-night ideas are usually shit. But late-night logs aren't. Log it.",
     ],
   },
 };
 
-// All-habits-logged congratulations — time-aware, kept short
+// All-habits-logged congratulations — time-aware. Earned, not soft.
+// Every line here MUST read as obviously dev-pool: captain energy, swearing,
+// builder/founder framing, direct callouts. No "well done, keep it up" filler.
 const DEV_ALL_LOGGED_POOLS = {
   weekday: [
-    "All habits logged. Now go build before bed.",
-    "Full house on a workday. That's discipline. Keep it.",
-    "Logged. Done. Ahead of most people. Stay there.",
-    "Everything in. You're running a tight ship. Keep going.",
+    "Full house on a workday. Now stop celebrating and ship the fucking thing.",
+    "All habits in. The minimum bar. Now go raise it, you donkey.",
+    "Logged. Logged. Logged. Cool — now kick the fucking door down.",
+    "Mid-week full sweep. Discipline confirmed. Now spend it on something real.",
+    "All habits done. So what the fuck are you actually building tonight?",
+    "Clean slate, all logged. Now go produce something the world hasn't seen.",
+    "Habits — handled. The actual fucking work is still waiting. Get to it.",
+    "Full set on a workday. You're operating above the lazy fuckers. Don't drift.",
+    "All in. Tight ship. Now ship the goddamn product.",
+    "You logged everything. The boring shit's out the way. BUILD.",
+    "Habits cleared. The mission isn't. Move, captain.",
+    "Done with the warm-up. Now do the real fucking work.",
+    "All logged. Most people will brag about this for a week. You'll do it again tomorrow.",
+    "Full sweep. Now answer the only question that matters: what shipped?",
+    "Habits — done. Forged isn't going to fucking build itself. You up?",
+    "Mid-week full house. The week's yours if you don't sit on it.",
   ],
   weekend: [
-    "All habits logged on a free day. Good. Now ship something.",
-    "Full house on a weekend. Make the most of it.",
-    "Every habit in. What else can you build today?",
-    "Done and dusted. Now go actually move the needle.",
+    "Full sweep on a free day. Now go ship something nobody fucking asked for.",
+    "All habits logged on a weekend. The leverage hour starts now. Use the shit out of it.",
+    "Habits handled. The real fucking work is waiting. Open the laptop.",
+    "Done with the easy wins. The hard ones build the exit. Get to them.",
+    "Logged. Now build the thing the habits exist to support, captain.",
+    "Weekend sweep complete. While the world brunches, you ship. Carry on.",
+    "All habits in on a free day. Anything less than building now is a fucking waste.",
+    "Discipline confirmed. Now produce the goddamn thing.",
+    "Floor reached. Now find the ceiling, you donkey.",
+    "Full house on a weekend. Most people coast from here. Don't be most people.",
+    "Habits cleared on a free day. Now build the thing that pays for never having to do this again.",
+    "Weekend full sweep. The real fucking work is the next hour. Move.",
+    "All logged on a Saturday/Sunday. Half the battle. Now do the other half.",
+    "Done with the boring shit. Now do the work that scares you a bit. That's the right one.",
+    "Full set on a weekend. The captain's awake. Now sail the damn ship.",
+    "All habits in. Forged was built on weekends like this. Build the next thing.",
   ],
 };
 
@@ -375,11 +568,39 @@ function pickDevOwnerMessage(habits, goals, todayYmd, localHour) {
 
   if (allLogged) {
     const pool = DEV_ALL_LOGGED_POOLS[poolKey];
-    return { title: "Forged ✅", body: devPick(pool, todayYmd, localHour ?? 0) };
+    const body = devPick(pool, todayYmd, localHour ?? 0);
+    return {
+      title: DEV_TITLE_ALL_LOGGED,
+      body,
+      meta: {
+        branch: "all_logged",
+        slot,
+        weekend,
+        poolKey,
+        poolName: `DEV_ALL_LOGGED_POOLS.${poolKey}`,
+        poolSize: pool.length,
+        trackableCount: trackableHabits.length,
+        allLogged: true,
+      },
+    };
   }
 
   const pool = (DEV_POOLS[slot] || DEV_POOLS.morning)[poolKey];
-  return { title: "Forged 🔥", body: devPick(pool, todayYmd, localHour ?? 0) };
+  const body = devPick(pool, todayYmd, localHour ?? 0);
+  return {
+    title: DEV_TITLE_DEFAULT,
+    body,
+    meta: {
+      branch: "default",
+      slot,
+      weekend,
+      poolKey,
+      poolName: `DEV_POOLS.${slot}.${poolKey}`,
+      poolSize: pool.length,
+      trackableCount: trackableHabits.length,
+      allLogged: false,
+    },
+  };
 }
 
 // ── Message picker ─────────────────────────────────────────────────────────────
@@ -530,7 +751,7 @@ Hard rules:
 
 // ── Handler ────────────────────────────────────────────────────────────────────
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== "GET" && req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
@@ -634,8 +855,25 @@ export default async function handler(req, res) {
     const now = hourMinuteNowInTimeZone(tz); // needed for both windowed check + message slot
     const isDevOwner = sub.user_id === DEV_OWNER_ID;
 
+    // Verbose dev-owner trace — every decision printed so we can prove
+    // exactly which branch fired for any given notification.
+    if (isDevOwner) {
+      console.log("[dev-owner] match", {
+        user_id: sub.user_id,
+        version: DEV_POOL_VERSION,
+        tz,
+        todayYmd,
+        local_hour: now.hour,
+        local_minute: now.minute,
+        cron_mode: cronMode,
+        hourly_mode: DEV_OWNER_HOURLY_MODE,
+        daily_reminders_enabled: sub.daily_reminders_enabled,
+      });
+    }
+
     // ── Per-category gate: skip users who turned off daily reminders ────
     if (sub.daily_reminders_enabled === false) {
+      if (isDevOwner) console.log("[dev-owner] skip reason=category_disabled");
       skippedCategory++;
       continue;
     }
@@ -647,12 +885,16 @@ export default async function handler(req, res) {
     if (isWindowed) {
       if (isDevOwner && DEV_OWNER_HOURLY_MODE) {
         // Only the :00 bucket each hour — prevents firing every 5 minutes
-        if (bucketMinute(now.minute) !== 0) { skippedWindow++; continue; }
+        if (bucketMinute(now.minute) !== 0) {
+          if (isDevOwner) console.log("[dev-owner] skip reason=window_not_top_of_hour", { minute: now.minute });
+          skippedWindow++; continue;
+        }
       } else {
         const target = isDevOwner
           ? { hour: DEV_OWNER_SINGLE_HOUR, minute: 0 }
           : parseReminderTime(sub.reminder_time);
         if (now.hour !== target.hour || bucketMinute(now.minute) !== bucketMinute(target.minute)) {
+          if (isDevOwner) console.log("[dev-owner] skip reason=window_miss", { now, target });
           skippedWindow++;
           continue;
         }
@@ -668,6 +910,7 @@ export default async function handler(req, res) {
       : todayYmd;
 
     if (sub.last_reminder_sent_date && sub.last_reminder_sent_date === dedupKey) {
+      if (isDevOwner) console.log("[dev-owner] skip reason=dedup", { dedupKey, last: sub.last_reminder_sent_date });
       skippedDedup++;
       continue;
     }
@@ -678,10 +921,22 @@ export default async function handler(req, res) {
 
     let title;
     let body;
+    let pickMeta = null;
     if (isDevOwner) {
       // Personal dev-owner notifications — time-of-day aware, escape-the-9-to-5 framing.
       // Scoped exclusively to DEV_OWNER_ID; never reaches any other user.
-      ({ title, body } = pickDevOwnerMessage(habits, goals, todayYmd, now.hour));
+      const picked = pickDevOwnerMessage(habits, goals, todayYmd, now.hour);
+      title = picked.title;
+      body = picked.body;
+      pickMeta = picked.meta;
+      console.log("[dev-owner] picked", {
+        version: DEV_POOL_VERSION,
+        title,
+        body,
+        ...pickMeta,
+        habits_count: habits.length,
+        dedup_key: dedupKey,
+      });
     } else if (profile.is_pro && process.env.ANTHROPIC_API_KEY) {
       const aiMsg = await aiPickMessage(profile.name || "there", habits, goals, todayYmd);
       ({ title, body } = aiMsg || pickMessage(habits, goals, todayYmd));
@@ -689,11 +944,18 @@ export default async function handler(req, res) {
       ({ title, body } = pickMessage(habits, goals, todayYmd));
     }
 
+    // Hard guard: dev owner must NEVER receive the generic title. If this
+    // ever logs, the dev branch silently failed — investigate immediately.
+    if (isDevOwner && title !== DEV_TITLE_DEFAULT && title !== DEV_TITLE_ALL_LOGGED) {
+      console.error("[dev-owner] FALLBACK FIRED — generic branch leaked through", { title, body });
+    }
+
     const payload = JSON.stringify({ title, body, url: "/", tag: "forged-reminder" });
 
     try {
       await webpush.sendNotification(sub.subscription, payload);
       sent++;
+      if (isDevOwner) console.log("[dev-owner] sent", { dedup_key: dedupKey });
       // Stamp the dedup key (hourly or daily depending on mode) so the next
       // cron run within the same window skips this user.
       try {
@@ -721,7 +983,9 @@ export default async function handler(req, res) {
   }
 
   console.log(
-    `[Forged cron] mode=${cronMode} sent=${sent} failed=${failed} skipped_dedup=${skippedDedup} skipped_window=${skippedWindow} skipped_category=${skippedCategory} stale_removed=${staleIds.length}`
+    `[Forged cron] mode=${cronMode} dev_pool=${DEV_POOL_VERSION} sent=${sent} failed=${failed} skipped_dedup=${skippedDedup} skipped_window=${skippedWindow} skipped_category=${skippedCategory} stale_removed=${staleIds.length}`
   );
   return res.status(200).json({ mode: cronMode, sent, failed, skippedDedup, skippedWindow, skippedCategory });
 }
+
+export default withSentry(handler, "cron-reminders");

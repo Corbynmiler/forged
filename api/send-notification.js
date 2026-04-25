@@ -1,5 +1,6 @@
 import webpush from "web-push";
 import { createClient } from "@supabase/supabase-js";
+import { withSentry } from "./_lib/sentry.js";
 
 const SUPABASE_URL = "https://apdmvbzfjuvxworjepze.supabase.co";
 
@@ -9,10 +10,25 @@ webpush.setVapidDetails(
   process.env.VAPID_PRIVATE_KEY
 );
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   // Allow GET so the cron job can hit it directly, POST for manual sends
   if (req.method !== "POST" && req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  // ── Auth: internal-only — must hold CRON_SECRET ─────────────────────────────
+  // Previously this endpoint had no auth: anyone could POST with a userId and
+  // send arbitrary push-notification text to that user. Now it is gated behind
+  // the same CRON_SECRET as the cron endpoint, so only server-side callers
+  // (cron, internal workers) can trigger pushes.
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret) {
+    console.error("[Forged] CRON_SECRET not set — refusing to send pushes");
+    return res.status(503).json({ error: "Push service not configured" });
+  }
+  const authHeader = req.headers.authorization || "";
+  if (authHeader !== `Bearer ${cronSecret}`) {
+    return res.status(401).json({ error: "Unauthorized" });
   }
 
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -78,3 +94,5 @@ export default async function handler(req, res) {
 
   return res.status(200).json({ sent, failed });
 }
+
+export default withSentry(handler, "send-notification");

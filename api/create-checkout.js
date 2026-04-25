@@ -1,11 +1,12 @@
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
+import { withSentry, captureException } from "./_lib/sentry.js";
 
 /**
  * Env priority (Vercel): use canonical live vars first — STRIPE_SECRET_KEY, STRIPE_MONTHLY_PRICE_ID,
  * STRIPE_ANNUAL_PRICE_ID. Test backups (e.g. Stripe_Secret_Key_Test) are only used if the live var is unset.
  */
-export default async function handler(req, res) {
+async function handler(req, res) {
   try {
     if (req.method !== "POST") return res.status(405).end();
 
@@ -63,6 +64,9 @@ export default async function handler(req, res) {
 
   } catch (err) {
     console.error("create-checkout error:", err);
+    captureException(err, { route: "create-checkout" });
     return res.status(500).json({ error: err.message || "Could not create checkout session" });
   }
 }
+
+export default withSentry(handler, "create-checkout");

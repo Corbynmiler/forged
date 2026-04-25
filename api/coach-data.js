@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { withSentry } from "./_lib/sentry.js";
 
 const SUPABASE_URL = "https://apdmvbzfjuvxworjepze.supabase.co";
 
@@ -42,7 +43,7 @@ function getLast7Days(logs, todayYmd) {
 }
 
 // ── Handler ────────────────────────────────────────────────────────────────────
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
@@ -202,3 +203,5 @@ export default async function handler(req, res) {
 
   return res.status(200).json({ clients, stats, asOf: todayYmd });
 }
+
+export default withSentry(handler, "coach-data");

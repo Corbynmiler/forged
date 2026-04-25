@@ -13,6 +13,7 @@
 //   - Idempotent — last-invite-wins (we just overwrite coach_id).
 
 import { createClient } from "@supabase/supabase-js";
+import { withSentry } from "./_lib/sentry.js";
 
 const SUPABASE_URL = "https://apdmvbzfjuvxworjepze.supabase.co";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -29,7 +30,7 @@ function decodeCoachId(encoded) {
   }
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
@@ -103,3 +104,5 @@ export default async function handler(req, res) {
     clientsAtLimit: !isProGranted,
   });
 }
+
+export default withSentry(handler, "accept-coach-invite");

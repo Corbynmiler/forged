@@ -1,12 +1,13 @@
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
+import { withSentry, captureException } from "./_lib/sentry.js";
 
 /**
  * Opens Stripe Customer Billing Portal (cancel plan, update payment method, invoices).
  * Requires profiles.stripe_customer_id from a completed Checkout session.
  * Configure the portal at https://dashboard.stripe.com/settings/billing/portal
  */
-export default async function handler(req, res) {
+async function handler(req, res) {
   try {
     if (req.method !== "POST") return res.status(405).end();
 
@@ -49,6 +50,9 @@ export default async function handler(req, res) {
     return res.status(200).json({ url: portalSession.url });
   } catch (err) {
     console.error("create-portal-session error:", err);
+    captureException(err, { route: "create-portal-session" });
     return res.status(500).json({ error: err.message || "Could not open billing portal" });
   }
 }
+
+export default withSentry(handler, "create-portal-session");
