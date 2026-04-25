@@ -1010,6 +1010,8 @@ const CSS = `
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes fadeIn { from { opacity:0 } to { opacity:1 } }
   @keyframes journalFadeIn { from { opacity:0; transform: translateY(4px); } to { opacity:1; transform: translateY(0); } }
+  @keyframes coachRowIn { from { opacity:0; transform: translateY(6px); } to { opacity:1; transform: none; } }
+  @keyframes coachToastIn { from { opacity:0; transform: translateY(-8px); } to { opacity:1; transform: none; } }
   @keyframes coachNudge {
     0%   { opacity: 0; transform: translateY(10px) scale(0.97); }
     9%   { opacity: 1; transform: translateY(0) scale(1); }
@@ -2471,7 +2473,7 @@ function LogProjectModal({ habit, onClose, onLog }) {
 }
 
 // ─── REFLECT MODAL ────────────────────────────────────────────────────────────
-function ReflectModal({ habit, onClose, onSave }) {
+function ReflectModal({ habit, onClose, onSave, hasCoach = false }) {
   const [text, setText] = useState("");
   const [saved, setSaved] = useState(false);
 
@@ -2519,6 +2521,11 @@ function ReflectModal({ habit, onClose, onSave }) {
       {speech.interim && !saved && (
         <div style={{ fontSize:13, color:T.hint, fontStyle:"italic", lineHeight:1.5, marginBottom:10, paddingLeft:4 }}>
           {speech.interim}…
+        </div>
+      )}
+      {hasCoach && !saved && (
+        <div style={{ fontSize:11, color:T.hint, fontStyle:"italic", lineHeight:1.5, marginTop:6, marginBottom:6, paddingLeft:4 }}>
+          Your coach reads these.
         </div>
       )}
       {speech.speechError && !saved ? (
@@ -9385,6 +9392,31 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
         <Stat label="best streak"  value={`${bestStreak}d`}    color={T.gold}/>
       </div>
 
+      {/* Coaching — only shown when this account is linked to a coach */}
+      {user.coachId && (
+        <div style={{
+          margin:"0 14px 12px",
+          background:T.surface,
+          border:`0.5px solid ${T.border}`,
+          borderRadius:12,
+          padding:"14px 16px",
+        }}>
+          <div style={{ fontSize:10, fontWeight:600, color:T.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>
+            Coached by
+          </div>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, marginBottom:5 }}>
+            <span style={{ fontSize:16, color:T.text, fontWeight:600 }}>Your coach</span>
+            <span style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:"#27AE60", fontWeight:600 }}>
+              <span style={{ width:7, height:7, borderRadius:"50%", background:"#27AE60", boxShadow:"0 0 0 2px rgba(39,174,96,0.18)" }}/>
+              Connected
+            </span>
+          </div>
+          <div style={{ fontSize:12, color:T.muted, lineHeight:1.55 }}>
+            Your coach can see your habit logs and notes.
+          </div>
+        </div>
+      )}
+
       {/* Account */}
       <div data-tour="profile-account" style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, overflow:"hidden" }}>
         <div style={{ padding:"10px 16px 6px", fontSize:10, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em" }}>Account</div>
@@ -10450,11 +10482,46 @@ function CompletionBar({ done, total }) {
 }
 
 // Single client row in the coach list — left accent border, completion bar, merged 7-day grid
-function CoachClientRow({ client, onClick }) {
-  const dsa = client.daysSinceActive;
-  const accent = dsa === null ? T.hint : dsa === 0 ? "#27AE60" : dsa <= 2 ? T.gold : dsa <= 5 ? T.amber : "#E74C3C";
-  const lastLabel = dsa === null ? "never logged" : dsa === 0 ? "active today" : dsa === 1 ? "yesterday" : `${dsa}d ago`;
-  const merged = mergedLast7(client.habits);
+// Per-row meta for the urgency-driven coach list. `accent` colours the left
+// border + last-active pill; `lastLabel` collapses `daysSinceActive` into a
+// short human phrase ("Active today", "Yesterday", "5 days ago", …).
+function clientRowMeta(dsa) {
+  if (dsa === null) return { accent: T.hint,    lastLabel: "Never logged" };
+  if (dsa === 0)    return { accent: "#27AE60", lastLabel: "Active today" };
+  if (dsa === 1)    return { accent: T.sub,     lastLabel: "Yesterday" };
+  if (dsa === 2)    return { accent: T.gold,    lastLabel: "2 days ago" };
+  if (dsa <= 5)     return { accent: T.amber,   lastLabel: `${dsa} days ago` };
+  return              { accent: "#E74C3C", lastLabel: `${dsa} days quiet` };
+}
+
+// Single short observation about the client. Priority order matches the spec:
+// strong streak > all-logged > inactive > best-streak fallback > habit count.
+function clientInsightLine(client) {
+  const habits = client.habits || [];
+  const streakHero = habits
+    .filter(h => h && typeof h.streak === "number" && h.streak > 7)
+    .sort((a, b) => b.streak - a.streak)[0];
+  if (streakHero) return `🔥 ${streakHero.name} — ${streakHero.streak}-day streak`;
+
+  if (client.totalHabits > 0 && client.loggedTodayCount === client.totalHabits) {
+    return "✓ Logged everything today";
+  }
+  if (client.loggedTodayCount === 0 && (client.daysSinceActive ?? 0) > 1) {
+    return "No activity logged recently";
+  }
+  if (client.bestStreak > 0) return `Best streak: ${client.bestStreak} days`;
+  if (client.totalHabits > 0) return `${client.totalHabits} habit${client.totalHabits === 1 ? "" : "s"} tracked`;
+  return "No habits yet";
+}
+
+// Card for one client in the coach list. The whole row is a button; tap opens
+// the detail panel. `accent` (passed in by parent) overrides the auto-derived
+// colour so the urgency group can colour-coordinate even when a client could
+// fit multiple buckets (e.g. a brand-new but inactive client).
+function CoachClientRow({ client, onClick, accent: accentOverride, animationDelayMs = 0, badge }) {
+  const meta = clientRowMeta(client.daysSinceActive);
+  const accent = accentOverride || meta.accent;
+  const insight = clientInsightLine(client);
   return (
     <button
       onClick={onClick}
@@ -10465,32 +10532,55 @@ function CoachClientRow({ client, onClick }) {
         borderRight:`1px solid rgba(255,255,255,0.06)`,
         borderBottom:`1px solid rgba(255,255,255,0.06)`,
         borderLeft:`3px solid ${accent}`,
+        boxShadow:"0 1px 0 rgba(0,0,0,0.18)",
+        animation: `coachRowIn 0.42s ${animationDelayMs}ms cubic-bezier(0.22,1,0.36,1) both`,
+        transition: "transform 0.15s ease",
       }}
     >
-      {/* Name + meta row */}
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
-        <div style={{ display:"flex", alignItems:"center", gap:7, minWidth:0 }}>
-          <span style={{ fontSize:14, fontWeight:600, color:T.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+      {/* Name row */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, marginBottom:6 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:7, minWidth:0, flex:1 }}>
+          <span style={{ fontSize:17, fontWeight:600, color:T.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
             {client.name}
           </span>
+          {badge && (
+            <span style={{
+              fontSize:9, fontWeight:700, color:"#1a1a16",
+              background:T.gold, padding:"2px 7px", borderRadius:6,
+              letterSpacing:"0.06em", flexShrink:0,
+            }}>
+              {badge}
+            </span>
+          )}
           {client.isPro && (
             <span style={{ fontSize:9, fontWeight:700, color:T.gold, background:"rgba(200,144,42,0.15)", padding:"2px 6px", borderRadius:6, flexShrink:0 }}>PRO</span>
           )}
         </div>
-        <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
-          {client.bestStreak >= 3 && <span style={{ fontSize:11, color:T.gold }}>🔥 {client.bestStreak}d</span>}
-          <span style={{ fontSize:11, color:accent, fontWeight:dsa === 0 ? 600 : 400 }}>{lastLabel}</span>
-          <span style={{ fontSize:14, color:T.muted }}>›</span>
-        </div>
-      </div>
-      {/* Activity row */}
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-        <span style={{ fontSize:11, color: client.totalHabits === 0 ? T.muted : client.loggedTodayCount === client.totalHabits && client.totalHabits > 0 ? "#27AE60" : T.muted }}>
-          {client.totalHabits === 0 ? "No habits yet" : `${client.loggedTodayCount}/${client.totalHabits} today`}
+        <span style={{
+          flexShrink:0,
+          fontSize:11, fontWeight:600,
+          color: meta.accent,
+          background: "rgba(255,255,255,0.04)",
+          border: `1px solid ${meta.accent}33`,
+          padding: "3px 9px",
+          borderRadius: 999,
+          letterSpacing: "0.01em",
+        }}>
+          {meta.lastLabel}
         </span>
-        <ActivityDots last7={merged} size={8} />
       </div>
-      {client.totalHabits > 0 && <CompletionBar done={client.loggedTodayCount} total={client.totalHabits} />}
+
+      {/* Insight + chevron row */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10 }}>
+        <span style={{
+          fontSize:12, color:T.sub, fontStyle:"italic", lineHeight:1.5,
+          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+          minWidth:0, flex:1,
+        }}>
+          {insight}
+        </span>
+        <span style={{ fontSize:16, color:T.hint, lineHeight:1, flexShrink:0 }}>→</span>
+      </div>
     </button>
   );
 }
@@ -10800,6 +10890,36 @@ function CoachPaywall() {
   );
 }
 
+// Time-of-day greeting used in the coach header. Boundaries are deliberately
+// blunt (12 / 17) — anything fancier (sunrise, weekday-vs-weekend) buys
+// nothing for an internal dashboard greeting.
+function coachGreetingForNow(d = new Date()) {
+  const h = d.getHours();
+  if (h < 12) return "Good morning.";
+  if (h < 17) return "Good afternoon.";
+  return "Good evening.";
+}
+
+// Section label used between urgency groups in the coach client list. Renders
+// as: "NEEDS ATTENTION  (3) ──────────────────────────────"
+function CoachSectionLabel({ label, count, anchorRef }) {
+  return (
+    <div ref={anchorRef} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10, marginTop:4 }}>
+      <span style={{ fontSize:10, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:"0.1em", flexShrink:0 }}>
+        {label}
+      </span>
+      <span style={{
+        fontSize:10, fontWeight:700, color:T.hint,
+        background:T.surface, border:`1px solid ${T.border}`,
+        borderRadius:999, padding:"1px 8px", flexShrink:0,
+      }}>
+        {count}
+      </span>
+      <span style={{ flex:1, height:1, background:T.border, borderRadius:1 }} />
+    </div>
+  );
+}
+
 function CoachApp({ onExit, isPreview, coachTier, isAdmin }) {
   const [coachScreen,    setCoachScreen]    = useState("list");
   const [selectedClient, setSelectedClient] = useState(null);
@@ -10808,6 +10928,10 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin }) {
   const [err,            setErr]            = useState(null);
   const [coachUserId,    setCoachUserId]    = useState(null);
   const [inviteCopied,   setInviteCopied]   = useState(false);
+  // Dismissed "X just joined" banners — keyed by client id so refetching
+  // doesn't reanimate something the coach already acknowledged.
+  const [dismissedToasts, setDismissedToasts] = useState(() => new Set());
+  const attentionAnchorRef = useRef(null);
 
   const showPaywall = !isAdmin && !isPreview && !coachTier;
 
@@ -10840,50 +10964,146 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin }) {
     });
   }
 
-  const { clients = [], stats = {} } = data || {};
+  const clients = data?.clients ?? [];
 
-  // Group clients by how recently they were active
-  const activeToday   = clients.filter(c => c.daysSinceActive === 0);
-  const recentClients = clients.filter(c => c.daysSinceActive !== null && c.daysSinceActive > 0 && c.daysSinceActive <= 4);
-  const quietClients  = clients.filter(c => c.daysSinceActive === null || c.daysSinceActive > 4);
+  // ── Bucket clients into urgency groups ─────────────────────────────────
+  // A client can fit several buckets — pick once, in priority order, so each
+  // client appears in exactly one section and the totals add up.
+  const now = Date.now();
+  const HOURS_72 = 72 * 60 * 60 * 1000;
+  const DAYS_7   = 7  * 24 * 60 * 60 * 1000;
+  const DAY_24H  = 24 * 60 * 60 * 1000;
 
-  function SectionLabel({ label, count, color }) {
-    const bg = color === "#27AE60" ? "#27AE60" : color === T.gold ? T.gold : "#E74C3C";
-    return (
-      <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:9, marginTop:4 }}>
-        <span style={{ fontSize:10, fontWeight:700, color, textTransform:"uppercase", letterSpacing:"0.07em" }}>{label}</span>
-        <span style={{ fontSize:10, fontWeight:700, color:"#1a1a16", background:bg, borderRadius:10, padding:"1px 7px" }}>{count}</span>
-      </div>
-    );
+  const needsAttention = [];
+  const newClients     = [];
+  const activeWeek     = [];
+
+  for (const c of clients) {
+    const dsa = c.daysSinceActive;
+    const joinedTs = c.joinedAt ? new Date(c.joinedAt).getTime() : null;
+    const joinedRecently72h = joinedTs !== null && (now - joinedTs) <= HOURS_72;
+    const joinedThisWeek    = joinedTs !== null && (now - joinedTs) <= DAYS_7;
+    const isQuiet = dsa === null ? joinedRecently72h : dsa >= 3;
+    const hasNeverLogged = dsa === null;
+
+    if (isQuiet || (joinedRecently72h && hasNeverLogged)) {
+      needsAttention.push(c);
+    } else if (joinedThisWeek) {
+      newClients.push(c);
+    } else {
+      activeWeek.push(c);
+    }
   }
+
+  // Sorting — newest first inside each bucket so the most relevant rows
+  // surface at the top.
+  needsAttention.sort((a, b) => (b.daysSinceActive ?? 999) - (a.daysSinceActive ?? 999));
+  newClients.sort((a, b) => new Date(b.joinedAt || 0) - new Date(a.joinedAt || 0));
+  activeWeek.sort((a, b) => (a.daysSinceActive ?? 0) - (b.daysSinceActive ?? 0));
+
+  // Subtitle counts — "active this week" spans both green and new buckets.
+  const activeThisWeekCount = clients.filter(c =>
+    c.daysSinceActive !== null && c.daysSinceActive < 7
+  ).length;
+
+  // Toast-style banners for clients who joined in the last 24 hours. Coach
+  // sees one welcome ribbon per fresh signup, dismissable via tap or auto-fade.
+  const justJoined = clients.filter(c => {
+    if (!c.joinedAt) return false;
+    const ts = new Date(c.joinedAt).getTime();
+    if (Number.isNaN(ts)) return false;
+    return (now - ts) <= DAY_24H && !dismissedToasts.has(c.id);
+  });
+
+  // Auto-dismiss the first joined-toast after 8s once it appears. We only
+  // schedule one timer at a time and dismiss the oldest banner so the queue
+  // drains predictably even if the coach doesn't tap.
+  const oldestJoinedId = justJoined[0]?.id || null;
+  useEffect(() => {
+    if (!oldestJoinedId) return;
+    const t = setTimeout(() => {
+      setDismissedToasts(prev => {
+        if (prev.has(oldestJoinedId)) return prev;
+        const next = new Set(prev);
+        next.add(oldestJoinedId);
+        return next;
+      });
+    }, 8000);
+    return () => clearTimeout(t);
+  }, [oldestJoinedId]);
+
+  function dismissJoinedToast(id) {
+    setDismissedToasts(prev => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  }
+
+  function scrollToAttention() {
+    if (attentionAnchorRef.current) {
+      attentionAnchorRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+
+  const greeting = coachGreetingForNow();
+  const subtitle = clients.length === 0
+    ? null
+    : `${clients.length} client${clients.length === 1 ? "" : "s"} · ${activeThisWeekCount} active this week`;
 
   return (
     <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg }}>
 
       {/* ── Header ─────────────────────────────────────────────────────── */}
-      <div style={{ padding:"18px 18px 14px", borderBottom:`0.5px solid rgba(255,255,255,0.08)` }}>
-        <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between" }}>
-          <div>
+      <div style={{ padding:"18px 18px 14px", borderBottom:`0.5px solid ${T.border}` }}>
+        <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:12 }}>
+          <div style={{ minWidth:0, flex:1 }}>
             <div style={{ display:"flex", alignItems:"center", gap:9, marginBottom:3 }}>
-              <span style={{ fontFamily:T.serif, fontSize:24, color:T.text, letterSpacing:"-0.01em" }}>Forged</span>
+              <span style={{ fontFamily:T.serif, fontSize:24, color:T.text, letterSpacing:"-0.01em", lineHeight:1.15 }}>
+                {greeting}
+              </span>
               <span style={{
                 fontSize:9, fontWeight:700, color:"#1a1a16",
                 background:T.gold, padding:"3px 8px", borderRadius:6,
-                letterSpacing:"0.07em",
+                letterSpacing:"0.07em", flexShrink:0,
               }}>
                 COACH{isPreview ? " · PREVIEW" : ""}
               </span>
             </div>
             <div style={{ fontSize:12, color:T.muted }}>{fmtDateLong()}</div>
+            {subtitle && (
+              <div style={{ fontSize:11, color:T.muted, marginTop:4, letterSpacing:"0.01em" }}>
+                {subtitle}
+              </div>
+            )}
           </div>
           <button
             onClick={isPreview ? onExit : () => supabase.auth.signOut()}
-            style={{ background:"rgba(255,255,255,0.06)", border:"none", borderRadius:20, padding:"7px 14px", fontSize:12, color:T.muted, cursor:"pointer", fontFamily:T.font }}
+            style={{ background:"rgba(255,255,255,0.06)", border:"none", borderRadius:20, padding:"7px 14px", fontSize:12, color:T.muted, cursor:"pointer", fontFamily:T.font, flexShrink:0 }}
           >
             {isPreview ? "← Exit" : "Sign out"}
           </button>
         </div>
       </div>
+
+      {/* ── Attention strip ────────────────────────────────────────────── */}
+      {!showPaywall && coachScreen === "list" && needsAttention.length > 0 && (
+        <button
+          type="button"
+          onClick={scrollToAttention}
+          style={{
+            width:"100%", display:"flex", alignItems:"center", justifyContent:"center",
+            background:"rgba(230,126,34,0.10)", border:"none", borderTop:`0.5px solid rgba(230,126,34,0.28)`,
+            borderBottom:`0.5px solid rgba(230,126,34,0.18)`,
+            color:T.gold, fontSize:12, fontWeight:600, fontFamily:T.font,
+            padding:"10px 16px", cursor:"pointer", letterSpacing:"0.01em",
+            minHeight:36,
+          }}
+        >
+          {needsAttention.length} client{needsAttention.length === 1 ? "" : "s"} need{needsAttention.length === 1 ? "s" : ""} attention
+        </button>
+      )}
 
       {/* ── Content ────────────────────────────────────────────────────── */}
       <div style={{ paddingBottom:52 }}>
@@ -10895,143 +11115,257 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin }) {
             onBack={() => { setCoachScreen("list"); setSelectedClient(null); }}
           />
         ) : (
-          <>
-            {/* Stats row */}
-            {!loading && !err && data && (
-              <div style={{ padding:"16px 16px 4px" }}>
-                <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:18 }}>
+          <div style={{ padding:"18px 16px 0" }}>
+            {loading && (
+              <div style={{ textAlign:"center", padding:52, color:T.muted, fontSize:13 }}>Loading clients…</div>
+            )}
+            {err && (
+              <div style={{ textAlign:"center", padding:52, color:"#E74C3C", fontSize:13 }}>{err}</div>
+            )}
+
+            {/* Just-joined toasts (top of list) */}
+            {!loading && !err && justJoined.length > 0 && justJoined.slice(0, 2).map(c => (
+              <button
+                key={`toast-${c.id}`}
+                type="button"
+                onClick={() => dismissJoinedToast(c.id)}
+                title="Dismiss"
+                style={{
+                  width:"100%", textAlign:"left", cursor:"pointer", fontFamily:T.font, display:"block",
+                  background:"linear-gradient(180deg, rgba(200,144,42,0.14), rgba(200,144,42,0.05))",
+                  border:`1px solid rgba(200,144,42,0.45)`,
+                  borderRadius:12, padding:"10px 14px", marginBottom:10,
+                  fontSize:12, color:T.text,
+                  animation:"coachToastIn 0.45s cubic-bezier(0.22,1,0.36,1) both",
+                  boxShadow:"0 1px 0 rgba(200,144,42,0.15)",
+                }}
+              >
+                <span style={{ fontWeight:700, color:T.gold }}>{c.name}</span>
+                <span style={{ color:T.sub }}> just joined through your invite link</span>
+                <span style={{ marginLeft:4 }}>🎉</span>
+              </button>
+            ))}
+
+            {/* Empty state */}
+            {!loading && !err && clients.length === 0 && (
+              <div style={{ textAlign:"center", padding:"32px 8px 12px" }}>
+                <div style={{ fontSize:52, lineHeight:1, marginBottom:16 }}>👥</div>
+                <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, lineHeight:1.2, marginBottom:10 }}>
+                  Your coaching space is ready.
+                </div>
+                <div style={{ fontSize:14, color:T.muted, lineHeight:1.65, maxWidth:280, margin:"0 auto 22px" }}>
+                  Invite a client to start seeing their habits, patterns, and progress here.
+                </div>
+
+                <div style={{
+                  textAlign:"left", maxWidth:280, margin:"0 auto 22px",
+                  display:"flex", flexDirection:"column", gap:8,
+                }}>
                   {[
-                    {
-                      label: "Clients",
-                      value: stats.totalClients ?? 0,
-                      valueColor: T.text,
-                      topColor: "rgba(255,255,255,0.12)",
-                    },
-                    {
-                      label: "Active today",
-                      value: stats.activeToday ?? 0,
-                      valueColor: (stats.activeToday ?? 0) > 0 ? "#27AE60" : T.muted,
-                      topColor: (stats.activeToday ?? 0) > 0 ? "rgba(39,174,96,0.6)" : "rgba(255,255,255,0.08)",
-                    },
-                    {
-                      label: "Avg streak",
-                      value: `${stats.avgStreak ?? 0}d`,
-                      valueColor: (stats.avgStreak ?? 0) >= 7 ? T.gold : T.text,
-                      topColor: (stats.avgStreak ?? 0) >= 7 ? "rgba(200,144,42,0.6)" : "rgba(255,255,255,0.08)",
-                    },
-                  ].map(s => (
-                    <div key={s.label} style={{
-                      background: T.surface,
-                      borderTop:`2px solid ${s.topColor}`,
-                      borderRight:`1px solid rgba(255,255,255,0.06)`,
-                      borderBottom:`1px solid rgba(255,255,255,0.06)`,
-                      borderLeft:`1px solid rgba(255,255,255,0.06)`,
-                      borderRadius:12, padding:"13px 10px 11px", textAlign:"center",
-                    }}>
-                      <div style={{ fontSize:22, fontWeight:700, color:s.valueColor, lineHeight:1, marginBottom:5 }}>{s.value}</div>
-                      <div style={{ fontSize:10, color:T.muted, lineHeight:1.2 }}>{s.label}</div>
+                    "They get a personalised onboarding",
+                    "Forged Pro included for each client (up to 15)",
+                    "You see their habits and notes as they log",
+                  ].map(line => (
+                    <div key={line} style={{ display:"flex", alignItems:"flex-start", gap:9 }}>
+                      <span style={{ color:T.gold, fontSize:12, lineHeight:1.55, flexShrink:0, marginTop:1, fontWeight:700 }}>✓</span>
+                      <span style={{ fontSize:12, color:T.sub, lineHeight:1.55 }}>{line}</span>
                     </div>
                   ))}
                 </div>
+
+                {inviteLink && (
+                  <button
+                    type="button"
+                    onClick={copyInviteLink}
+                    style={{
+                      width:"100%", maxWidth:300, margin:"0 auto",
+                      padding:"13px 16px", borderRadius:12, border:"none",
+                      background:T.gold, color:"#1a1a16",
+                      fontSize:14, fontWeight:700, fontFamily:T.font,
+                      cursor:"pointer", display:"block",
+                      boxShadow:"0 2px 14px rgba(200,144,42,0.18)",
+                    }}
+                  >
+                    {inviteCopied ? "Link copied ✓" : "Invite your first client →"}
+                  </button>
+                )}
+
+                {inviteLink && (
+                  <div style={{
+                    marginTop:14, maxWidth:300, marginLeft:"auto", marginRight:"auto",
+                    background:T.surface, border:`1px solid ${T.border}`, borderRadius:10,
+                    padding:"8px 10px", fontSize:11, color:T.sub,
+                    overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                    fontFamily:"ui-monospace, SFMono-Regular, Menlo, monospace",
+                  }}>
+                    {inviteLink}
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Client list */}
-            <div style={{ padding:"0 16px" }}>
-              {loading && (
-                <div style={{ textAlign:"center", padding:52, color:T.muted, fontSize:13 }}>Loading clients…</div>
-              )}
-              {err && (
-                <div style={{ textAlign:"center", padding:52, color:"#E74C3C", fontSize:13 }}>{err}</div>
-              )}
-
-              {!loading && !err && clients.length === 0 && (
-                <div style={{ textAlign:"center", padding:"36px 16px 24px" }}>
-                  <div style={{ fontSize:36, marginBottom:12 }}>👥</div>
-                  <div style={{ fontSize:15, fontWeight:600, color:T.text, marginBottom:6 }}>No clients yet</div>
-                  <div style={{ fontSize:13, color:T.muted, lineHeight:1.65, maxWidth:260, margin:"0 auto" }}>
-                    Share your invite link below and clients will appear here as they sign up.
+            {/* Urgency-grouped client list */}
+            {!loading && !err && clients.length > 0 && (
+              <>
+                {needsAttention.length > 0 && (
+                  <div style={{ marginBottom:14 }}>
+                    <CoachSectionLabel label="Needs attention" count={needsAttention.length} anchorRef={attentionAnchorRef} />
+                    {needsAttention.map((c, i) => (
+                      <CoachClientRow
+                        key={c.id} client={c}
+                        accent="#E74C3C"
+                        animationDelayMs={i * 30}
+                        onClick={() => { setSelectedClient(c); setCoachScreen("detail"); }}
+                      />
+                    ))}
                   </div>
+                )}
+
+                {newClients.length > 0 && (
+                  <div style={{ marginBottom:14 }}>
+                    <CoachSectionLabel label="New" count={newClients.length} />
+                    {newClients.map((c, i) => (
+                      <CoachClientRow
+                        key={c.id} client={c}
+                        accent={T.gold}
+                        badge="NEW"
+                        animationDelayMs={i * 30}
+                        onClick={() => { setSelectedClient(c); setCoachScreen("detail"); }}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {activeWeek.length > 0 && (
+                  <div style={{ marginBottom:14 }}>
+                    <CoachSectionLabel label="Active this week" count={activeWeek.length} />
+                    {activeWeek.map((c, i) => (
+                      <CoachClientRow
+                        key={c.id} client={c}
+                        accent="#27AE60"
+                        animationDelayMs={i * 30}
+                        onClick={() => { setSelectedClient(c); setCoachScreen("detail"); }}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                <div style={{ fontSize:10, color:T.muted, textAlign:"center", marginTop:6, marginBottom:4 }}>
+                  As of {data?.asOf ?? "—"}
                 </div>
-              )}
+              </>
+            )}
 
-              {!loading && !err && clients.length > 0 && (
-                <>
-                  {activeToday.length > 0 && (
-                    <div style={{ marginBottom:8 }}>
-                      <SectionLabel label="Active today" count={activeToday.length} color="#27AE60" />
-                      {activeToday.map(c => (
-                        <CoachClientRow key={c.id} client={c} onClick={() => { setSelectedClient(c); setCoachScreen("detail"); }} />
-                      ))}
-                    </div>
-                  )}
-
-                  {recentClients.length > 0 && (
-                    <div style={{ marginBottom:8 }}>
-                      <SectionLabel label="Recent" count={recentClients.length} color={T.gold} />
-                      {recentClients.map(c => (
-                        <CoachClientRow key={c.id} client={c} onClick={() => { setSelectedClient(c); setCoachScreen("detail"); }} />
-                      ))}
-                    </div>
-                  )}
-
-                  {quietClients.length > 0 && (
-                    <div style={{ marginBottom:8 }}>
-                      <SectionLabel label="Going quiet" count={quietClients.length} color="#E74C3C" />
-                      {quietClients.map(c => (
-                        <CoachClientRow key={c.id} client={c} onClick={() => { setSelectedClient(c); setCoachScreen("detail"); }} />
-                      ))}
-                    </div>
-                  )}
-
-                  <div style={{ fontSize:10, color:T.muted, textAlign:"center", marginTop:6, marginBottom:4 }}>
-                    {clients.length} client{clients.length !== 1 ? "s" : ""} · as of {data?.asOf ?? "—"}
-                  </div>
-                </>
-              )}
-
-              {/* Invite link */}
-              {!loading && !err && inviteLink && (
+            {/* Invite link panel — kept available below the list when there are
+                already clients. The empty state has its own version above. */}
+            {!loading && !err && inviteLink && clients.length > 0 && (
+              <div style={{
+                marginTop:20,
+                padding:"16px", background:T.surface,
+                border:`1px solid ${T.border}`, borderRadius:14,
+              }}>
+                <div style={{ fontSize:13, fontWeight:600, color:T.text, marginBottom:3 }}>Invite a client</div>
+                <div style={{ fontSize:11, color:T.muted, lineHeight:1.55, marginBottom:12 }}>
+                  Anyone who signs up through this link will appear in your client list automatically.
+                </div>
                 <div style={{
-                  marginTop: clients.length === 0 ? 4 : 20,
-                  padding:"16px", background:T.surface,
-                  border:`1px solid rgba(255,255,255,0.06)`, borderRadius:14,
+                  display:"flex", alignItems:"center", gap:8,
+                  background:T.bg, border:`1px solid ${T.border}`, borderRadius:10, padding:"8px 10px",
                 }}>
-                  <div style={{ fontSize:13, fontWeight:600, color:T.text, marginBottom:3 }}>Invite a client</div>
-                  <div style={{ fontSize:11, color:T.muted, lineHeight:1.55, marginBottom:12 }}>
-                    Anyone who signs up through this link will appear in your client list automatically.
-                  </div>
                   <div style={{
-                    display:"flex", alignItems:"center", gap:8,
-                    background:T.bg, border:`1px solid rgba(255,255,255,0.06)`, borderRadius:10, padding:"8px 10px",
+                    flex:1, minWidth:0, fontSize:11, color:T.sub,
+                    overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                    fontFamily:"ui-monospace, SFMono-Regular, Menlo, monospace",
                   }}>
-                    <div style={{
-                      flex:1, minWidth:0, fontSize:11, color:T.sub,
-                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
-                      fontFamily:"ui-monospace, SFMono-Regular, Menlo, monospace",
-                    }}>
-                      {inviteLink}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={copyInviteLink}
-                      style={{
-                        flexShrink:0, padding:"6px 12px", borderRadius:8, border:"none",
-                        background: inviteCopied ? "rgba(39,174,96,0.18)" : T.gold,
-                        color: inviteCopied ? "#27AE60" : "#1a1a16",
-                        fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:T.font,
-                        transition:"background 0.18s, color 0.18s",
-                      }}
-                    >
-                      {inviteCopied ? "Copied ✓" : "Copy"}
-                    </button>
+                    {inviteLink}
                   </div>
+                  <button
+                    type="button"
+                    onClick={copyInviteLink}
+                    style={{
+                      flexShrink:0, padding:"6px 12px", borderRadius:8, border:"none",
+                      background: inviteCopied ? "rgba(39,174,96,0.18)" : T.gold,
+                      color: inviteCopied ? "#27AE60" : "#1a1a16",
+                      fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:T.font,
+                      transition:"background 0.18s, color 0.18s",
+                    }}
+                  >
+                    {inviteCopied ? "Copied ✓" : "Copy"}
+                  </button>
                 </div>
-              )}
-            </div>
-          </>
+              </div>
+            )}
+          </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── COACH-CLIENT WELCOME ─────────────────────────────────────────────────────
+// Shown once after onboarding completes for users who arrived via a coach
+// invite link. Caller is responsible for stamping
+// `localStorage.forged_coach_welcome_seen = "1"` when onDone fires so this
+// never reappears for the same device/account.
+function CoachWelcomeScreen({ onDone }) {
+  return (
+    <div style={{
+      fontFamily: T.font, background: T.bg, minHeight: "100vh",
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      padding: "0 26px", textAlign: "center",
+      animation: "fadeIn 0.6s ease both",
+    }}>
+      <div style={{
+        width: 64, height: 64, borderRadius: "50%",
+        background: "rgba(39,174,96,0.15)",
+        border: "1px solid rgba(39,174,96,0.45)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        marginBottom: 22,
+      }}>
+        <span style={{ fontSize: 28, color: "#27AE60", lineHeight: 1, fontWeight: 700 }}>✓</span>
+      </div>
+
+      <div style={{ fontFamily: T.serif, fontSize: 28, color: T.text, lineHeight: 1.2, marginBottom: 12 }}>
+        You&rsquo;re connected.
+      </div>
+      <div style={{ fontSize: 14, color: T.muted, lineHeight: 1.65, maxWidth: 280, marginBottom: 26 }}>
+        Your coach can now see your habit logs and notes. They&rsquo;ll be notified you&rsquo;ve joined.
+      </div>
+
+      <div style={{ width: "100%", maxWidth: 320, height: 1, background: T.border, marginBottom: 22 }} />
+
+      <div style={{
+        width: "100%", maxWidth: 320,
+        background: "linear-gradient(180deg, rgba(39,174,96,0.12), rgba(39,174,96,0.04))",
+        border: "1px solid rgba(39,174,96,0.32)",
+        borderRadius: 14, padding: "14px 16px",
+        display: "flex", alignItems: "center", gap: 12,
+        marginBottom: 24, textAlign: "left",
+      }}>
+        <span style={{ fontSize: 22, lineHeight: 1 }}>⚡</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 2 }}>
+            Forged Pro &mdash; Included
+          </div>
+          <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.5 }}>
+            Your coach has unlocked full access for you.
+          </div>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={onDone}
+        style={{
+          width: "100%", maxWidth: 320,
+          padding: "14px 16px", borderRadius: 12, border: "none",
+          background: T.gold, color: "#1a1a16",
+          fontSize: 15, fontWeight: 700, fontFamily: T.font,
+          cursor: "pointer", letterSpacing: "0.01em",
+        }}
+      >
+        Start logging &rarr;
+      </button>
     </div>
   );
 }
@@ -11093,6 +11427,18 @@ export default function App() {
   const [stripeCustomerId, setStripeCustomerId] = useState(null);
   const [coachName,      setCoachName]      = useState("Coach");
   const [coachIcon,      setCoachIcon]      = useState("");
+  // One-time post-onboarding welcome screen shown to users who arrived via a
+  // coach invite link. Flipped on by either (a) a successful accept-coach-invite
+  // POST, or (b) detecting `forged_pending_coach` at app load. Persisted-once
+  // dismissal lives in localStorage("forged_coach_welcome_seen").
+  const [pendingCoachWelcome, setPendingCoachWelcome] = useState(() => {
+    try {
+      if (typeof window === "undefined") return false;
+      const seen = window.localStorage.getItem("forged_coach_welcome_seen") === "1";
+      const hasPending = !!window.localStorage.getItem("forged_pending_coach");
+      return hasPending && !seen;
+    } catch { return false; }
+  });
 
   // ── Notification state (App-level so it survives tab switches) ───────────────
   const [notifEnabled,    setNotifEnabled]    = useState(false);
@@ -11371,6 +11717,9 @@ export default function App() {
           localStorage.removeItem("forged_pending_coach");
           try {
             const json = await res.json();
+            // Mirror coach_id into local user state so the Coaching card on
+            // ProfileScreen renders without a profile re-fetch.
+            if (json.coachId) setUser(u => ({ ...u, coachId: json.coachId }));
             if (json.isProGranted) {
               setIsPro(true);
               addToast("✓ Connected with your coach — Forged Pro unlocked!");
@@ -11380,6 +11729,13 @@ export default function App() {
           } catch {
             addToast("You're connected with your coach.");
           }
+          // Always queue the welcome screen on a fresh acceptance, unless the
+          // user already dismissed it on this device.
+          try {
+            if (localStorage.getItem("forged_coach_welcome_seen") !== "1") {
+              setPendingCoachWelcome(true);
+            }
+          } catch { /* localStorage blocked — skip welcome silently */ }
         } else {
           // Permanent failure modes: bad token, self-invite, missing coach.
           // Drop the token so we don't keep retrying every session.
@@ -12328,6 +12684,9 @@ export default function App() {
           avatarUrl: profile.avatar_url || null,
           username: profile.username || "",
           visibleToFriendsOfFriends: !!profile.visible_to_friends_of_friends,
+          // Carry the coach link forward so ProfileScreen can render the
+          // "Coaching" card and the post-coach welcome flow can fire.
+          coachId: profile.coach_id || null,
         });
         setXp(profile.xp ?? 0);
         const proStatus = !!(profile.is_pro || profile.is_admin);
@@ -13223,6 +13582,24 @@ export default function App() {
     );
   }
 
+  // Coach-client welcome — fires once after onboarding completes for users who
+  // arrived via a coach invite link. Renders BEFORE the main app the very
+  // first time only; dismissal stamps localStorage so this never reappears.
+  if (
+    !loading && !authScreen && accountDataReady && onboarded === true &&
+    pendingCoachWelcome && !checkingPayment && !previewOnboarding
+  ) {
+    return (
+      <><style>{CSS}</style>
+      <CoachWelcomeScreen
+        onDone={() => {
+          try { localStorage.setItem("forged_coach_welcome_seen", "1"); } catch { /* noop */ }
+          setPendingCoachWelcome(false);
+        }}
+      /></>
+    );
+  }
+
   // Confirming payment after Stripe redirect — poll until webhook fires
   if (!loading && !authScreen && accountDataReady && onboarded && checkingPayment) {
     return (
@@ -14086,7 +14463,7 @@ export default function App() {
       {editGoalId    && (() => { const g = resolveGoalForModal(editGoalId, goals, habits); return g ? <EditGoalModal goal={g} onClose={() => setEditGoalId(null)} onSave={handleEditGoalSave}/> : null; })()}
       {showXP        && <XPModal       xp={xp}                               onClose={() => setShowXP(false)}/>}
       {showHistory   && <HistoryModal  habits={habits} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onClose={() => setShowHistory(false)}/>}
-      {reflectId     && <ReflectModal  habit={reflectHabit}                  onClose={() => setReflectId(null)} onSave={handleSaveReflection}/>}
+      {reflectId     && <ReflectModal  habit={reflectHabit}                  onClose={() => setReflectId(null)} onSave={handleSaveReflection} hasCoach={!!user.coachId}/>}
       {editId && !editGoalId && editHabit && !isGoalLikeHabitType(editHabit) && <EditModal habit={editHabit} onClose={() => setEditId(null)} onSave={handleEditSave}/>}
       {logId && logHabit?.habitType === "project"  && <LogProjectModal   habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
       {showCoach   && <AICoach habits={habits} goals={goals} user={user} isPro={isPro} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)} coachName={coachName} currentScreen={screen}
