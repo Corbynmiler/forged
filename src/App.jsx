@@ -9396,23 +9396,25 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
       {user.coachId && (
         <div style={{
           margin:"0 14px 12px",
-          background:T.surface,
-          border:`0.5px solid ${T.border}`,
-          borderRadius:12,
+          background:"linear-gradient(145deg, rgba(39,174,96,0.07) 0%, rgba(39,174,96,0.02) 100%)",
+          border:`1px solid rgba(39,174,96,0.28)`,
+          borderRadius:14,
           padding:"14px 16px",
         }}>
-          <div style={{ fontSize:10, fontWeight:600, color:T.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>
-            Coached by
+          <div style={{ fontSize:10, fontWeight:700, color:"#27AE60", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:8 }}>
+            Coaching
           </div>
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, marginBottom:5 }}>
-            <span style={{ fontSize:16, color:T.text, fontWeight:600 }}>Your coach</span>
-            <span style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:"#27AE60", fontWeight:600 }}>
-              <span style={{ width:7, height:7, borderRadius:"50%", background:"#27AE60", boxShadow:"0 0 0 2px rgba(39,174,96,0.18)" }}/>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, marginBottom:6 }}>
+            <span style={{ fontSize:17, color:T.text, fontWeight:600 }}>
+              {user.linkedCoachName || "Your coach"}
+            </span>
+            <span style={{ display:"flex", alignItems:"center", gap:5, fontSize:11, color:"#27AE60", fontWeight:600, background:"rgba(39,174,96,0.1)", padding:"3px 9px", borderRadius:99 }}>
+              <span style={{ width:6, height:6, borderRadius:"50%", background:"#27AE60", flexShrink:0 }}/>
               Connected
             </span>
           </div>
-          <div style={{ fontSize:12, color:T.muted, lineHeight:1.55 }}>
-            Your coach can see your habit logs and notes.
+          <div style={{ fontSize:12, color:T.muted, lineHeight:1.6 }}>
+            {user.linkedCoachName ? `${user.linkedCoachName} can` : "Your coach can"} see your habit logs and notes to help prepare for your sessions.
           </div>
         </div>
       )}
@@ -10481,10 +10483,31 @@ function CompletionBar({ done, total }) {
   );
 }
 
-// Single client row in the coach list — left accent border, completion bar, merged 7-day grid
-// Per-row meta for the urgency-driven coach list. `accent` colours the left
-// border + last-active pill; `lastLabel` collapses `daysSinceActive` into a
-// short human phrase ("Active today", "Yesterday", "5 days ago", …).
+// ── Local-timezone date helpers for the coach workspace ───────────────────────
+// The coach-data API computes "today" in UTC (Vercel runs in UTC). Coaches in
+// AEST/AEDT (UTC+10/11) are already on the next calendar day when UTC midnight
+// hits. All "today / yesterday / X days ago" labels are therefore computed
+// client-side from lastActiveDate so they always match the coach's local clock.
+
+function localTodayYmd() {
+  const n = new Date();
+  return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}-${String(n.getDate()).padStart(2,"0")}`;
+}
+
+/** Days since a YYYY-MM-DD string, using the browser's local timezone. */
+function localDaysSince(dateStr) {
+  if (!dateStr) return null;
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const target     = new Date(y, m - 1, d).getTime();
+  const n          = new Date();
+  const todayMs    = new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime();
+  const diff       = todayMs - target;
+  return diff < 0 ? 0 : Math.round(diff / 86400000);
+}
+
+function localIsToday(dateStr) { return localDaysSince(dateStr) === 0; }
+
+// Per-row meta: accent colour + pill label. Always pass a LOCALLY-computed dsa.
 function clientRowMeta(dsa) {
   if (dsa === null) return { accent: T.hint,    lastLabel: "Never logged" };
   if (dsa === 0)    return { accent: "#27AE60", lastLabel: "Active today" };
@@ -10494,24 +10517,26 @@ function clientRowMeta(dsa) {
   return              { accent: "#E74C3C", lastLabel: `${dsa} days quiet` };
 }
 
-// Single short observation about the client. Priority order matches the spec:
-// strong streak > all-logged > inactive > best-streak fallback > habit count.
+// Single short observation about the client, using LOCAL date so timezone drift
+// doesn't produce "logged everything today" for yesterday's logs.
 function clientInsightLine(client) {
-  const habits = client.habits || [];
+  const habits  = client.habits || [];
+  const localDsa = localDaysSince(client.lastActiveDate);
+
   const streakHero = habits
     .filter(h => h && typeof h.streak === "number" && h.streak > 7)
     .sort((a, b) => b.streak - a.streak)[0];
   if (streakHero) return `🔥 ${streakHero.name} — ${streakHero.streak}-day streak`;
 
-  if (client.totalHabits > 0 && client.loggedTodayCount === client.totalHabits) {
-    return "✓ Logged everything today";
-  }
-  if (client.loggedTodayCount === 0 && (client.daysSinceActive ?? 0) > 1) {
+  if (localDsa === 0 && client.totalHabits > 0 && client.loggedTodayCount === client.totalHabits)
+    return "✓ All habits logged today";
+  if (localDsa === 0 && client.loggedTodayCount > 0)
+    return `✓ ${client.loggedTodayCount}/${client.totalHabits} habits logged today`;
+  if (localDsa !== null && localDsa > 1)
     return "No activity logged recently";
-  }
   if (client.bestStreak > 0) return `Best streak: ${client.bestStreak} days`;
   if (client.totalHabits > 0) return `${client.totalHabits} habit${client.totalHabits === 1 ? "" : "s"} tracked`;
-  return "No habits yet";
+  return "No habits set up yet";
 }
 
 // Card for one client in the coach list. The whole row is a button; tap opens
@@ -10519,7 +10544,9 @@ function clientInsightLine(client) {
 // colour so the urgency group can colour-coordinate even when a client could
 // fit multiple buckets (e.g. a brand-new but inactive client).
 function CoachClientRow({ client, onClick, accent: accentOverride, animationDelayMs = 0, badge }) {
-  const meta = clientRowMeta(client.daysSinceActive);
+  // Use local-timezone dsa so the pill always reflects the coach's local date.
+  const localDsa = localDaysSince(client.lastActiveDate);
+  const meta = clientRowMeta(localDsa !== null ? localDsa : client.daysSinceActive);
   const accent = accentOverride || meta.accent;
   const insight = clientInsightLine(client);
   return (
@@ -10592,29 +10619,41 @@ function CoachClientRow({ client, onClick, accent: accentOverride, animationDela
 
 function buildSessionBrief(client) {
   const items = [];
-  const { habits = [], loggedTodayCount, totalHabits, daysSinceActive } = client;
+  const { habits = [], loggedTodayCount, totalHabits, lastActiveDate } = client;
+
+  // Use locally-computed dsa so timezone drift doesn't mislabel yesterday as today.
+  const localDsa    = localDaysSince(lastActiveDate);
+  const isToday     = localDsa === 0;
+  const isYesterday = localDsa === 1;
 
   if (totalHabits > 0) {
-    if (loggedTodayCount === totalHabits)
+    if (isToday && loggedTodayCount === totalHabits)
       items.push({ icon:"✅", text:`All ${totalHabits} habits logged today` });
-    else if (loggedTodayCount > 0)
-      items.push({ icon:"📋", text:`${loggedTodayCount}/${totalHabits} habits logged today` });
+    else if (isToday && loggedTodayCount > 0)
+      items.push({ icon:"📋", text:`${loggedTodayCount}/${totalHabits} habits logged so far today` });
+    else if (isToday)
+      items.push({ icon:"⏰", text:"Not yet logged today — session is a good prompt" });
+    else if (isYesterday)
+      items.push({ icon:"📅", text:"Last logged yesterday — not yet active today" });
+    else if (localDsa !== null && localDsa > 1)
+      items.push({ icon:"⏰", text:`${localDsa} days since last activity — worth checking in on` });
     else
-      items.push({ icon:"⏰", text:"Nothing logged yet today" });
+      items.push({ icon:"🔵", text:"No activity logged yet" });
   }
 
   const streakHabit = [...habits].sort((a, b) => b.streak - a.streak)[0];
   if (streakHabit && streakHabit.streak >= 3) {
-    items.push({ icon:"🔥", text:`${streakHabit.emoji} ${streakHabit.name} · ${streakHabit.streak}-day streak — ask about momentum` });
+    items.push({ icon:"🔥", text:`${streakHabit.emoji || ""} ${streakHabit.name} · ${streakHabit.streak}-day streak — ask about momentum` });
   }
 
+  // Habits not logged recently (use local date for gap calc).
   const gapHabits = habits.filter(h => {
-    if (h.loggedToday) return false;
+    if (isToday && h.loggedToday) return false;
     if (!h.lastLogDate) return true;
-    return Math.round((Date.now() - new Date(h.lastLogDate)) / 86400000) >= 3;
+    return (localDaysSince(h.lastLogDate) ?? 0) >= 3;
   });
   for (const h of gapHabits.slice(0, 2)) {
-    const days = h.lastLogDate ? Math.round((Date.now() - new Date(h.lastLogDate)) / 86400000) : null;
+    const days = h.lastLogDate ? localDaysSince(h.lastLogDate) : null;
     items.push({ icon:"⚠️", text:`${h.emoji || ""} ${h.name} — ${days ? `${days}d since last log` : "never logged"} — worth checking in on` });
   }
 
@@ -10628,11 +10667,13 @@ function buildSessionBrief(client) {
 }
 
 function CoachClientDetail({ client, onBack }) {
+  const [detailTab, setDetailTab] = useState("brief"); // "brief" | "habits"
   const brief = buildSessionBrief(client);
-  const lastSeenLabel = client.daysSinceActive === null ? "never active"
-    : client.daysSinceActive === 0 ? "active today"
-    : client.daysSinceActive === 1 ? "last seen yesterday"
-    : `last seen ${client.daysSinceActive}d ago`;
+  const localDsa = localDaysSince(client.lastActiveDate);
+  const lastSeenLabel = localDsa === null ? "never active"
+    : localDsa === 0 ? "active today"
+    : localDsa === 1 ? "last seen yesterday"
+    : `last seen ${localDsa}d ago`;
 
   // ── AI session-prep brief ──────────────────────────────────────────────
   // Fetched on mount and on the refresh button. Renders below the
@@ -10671,114 +10712,206 @@ function CoachClientDetail({ client, onBack }) {
     return () => ctrl.abort();
   }, [fetchSummary]);
 
+  const tabBtn = (id, label) => (
+    <button
+      key={id}
+      onClick={() => setDetailTab(id)}
+      style={{
+        flex:1, padding:"9px 0", background:"none", border:"none",
+        borderBottom: detailTab === id ? `2px solid ${T.gold}` : "2px solid transparent",
+        color: detailTab === id ? T.text : T.muted,
+        fontSize:13, fontWeight: detailTab === id ? 600 : 400,
+        cursor:"pointer", fontFamily:T.font, letterSpacing:"0.01em",
+        transition:"color 0.15s, border-color 0.15s",
+      }}
+    >
+      {label}
+    </button>
+  );
+
   return (
-    <div style={{ padding:"0 16px 40px" }}>
-      <button onClick={onBack} style={{ display:"flex", alignItems:"center", gap:6, background:"none", border:"none", color:T.muted, fontSize:13, cursor:"pointer", padding:"16px 0", fontFamily:T.font }}>
+    <div style={{ paddingBottom:40 }}>
+      {/* Back nav */}
+      <button onClick={onBack} style={{ display:"flex", alignItems:"center", gap:6, background:"none", border:"none", color:T.muted, fontSize:13, cursor:"pointer", padding:"14px 16px 10px", fontFamily:T.font }}>
         ← All clients
       </button>
 
-      {/* Client header */}
-      <div style={{ marginBottom:20 }}>
-        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:4 }}>
+      {/* Client identity strip */}
+      <div style={{ padding:"0 16px 16px", borderBottom:`0.5px solid ${T.border}` }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:3 }}>
           <span style={{ fontSize:22, fontWeight:700, color:T.text }}>{client.name}</span>
           {client.isPro && <span style={{ fontSize:9, fontWeight:700, color:T.gold, background:"rgba(200,144,42,0.15)", padding:"2px 7px", borderRadius:8 }}>PRO</span>}
         </div>
-        {client.email && <div style={{ fontSize:12, color:T.muted, marginBottom:2 }}>{client.email}</div>}
-        <div style={{ fontSize:12, color:T.sub }}>{lastSeenLabel} · {client.xp} xp · joined {client.joinedAt ? new Date(client.joinedAt).toLocaleDateString("en-AU", { month:"short", year:"numeric" }) : "—"}</div>
-      </div>
-
-      {/* Before this session */}
-      <div style={{ background:T.surface, borderRadius:14, padding:"14px 16px", marginBottom:16, border:`1px solid rgba(255,255,255,0.06)` }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
-          <div style={{ fontSize:10, fontWeight:700, color:T.gold, textTransform:"uppercase", letterSpacing:"0.07em" }}>
-            Before this session
-          </div>
-          <button
-            type="button"
-            onClick={() => { if (!aiLoading) fetchSummary(); }}
-            disabled={aiLoading}
-            title="Refresh AI brief"
-            style={{
-              display:"flex", alignItems:"center", gap:5,
-              background:"rgba(255,255,255,0.05)", border:`1px solid rgba(255,255,255,0.06)`,
-              borderRadius:8, padding:"4px 9px",
-              fontSize:10, fontWeight:600, color: aiLoading ? T.muted : T.sub,
-              cursor: aiLoading ? "default" : "pointer", fontFamily:T.font,
-            }}
-          >
-            <span style={{
-              fontSize:11,
-              display:"inline-block",
-              animation: aiLoading ? "coachRefreshSpin 1.1s linear infinite" : "none",
-            }}>↻</span>
-            {aiLoading ? "Updating" : "Refresh"}
-          </button>
-        </div>
-
-        {/* Client-side deterministic bullets */}
-        {brief.length === 0
-          ? <div style={{ fontSize:12, color:T.muted, fontStyle:"italic" }}>No data yet — ask them to log their first habit.</div>
-          : brief.map((item, i) => (
-            <div key={i} style={{ display:"flex", gap:10, marginBottom: i < brief.length-1 ? 8 : 0 }}>
-              <span style={{ fontSize:13, flexShrink:0 }}>{item.icon}</span>
-              <span style={{ fontSize:12, color:T.sub, lineHeight:1.55 }}>{item.text}</span>
-            </div>
-          ))
-        }
-
-        {/* AI brief — visually separated, clearly labelled */}
-        <div style={{ marginTop: brief.length > 0 ? 14 : 12, paddingTop: brief.length > 0 ? 12 : 0, borderTop: brief.length > 0 ? `1px solid rgba(255,255,255,0.06)` : "none" }}>
-          <div style={{ fontSize:10, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:8, display:"flex", alignItems:"center", gap:6 }}>
-            <span>AI take</span>
-            <span style={{ fontSize:9, fontWeight:700, color:T.gold, background:"rgba(200,144,42,0.12)", padding:"1px 6px", borderRadius:6 }}>BETA</span>
-          </div>
-          {aiLoading && aiBullets === null && (
-            <div style={{ fontSize:12, color:T.muted, fontStyle:"italic" }}>Generating…</div>
-          )}
-          {aiErr && (
-            <div style={{ fontSize:12, color:"#E74C3C", lineHeight:1.5 }}>
-              Couldn't generate brief — {aiErr}
-            </div>
-          )}
-          {!aiErr && aiBullets && aiBullets.length === 0 && (
-            <div style={{ fontSize:12, color:T.muted, fontStyle:"italic" }}>Not enough data for a useful take yet.</div>
-          )}
-          {!aiErr && aiBullets && aiBullets.map((b, i) => (
-            <div key={i} style={{ display:"flex", gap:10, marginBottom: i < aiBullets.length-1 ? 8 : 0 }}>
-              <span style={{ fontSize:13, flexShrink:0, color:T.gold }}>•</span>
-              <span style={{ fontSize:12, color:T.sub, lineHeight:1.55 }}>{b}</span>
-            </div>
-          ))}
+        {client.email && <div style={{ fontSize:12, color:T.muted, marginBottom:3 }}>{client.email}</div>}
+        <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+          <span style={{
+            fontSize:11, fontWeight:600, padding:"2px 9px", borderRadius:99,
+            background: localDsa === 0 ? "rgba(39,174,96,0.12)" : localDsa === 1 ? "rgba(255,255,255,0.05)" : "rgba(231,76,60,0.1)",
+            color: localDsa === 0 ? "#27AE60" : localDsa === 1 ? T.sub : "#E74C3C",
+            border: `1px solid ${localDsa === 0 ? "rgba(39,174,96,0.3)" : localDsa === 1 ? T.border : "rgba(231,76,60,0.25)"}`,
+          }}>
+            {lastSeenLabel}
+          </span>
+          <span style={{ fontSize:11, color:T.hint }}>
+            {client.xp} xp · joined {client.joinedAt ? new Date(client.joinedAt).toLocaleDateString("en-AU", { month:"short", year:"numeric" }) : "—"}
+          </span>
         </div>
       </div>
 
-      {/* Habits */}
-      {client.habits.length > 0 && (
-        <div style={{ marginBottom:16 }}>
-          <div style={{ fontSize:10, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:10 }}>Habits</div>
-          <div style={{ background:T.surface, borderRadius:14, overflow:"hidden", border:`1px solid rgba(255,255,255,0.06)` }}>
-            {client.habits.map((h, i) => (
-              <div key={i} style={{ padding:"12px 16px", borderBottom: i < client.habits.length-1 ? `1px solid rgba(255,255,255,0.05)` : "none" }}>
-                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
-                  <span style={{ fontSize:13, color:h.loggedToday ? T.text : T.sub, fontWeight:h.loggedToday ? 600 : 400 }}>
-                    {h.emoji} {h.name}
-                    {h.loggedToday && <span style={{ color:"#27AE60", marginLeft:6, fontSize:11 }}>✓</span>}
-                  </span>
-                  {h.streak > 0 && <span style={{ fontSize:11, color:T.gold }}>🔥 {h.streak}d</span>}
+      {/* Tab bar */}
+      <div style={{ display:"flex", borderBottom:`0.5px solid ${T.border}`, padding:"0 16px" }}>
+        {tabBtn("brief", "Session brief")}
+        {tabBtn("habits", `Habits (${client.habits.length})`)}
+      </div>
+
+      {/* ── SESSION BRIEF TAB ─────────────────────────────────────────────── */}
+      {detailTab === "brief" && (
+        <div style={{ padding:"16px 16px 0" }}>
+
+          {/* Situation snapshot */}
+          <div style={{ background:T.surface, borderRadius:14, padding:"14px 16px", marginBottom:12, border:`1px solid rgba(255,255,255,0.06)` }}>
+            <div style={{ fontSize:10, fontWeight:700, color:T.gold, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:11 }}>
+              Situation snapshot
+            </div>
+            {brief.length === 0
+              ? <div style={{ fontSize:12, color:T.muted, fontStyle:"italic" }}>No data yet — ask them to log their first habit in this session.</div>
+              : brief.map((item, i) => (
+                <div key={i} style={{ display:"flex", gap:10, marginBottom: i < brief.length-1 ? 9 : 0 }}>
+                  <span style={{ fontSize:13, flexShrink:0, lineHeight:1.5 }}>{item.icon}</span>
+                  <span style={{ fontSize:13, color:T.sub, lineHeight:1.55 }}>{item.text}</span>
                 </div>
-                <ActivityDots last7={h.last7} />
-                {h.recentNote && (
-                  <div style={{ fontSize:11, color:T.muted, fontStyle:"italic", marginTop:5, lineHeight:1.5 }}>
-                    "{h.recentNote.length > 90 ? h.recentNote.slice(0,90)+"…" : h.recentNote}"
-                  </div>
-                )}
+              ))
+            }
+          </div>
+
+          {/* AI pre-session brief */}
+          <div style={{
+            background:"linear-gradient(145deg, rgba(200,144,42,0.07) 0%, rgba(200,144,42,0.02) 100%)",
+            border:`1px solid rgba(200,144,42,0.22)`,
+            borderRadius:14, padding:"14px 16px", marginBottom:12,
+          }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:7 }}>
+                <span style={{ fontSize:10, fontWeight:700, color:T.gold, textTransform:"uppercase", letterSpacing:"0.07em" }}>AI pre-session brief</span>
+                <span style={{ fontSize:9, fontWeight:700, color:T.gold, background:"rgba(200,144,42,0.15)", padding:"1px 6px", borderRadius:6 }}>BETA</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => { if (!aiLoading) fetchSummary(); }}
+                disabled={aiLoading}
+                style={{
+                  display:"flex", alignItems:"center", gap:4,
+                  background:"rgba(255,255,255,0.05)", border:`1px solid rgba(255,255,255,0.07)`,
+                  borderRadius:8, padding:"4px 10px",
+                  fontSize:10, fontWeight:600, color: aiLoading ? T.muted : T.sub,
+                  cursor: aiLoading ? "default" : "pointer", fontFamily:T.font,
+                }}
+              >
+                <span style={{ fontSize:11, display:"inline-block", animation: aiLoading ? "coachRefreshSpin 1.1s linear infinite" : "none" }}>↻</span>
+                {aiLoading ? "Generating…" : "Refresh"}
+              </button>
+            </div>
+
+            {/* Loading shimmer */}
+            {aiLoading && aiBullets === null && (
+              <div style={{ fontSize:12, color:T.muted, fontStyle:"italic", lineHeight:1.6 }}>
+                Reading {client.name}&apos;s last 14 days of data…
+              </div>
+            )}
+
+            {/* Graceful error — no red, no technical message */}
+            {aiErr && !aiLoading && (
+              <div style={{ fontSize:12, color:T.muted, lineHeight:1.6 }}>
+                Brief unavailable right now — tap Refresh to try again.
+              </div>
+            )}
+
+            {/* Empty result */}
+            {!aiErr && aiBullets && aiBullets.length === 0 && (
+              <div style={{ fontSize:12, color:T.muted, fontStyle:"italic", lineHeight:1.6 }}>
+                Not enough logging data yet for a useful brief. Check back after a few sessions.
+              </div>
+            )}
+
+            {/* Bullets */}
+            {!aiErr && aiBullets && aiBullets.length > 0 && aiBullets.map((b, i) => (
+              <div key={i} style={{ display:"flex", gap:10, marginBottom: i < aiBullets.length-1 ? 9 : 0 }}>
+                <span style={{ fontSize:14, color:T.gold, flexShrink:0, lineHeight:1.4 }}>›</span>
+                <span style={{ fontSize:13, color:T.sub, lineHeight:1.6 }}>{b}</span>
               </div>
             ))}
           </div>
+
+          {/* 7-day activity grid */}
+          {client.habits.length > 0 && (() => {
+            const merged = client.habits[0]?.last7 ? client.habits[0].last7.map((day, i) => ({
+              date: day.date,
+              logged: client.habits.some(h => h.last7?.[i]?.logged),
+              skip:   !client.habits.some(h => h.last7?.[i]?.logged) && client.habits.some(h => h.last7?.[i]?.skip),
+            })) : [];
+            return merged.length > 0 ? (
+              <div style={{ background:T.surface, borderRadius:14, padding:"12px 16px", marginBottom:12, border:`1px solid rgba(255,255,255,0.06)` }}>
+                <div style={{ fontSize:10, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:10 }}>
+                  Last 7 days
+                </div>
+                <div style={{ display:"flex", gap:6, justifyContent:"space-between" }}>
+                  {merged.map((day, i) => {
+                    const isT = localIsToday(day.date);
+                    const bg  = day.logged ? "#27AE60" : day.skip ? T.amber : "rgba(255,255,255,0.07)";
+                    const dow = day.date ? new Date(day.date+"T00:00:00").toLocaleDateString("en-AU",{weekday:"short"}).slice(0,1) : "";
+                    return (
+                      <div key={i} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+                        <div style={{ fontSize:9, color: isT ? T.gold : T.hint, fontWeight: isT ? 700 : 400 }}>{dow}</div>
+                        <div style={{ width:"100%", aspectRatio:"1", borderRadius:5, background:bg, border: isT ? `1.5px solid ${T.gold}` : "none" }}/>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null;
+          })()}
         </div>
       )}
-      {client.habits.length === 0 && (
-        <div style={{ textAlign:"center", padding:"32px 0", color:T.muted, fontSize:13 }}>No habits tracked yet.</div>
+
+      {/* ── HABITS TAB ────────────────────────────────────────────────────── */}
+      {detailTab === "habits" && (
+        <div style={{ padding:"16px 16px 0" }}>
+          {client.habits.length === 0 ? (
+            <div style={{ textAlign:"center", padding:"40px 0", color:T.muted, fontSize:13 }}>
+              <div style={{ fontSize:36, marginBottom:12 }}>📋</div>
+              No habits set up yet.
+            </div>
+          ) : (
+            <div style={{ background:T.surface, borderRadius:14, overflow:"hidden", border:`1px solid rgba(255,255,255,0.06)` }}>
+              {client.habits.map((h, i) => {
+                const hDsa = localDaysSince(h.lastLogDate);
+                const isLoggedToday = localIsToday(h.lastLogDate);
+                return (
+                  <div key={i} style={{ padding:"13px 16px", borderBottom: i < client.habits.length-1 ? `1px solid rgba(255,255,255,0.05)` : "none" }}>
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:7 }}>
+                      <span style={{ fontSize:13, color: isLoggedToday ? T.text : T.sub, fontWeight: isLoggedToday ? 600 : 400, display:"flex", alignItems:"center", gap:5 }}>
+                        {h.emoji} {h.name}
+                        {isLoggedToday && <span style={{ color:"#27AE60", fontSize:11 }}>✓</span>}
+                      </span>
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        {h.streak > 0 && <span style={{ fontSize:11, color:T.gold }}>🔥 {h.streak}d</span>}
+                        {hDsa !== null && hDsa > 1 && (
+                          <span style={{ fontSize:10, color: hDsa > 3 ? "#E74C3C" : T.muted }}>{hDsa}d ago</span>
+                        )}
+                      </div>
+                    </div>
+                    <ActivityDots last7={h.last7} size={10} />
+                    {h.recentNote && (
+                      <div style={{ fontSize:11, color:T.muted, fontStyle:"italic", marginTop:7, lineHeight:1.5, paddingLeft:2 }}>
+                        &ldquo;{h.recentNote.length > 100 ? h.recentNote.slice(0,100)+"…" : h.recentNote}&rdquo;
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -10920,7 +11053,8 @@ function CoachSectionLabel({ label, count, anchorRef }) {
   );
 }
 
-function CoachApp({ onExit, isPreview, coachTier, isAdmin }) {
+function CoachApp({ onExit, isPreview, coachTier, isAdmin, coachOwnName }) {
+  const [coachTab,       setCoachTab]       = useState("clients"); // "clients" | "invite" | "you"
   const [coachScreen,    setCoachScreen]    = useState("list");
   const [selectedClient, setSelectedClient] = useState(null);
   const [data,           setData]           = useState(null);
@@ -10979,11 +11113,13 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin }) {
   const activeWeek     = [];
 
   for (const c of clients) {
-    const dsa = c.daysSinceActive;
-    const joinedTs = c.joinedAt ? new Date(c.joinedAt).getTime() : null;
+    // Use LOCAL dsa so AU coaches don't see "Active today" for yesterday's logs.
+    const localDsa      = localDaysSince(c.lastActiveDate);
+    const dsa           = localDsa !== null ? localDsa : c.daysSinceActive;
+    const joinedTs      = c.joinedAt ? new Date(c.joinedAt).getTime() : null;
     const joinedRecently72h = joinedTs !== null && (now - joinedTs) <= HOURS_72;
     const joinedThisWeek    = joinedTs !== null && (now - joinedTs) <= DAYS_7;
-    const isQuiet = dsa === null ? joinedRecently72h : dsa >= 3;
+    const isQuiet       = dsa === null ? true : dsa >= 3;
     const hasNeverLogged = dsa === null;
 
     if (isQuiet || (joinedRecently72h && hasNeverLogged)) {
@@ -10995,16 +11131,23 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin }) {
     }
   }
 
-  // Sorting — newest first inside each bucket so the most relevant rows
-  // surface at the top.
-  needsAttention.sort((a, b) => (b.daysSinceActive ?? 999) - (a.daysSinceActive ?? 999));
+  needsAttention.sort((a, b) => {
+    const da = localDaysSince(a.lastActiveDate) ?? 999;
+    const db = localDaysSince(b.lastActiveDate) ?? 999;
+    return db - da;
+  });
   newClients.sort((a, b) => new Date(b.joinedAt || 0) - new Date(a.joinedAt || 0));
-  activeWeek.sort((a, b) => (a.daysSinceActive ?? 0) - (b.daysSinceActive ?? 0));
+  activeWeek.sort((a, b) => {
+    const da = localDaysSince(a.lastActiveDate) ?? 0;
+    const db = localDaysSince(b.lastActiveDate) ?? 0;
+    return da - db;
+  });
 
-  // Subtitle counts — "active this week" spans both green and new buckets.
-  const activeThisWeekCount = clients.filter(c =>
-    c.daysSinceActive !== null && c.daysSinceActive < 7
-  ).length;
+  // Subtitle — active = logged in last 7 days (local).
+  const activeThisWeekCount = clients.filter(c => {
+    const d = localDaysSince(c.lastActiveDate);
+    return d !== null && d < 7;
+  }).length;
 
   // Toast-style banners for clients who joined in the last 24 hours. Coach
   // sees one welcome ribbon per fresh signup, dismissable via tap or auto-fade.
@@ -11047,10 +11190,30 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin }) {
     }
   }
 
-  const greeting = coachGreetingForNow();
-  const subtitle = clients.length === 0
+  const firstName = coachOwnName ? coachOwnName.split(" ")[0] : "";
+  const greeting  = coachGreetingForNow() + (firstName ? ` ${firstName}.` : "");
+  const subtitle  = clients.length === 0
     ? null
     : `${clients.length} client${clients.length === 1 ? "" : "s"} · ${activeThisWeekCount} active this week`;
+
+  // Bottom nav icon helper
+  const navItem = (tab, icon, label) => {
+    const active = coachTab === tab;
+    return (
+      <button
+        key={tab}
+        onClick={() => { setCoachTab(tab); if (tab === "clients") { setCoachScreen("list"); setSelectedClient(null); } }}
+        style={{
+          flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:3,
+          background:"none", border:"none", cursor:"pointer", fontFamily:T.font,
+          padding:"8px 0", color: active ? T.gold : T.hint,
+        }}
+      >
+        <span style={{ fontSize:20, lineHeight:1 }}>{icon}</span>
+        <span style={{ fontSize:10, fontWeight: active ? 700 : 400, letterSpacing:"0.03em" }}>{label}</span>
+      </button>
+    );
+  };
 
   return (
     <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg }}>
@@ -11078,17 +11241,11 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin }) {
               </div>
             )}
           </div>
-          <button
-            onClick={isPreview ? onExit : () => supabase.auth.signOut()}
-            style={{ background:"rgba(255,255,255,0.06)", border:"none", borderRadius:20, padding:"7px 14px", fontSize:12, color:T.muted, cursor:"pointer", fontFamily:T.font, flexShrink:0 }}
-          >
-            {isPreview ? "← Exit" : "Sign out"}
-          </button>
         </div>
       </div>
 
-      {/* ── Attention strip ────────────────────────────────────────────── */}
-      {!showPaywall && coachScreen === "list" && needsAttention.length > 0 && (
+      {/* ── Attention strip (clients tab, list view only) ───────────────── */}
+      {!showPaywall && coachTab === "clients" && coachScreen === "list" && needsAttention.length > 0 && (
         <button
           type="button"
           onClick={scrollToAttention}
@@ -11106,9 +11263,117 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin }) {
       )}
 
       {/* ── Content ────────────────────────────────────────────────────── */}
-      <div style={{ paddingBottom:52 }}>
+      <div style={{ paddingBottom:80 }}>
         {showPaywall ? (
           <CoachPaywall />
+
+        /* ── INVITE TAB ─────────────────────────────────────────────────── */
+        ) : coachTab === "invite" ? (
+          <div style={{ padding:"28px 20px" }}>
+            <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:8 }}>Invite a client</div>
+            <div style={{ fontSize:13, color:T.muted, lineHeight:1.65, marginBottom:24 }}>
+              Share your personal link. When they sign up through it, they&apos;ll appear in your client list automatically — and get Forged Pro included for free.
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:24 }}>
+              {["They get a personalised onboarding", "Forged Pro included (up to 15 clients)", "You see their habits and notes as they log"].map(line => (
+                <div key={line} style={{ display:"flex", alignItems:"flex-start", gap:9 }}>
+                  <span style={{ color:T.gold, fontSize:12, lineHeight:1.6, flexShrink:0, fontWeight:700 }}>✓</span>
+                  <span style={{ fontSize:13, color:T.sub, lineHeight:1.6 }}>{line}</span>
+                </div>
+              ))}
+            </div>
+            {inviteLink && (
+              <>
+                <button
+                  type="button"
+                  onClick={copyInviteLink}
+                  style={{
+                    width:"100%", padding:"14px 0", borderRadius:12, border:"none",
+                    background: inviteCopied ? "#27AE60" : T.gold, color:"#1a1a16",
+                    fontSize:14, fontWeight:700, fontFamily:T.font, cursor:"pointer",
+                    marginBottom:12, transition:"background 0.2s",
+                    boxShadow:"0 2px 14px rgba(200,144,42,0.18)",
+                  }}
+                >
+                  {inviteCopied ? "✓ Link copied to clipboard" : "Copy invite link →"}
+                </button>
+                <div style={{
+                  background:T.surface, border:`1px solid ${T.border}`, borderRadius:10,
+                  padding:"10px 12px", fontSize:11, color:T.sub,
+                  overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                  fontFamily:"ui-monospace, SFMono-Regular, Menlo, monospace",
+                  marginBottom:24,
+                }}>
+                  {inviteLink}
+                </div>
+              </>
+            )}
+            <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:12, padding:"14px 16px" }}>
+              <div style={{ fontSize:10, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:8 }}>Client slots</div>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                <span style={{ fontSize:14, color:T.text }}>{clients.length} of 15 used</span>
+                <span style={{ fontSize:12, color: clients.length >= 15 ? "#E74C3C" : "#27AE60", fontWeight:600 }}>
+                  {clients.length >= 15 ? "At limit" : `${15 - clients.length} remaining`}
+                </span>
+              </div>
+              <div style={{ marginTop:8, height:4, background:"rgba(255,255,255,0.06)", borderRadius:2, overflow:"hidden" }}>
+                <div style={{ height:"100%", width:`${Math.min(100, (clients.length/15)*100)}%`, background: clients.length >= 15 ? "#E74C3C" : T.gold, borderRadius:2, transition:"width 0.4s" }}/>
+              </div>
+            </div>
+          </div>
+
+        /* ── YOU TAB ─────────────────────────────────────────────────────── */
+        ) : coachTab === "you" ? (
+          <div style={{ padding:"28px 20px" }}>
+            <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:4 }}>
+              {coachOwnName || "Coach profile"}
+            </div>
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:28 }}>
+              <span style={{ fontSize:9, fontWeight:700, color:"#1a1a16", background:T.gold, padding:"3px 8px", borderRadius:6, letterSpacing:"0.07em" }}>
+                {coachTier ? "COACH · ACTIVE" : "COACH"}
+              </span>
+              {clients.length > 0 && (
+                <span style={{ fontSize:12, color:T.muted }}>{clients.length} client{clients.length===1?"":"s"}</span>
+              )}
+            </div>
+            <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:12, overflow:"hidden", marginBottom:12 }}>
+              <div style={{ padding:"12px 16px", borderBottom:`0.5px solid ${T.border}` }}>
+                <div style={{ fontSize:11, color:T.hint, marginBottom:2 }}>Display name</div>
+                <div style={{ fontSize:14, color:T.text }}>{coachOwnName || "—"}</div>
+              </div>
+              <div style={{ padding:"12px 16px" }}>
+                <div style={{ fontSize:11, color:T.hint, marginBottom:2 }}>Subscription</div>
+                <div style={{ fontSize:14, color: coachTier ? "#27AE60" : T.muted }}>
+                  {coachTier ? "Forged Coach · Active" : "No active plan"}
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={() => supabase.auth.signOut()}
+              style={{
+                width:"100%", padding:"13px 0", borderRadius:12,
+                background:"rgba(231,76,60,0.08)", border:`1px solid rgba(231,76,60,0.22)`,
+                color:"#E74C3C", fontSize:14, fontWeight:600,
+                cursor:"pointer", fontFamily:T.font,
+              }}
+            >
+              Sign out
+            </button>
+            {isPreview && (
+              <button
+                onClick={onExit}
+                style={{
+                  width:"100%", marginTop:10, padding:"13px 0", borderRadius:12,
+                  background:"rgba(255,255,255,0.05)", border:`1px solid ${T.border}`,
+                  color:T.muted, fontSize:14, cursor:"pointer", fontFamily:T.font,
+                }}
+              >
+                ← Exit preview
+              </button>
+            )}
+          </div>
+
+        /* ── CLIENTS TAB ─────────────────────────────────────────────────── */
         ) : coachScreen === "detail" && selectedClient ? (
           <CoachClientDetail
             client={selectedClient}
@@ -11251,52 +11516,27 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin }) {
                 )}
 
                 <div style={{ fontSize:10, color:T.muted, textAlign:"center", marginTop:6, marginBottom:4 }}>
-                  As of {data?.asOf ?? "—"}
+                  As of {data?.asOf ?? localTodayYmd()}
                 </div>
               </>
             )}
-
-            {/* Invite link panel — kept available below the list when there are
-                already clients. The empty state has its own version above. */}
-            {!loading && !err && inviteLink && clients.length > 0 && (
-              <div style={{
-                marginTop:20,
-                padding:"16px", background:T.surface,
-                border:`1px solid ${T.border}`, borderRadius:14,
-              }}>
-                <div style={{ fontSize:13, fontWeight:600, color:T.text, marginBottom:3 }}>Invite a client</div>
-                <div style={{ fontSize:11, color:T.muted, lineHeight:1.55, marginBottom:12 }}>
-                  Anyone who signs up through this link will appear in your client list automatically.
-                </div>
-                <div style={{
-                  display:"flex", alignItems:"center", gap:8,
-                  background:T.bg, border:`1px solid ${T.border}`, borderRadius:10, padding:"8px 10px",
-                }}>
-                  <div style={{
-                    flex:1, minWidth:0, fontSize:11, color:T.sub,
-                    overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
-                    fontFamily:"ui-monospace, SFMono-Regular, Menlo, monospace",
-                  }}>
-                    {inviteLink}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={copyInviteLink}
-                    style={{
-                      flexShrink:0, padding:"6px 12px", borderRadius:8, border:"none",
-                      background: inviteCopied ? "rgba(39,174,96,0.18)" : T.gold,
-                      color: inviteCopied ? "#27AE60" : "#1a1a16",
-                      fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:T.font,
-                      transition:"background 0.18s, color 0.18s",
-                    }}
-                  >
-                    {inviteCopied ? "Copied ✓" : "Copy"}
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         )}
+      </div>
+
+      {/* ── Bottom navigation ───────────────────────────────────────────── */}
+      <div style={{
+        position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)",
+        width:"100%", maxWidth:430,
+        background: T.raised,
+        borderTop:`0.5px solid ${T.border}`,
+        display:"flex", alignItems:"stretch",
+        paddingBottom:"env(safe-area-inset-bottom, 0px)",
+        zIndex:200,
+      }}>
+        {navItem("clients", "👥", "Clients")}
+        {navItem("invite",  "＋", "Invite")}
+        {navItem("you",     "⚙︎", "You")}
       </div>
     </div>
   );
@@ -11726,7 +11966,14 @@ export default function App() {
             const json = await res.json();
             // Mirror coach_id into local user state so the Coaching card on
             // ProfileScreen renders without a profile re-fetch.
-            if (json.coachId) setUser(u => ({ ...u, coachId: json.coachId }));
+            if (json.coachId) {
+              setUser(u => ({ ...u, coachId: json.coachId }));
+              // Fetch and surface the coach's display name immediately.
+              supabase.from("profiles").select("name").eq("id", json.coachId).maybeSingle()
+                .then(({ data }) => {
+                  if (data?.name) setUser(u => ({ ...u, linkedCoachName: data.name.trim() || null }));
+                }).catch(() => {});
+            }
             if (json.isProGranted) {
               setIsPro(true);
               addToast("✓ Connected with your coach — Forged Pro unlocked!");
@@ -12685,15 +12932,25 @@ export default function App() {
       let isOnboarded = null;
 
       if (profile) {
+        // If this account is linked to a coach, fetch the coach's display name
+        // so we can show it in the "Coached by" card instead of generic text.
+        let linkedCoachName = null;
+        if (profile.coach_id) {
+          try {
+            const { data: coachProf } = await supabase
+              .from("profiles").select("name").eq("id", profile.coach_id).maybeSingle();
+            linkedCoachName = coachProf?.name?.trim() || null;
+          } catch { /* non-critical — silently skip */ }
+        }
+
         setUser({
           id: profile.id,
           name: profile.name || "",
           avatarUrl: profile.avatar_url || null,
           username: profile.username || "",
           visibleToFriendsOfFriends: !!profile.visible_to_friends_of_friends,
-          // Carry the coach link forward so ProfileScreen can render the
-          // "Coaching" card and the post-coach welcome flow can fire.
           coachId: profile.coach_id || null,
+          linkedCoachName,
         });
         setXp(profile.xp ?? 0);
         const proStatus = !!(profile.is_pro || profile.is_admin);
@@ -14065,6 +14322,7 @@ export default function App() {
           isPreview={!!previewCoach}
           coachTier={coachTier}
           isAdmin={isAdmin}
+          coachOwnName={user.name || ""}
         />
       </>
     );
