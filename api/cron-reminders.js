@@ -163,33 +163,204 @@ function getDailyStreak(h, todayYmd) {
 
 // ── Dev-owner custom notifications ────────────────────────────────────────────
 // Scoped exclusively to this one user UUID. Never applied to anyone else.
-// Tone: aggressive, energising, escape-the-9-to-5 builder framing.
+// Tone: short, punchy, escape-the-9-to-5 builder framing.
 // Swear words intentional — this is a personal dev customisation.
 const DEV_OWNER_ID = "5e9b4ba7-bf15-4e94-ab05-fe3306496973";
-const DEV_OWNER_REMINDER_HOUR = 5;
-const DEV_OWNER_REMINDER_MINUTE = 0;
+
+// Set true to send every hour (for testing whether hourly reminders motivate or annoy).
+// When false, reverts to single daily send at DEV_OWNER_SINGLE_HOUR.
+const DEV_OWNER_HOURLY_MODE = true;
+const DEV_OWNER_SINGLE_HOUR = 5;   // only used when DEV_OWNER_HOURLY_MODE = false
 
 // Day names for in-message references
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 function isWeekend(todayYmd) {
-  const day = new Date(todayYmd + "T12:00:00Z").getUTCDay(); // 0=Sun, 6=Sat
+  const day = new Date(todayYmd + "T12:00:00Z").getUTCDay();
   return day === 0 || day === 6;
 }
 
 function getDayName(todayYmd) {
-  const day = new Date(todayYmd + "T12:00:00Z").getUTCDay();
-  return DAY_NAMES[day];
+  return DAY_NAMES[new Date(todayYmd + "T12:00:00Z").getUTCDay()];
 }
 
-// Deterministic-but-varied daily pick: same message all day (no flip on re-send),
-// different message each day. Index rotates through pool by date number.
-function devPick(pool, todayYmd) {
-  const seed = parseInt(todayYmd.replace(/-/g, ""), 10);
+// Time-of-day slot — drives which pool is picked
+function getTimeSlot(hour) {
+  if (hour >= 5  && hour < 7)  return "early_morning"; // 5–7am
+  if (hour >= 7  && hour < 9)  return "morning";        // 7–9am
+  if (hour >= 9  && hour < 12) return "work_am";        // 9am–noon
+  if (hour >= 12 && hour < 14) return "lunch";          // noon–2pm
+  if (hour >= 14 && hour < 17) return "work_pm";        // 2–5pm
+  if (hour >= 17 && hour < 20) return "after_work";     // 5–8pm
+  if (hour >= 20 && hour < 23) return "evening";        // 8–11pm
+  return "night";                                         // 11pm–5am
+}
+
+// Deterministic hourly pick — same message within a given hour, different each hour/day.
+// Prime multiplier keeps the spread varied across small pools.
+function devPick(pool, todayYmd, hour) {
+  const dateSeed = parseInt(todayYmd.replace(/-/g, ""), 10);
+  const seed = dateSeed + hour * 37;
   return pool[seed % pool.length];
 }
 
-function pickDevOwnerMessage(habits, goals, todayYmd) {
+// ── Message pools ──────────────────────────────────────────────────────────────
+// Keys: getTimeSlot() values. Each has `weekday` and `weekend` arrays.
+const DEV_POOLS = {
+  early_morning: {
+    weekday: [
+      "5am. You set this alarm. Don't waste it.",
+      "Up before the job owns you. That's the edge. Use it.",
+      "Early window. Nobody's asking for anything yet. Log it and build.",
+      "Most people are asleep. You're not. That's the whole move.",
+      "Rise before the boss does. That's how you escape the boss.",
+      "5am. Log it, then go earn the commute.",
+      "Before the world wants a piece of you — this hour belongs to you.",
+    ],
+    weekend: [
+      "5am on a free day. Dream window. Open the laptop.",
+      "Weekend morning. No commute. Just you and the build.",
+      "Up early on a weekend — that's not normal. Good. Make it count.",
+      "Free time starts now. Don't sleep through the best part of the day.",
+      "Weekend 5am. Rarer than you think. Use every minute.",
+    ],
+  },
+  morning: {
+    weekday: [
+      "Before work takes over — what are you building?",
+      "Log it. Then go be employed for a bit.",
+      "Quick. Before the day gets away from you.",
+      "Morning window closing. Get the habits in.",
+      "The inbox can wait 2 minutes. Log it first.",
+      "Log before you check your phone. That's the order.",
+    ],
+    weekend: [
+      "Free morning. No meetings. Just time. Use it.",
+      "Weekend morning hours are gold. Don't waste them.",
+      "Coffee, habits, build. That's the order.",
+      "No commute today. Trade the time for something real.",
+    ],
+  },
+  work_am: {
+    weekday: [
+      "At work. Fine. Remember what you're working toward.",
+      "Punched in. Tonight, you work for yourself.",
+      "The 9-to-5 pays rent. The side work buys the exit.",
+      "Morning shift. Build something tonight.",
+      "Survive the morning. Come home and make something.",
+      "Clock's ticking on someone else's time. Yours starts later.",
+      "If even you don't use this app, who the fuck will? Log it.",
+    ],
+    weekend: [
+      "Mid-morning on a free day. Habits logged? Good. What are you building?",
+      "No boss watching. That's a privilege. Don't squander it.",
+      "Weekend mid-morning. What have you actually shipped today?",
+      "Free hours passing. Log it and open the laptop.",
+    ],
+  },
+  lunch: {
+    weekday: [
+      "Lunch. Don't scroll — remember the mission.",
+      "Half the day gone. Tonight still belongs to you.",
+      "Quick log. Then eat. Don't let the day slip.",
+      "Midday. Log it now before you forget.",
+      "Halfway through someone else's schedule. Keep your own.",
+      "One more shift to get through. Then you build.",
+    ],
+    weekend: [
+      "Afternoon already. What have you built today?",
+      "Half the day's gone. The other half is yours.",
+      "Log it. Then actually build something this afternoon.",
+      "Lunchtime on a free day. Time to show up for yourself.",
+    ],
+  },
+  work_pm: {
+    weekday: [
+      "Home stretch at work. Then your real job starts.",
+      "One more shift. Then build your own shit.",
+      "Almost out. Don't forget what comes after.",
+      "Afternoon at someone else's desk. Soon it'll be your own.",
+      "Nearly done. The evening belongs to you — protect it.",
+      "Stop fucking drifting at work. Think about what you're building tonight.",
+      "End of shift incoming. Line up what you're shipping tonight.",
+    ],
+    weekend: [
+      "Weekend afternoon — still time to build something worth doing.",
+      "Free hours passing. Log it and get to work.",
+      "This is your time. Don't drift through it.",
+      "Afternoon on a free day. Make something real.",
+    ],
+  },
+  after_work: {
+    weekday: [
+      "Shift's done. Open the laptop.",
+      "Home time. Build your thing.",
+      "You survived work. Now do your real job.",
+      "Evening's yours. Don't give it to Netflix.",
+      "This is it — the hours you spent all day waiting for.",
+      "No boss from here. Just you and what you're building.",
+      "Clock out from them. Clock in for you.",
+      "The escape hatch doesn't build itself. Get to it.",
+      "You're not going to get out by doing nothing every evening.",
+    ],
+    weekend: [
+      "Weekend evening. Still time. Don't drift.",
+      "Evening on a free day — this is the window. Use it.",
+      "After-hours on a weekend. Build something.",
+      "Free evening. Rarer than it feels. Don't waste it.",
+    ],
+  },
+  evening: {
+    weekday: [
+      "Evening's ticking. One good hour beats zero.",
+      "Stop fucking drifting. Make something tonight.",
+      "Don't waste the night. One push.",
+      "Last real window today. Use it.",
+      "You've still got time. Own it or own the fact that you didn't.",
+      "It's not too late. Log it and do one thing.",
+      "This is your shot. Don't waste it.",
+      "One hour of real work tonight beats a week of good intentions.",
+    ],
+    weekend: [
+      "Weekend's almost done. Make the last hours count.",
+      "Sunday evening is both a gift and a threat. Use it.",
+      "Last stretch of the weekend. Go hard.",
+      "Still building? Good. Don't stop now.",
+      "Night closing in on the weekend. What did you actually ship?",
+    ],
+  },
+  night: {
+    weekday: [
+      "Late. Log it or sleep — both are better than drifting.",
+      "Still up? Log it. Then rest. You've got work tomorrow.",
+      "Night mode. Quick log, then sleep. Come back sharp.",
+      "Late but not wasted if you log it now.",
+    ],
+    weekend: [
+      "Late on a free day. Log it and wind down. Tomorrow's another shot.",
+      "Night. Log it quick before you crash.",
+      "Late night. Log it. Sleep. Do it again tomorrow.",
+    ],
+  },
+};
+
+// All-habits-logged congratulations — time-aware, kept short
+const DEV_ALL_LOGGED_POOLS = {
+  weekday: [
+    "All habits logged. Now go build before bed.",
+    "Full house on a workday. That's discipline. Keep it.",
+    "Logged. Done. Ahead of most people. Stay there.",
+    "Everything in. You're running a tight ship. Keep going.",
+  ],
+  weekend: [
+    "All habits logged on a free day. Good. Now ship something.",
+    "Full house on a weekend. Make the most of it.",
+    "Every habit in. What else can you build today?",
+    "Done and dusted. Now go actually move the needle.",
+  ],
+};
+
+function pickDevOwnerMessage(habits, goals, todayYmd, localHour) {
   const TRACKABLE = ["daily", "weekly", "project", "limit"];
   const trackableHabits = (habits || []).filter(
     h => TRACKABLE.includes(h.habit_type) && h.habit_type !== "log"
@@ -199,61 +370,16 @@ function pickDevOwnerMessage(habits, goals, todayYmd) {
     trackableHabits.every(h => hasAnyLogOnDate(h, todayYmd));
 
   const weekend = isWeekend(todayYmd);
-  const day = getDayName(todayYmd);
+  const slot = getTimeSlot(localHour ?? 8);
+  const poolKey = weekend ? "weekend" : "weekday";
 
-  // ── All habits logged variants ───────────────────────────────────────────
   if (allLogged) {
-    const pool = weekend
-      ? [
-          `All habits logged on a ${day}. That's how you build an exit ramp while everyone else is sleeping in. Keep going.`,
-          `Full house on a ${day}. Logged, building, moving. This is exactly the shit that changes your situation.`,
-          `Everything logged on a free ${day}. You're not just tracking habits — you're building the version of you that doesn't need the day job.`,
-        ]
-      : [
-          `All logged before the commute even starts. That's the discipline that builds a way out. Now go earn the rest of the day.`,
-          `Full house on a ${day}. Every habit logged. You're doing the work before work. That's exactly how you build something real.`,
-          `Habits logged on a ${day} morning. Log it, build it, get out. You're doing the thing. Keep fucking going.`,
-        ];
-    return { title: "Forged ✅", body: devPick(pool, todayYmd) };
+    const pool = DEV_ALL_LOGGED_POOLS[poolKey];
+    return { title: "Forged ✅", body: devPick(pool, todayYmd, localHour ?? 0) };
   }
 
-  // ── Weekend pools ────────────────────────────────────────────────────────
-  if (weekend) {
-    const pool = [
-      `It's ${day}. No boss. No commute. No one owns your hours today except you. Log your shit and build the fucking thing.`,
-      `${day}! This is the time you grind for all week. Don't waste it. Get your habits logged and ship something that moves you closer to out.`,
-      `Weekend hours are rarer than you think. ${day} — this is your real work. The app, the habits, the exit plan. Let's fucking go.`,
-      `No meetings today. No Slack pings. Just you and what you're building. ${day} — make it count or Monday hits harder than it should.`,
-      `It's ${day} and nobody's asking anything of you. That's rare. Use it. Log your habits. Build the thing that gets you the hell out.`,
-      `Free time doesn't mean shit if you don't use it. ${day} — your window to build the life you actually want is wide open right now.`,
-      `The 9-to-5 doesn't own ${day}. You do. Log your habits, open the laptop, and build the fucking exit.`,
-      `Captain, it's the weekend. The version of you that escapes the grind gets built on ${day}s like this. Don't sleep on it.`,
-      `${day} is your competitive advantage. Most people are watching TV. You're supposed to be building. Log it and get after it.`,
-      `No alarm for work today — but you set one for a reason. ${day}, let's build something you're actually proud of, not just employed for.`,
-      `It's ${day}. Every hour you put in here is an hour closer to never needing a ${day === "Saturday" ? "Monday" : "Monday"} to ruin your weekend again. Let's fucking go.`,
-      `${day} morning, captain. Clear runway. Log your habits, shut the noise out, and build the escape hatch. Nobody does it for you.`,
-    ];
-    return { title: "Forged 🔥", body: devPick(pool, todayYmd) };
-  }
-
-  // ── Weekday pools ────────────────────────────────────────────────────────
-  const pool = [
-    `Oi captain, it's ${day}. Go punch in, survive the shift, then come home and build your actual fucking future. You're not doing this forever.`,
-    `${day}. Every day you don't build is another day you have to go back. Log your habits and put in the work when you get home.`,
-    `Work pays the bills today. Forged builds the exit. Log it, build it, don't let the day job steal the evening too.`,
-    `Clock in. Clock out. Come home. Build. That's the deal you made. ${day} — hold up your end of it.`,
-    `The boss can have 8 hours. The rest belongs to you and what you're building. ${day} — log it and protect the evening.`,
-    `Another ${day} working for someone else. That ends when you build something better. Log your shit and keep moving.`,
-    `${day} grind incoming. Fine. But tonight you work for yourself. Log your habits and remember what you're actually building toward.`,
-    `It's ${day}. You're building an escape hatch. Every habit logged, every session shipped — it adds up. Don't miss today.`,
-    `Full-time job today, full-time founder tonight. That's the deal you made with yourself. Log it and fucking stick to it.`,
-    `You're not just building an app. You're building the reason you don't need to answer to someone else. ${day} — let's go.`,
-    `${day} morning. The job is temporary. What you build here is yours. Get your habits logged before the grind swallows the whole day.`,
-    `If even you don't use this app, who the fuck will? It's ${day} — log it, improve it, build it. Eat your own cooking.`,
-    `${day}. You built this thing to get yourself out. Don't let a busy workday be the excuse you didn't build it for. Log it.`,
-    `Five AM on a ${day}. Most people are asleep. You're up because you want something different. Log the habits, go to work, come back and build.`,
-  ];
-  return { title: "Forged 🔥", body: devPick(pool, todayYmd) };
+  const pool = (DEV_POOLS[slot] || DEV_POOLS.morning)[poolKey];
+  return { title: "Forged 🔥", body: devPick(pool, todayYmd, localHour ?? 0) };
 }
 
 // ── Message picker ─────────────────────────────────────────────────────────────
@@ -505,39 +631,43 @@ export default async function handler(req, res) {
   for (const sub of subs) {
     const tz = tzByUser[sub.user_id] || "UTC";
     const todayYmd = ymdNowInTimeZone(tz);
+    const now = hourMinuteNowInTimeZone(tz); // needed for both windowed check + message slot
+    const isDevOwner = sub.user_id === DEV_OWNER_ID;
 
     // ── Per-category gate: skip users who turned off daily reminders ────
-    // The column is added by 20260423000000_notification_categories.sql.
-    // If the column is absent (pre-migration) we treat it as enabled, which
-    // matches the historical default.
     if (sub.daily_reminders_enabled === false) {
       skippedCategory++;
       continue;
     }
 
-    // ── Windowed mode: only fire when local HH:MM bucket matches user ───
-    // 5-minute buckets give us minute-level precision in practice without
-    // running a per-minute cron. Without this guard, the */5 cron would
-    // spam every user 12 times an hour.
-    // Dev owner override: always fire at 05:00 regardless of DB reminder_time.
+    // ── Windowed mode ───────────────────────────────────────────────────
+    // Dev owner hourly mode: fire at the top of every hour (minute bucket 0).
+    // Dev owner single mode: fire at DEV_OWNER_SINGLE_HOUR:00 only.
+    // Everyone else: fire at their configured reminder_time bucket.
     if (isWindowed) {
-      const isDevOwner = sub.user_id === DEV_OWNER_ID;
-      const target = isDevOwner
-        ? { hour: DEV_OWNER_REMINDER_HOUR, minute: DEV_OWNER_REMINDER_MINUTE }
-        : parseReminderTime(sub.reminder_time);
-      const now = hourMinuteNowInTimeZone(tz);
-      if (now.hour !== target.hour || bucketMinute(now.minute) !== bucketMinute(target.minute)) {
-        skippedWindow++;
-        continue;
+      if (isDevOwner && DEV_OWNER_HOURLY_MODE) {
+        // Only the :00 bucket each hour — prevents firing every 5 minutes
+        if (bucketMinute(now.minute) !== 0) { skippedWindow++; continue; }
+      } else {
+        const target = isDevOwner
+          ? { hour: DEV_OWNER_SINGLE_HOUR, minute: 0 }
+          : parseReminderTime(sub.reminder_time);
+        if (now.hour !== target.hour || bucketMinute(now.minute) !== bucketMinute(target.minute)) {
+          skippedWindow++;
+          continue;
+        }
       }
     }
 
-    // ── Local-day dedupe ────────────────────────────────────────────────
-    // last_reminder_sent_date is "YYYY-MM-DD" in the user's local TZ. If
-    // the migration hasn't run yet the field is undefined and we just send;
-    // once the migration is applied this prevents accidental double-sends
-    // on hourly schedules / retries / DST transitions.
-    if (sub.last_reminder_sent_date && sub.last_reminder_sent_date === todayYmd) {
+    // ── Dedupe ──────────────────────────────────────────────────────────
+    // Dev owner hourly: key = "YYYY-MM-DDH{hour}" — one send per local hour.
+    // Everyone else: key = "YYYY-MM-DD" — one send per local day.
+    // The hour key never equals a plain date string so regular users are unaffected.
+    const dedupKey = (isDevOwner && DEV_OWNER_HOURLY_MODE)
+      ? `${todayYmd}H${now.hour}`
+      : todayYmd;
+
+    if (sub.last_reminder_sent_date && sub.last_reminder_sent_date === dedupKey) {
       skippedDedup++;
       continue;
     }
@@ -548,10 +678,10 @@ export default async function handler(req, res) {
 
     let title;
     let body;
-    if (sub.user_id === DEV_OWNER_ID) {
-      // Personal dev-owner notifications — custom tone, escape-the-9-to-5 framing.
-      // Scoped exclusively to DEV_OWNER_ID; never applied to any other user.
-      ({ title, body } = pickDevOwnerMessage(habits, goals, todayYmd));
+    if (isDevOwner) {
+      // Personal dev-owner notifications — time-of-day aware, escape-the-9-to-5 framing.
+      // Scoped exclusively to DEV_OWNER_ID; never reaches any other user.
+      ({ title, body } = pickDevOwnerMessage(habits, goals, todayYmd, now.hour));
     } else if (profile.is_pro && process.env.ANTHROPIC_API_KEY) {
       const aiMsg = await aiPickMessage(profile.name || "there", habits, goals, todayYmd);
       ({ title, body } = aiMsg || pickMessage(habits, goals, todayYmd));
@@ -564,13 +694,12 @@ export default async function handler(req, res) {
     try {
       await webpush.sendNotification(sub.subscription, payload);
       sent++;
-      // Stamp the local-day watermark so future runs in this calendar day
-      // skip this user. Wrapped in try/catch so a missing column (pre-
-      // migration) doesn't bubble up — the worst case is no dedupe.
+      // Stamp the dedup key (hourly or daily depending on mode) so the next
+      // cron run within the same window skips this user.
       try {
         await supabase
           .from("push_subscriptions")
-          .update({ last_reminder_sent_date: todayYmd })
+          .update({ last_reminder_sent_date: dedupKey })
           .eq("id", sub.id);
       } catch (markErr) {
         if (!String(markErr?.message || "").includes("last_reminder_sent_date")) {
