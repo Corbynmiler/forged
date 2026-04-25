@@ -10468,13 +10468,13 @@ function ClientCard({ client, expanded, onToggle }) {
 
 function CoachDashboard() {
   const T = THEME;
-  const [data, setData] = React.useState(null);
-  const [loading, setLoading] = React.useState(true);
-  const [err, setErr] = React.useState(null);
-  const [expandedId, setExpandedId] = React.useState(null);
-  const [tab, setTab] = React.useState("clients");
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
+  const [tab, setTab] = useState("clients");
 
-  React.useEffect(() => {
+  useEffect(() => {
     (async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
