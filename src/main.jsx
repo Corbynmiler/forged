@@ -1,7 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Analytics } from "@vercel/analytics/react";
-import { SpeedInsights } from "@vercel/speed-insights/react";
 import App from "./App.jsx";
 import { initSentry, Sentry } from "./sentry.js";
 
@@ -50,8 +49,8 @@ createRoot(document.getElementById("root")).render(
     <Sentry.ErrorBoundary fallback={CrashFallback}>
       <App />
     </Sentry.ErrorBoundary>
-    {/* Vercel Analytics + Speed Insights — both no-op outside Vercel hosting */}
+    {/* Vercel Analytics (free tier, ~2.5k events/mo). Speed Insights removed
+        — it's billed per data point and can rack up cost on a paid product. */}
     <Analytics />
-    <SpeedInsights />
   </StrictMode>
 );

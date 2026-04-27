@@ -786,17 +786,39 @@ async function handler(req, res) {
   const supabase = createClient(SUPABASE_URL, serviceRoleKey);
 
   // CRON_MODE controls how we decide *who* to send to on this invocation:
-  //   - "daily"   (default): send once to every enabled subscriber. Use only
-  //                          when the Vercel cron is daily (`0 7 * * *`).
-  //   - "hourly"            : alias for "windowed" (back-compat with the
-  //                          original env value).
-  //   - "windowed"          : only send to users whose configured local
+  //   - "windowed" (default): only send to users whose configured local
   //                          HH:MM (5-minute bucket) matches NOW in their
-  //                          timezone. Use with `*/5 * * * *` cron.
+  //                          timezone. Pair with the `*/5 * * * *` Vercel
+  //                          cron schedule. This is the only mode that
+  //                          actually delivers each user a reminder at
+  //                          their chosen local time.
+  //   - "hourly"            : alias for "windowed" (back-compat).
+  //   - "daily"             : legacy mode — send once per cron invocation
+  //                          to every enabled subscriber. Only correct
+  //                          when paired with a once-per-day cron schedule
+  //                          (e.g. `0 7 * * *`). Leaves it impossible to
+  //                          honour per-user reminder times, so we no
+  //                          longer default to it.
   // Every mode also dedupes via last_reminder_sent_date so the same user
   // never gets two daily reminders on the same local calendar day.
-  const cronMode = (process.env.CRON_MODE || "daily").toLowerCase().trim();
+  const cronMode = (process.env.CRON_MODE || "windowed").toLowerCase().trim();
   const isWindowed = cronMode === "hourly" || cronMode === "windowed";
+
+  const debug = process.env.DEBUG_CRON === "1" || process.env.DEBUG_CRON === "true";
+
+  // Startup line — surfaces in Vercel logs every cron fire. Lets you confirm
+  // the env vars and dev-pool version that are actually live in production.
+  console.log("[Forged cron] start", {
+    mode: cronMode,
+    isWindowed,
+    dev_pool_version: DEV_POOL_VERSION,
+    cron_secret_present: Boolean(cronSecret),
+    vapid_public_present: Boolean(process.env.VAPID_PUBLIC_KEY),
+    vapid_private_present: Boolean(process.env.VAPID_PRIVATE_KEY),
+    anthropic_present: Boolean(process.env.ANTHROPIC_API_KEY),
+    debug,
+    now_utc: new Date().toISOString(),
+  });
 
   // SELECT * tolerates the column being absent if the new migration hasn't
   // run yet — we just gracefully skip dedupe in that case.
@@ -848,6 +870,12 @@ async function handler(req, res) {
   let skippedWindow = 0;
   let skippedCategory = 0;
   const staleIds = [];
+  // Per-user trace populated when DEBUG_CRON=1; surfaced in the response so
+  // you can hit the cron manually with curl + Bearer CRON_SECRET to see who
+  // got picked and why.
+  const trace = [];
+
+  console.log(`[Forged cron] subscribers loaded count=${subs.length}`);
 
   for (const sub of subs) {
     const tz = tzByUser[sub.user_id] || "UTC";
@@ -874,6 +902,7 @@ async function handler(req, res) {
     // ── Per-category gate: skip users who turned off daily reminders ────
     if (sub.daily_reminders_enabled === false) {
       if (isDevOwner) console.log("[dev-owner] skip reason=category_disabled");
+      if (debug) trace.push({ user_id: sub.user_id, skipped: "category_disabled" });
       skippedCategory++;
       continue;
     }
@@ -887,6 +916,7 @@ async function handler(req, res) {
         // Only the :00 bucket each hour — prevents firing every 5 minutes
         if (bucketMinute(now.minute) !== 0) {
           if (isDevOwner) console.log("[dev-owner] skip reason=window_not_top_of_hour", { minute: now.minute });
+          if (debug) trace.push({ user_id: sub.user_id, skipped: "window_not_top_of_hour", minute: now.minute });
           skippedWindow++; continue;
         }
       } else {
@@ -895,6 +925,10 @@ async function handler(req, res) {
           : parseReminderTime(sub.reminder_time);
         if (now.hour !== target.hour || bucketMinute(now.minute) !== bucketMinute(target.minute)) {
           if (isDevOwner) console.log("[dev-owner] skip reason=window_miss", { now, target });
+          if (debug) trace.push({
+            user_id: sub.user_id, skipped: "window_miss",
+            tz, now_local: now, target,
+          });
           skippedWindow++;
           continue;
         }
@@ -911,6 +945,7 @@ async function handler(req, res) {
 
     if (sub.last_reminder_sent_date && sub.last_reminder_sent_date === dedupKey) {
       if (isDevOwner) console.log("[dev-owner] skip reason=dedup", { dedupKey, last: sub.last_reminder_sent_date });
+      if (debug) trace.push({ user_id: sub.user_id, skipped: "dedup", dedup_key: dedupKey, last: sub.last_reminder_sent_date });
       skippedDedup++;
       continue;
     }
@@ -956,6 +991,7 @@ async function handler(req, res) {
       await webpush.sendNotification(sub.subscription, payload);
       sent++;
       if (isDevOwner) console.log("[dev-owner] sent", { dedup_key: dedupKey });
+      if (debug) trace.push({ user_id: sub.user_id, sent: true, title, dedup_key: dedupKey });
       // Stamp the dedup key (hourly or daily depending on mode) so the next
       // cron run within the same window skips this user.
       try {
@@ -970,10 +1006,18 @@ async function handler(req, res) {
       }
     } catch (err) {
       failed++;
+      // FCM/APNS returns 404/410 for a subscription the browser has rotated,
+      // unsubscribed, or the user revoked. The DB row is now garbage — purge
+      // it so we don't keep hammering an endpoint that will never deliver.
+      // The user's app re-subscribes automatically on next open (sw + UI),
+      // but if the row stays around the cron will keep failing on it.
       if (err.statusCode === 404 || err.statusCode === 410) {
         staleIds.push(sub.id);
+        console.warn(`[Forged cron] stale subscription for ${sub.user_id} status=${err.statusCode} — deleting row, user must re-enable in app`);
+        if (debug) trace.push({ user_id: sub.user_id, sent: false, error: "stale_subscription", statusCode: err.statusCode });
       } else {
-        console.error(`[Forged cron] push error for ${sub.user_id}:`, err.message);
+        console.error(`[Forged cron] push error for ${sub.user_id}:`, err.message, "statusCode=", err.statusCode);
+        if (debug) trace.push({ user_id: sub.user_id, sent: false, error: err.message, statusCode: err.statusCode });
       }
     }
   }
@@ -983,9 +1027,21 @@ async function handler(req, res) {
   }
 
   console.log(
-    `[Forged cron] mode=${cronMode} dev_pool=${DEV_POOL_VERSION} sent=${sent} failed=${failed} skipped_dedup=${skippedDedup} skipped_window=${skippedWindow} skipped_category=${skippedCategory} stale_removed=${staleIds.length}`
+    `[Forged cron] done mode=${cronMode} dev_pool=${DEV_POOL_VERSION} sent=${sent} failed=${failed} skipped_dedup=${skippedDedup} skipped_window=${skippedWindow} skipped_category=${skippedCategory} stale_removed=${staleIds.length}`
   );
-  return res.status(200).json({ mode: cronMode, sent, failed, skippedDedup, skippedWindow, skippedCategory });
+  return res.status(200).json({
+    mode: cronMode,
+    dev_pool_version: DEV_POOL_VERSION,
+    subs_total: subs.length,
+    sent,
+    failed,
+    skippedDedup,
+    skippedWindow,
+    skippedCategory,
+    staleRemoved: staleIds.length,
+    // Only present when DEBUG_CRON=1 — full per-user reasoning.
+    ...(debug ? { trace } : {}),
+  });
 }
 
 export default withSentry(handler, "cron-reminders");
