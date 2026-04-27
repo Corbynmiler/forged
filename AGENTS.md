@@ -13,7 +13,7 @@ Forged is a habit / goal / coach app. Stack:
 - **Payments**: Stripe (Checkout + Customer Portal + webhook)
 - **Push**: `web-push` with VAPID keys
 - **Hosting**: Vercel
-- **Observability**: Sentry (React + Node), Vercel Analytics, Vercel Speed Insights
+- **Observability**: Vercel Analytics (optional, free tier — enable in dashboard). Server-side `@sentry/node` is wired in `api/_lib/sentry.js` but is a **no-op until `SENTRY_DSN` is set** — skip that until you want error tracking. No Speed Insights (paid).
 
 Hard constraints:
 
@@ -49,7 +49,7 @@ async function handler(req, res) {
 export default withSentry(handler, "route-name");
 ```
 
-For routes that catch their own errors (SSE streams, Stripe webhook), also call `captureException(err, { route, ...context })` inside the catch.
+For routes that catch their own errors (SSE streams, Stripe webhook), also call `captureException(err, { route, ...context })` inside the catch — it only reports when `SENTRY_DSN` is set.
 
 ### Auth in API routes
 
@@ -72,7 +72,7 @@ The Supabase anon key is hardcoded in `src/supabase.js` and route files — that
 ### Anthropic / AI cost discipline
 
 - Default model is `claude-haiku-4-5`. Do not silently swap to Sonnet/Opus.
-- `api/chat.js` uses **prompt caching** (`cache_control: { type: "ephemeral" }`) on the tools array and system prompt. Don't strip these.
+- `api/chat.js` uses **prompt caching** (`cache_control: { type: "ephemeral" }`) on the tools array and system prompt (all `messages.create` / `messages.stream` paths). `api/coach-summary.js` caches the stable system prompt the same way. Don't strip these.
 - Free-tier daily quota is 10/day, enforced server-side via the `chat_usage` table. Client-side cap exists too but is not authoritative.
 - `trimmedMessages = messages.slice(-12)` keeps context small. If you're tempted to raise this, consider cost first.
 - Tools are executed sequentially (not in parallel) because the model sometimes calls `create_habit` then `log_habit` on the new habit in one turn.
@@ -113,14 +113,13 @@ Sequentially numbered + dated: `YYYYMMDDHHMMSS_short_name.sql`. New migrations g
 
 ## Splitting App.jsx — when, not whether
 
-`src/App.jsx` is one ~14k-line file. This is the deliberate current state. When you eventually split it, the target structure is:
+`src/App.jsx` is a large monolithic file by design. When you eventually split it, the target structure is:
 
 ```
 src/
   App.jsx              # router + top-level shell only
   main.jsx             # entry (current)
   supabase.js          # current
-  sentry.js            # current
   lib/
     dates.js           # todayStr, daysAgo, parseLocal, fmtDate, weekStartFor, etc.
     streaks.js         # getDailyStreak, getWeeklyStreak, etc.
@@ -179,6 +178,9 @@ Required:
 - `CRON_SECRET` (Vercel sets this automatically on cron invocations when set as project env var)
 
 Optional (observability — fail safely when missing):
-- `SENTRY_DSN` — Node Sentry for API routes
-- `VITE_SENTRY_DSN` — React Sentry, exposed to client at build time
-- `VITE_PUBLIC_VERCEL_ENV` — tags Sentry events with deploy environment
+- `SENTRY_DSN` — Node Sentry for API routes (omit until you set up Sentry)
+- `VITE_PUBLIC_VERCEL_ENV` — e.g. `production` | `preview` (if you add client telemetry later)
+
+### Cursor + Supabase MCP
+
+`.cursor/mcp.json` mirrors `.claude/settings.json`: Supabase hosted MCP for this project (`project_ref` in the URL). First use may open a browser login to Supabase. If Cursor expects a different MCP schema on your version, see [Cursor MCP docs](https://docs.cursor.com/context/model-context-protocol).

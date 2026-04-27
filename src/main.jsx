@@ -1,12 +1,7 @@
-import { StrictMode } from "react";
+import { StrictMode, Component } from "react";
 import { createRoot } from "react-dom/client";
 import { Analytics } from "@vercel/analytics/react";
 import App from "./App.jsx";
-import { initSentry, Sentry } from "./sentry.js";
-
-// Sentry must init before render so it captures setup errors.
-// No-ops when VITE_SENTRY_DSN is unset.
-initSentry();
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
@@ -28,7 +23,7 @@ function CrashFallback({ resetError }) {
           Something broke.
         </div>
         <div style={{ color: "#A8A49C", marginBottom: 20, lineHeight: 1.5 }}>
-          The app hit an unexpected error. We've been notified. Try reloading.
+          The app hit an unexpected error. Try reloading. If it keeps happening, check the browser console.
         </div>
         <button
           onClick={() => { resetError?.(); window.location.reload(); }}
@@ -44,13 +39,39 @@ function CrashFallback({ resetError }) {
   );
 }
 
+/** Lightweight boundary — no third-party service; logs to console only. */
+class AppErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("[Forged] App crashed:", error, info?.componentStack);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <CrashFallback
+          resetError={() => this.setState({ error: null })}
+        />
+      );
+    }
+    return this.props.children;
+  }
+}
+
 createRoot(document.getElementById("root")).render(
   <StrictMode>
-    <Sentry.ErrorBoundary fallback={CrashFallback}>
+    <AppErrorBoundary>
       <App />
-    </Sentry.ErrorBoundary>
-    {/* Vercel Analytics (free tier, ~2.5k events/mo). Speed Insights removed
-        — it's billed per data point and can rack up cost on a paid product. */}
+    </AppErrorBoundary>
+    {/* Vercel Analytics: free tier; enable in project dashboard if you want data */}
     <Analytics />
   </StrictMode>
 );
