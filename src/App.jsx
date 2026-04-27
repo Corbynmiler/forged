@@ -2305,7 +2305,363 @@ function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHabit, on
   );
 }
 
-function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete, onDelete, onShareGoal }) {
+// ─── LINK HABITS SHEET ────────────────────────────────────────────────────────
+function LinkHabitsSheet({ goal, habits, onSave, onClose }) {
+  const existingLinks = (goal.logs || []).find(l => l.type === "goal_links")?.habitIds || [];
+  const [selected, setSelected] = useState(new Set(existingLinks));
+
+  const trackable = habits.filter(h => ["daily","weekly","project","limit"].includes(h.habitType));
+
+  function toggle(id) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.72)", zIndex:500, display:"flex", alignItems:"flex-end", justifyContent:"center" }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ width:430, maxWidth:"100vw", background:T.raised, borderRadius:"22px 22px 0 0", maxHeight:"70vh", display:"flex", flexDirection:"column" }}>
+        <div style={{ padding:"18px 18px 14px", borderBottom:`0.5px solid ${T.border}`, flexShrink:0 }}>
+          <div style={{ fontFamily:T.serif, fontSize:20, color:T.text }}>Link habits</div>
+          <div style={{ fontSize:12, color:T.muted, marginTop:3 }}>Choose habits that support this goal. They'll appear in the goal detail view.</div>
+        </div>
+        <div style={{ flex:1, overflowY:"auto", padding:"12px 16px" }}>
+          {trackable.length === 0 ? (
+            <div style={{ fontSize:13, color:T.muted, textAlign:"center", padding:"24px 0" }}>No habits to link yet.</div>
+          ) : trackable.map(h => {
+            const isOn = selected.has(String(h.id));
+            return (
+              <button key={h.id} type="button" onClick={() => toggle(String(h.id))}
+                style={{ display:"flex", alignItems:"center", gap:12, width:"100%", padding:"11px 12px", borderRadius:T.rsm, border:`0.5px solid ${isOn ? h.color+"66" : T.border}`, background:isOn ? h.color+"0D" : T.surface, marginBottom:8, cursor:"pointer", textAlign:"left" }}>
+                <span style={{ fontSize:18 }}>{h.emoji}</span>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:14, color:T.text, fontWeight:isOn ? 500 : 400 }}>{h.name}</div>
+                  <div style={{ fontSize:11, color:T.muted, marginTop:1 }}>{h.habitType}</div>
+                </div>
+                <div style={{ width:20, height:20, borderRadius:"50%", border:`1.5px solid ${isOn ? h.color : T.borderStrong}`, background:isOn ? h.color : "none", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                  {isOn && <span style={{ fontSize:10, color:"#fff" }}>✓</span>}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ padding:"12px 16px 32px", borderTop:`0.5px solid ${T.border}`, display:"flex", gap:10, flexShrink:0 }}>
+          <button type="button" onClick={() => onSave([...selected])}
+            style={{ flex:1, padding:"11px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer" }}>
+            Save
+          </button>
+          <button type="button" onClick={onClose}
+            style={{ padding:"11px 18px", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:"none", color:T.muted, fontSize:14, cursor:"pointer" }}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── GOAL DETAIL SHEET ────────────────────────────────────────────────────────
+function GoalDetailSheet({ goal, habits, onClose, onLog, onEdit, onComplete, onDelete, onCheckin, onLinkHabits }) {
+  const [tab, setTab] = useState("overview"); // "overview" | "history" | "linked"
+  const [showLinkSheet, setShowLinkSheet] = useState(false);
+  const [checkInNote, setCheckInNote] = useState("");
+  const [showCheckInNote, setShowCheckInNote] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+
+  const stats   = getGoalProgress(goal);
+  const pacing  = getGoalPacing(goal);
+  const today   = todayStr();
+  const thisWeek = weekStartFor(today);
+
+  // Segregate log entries by type
+  const numericLogs  = (goal.logs || []).filter(l => typeof l.value === "number").sort((a, b) => b.date.localeCompare(a.date));
+  const milestones   = (goal.logs || []).filter(l => l.type === "milestone").sort((a, b) => a.date.localeCompare(b.date));
+  const checkIns     = (goal.logs || []).filter(l => l.type === "checkin").sort((a, b) => b.date.localeCompare(a.date));
+  const whyEntry     = (goal.logs || []).find(l => l.type === "goal_why");
+  const linksEntry   = (goal.logs || []).find(l => l.type === "goal_links");
+  const linkedIds    = new Set(linksEntry?.habitIds?.map(String) || []);
+  const linkedHabits = habits.filter(h => linkedIds.has(String(h.id)));
+
+  const thisWeekCheckIn = checkIns.find(c => c.date === thisWeek);
+
+  const CHECK_IN_EMOJIS = ["😰", "😕", "😐", "🙂", "💪"];
+  const pacingColors = { ahead:"#27AE60", "on-track":"#27AE60", behind:"#E74C3C", overdue:"#E74C3C", complete:"#27AE60" };
+  const pacingLabels = { ahead:"Ahead of pace 🔥", "on-track":"On track ✓", behind:"Behind pace — push it", overdue:"Past deadline", complete:"Completed 🎉" };
+
+  function handleCheckinTap(rating) {
+    if (showCheckInNote) return;
+    onCheckin(goal.id, rating, "");
+  }
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", zIndex:400, display:"flex", alignItems:"flex-end", justifyContent:"center" }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ width:430, maxWidth:"100vw", background:T.raised, borderRadius:"22px 22px 0 0", maxHeight:"88vh", display:"flex", flexDirection:"column" }}>
+
+        {/* Handle bar */}
+        <div style={{ width:36, height:4, borderRadius:2, background:T.border, margin:"12px auto 0", flexShrink:0 }}/>
+
+        {/* Header */}
+        <div style={{ padding:"14px 18px 0", flexShrink:0 }}>
+          <div style={{ display:"flex", alignItems:"flex-start", gap:12 }}>
+            <div style={{ width:46, height:46, borderRadius:13, background:goal.color+"22", display:"flex", alignItems:"center", justifyContent:"center", fontSize:24, flexShrink:0 }}>
+              {goal.emoji || "🎯"}
+            </div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontFamily:T.serif, fontSize:20, color:T.text, lineHeight:1.25 }}>{goal.name}</div>
+              {whyEntry && (
+                <div style={{ fontSize:12, color:T.muted, marginTop:3, fontStyle:"italic", lineHeight:1.4 }}>"{whyEntry.label}"</div>
+              )}
+            </div>
+            <button onClick={onClose} style={{ background:"none", border:"none", color:T.muted, fontSize:22, cursor:"pointer", lineHeight:1, padding:"0 0 0 4px", flexShrink:0, marginTop:-2 }}>×</button>
+          </div>
+
+          {/* Big progress + pacing */}
+          <div style={{ margin:"14px 0 10px" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+              <div style={{ fontSize:13, color:T.muted }}>
+                <strong style={{ fontSize:16, color:goal.color }}>{goal.currentValue}{goal.unit}</strong>
+                <span style={{ color:T.hint }}> / {goal.targetValue}{goal.unit}</span>
+              </div>
+              <div style={{ fontSize:13, fontWeight:600, color: stats.isComplete ? T.green : goal.color }}>{stats.pct}%</div>
+            </div>
+            <div style={{ height:8, background:T.surface, borderRadius:4, overflow:"hidden" }}>
+              <div style={{ height:"100%", borderRadius:4, background:stats.isComplete ? T.green : goal.color, width:`${Math.max(stats.pct, 4)}%`, transition:"width 0.4s ease" }}/>
+            </div>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:6, gap:8, flexWrap:"wrap" }}>
+              <div style={{ fontSize:11, color:T.muted }}>
+                {!stats.isComplete && stats.toGo > 0 ? `${formatWithUnit(stats.toGo, goal.unit)} to go` : ""}
+              </div>
+              {pacing && (
+                <div style={{ fontSize:11, fontWeight:600, color: pacingColors[pacing.status] || T.muted, background:(pacingColors[pacing.status] || T.muted)+"15", border:`0.5px solid ${(pacingColors[pacing.status] || T.muted)}33`, borderRadius:10, padding:"2px 8px" }}>
+                  {pacingLabels[pacing.status] || ""}
+                  {pacing.daysLeft > 0 ? ` · ${pacing.daysLeft}d left` : ""}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <div style={{ display:"flex", background:T.surface, borderRadius:T.rsm, padding:3, gap:2 }}>
+            {[["overview","Overview"],["history",`History (${numericLogs.length})`],["linked",`Linked (${linkedHabits.length})`]].map(([id, label]) => (
+              <button key={id} type="button" onClick={() => setTab(id)}
+                style={{ flex:1, padding:"6px 4px", borderRadius:7, border:"none", cursor:"pointer", background:tab===id?T.raised:"none", color:tab===id?T.text:T.muted, fontSize:11, fontWeight:500, transition:"all 0.15s" }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Scrollable body */}
+        <div style={{ flex:1, overflowY:"auto", padding:"14px 18px 24px" }}>
+
+          {/* ── OVERVIEW TAB ─────────────────────────────────────── */}
+          {tab === "overview" && (
+            <>
+              {/* Weekly check-in */}
+              {!stats.isComplete && (
+                <div style={{ marginBottom:18, padding:"13px 14px", background:T.surface, borderRadius:T.r, border:`0.5px solid ${thisWeekCheckIn ? T.border : "rgba(200,144,42,0.3)"}` }}>
+                  <div style={{ fontSize:11, fontWeight:700, letterSpacing:"0.07em", textTransform:"uppercase", color:thisWeekCheckIn ? T.hint : T.gold, marginBottom:8 }}>
+                    {thisWeekCheckIn ? "This week's check-in" : "How's it going this week?"}
+                  </div>
+                  <div style={{ display:"flex", gap:6, justifyContent:"space-between" }}>
+                    {CHECK_IN_EMOJIS.map((em, i) => {
+                      const rating = i + 1;
+                      const isSelected = thisWeekCheckIn?.rating === rating;
+                      return (
+                        <button key={i} type="button"
+                          onClick={() => { if (!thisWeekCheckIn) onCheckin(goal.id, rating, ""); }}
+                          disabled={!!thisWeekCheckIn}
+                          style={{
+                            flex:1, padding:"8px 0", borderRadius:10,
+                            border:`1px solid ${isSelected ? T.gold : T.border}`,
+                            background:isSelected ? "rgba(200,144,42,0.15)" : "none",
+                            fontSize:22, cursor:thisWeekCheckIn ? "default" : "pointer",
+                            transition:"all 0.15s", opacity:thisWeekCheckIn && !isSelected ? 0.4 : 1,
+                          }}>
+                          {em}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {thisWeekCheckIn?.note ? (
+                    <div style={{ fontSize:12, color:T.muted, marginTop:8, fontStyle:"italic" }}>"{thisWeekCheckIn.note}"</div>
+                  ) : null}
+                  {!thisWeekCheckIn && (
+                    <div style={{ fontSize:10, color:T.hint, marginTop:6, textAlign:"center" }}>Tap to record • saved automatically</div>
+                  )}
+                </div>
+              )}
+
+              {/* Milestones */}
+              {milestones.length > 0 && (
+                <div style={{ marginBottom:18 }}>
+                  <div style={{ fontSize:11, fontWeight:700, letterSpacing:"0.07em", textTransform:"uppercase", color:T.hint, marginBottom:8 }}>Milestones</div>
+                  {milestones.map((m, i) => {
+                    const isPast  = m.date < today;
+                    const isToday = m.date === today;
+                    return (
+                      <div key={i} style={{ display:"flex", alignItems:"flex-start", gap:10, marginBottom:10 }}>
+                        <div style={{ flexShrink:0, width:28, height:28, borderRadius:"50%", background:isPast ? T.surface : "rgba(200,144,42,0.12)", border:`1px solid ${isPast ? T.border : "rgba(200,144,42,0.4)"}`, display:"flex", alignItems:"center", justifyContent:"center", marginTop:1 }}>
+                          <span style={{ fontSize:12 }}>{isPast ? "✓" : "◆"}</span>
+                        </div>
+                        <div style={{ flex:1 }}>
+                          <div style={{ fontSize:13, color:isPast ? T.muted : T.text, fontWeight:isPast ? 400 : 500, textDecoration:isPast ? "line-through" : "none" }}>{m.label}</div>
+                          <div style={{ fontSize:11, color:isToday ? T.gold : T.hint, marginTop:1 }}>
+                            {isToday ? "Today" : fmtGoalDueHuman(m.date)}
+                            {!isPast && !isToday && (() => {
+                              const d = Math.round((parseLocal(m.date) - parseLocal(today)) / 86400000);
+                              return d > 0 ? ` · ${d}d away` : "";
+                            })()}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Goal deadline */}
+              {goal.targetDate && (
+                <div style={{ marginBottom:18, display:"flex", alignItems:"center", gap:8, padding:"10px 12px", background:T.surface, borderRadius:T.rsm, border:`0.5px solid ${T.border}` }}>
+                  <span style={{ fontSize:16 }}>🎯</span>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:12, color:T.text, fontWeight:500 }}>Deadline: {fmtGoalDueHuman(goal.targetDate)}</div>
+                    {pacing?.daysLeft > 0 && <div style={{ fontSize:11, color:T.muted, marginTop:1 }}>{pacing.daysLeft} days remaining</div>}
+                    {pacing?.daysLeft === 0 && <div style={{ fontSize:11, color:T.amber }}>Today is the deadline</div>}
+                    {pacing?.daysLeft < 0 && <div style={{ fontSize:11, color:"#E74C3C" }}>Overdue by {Math.abs(pacing.daysLeft)} days</div>}
+                  </div>
+                </div>
+              )}
+
+              {/* Quick log */}
+              {!stats.isComplete && (
+                <button type="button" onClick={() => { onClose(); onLog(goal.id); }}
+                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8, width:"100%", padding:"12px", borderRadius:T.rsm, border:`0.5px solid ${goal.color+"55"}`, background:goal.color+"0D", color:goal.color, fontSize:14, fontWeight:600, cursor:"pointer", marginBottom:14 }}>
+                  + Log progress
+                </button>
+              )}
+
+              {/* Actions row */}
+              <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                <button type="button" onClick={() => { onClose(); onEdit(goal.id); }}
+                  style={{ padding:"7px 14px", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:"none", color:T.muted, fontSize:12, cursor:"pointer" }}>
+                  Edit goal
+                </button>
+                {!stats.isComplete && (
+                  <button type="button" onClick={() => { onComplete(goal.id); onClose(); }}
+                    style={{ padding:"7px 14px", borderRadius:T.rsm, border:`0.5px solid rgba(39,174,96,0.35)`, background:"none", color:T.green, fontSize:12, cursor:"pointer" }}>
+                    Mark complete
+                  </button>
+                )}
+                {!deleteConfirm ? (
+                  <button type="button" onClick={() => setDeleteConfirm(true)}
+                    style={{ padding:"7px 14px", borderRadius:T.rsm, border:`0.5px solid rgba(231,76,60,0.3)`, background:"none", color:"#e74c3c", fontSize:12, cursor:"pointer", marginLeft:"auto" }}>
+                    Delete
+                  </button>
+                ) : (
+                  <>
+                    <span style={{ fontSize:12, color:T.muted, alignSelf:"center", marginLeft:"auto" }}>Sure?</span>
+                    <button type="button" onClick={() => { onDelete(goal.id); onClose(); }}
+                      style={{ padding:"7px 14px", borderRadius:T.rsm, border:"none", background:"rgba(231,76,60,0.15)", color:"#e74c3c", fontSize:12, fontWeight:600, cursor:"pointer" }}>
+                      Delete
+                    </button>
+                    <button type="button" onClick={() => setDeleteConfirm(false)}
+                      style={{ padding:"7px 14px", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:"none", color:T.muted, fontSize:12, cursor:"pointer" }}>
+                      Cancel
+                    </button>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* ── HISTORY TAB ──────────────────────────────────────── */}
+          {tab === "history" && (
+            <>
+              {numericLogs.length === 0 && checkIns.length === 0 ? (
+                <div style={{ textAlign:"center", padding:"32px 0", color:T.muted, fontSize:13 }}>
+                  No entries yet — tap "Log progress" to start.
+                </div>
+              ) : null}
+
+              {/* Interleave numeric logs + check-ins by date, newest first */}
+              {[
+                ...numericLogs.map(l => ({ ...l, _kind: "value" })),
+                ...checkIns.map(l => ({ ...l, _kind: "checkin" })),
+              ].sort((a, b) => b.date.localeCompare(a.date)).map((entry, i) => (
+                <div key={i} style={{ display:"flex", gap:10, marginBottom:12, alignItems:"flex-start" }}>
+                  <div style={{ flexShrink:0, width:7, height:7, borderRadius:"50%", background:entry._kind === "checkin" ? T.gold : goal.color, marginTop:5 }}/>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:11, color:T.hint }}>{fmtEntryDate(entry.date)}</div>
+                    {entry._kind === "value" ? (
+                      <div style={{ fontSize:14, color:T.text, fontWeight:500, marginTop:1 }}>
+                        {entry.value}{goal.unit}
+                        {entry.note ? <span style={{ fontSize:12, color:T.muted, fontWeight:400 }}> — {entry.note}</span> : null}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize:20, marginTop:1 }} title={`Rating: ${entry.rating}/5`}>
+                        {CHECK_IN_EMOJIS[(entry.rating || 1) - 1]}
+                        {entry.note ? <span style={{ fontSize:12, color:T.muted, marginLeft:6 }}>"{entry.note}"</span> : null}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+
+          {/* ── LINKED HABITS TAB ────────────────────────────────── */}
+          {tab === "linked" && (
+            <>
+              <button type="button" onClick={() => setShowLinkSheet(true)}
+                style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, width:"100%", padding:"11px", borderRadius:T.rsm, border:`0.5px solid ${T.borderStrong}`, background:T.surface, color:T.muted, fontSize:13, cursor:"pointer", marginBottom:14 }}>
+                <span style={{ fontSize:16 }}>＋</span> {linkedHabits.length > 0 ? "Edit linked habits" : "Link habits to this goal"}
+              </button>
+              {linkedHabits.length === 0 ? (
+                <div style={{ textAlign:"center", padding:"16px 0 32px", color:T.hint, fontSize:12, lineHeight:1.6 }}>
+                  Link habits that support this goal.<br/>They'll appear here so you can see how your daily practice connects to the outcome.
+                </div>
+              ) : linkedHabits.map(h => {
+                const streak = getStreak(h);
+                return (
+                  <div key={h.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 13px", borderRadius:T.rsm, background:T.surface, border:`0.5px solid ${T.border}`, marginBottom:8 }}>
+                    <div style={{ width:36, height:36, borderRadius:10, background:h.color+"22", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>{h.emoji}</div>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:13, color:T.text, fontWeight:500 }}>{h.name}</div>
+                      <div style={{ fontSize:11, color:T.muted, marginTop:1 }}>
+                        {streak > 0 ? `${streak} day streak` : "No streak yet"}
+                        {" · "}{h.habitType}
+                      </div>
+                    </div>
+                    {streak > 0 && (
+                      <div style={{ fontSize:11, color:T.gold, fontWeight:600, background:"rgba(200,144,42,0.12)", borderRadius:8, padding:"3px 8px" }}>🔥 {streak}</div>
+                    )}
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+      </div>
+
+      {showLinkSheet && (
+        <LinkHabitsSheet
+          goal={goal}
+          habits={habits}
+          onSave={habitIds => { onLinkHabits(goal.id, habitIds); setShowLinkSheet(false); }}
+          onClose={() => setShowLinkSheet(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete, onDelete, onShareGoal, onOpen }) {
   const stats = getGoalProgress(goal);
   const { isComplete } = stats;
   const barFillPct = goalBarFillWidthPct(stats);
@@ -2334,7 +2690,11 @@ function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete, onDelete, onShareG
       onPointerDown={e => e.stopPropagation()}
       className="rc"
       style={{ margin:"0 14px 10px", background:loggedToday ? `${goal.color}0D` : T.raised, borderRadius:T.r, border:`0.5px solid ${loggedToday ? goal.color+"66" : T.border}`, overflow:"hidden" }}>
-      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
+      {/* Tappable header row — opens goal detail sheet */}
+      <div
+        role={onOpen ? "button" : undefined}
+        onClick={onOpen ? (e) => { e.stopPropagation(); onOpen(goal.id); } : undefined}
+        style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px", cursor:onOpen ? "pointer" : "default" }}>
         <div style={{ width:40, height:40, borderRadius:11, background:goal.color+"20", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>{goal.emoji}</div>
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{goal.name}</div>
@@ -2352,7 +2712,7 @@ function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete, onDelete, onShareG
               Log
             </button>
           )}
-          <TodayOverflowDotsBtn expanded={showMenu} onToggle={() => setShowMenu(m => !m)} />
+          <TodayOverflowDotsBtn expanded={showMenu} onToggle={(e) => { e && e.stopPropagation(); setShowMenu(m => !m); }} />
         </div>
       </div>
       <div style={{ padding:"0 15px 14px" }}>
@@ -3413,7 +3773,7 @@ function LogCard({ habit, onSaveEntry, onEditHabit, onDeleteHabit }) {
 }
 
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
-function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote, onLogZero, onOpenLog, onOpenGoalLog, onEditGoal, onCompleteGoal, onDeleteGoal, onShareGoal, onEditHabit, onDeleteHabit, onShareHabit, sharingHabitId, onXPInfo, onAdd, onSaveLogEntry, hideFloatingAdd, coachEverOpened = true, onOpenCoach }) {
+function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote, onLogZero, onOpenLog, onOpenGoalLog, onEditGoal, onCompleteGoal, onDeleteGoal, onShareGoal, onEditHabit, onDeleteHabit, onShareHabit, sharingHabitId, onXPInfo, onAdd, onSaveLogEntry, hideFloatingAdd, coachEverOpened = true, onOpenCoach, onOpenGoalDetail }) {
   const activeGoals = goals.filter(g => g.status !== "completed");
   const trackHabits = habits.filter(h => h.habitType !== "log");
   const logHabits = habits.filter(h => h.habitType === "log");
@@ -3484,7 +3844,7 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
       {/* Tour target: wraps only the first non-empty section so the spotlight ring is tight */}
       {(() => {
         const sections = [
-          activeGoals.length > 0 && <><SLabel>Goals</SLabel> {activeGoals.map(g => <TodayGoalCard key={g.id} goal={g} onOpenLog={onOpenGoalLog} onEdit={onEditGoal} onComplete={onCompleteGoal} onDelete={onDeleteGoal} onShareGoal={onShareGoal}/>)}</>,
+          activeGoals.length > 0 && <><SLabel>Goals</SLabel> {activeGoals.map(g => <TodayGoalCard key={g.id} goal={g} onOpenLog={onOpenGoalLog} onEdit={onEditGoal} onComplete={onCompleteGoal} onDelete={onDeleteGoal} onShareGoal={onShareGoal} onOpen={onOpenGoalDetail}/>)}</>,
           daily.length   > 0 && <><SLabel>Daily</SLabel>          {daily.map(h   => <DailyCard  key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId === h.id}/>)}</>,
           limit.length   > 0 && <><SLabel>Limits</SLabel>         {limit.map(h   => <LimitCard  key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId === h.id}/>)}</>,
           weekly.length  > 0 && <><SLabel>Weekly targets</SLabel> {weekly.map(h  => <WeeklyCard key={h.id} habit={h} onTap={onTap} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId === h.id}/>)}</>,
@@ -5195,6 +5555,42 @@ function goalStateAfterLogRemoval(goal, nextLogs) {
 
 function getGoalEntryCount(goal) {
   return (goal.logs || []).filter(l => typeof l.value === "number").length;
+}
+
+/**
+ * Returns pacing info for a goal that has a deadline.
+ * Tells you whether the user is on track, ahead, or behind based on
+ * time elapsed vs progress made.
+ * Returns null if no deadline is set.
+ */
+function getGoalPacing(goal) {
+  if (!goal.targetDate) return null;
+  const today = todayStr();
+  const stats = getGoalProgress(goal);
+  if (stats.isComplete) return { status: "complete", daysLeft: 0 };
+
+  const daysLeft = Math.round((parseLocal(goal.targetDate) - parseLocal(today)) / 86400000);
+  if (daysLeft < 0) return { status: "overdue", daysLeft };
+
+  // Use first numeric log date as start reference, fall back to today
+  const numericLogs = (goal.logs || [])
+    .filter(l => typeof l.value === "number")
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const startDate = numericLogs.length > 0 ? numericLogs[0].date : today;
+  const totalDays = Math.round((parseLocal(goal.targetDate) - parseLocal(startDate)) / 86400000);
+  if (totalDays <= 0) return { status: "on-track", daysLeft };
+
+  const daysElapsed = Math.round((parseLocal(today) - parseLocal(startDate)) / 86400000);
+  const timeUsedPct = Math.min(1, Math.max(0, daysElapsed / totalDays));
+  const progressPct = stats.pct / 100;
+  const gap = progressPct - timeUsedPct;
+
+  let status;
+  if (gap > 0.1) status = "ahead";
+  else if (gap >= -0.05) status = "on-track";
+  else status = "behind";
+
+  return { status, daysLeft, timeUsedPct: Math.round(timeUsedPct * 100), progressPct: stats.pct };
 }
 
 function getGoalStatusText(goal, stats = getGoalProgress(goal)) {
@@ -8123,6 +8519,7 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
                 } else {
                   starters.push("Help me pick my first habit");
                 }
+                starters.push("Help me set a goal");
                 starters.push("Give me a pep talk");
                 return (
                   <div style={{ marginTop:6, display:"flex", flexDirection:"column", gap:6 }}>
@@ -11842,6 +12239,7 @@ export default function App() {
   const [showAddLog,     setShowAddLog]     = useState(false);
   const [logGoalId,      setLogGoalId]      = useState(null);
   const [editGoalId,     setEditGoalId]     = useState(null);
+  const [openGoalId,     setOpenGoalId]     = useState(null);
   const [showXP,      setShowXP]     = useState(false);
   const [showHistory, setShowHistory]= useState(false);
   const [showCoach,   setShowCoach]  = useState(false);
@@ -14424,6 +14822,33 @@ export default function App() {
     addToast(`✓ Goal "${plan.name}" created`);
   }
 
+  /** Save a weekly check-in (emoji rating 1-5) for a goal. */
+  async function handleGoalCheckin(goalId, rating, note) {
+    const goal = resolveGoalForModal(goalId, goals, habits);
+    if (!goal) return;
+    const weekStart = weekStartFor(todayStr());
+    // Replace any existing checkin for this week, keep all other log entries
+    const otherLogs = (goal.logs || []).filter(l => !(l.type === "checkin" && l.date === weekStart));
+    const newCheckin = { type: "checkin", date: weekStart, rating, note: note || "", id: `ci_${Date.now()}` };
+    const updated = { ...goal, logs: [...otherLogs, newCheckin] };
+    const saved = await syncGoal(updated);
+    if (!saved) { addToast("⚠️ Couldn't save check-in"); return; }
+    setGoals(prev => prev.map(g => entityIdEq(g.id, goalId) ? updated : g));
+  }
+
+  /** Update the habit IDs linked to a goal (stored as a goal_links log entry). */
+  async function handleGoalLinkHabits(goalId, habitIds) {
+    const goal = resolveGoalForModal(goalId, goals, habits);
+    if (!goal) return;
+    const otherLogs = (goal.logs || []).filter(l => l.type !== "goal_links");
+    const linksEntry = { type: "goal_links", habitIds: habitIds.map(String), id: `gl_${Date.now()}` };
+    const updated = { ...goal, logs: [...otherLogs, linksEntry] };
+    const saved = await syncGoal(updated);
+    if (!saved) { addToast("⚠️ Couldn't save linked habits"); return; }
+    setGoals(prev => prev.map(g => entityIdEq(g.id, goalId) ? updated : g));
+    addToast(`✓ Linked habits updated`);
+  }
+
   async function handleLogGoal(id, value, note) {
     const goal = resolveGoalForModal(id, goals, habits);
     if (!goal) return;
@@ -14628,7 +15053,7 @@ export default function App() {
             >×</button>
           </div>
         )}
-        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} coachEverOpened={coachEverOpened} onOpenCoach={() => { try { localStorage.setItem("forged_coach_opened", "1"); } catch {} setCoachEverOpened(true); setShowCoach(true); }} hideFloatingAdd/>}
+        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} coachEverOpened={coachEverOpened} onOpenCoach={() => { try { localStorage.setItem("forged_coach_opened", "1"); } catch {} setCoachEverOpened(true); setShowCoach(true); }} hideFloatingAdd onOpenGoalDetail={id => setOpenGoalId(id)}/>}
         {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)}/>}
         {screen === "insights" && <InsightsScreen habits={habits} goals={goals} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} userId={sessionUserId}/>}
         {screen === "social"   && <SocialScreen
@@ -14975,6 +15400,7 @@ export default function App() {
       {showCoachTeaser && <CoachComingSoonSheet onClose={() => setShowCoachTeaser(false)} coachName={coachName} context={screen}/>}
       {logGoalId     && (() => { const g = resolveGoalForModal(logGoalId, goals, habits); return g ? <LogGoalModal goal={g} onClose={() => setLogGoalId(null)} onLog={(id, val, note) => { handleLogGoal(id, val, note); setLogGoalId(null); }}/> : null; })()}
       {editGoalId    && (() => { const g = resolveGoalForModal(editGoalId, goals, habits); return g ? <EditGoalModal goal={g} onClose={() => setEditGoalId(null)} onSave={handleEditGoalSave}/> : null; })()}
+      {openGoalId    && (() => { const g = resolveGoalForModal(openGoalId, goals, habits); return g ? <GoalDetailSheet goal={g} habits={habits} onClose={() => setOpenGoalId(null)} onLog={id => { setOpenGoalId(null); setLogGoalId(id); }} onEdit={id => { setOpenGoalId(null); openEditGoal(id); }} onComplete={handleCompleteGoal} onDelete={id => { handleDeleteGoal(id); setOpenGoalId(null); }} onCheckin={handleGoalCheckin} onLinkHabits={handleGoalLinkHabits}/> : null; })()}
       {showXP        && <XPModal       xp={xp}                               onClose={() => setShowXP(false)}/>}
       {showHistory   && <HistoryModal  habits={habits} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onClose={() => setShowHistory(false)}/>}
       {reflectId     && <ReflectModal  habit={reflectHabit}                  onClose={() => setReflectId(null)} onSave={handleSaveReflection} hasCoach={!!user.coachId}/>}
