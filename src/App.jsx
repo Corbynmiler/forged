@@ -12645,22 +12645,42 @@ export default function App() {
   const [showCoachTeaser, setShowCoachTeaser] = useState(false);
   /** Message recorded via page-level mic, auto-sent when AICoach mounts. Cleared after use. */
   const [coachPendingMsg, setCoachPendingMsg] = useState(null);
-  // Page-level speech hook: mic tap in CoachBar records on the current page without
-  // opening the chat thread first. When a final transcript arrives the coach opens
-  // and the message is auto-submitted so the response starts streaming immediately.
+  // Accumulates finals + stop-time interim flush across Web Speech segments. Same session
+  // as in-chat dictation: browsers end recognition after pauses unless we auto-restart.
+  const pageDictationAccumulatorRef = useRef("");
+  // Page-level speech hook: mic tap in CoachBar records without opening the sheet first.
+  // autoRestart matches AICoach so silence does not end the session until the user stops.
   const pageSpeech = useSpeechInput(
     (transcript) => {
       const t = (transcript || "").trim();
       if (!t) return;
-      setCoachPendingMsg(t);
-      try { localStorage.setItem("forged_coach_opened", "1"); } catch { /* ignore */ }
-      setCoachEverOpened(true);
-      setCoachOpenMode("text");
-      setCoachInstanceKey(k => k + 1);
-      setShowCoach(true);
+      const prev = pageDictationAccumulatorRef.current;
+      pageDictationAccumulatorRef.current = prev ? `${prev} ${t}` : t;
+      if (import.meta.env.DEV) {
+        console.log("[pageSpeech] segment", t.length, "chars; total", pageDictationAccumulatorRef.current.length);
+      }
     },
-    { autoRestart: false },
+    { autoRestart: true, meter: false },
   );
+  const prevPageSpeechListeningRef = useRef(false);
+  useEffect(() => {
+    const was = prevPageSpeechListeningRef.current;
+    const now = pageSpeech.listening;
+    if (was && !now) {
+      const msg = pageDictationAccumulatorRef.current.trim();
+      pageDictationAccumulatorRef.current = "";
+      if (msg) {
+        if (import.meta.env.DEV) console.log("[pageSpeech] handoff", msg.length, "chars");
+        setCoachPendingMsg(msg);
+        try { localStorage.setItem("forged_coach_opened", "1"); } catch { /* ignore */ }
+        setCoachEverOpened(true);
+        setCoachOpenMode("text");
+        setCoachInstanceKey(k => k + 1);
+        setShowCoach(true);
+      }
+    }
+    prevPageSpeechListeningRef.current = now;
+  }, [pageSpeech.listening]);
   /** Ephemeral bubble above the coach FAB: `{ id, text }` while visible; `id` ties to the navigation that triggered it. */
   const [coachPageNudge, setCoachPageNudge] = useState(null);
   const coachNudgeSeqRef = useRef(0);
@@ -15743,8 +15763,9 @@ export default function App() {
                     onOpenMic={() => {
                       // Non-Pro: fall through to AICoach which handles paywall
                       if (!isPro) { openCoachWithMode("mic"); return; }
-                      // Page mic: record on current page, send when done
+                      // Page mic: record on current page; handoff when user stops (see pageSpeech effect)
                       if (pageSpeech.supported) {
+                        if (!pageSpeech.listening) pageDictationAccumulatorRef.current = "";
                         pageSpeech.toggle();
                       } else {
                         openCoachWithMode("mic"); // fallback if speech API unavailable
