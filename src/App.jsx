@@ -3850,8 +3850,7 @@ function buildCoachGreetingLine({ habits, goals }) {
 function CoachGreeting({ coachName, coachIcon, habits, goals, habitAccent, onOpenMic }) {
   const displayName = (coachName || "Coach").trim() || "Coach";
   const body = buildCoachGreetingLine({ habits, goals });
-  const bodyClipped = body.length > 80 ? `${body.slice(0, 79).trimEnd()}…` : body;
-  const line = `${displayName}: ${bodyClipped}`;
+  const line = `${displayName}: ${body}`;
   const initial = displayName.charAt(0).toUpperCase();
   const accent = habitAccent || T.accent;
   return (
@@ -3887,7 +3886,9 @@ function CoachGreeting({ coachName, coachIcon, habits, goals, habitAccent, onOpe
       </div>
       <span style={{
         flex:1, minWidth:0, fontSize:13.5, fontWeight:500, color:T.text,
-        lineHeight:1.45, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis",
+        lineHeight:1.45,
+        display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical",
+        overflow:"hidden",
       }}>
         {line}
       </span>
@@ -3895,11 +3896,17 @@ function CoachGreeting({ coachName, coachIcon, habits, goals, habitAccent, onOpe
   );
 }
 
-function CoachBar({ coachName, coachIcon, habitColor, onOpenMic, onOpenText, coachEverOpened }) {
+function CoachBar({ coachName, coachIcon, habitColor, onOpenMic, onOpenText, coachEverOpened, isListening = false, listeningInterim = "" }) {
   const coachLabelRaw = (coachName ?? "").trim() || "Coach";
   const coachLabelShort = coachLabelRaw.length > 12 ? `${coachLabelRaw.slice(0, 11)}…` : coachLabelRaw;
   const micColor = habitColor || T.accent;
   const initial = coachLabelRaw.charAt(0).toUpperCase();
+  // When listening: mic button glows red with a pulsing animation to signal recording
+  const micBg = isListening
+    ? `linear-gradient(145deg, #E74C3C88 0%, #E74C3C55 55%, #C0392B 100%)`
+    : `linear-gradient(145deg, ${micColor}35 0%, ${micColor}12 55%, ${T.raised} 100%)`;
+  const micBorderColor = isListening ? "#E74C3Ccc" : `${micColor}88`;
+  const micIconColor = isListening ? "#ff6b6b" : micColor;
   return (
     <div
       data-tour="coach-fab"
@@ -3909,10 +3916,13 @@ function CoachBar({ coachName, coachIcon, habitColor, onOpenMic, onOpenText, coa
         minHeight:52,
         padding:"10px 12px",
         background:T.surface,
-        borderTop:`0.5px solid ${T.border}`,
+        borderTop:`0.5px solid ${isListening ? "#E74C3C55" : T.border}`,
         borderRadius:20,
-        boxShadow:"0 -4px 20px rgba(0,0,0,0.35)",
+        boxShadow: isListening
+          ? "0 -4px 24px rgba(231,76,60,0.28)"
+          : "0 -4px 20px rgba(0,0,0,0.35)",
         fontFamily:T.font,
+        transition:"box-shadow 0.2s, border-top-color 0.2s",
       }}
     >
       <div style={{ flex:1, display:"flex", justifyContent:"flex-start", alignItems:"center", minWidth:0 }}>
@@ -3930,34 +3940,60 @@ function CoachBar({ coachName, coachIcon, habitColor, onOpenMic, onOpenText, coa
             {coachIcon && COACH_ICON_OPTIONS.includes(coachIcon) ? coachIcon : initial}
           </div>
           <span style={{
-            fontSize:9, fontWeight:600, color:T.muted, textAlign:"center",
-            lineHeight:1.15, maxWidth:56, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+            fontSize:9, fontWeight:600,
+            color: isListening ? "#E74C3C" : T.muted,
+            textAlign:"center", lineHeight:1.15,
+            maxWidth:56, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+            transition:"color 0.2s",
           }}>
-            {coachLabelShort}
+            {isListening ? "Listening…" : coachLabelShort}
           </span>
         </div>
+        {/* Interim transcript shown while listening */}
+        {isListening && listeningInterim && (
+          <span style={{
+            fontSize:12, color:T.sub, fontStyle:"italic",
+            overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+            maxWidth:"calc(100% - 72px)", marginLeft:4,
+          }}>
+            "{listeningInterim}"
+          </span>
+        )}
       </div>
       <button
         type="button"
         onClick={onOpenMic}
-        aria-label={`${coachLabelRaw} — voice`}
-        title="Voice"
+        aria-label={isListening ? "Stop listening" : `${coachLabelRaw} — voice`}
+        title={isListening ? "Stop" : "Voice"}
         style={{
           position:"absolute", left:"50%", transform:"translateX(-50%)",
           width:52, height:52, borderRadius:"50%",
-          border:`1px solid ${micColor}88`,
-          background:`linear-gradient(145deg, ${micColor}35 0%, ${micColor}12 55%, ${T.raised} 100%)`,
-          color:micColor,
+          border:`1px solid ${micBorderColor}`,
+          background:micBg,
+          color:micIconColor,
           cursor:"pointer",
           display:"flex", alignItems:"center", justifyContent:"center",
-          boxShadow:`0 2px 12px rgba(0,0,0,0.35)`,
-          animation: coachEverOpened ? undefined : "coachFabPulse 2.4s ease-in-out infinite",
+          boxShadow: isListening
+            ? `0 0 0 3px rgba(231,76,60,0.2), 0 2px 12px rgba(0,0,0,0.35)`
+            : `0 2px 12px rgba(0,0,0,0.35)`,
+          animation: isListening
+            ? "coachFabPulse 1s ease-in-out infinite"
+            : coachEverOpened ? undefined : "coachFabPulse 2.4s ease-in-out infinite",
+          transition:"background 0.2s, border-color 0.2s, box-shadow 0.2s, color 0.2s",
         }}
       >
-        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path d="M12 14a3 3 0 0 0 3-3V7a3 3 0 1 0-6 0v4a3 3 0 0 0 3 3Z" stroke="currentColor" strokeWidth="1.6"/>
-          <path d="M8 11v1a4 4 0 0 0 8 0v-1M12 18v2M9 22h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
-        </svg>
+        {isListening ? (
+          /* Stop icon while recording */
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <rect x="8" y="8" width="8" height="8" rx="1.5" fill="currentColor"/>
+          </svg>
+        ) : (
+          /* Mic icon at rest */
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path d="M12 14a3 3 0 0 0 3-3V7a3 3 0 1 0-6 0v4a3 3 0 0 0 3 3Z" stroke="currentColor" strokeWidth="1.6"/>
+            <path d="M8 11v1a4 4 0 0 0 8 0v-1M12 18v2M9 22h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+          </svg>
+        )}
       </button>
       <div style={{ flex:1, display:"flex", justifyContent:"flex-end", alignItems:"center" }}>
         <button
@@ -7835,15 +7871,16 @@ function buildCoachSystemPrompt(user, habits, coachName, screen, goals = []) {
   };
   const creatorCtx = isCreator ? `
 
-Creator (Corbyn): direct, peer tone; skip generic suggestions. Capabilities: create/edit habits & goals from chat, push notifications, read streaks/reflections.` : "";
+─── CONTEXT: YOU'RE TALKING TO THE PERSON WHO BUILT THIS APP ───
+${name} is the developer and creator of Forged. Treat them as a peer, not a coaching client. Skip generic encouragement — they know what they're building. Reference their actual data. Match the energy they bring: usually direct, builder-focused, no fluff.
+When they mention "Forged", "the build", "the app", "shipping something", or "working on the product" — that's their software project, likely mapped to a project-type habit above. Treat it like any other project update and log it.` : "";
 
-  return `You are ${coach}, habit coach in Forged for ${name}.
+  return `You are ${coach}, talking with ${name} inside the Forged habit app.
 
-Screen: ${screenCtx[screen] || "App"}
-Date: ${today}
+Today: ${today} | Screen: ${screenCtx[screen] || "app"}
 
 Habits:
-${habitSummaries || "None."}
+${habitSummaries || "None yet."}
 ${goals.length ? `
 Goals:
 ${goals.map(g => {
@@ -7852,22 +7889,38 @@ ${goals.map(g => {
   return `- [id:${g.id}] ${g.emoji || ""} ${g.name} (goal, ${g.currentValue}/${g.targetValue}${g.unit || ""}${due}, ${pct}% complete, status: ${g.status})`;
 }).join("\n")}` : ""}
 
-GOAL PLANNING — read this first:
-When the user wants to set a goal (an outcome measured by a number, e.g. lose weight, run a distance, save money), do NOT call create_habit. Instead:
-1. Ask up to 3 short questions if you still need: what number/outcome, by when, current starting point.
-2. Once you have enough info, embed a <goal_plan> block in your reply (valid JSON, no line breaks inside):
+─── HOW TO SOUND ───
+You're a smart, grounded companion — not a therapy bot, not a corporate wellness AI, not a cheerleader.
+- Short by default: 1–3 sentences. Go longer only when asked something genuinely complex.
+- Match their energy. Casual message in → casual reply. Thoughtful message in → thoughtful reply.
+- No hollow openers. Never start with "Great!", "Of course!", "Absolutely!", "Sure thing!" Just reply.
+- Don't lecture. Don't moralize. Don't over-explain what you just did.
+- One question max per reply, only when you genuinely need it to act. Never stack questions.
+- Don't start every reply with their name.
+
+─── WHEN TO ACT vs ASK ───
+If they tell you what they did, log it — don't ask permission first. Act, then confirm briefly in plain language.
+"I went for a run" → log the run. "Two drinks tonight" → log the limit habit. "Three hours on the app" → log the project habit for 3h (180 min).
+Only ask a clarifying question if something critical is truly missing — like which habit to log when there are several candidates, or how long for project work if they didn't say.
+After logging: one natural sentence of confirmation. No bullet lists of "I logged X, updated Y, set Z."
+
+─── PRODUCT CONTEXT ───
+Forged is the habit-tracking app ${name} is using — and may also be building. If they reference "Forged", "the build", "the app", "shipping a feature", or "working on the product", that's their software project. Look for a project-type habit in their list and log it. Don't treat "Forged" as an unknown reference.
+
+─── GOAL PLANNING ───
+When the user wants a goal (any outcome tied to a number — lose weight, run a distance, save money, hit a target), do NOT call create_habit. Instead:
+1. Ask up to 3 short questions if you still need: what number/outcome, by when, starting point.
+2. Once you have enough info, embed a <goal_plan> block (valid JSON, no line breaks inside):
 <goal_plan>{"name":"Run 5K","emoji":"🏃","unit":"km","targetValue":5,"startValue":1,"direction":"increasing","targetDate":"2025-09-30","milestones":[{"date":"2025-07-31","label":"Hit 3K"}],"why":"Feel healthier"}</goal_plan>
-3. Tell the user: tap "Create this goal" on the card below to save it.
-The app renders a confirmation card from the <goal_plan> tag. Do not call create_habit for goals.
+3. Tell the user to tap "Create this goal" on the card below.
+The app renders a confirmation card from the <goal_plan> block. Never call create_habit for goals.
 
-Tools (habits only — not goals):
-- create_habit: new habits only — never for edits, never for goals.
-- edit_habit: existing habit; habit_id from [id:...] above.
-- log_habit: today — project → minutes; limit/goal → amount; daily/weekly → neither.
-- success:false from a tool → state failure; never claim success.
-- Missing required fields → one clarifying question.
-
-Streaks/logs above are authoritative; logged today:true = already done. Mobile chat — short. No invented data.${creatorCtx}`;
+─── TOOLS ───
+create_habit: new habits only — never for edits, never for goals. One clarifying question if type is genuinely unclear.
+edit_habit: existing habit; use habit_id from [id:…] in the list above.
+log_habit: project → minutes; limit/goal → amount; daily/weekly → nothing extra needed.
+If a tool returns success:false, say it failed. Never claim success when it isn't.
+Data above is authoritative. Logged today: true means it's already done — don't log again unless they ask.${creatorCtx}`;
 }
 
 const COACH_LS_RESET = "coach_reset_date";
@@ -8493,7 +8546,7 @@ function GoalPlanPreview({ plan, onConfirm, onDismiss }) {
   );
 }
 
-function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onGoalLogged, onHabitRenamed, onGoalPlanConfirm, openInputMode = null }) {
+function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, coachIcon, coachAccentColor, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onGoalLogged, onHabitRenamed, onGoalPlanConfirm, openInputMode = null, pendingMessage = null }) {
   const cName = coachName || "Coach";
   const isCreatorUser = user?.id === CREATOR_ID;
   // ── Warmer, context-aware greeting ─────────────────────────────────────────
@@ -8543,6 +8596,20 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
     }, 160);
     return () => { cancelled = true; clearTimeout(t); };
   // Mount-only: parent remounts via key when opening with a new mode.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-send a pending message if the coach was opened via page-mic.
+  // Captured at mount time via ref so it doesn't re-run if the prop ever changes.
+  const pendingMessageRef = useRef(pendingMessage);
+  useEffect(() => {
+    const msg = pendingMessageRef.current;
+    if (!msg?.trim()) return;
+    let cancelled = false;
+    const t = setTimeout(() => {
+      if (!cancelled) send(msg);
+    }, 220);
+    return () => { cancelled = true; clearTimeout(t); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -8762,12 +8829,23 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
 
         {/* Header */}
         <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 13px", borderBottom:`0.5px solid ${T.border}`, flexShrink:0 }}>
-          <div style={{ width:38, height:38, borderRadius:"50%", background:"rgba(200,144,42,0.18)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:19 }}>🤖</div>
-          <div style={{ flex:1 }}>
-            <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{cName}</div>
-            <div style={{ display:"flex", alignItems:"center", gap:5 }}>
-              <div style={{ width:6, height:6, borderRadius:"50%", background:T.green }}/>
-              <div style={{ fontSize:11, color:T.muted }}>Knows your habits</div>
+          {/* Avatar — shows the selected coach icon, falls back to initial */}
+          <div style={{
+            width:40, height:40, borderRadius:"50%", flexShrink:0,
+            background:`${coachAccentColor || T.accent}22`,
+            border:`1.5px solid ${coachAccentColor || T.accent}55`,
+            display:"flex", alignItems:"center", justifyContent:"center",
+            fontSize: (coachIcon && COACH_ICON_OPTIONS.includes(coachIcon)) ? 20 : 16,
+            fontWeight:600, color: coachAccentColor || T.accent,
+            lineHeight:1,
+          }}>
+            {coachIcon && COACH_ICON_OPTIONS.includes(coachIcon) ? coachIcon : cName.charAt(0).toUpperCase()}
+          </div>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:15, fontWeight:600, color:T.text, lineHeight:1.2 }}>{cName}</div>
+            <div style={{ display:"flex", alignItems:"center", gap:5, marginTop:3 }}>
+              <div style={{ width:6, height:6, borderRadius:"50%", background:T.green, flexShrink:0 }}/>
+              <div style={{ fontSize:11, color:T.muted }}>Active — knows your habits & goals</div>
             </div>
           </div>
           {!isPro && !atFreeCap && freeCoachMsgsToday > 0 && coachMsgsRemaining != null && coachMsgsRemaining > 0 ? (
@@ -12565,6 +12643,24 @@ export default function App() {
     try { return localStorage.getItem("forged_coach_opened") === "1"; } catch { return false; }
   });
   const [showCoachTeaser, setShowCoachTeaser] = useState(false);
+  /** Message recorded via page-level mic, auto-sent when AICoach mounts. Cleared after use. */
+  const [coachPendingMsg, setCoachPendingMsg] = useState(null);
+  // Page-level speech hook: mic tap in CoachBar records on the current page without
+  // opening the chat thread first. When a final transcript arrives the coach opens
+  // and the message is auto-submitted so the response starts streaming immediately.
+  const pageSpeech = useSpeechInput(
+    (transcript) => {
+      const t = (transcript || "").trim();
+      if (!t) return;
+      setCoachPendingMsg(t);
+      try { localStorage.setItem("forged_coach_opened", "1"); } catch { /* ignore */ }
+      setCoachEverOpened(true);
+      setCoachOpenMode("text");
+      setCoachInstanceKey(k => k + 1);
+      setShowCoach(true);
+    },
+    { autoRestart: false },
+  );
   /** Ephemeral bubble above the coach FAB: `{ id, text }` while visible; `id` ties to the navigation that triggered it. */
   const [coachPageNudge, setCoachPageNudge] = useState(null);
   const coachNudgeSeqRef = useRef(0);
@@ -15644,9 +15740,20 @@ export default function App() {
                     coachName={coachName}
                     coachIcon={coachIcon}
                     habitColor={habitColor}
-                    onOpenMic={() => openCoachWithMode("mic")}
+                    onOpenMic={() => {
+                      // Non-Pro: fall through to AICoach which handles paywall
+                      if (!isPro) { openCoachWithMode("mic"); return; }
+                      // Page mic: record on current page, send when done
+                      if (pageSpeech.supported) {
+                        pageSpeech.toggle();
+                      } else {
+                        openCoachWithMode("mic"); // fallback if speech API unavailable
+                      }
+                    }}
                     onOpenText={() => openCoachWithMode("text")}
                     coachEverOpened={coachEverOpened}
+                    isListening={pageSpeech.listening}
+                    listeningInterim={pageSpeech.interim || ""}
                   />
                 </div>
               ) : null}
@@ -15695,7 +15802,14 @@ export default function App() {
       {reflectId     && <ReflectModal  habit={reflectHabit}                  onClose={() => setReflectId(null)} onSave={handleSaveReflection} hasCoach={!!user.coachId}/>}
       {editId && !editGoalId && editHabit && !isGoalLikeHabitType(editHabit) && <EditModal habit={editHabit} onClose={() => setEditId(null)} onSave={handleEditSave}/>}
       {logId && logHabit?.habitType === "project"  && <LogProjectModal   habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
-      {showCoach   && <AICoach key={coachInstanceKey} openInputMode={coachOpenMode} habits={habits} goals={goals} user={user} isPro={isPro} onClose={() => { setShowCoach(false); setCoachOpenMode(null); }} onUpgrade={() => setShowUpgrade(true)} coachName={coachName} currentScreen={screen}
+      {showCoach   && <AICoach key={coachInstanceKey} openInputMode={coachOpenMode}
+          pendingMessage={coachPendingMsg}
+          habits={habits} goals={goals} user={user} isPro={isPro}
+          onClose={() => { setShowCoach(false); setCoachOpenMode(null); setCoachPendingMsg(null); }}
+          onUpgrade={() => setShowUpgrade(true)} coachName={coachName}
+          coachIcon={coachIcon}
+          coachAccentColor={habits.find(h => h.habitType !== "log")?.color || T.accent}
+          currentScreen={screen}
           onHabitCreated={h  => setHabits(p => p.some(x => String(x.id) === String(h.id)) ? p.map(x => String(x.id) === String(h.id) ? h : x) : [...p, h])}
           onGoalCreated={g   => setGoals(p  => p.some(x => String(x.id) === String(g.id)) ? p.map(x => String(x.id) === String(g.id) ? g : x) : [...p, g])}
           onHabitLogged={(id, logs) => setHabits(p => p.map(h => String(h.id) === String(id) ? { ...h, logs } : h))}
