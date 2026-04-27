@@ -3777,8 +3777,215 @@ function LogCard({ habit, onSaveEntry, onEditHabit, onDeleteHabit }) {
   );
 }
 
+// ─── Coach shell: deterministic Today greeting + bottom CoachBar ─────────────
+function coachGreetingDaysLeft(targetYmd) {
+  const t = todayStr();
+  if (!targetYmd || targetYmd < t) return null;
+  return Math.round((parseLocal(targetYmd) - parseLocal(t)) / 86400000);
+}
+
+/** One short line (body only). Caller prefixes with "Name: ". No AI. */
+function buildCoachGreetingLine({ habits, goals }) {
+  const hr = new Date().getHours();
+  const tod = hr < 12 ? "morning" : hr < 17 ? "afternoon" : "evening";
+  const trackHabits = (habits || []).filter(h => h.habitType !== "log");
+  const activeGoals = (goals || []).filter(g => g.status !== "completed");
+  const total = trackHabits.length;
+  const loggedCount = total ? trackHabits.filter(h => isLoggedToday(h)).length : 0;
+  const all = total > 0 && loggedCount === total;
+  const some = total > 0 && loggedCount > 0 && !all;
+  const none = total > 0 && loggedCount === 0;
+
+  let urgent = null;
+  let bestLeft = 8;
+  for (const g of activeGoals) {
+    if (!g.targetDate) continue;
+    const left = coachGreetingDaysLeft(g.targetDate);
+    if (left != null && left >= 0 && left < 7 && left < bestLeft) {
+      bestLeft = left;
+      urgent = { g, left };
+    }
+  }
+  if (urgent) {
+    const nm = String(urgent.g.name || "Goal").slice(0, 22);
+    if (urgent.left === 0) return `"${nm}" is due today — check in?`;
+    if (urgent.left === 1) return `"${nm}" due tomorrow — on track?`;
+    return `"${nm}" in ${urgent.left} days — one step today?`;
+  }
+
+  let topH = null;
+  let topS = 0;
+  for (const h of trackHabits) {
+    const s = getStreak(h);
+    if (s >= 5 && s > topS) {
+      topS = s;
+      topH = h;
+    }
+  }
+  if (topH) {
+    const nm = String(topH.name || "Habit").slice(0, 18);
+    return `${nm} — ${topS}-day streak. Keep it?`;
+  }
+
+  if (all) {
+    if (tod === "morning") return `All habits in — you're ahead today.`;
+    if (tod === "afternoon") return `Full sweep already — nice.`;
+    return `Everything logged — how was the day?`;
+  }
+  if (some) {
+    if (tod === "morning") return `Good start — clear the rest when ready.`;
+    if (tod === "afternoon") return `Halfway through — log what's left?`;
+    return `Solid progress — finish the set tonight?`;
+  }
+  if (none) {
+    if (tod === "morning") return `Morning — tap a habit when you're ready.`;
+    if (tod === "afternoon") return `Still time to log something today.`;
+    return `Evening — log what you got done?`;
+  }
+  if (tod === "morning") return `How's the morning going?`;
+  if (tod === "evening") return `How did today go?`;
+  return `How's the day going?`;
+}
+
+function CoachGreeting({ coachName, coachIcon, habits, goals, habitAccent, onOpenMic }) {
+  const displayName = (coachName || "Coach").trim() || "Coach";
+  const body = buildCoachGreetingLine({ habits, goals });
+  const bodyClipped = body.length > 80 ? `${body.slice(0, 79).trimEnd()}…` : body;
+  const line = `${displayName}: ${bodyClipped}`;
+  const initial = displayName.charAt(0).toUpperCase();
+  const accent = habitAccent || T.accent;
+  return (
+    <button
+      type="button"
+      onClick={onOpenMic}
+      aria-label={`Open ${displayName} — voice`}
+      style={{
+        display:"flex", alignItems:"center", gap:12,
+        width:"calc(100% - 28px)", margin:"8px 14px 0",
+        padding:"12px 14px",
+        background:T.surface,
+        border:`0.5px solid ${T.border}`,
+        borderLeft:`3px solid ${accent}`,
+        borderRadius:T.rsm,
+        cursor:"pointer",
+        textAlign:"left",
+        fontFamily:T.font,
+        boxSizing:"border-box",
+      }}
+    >
+      <div
+        style={{
+          width:36, height:36, borderRadius:"50%", flexShrink:0,
+          background:`${accent}22`,
+          border:`1px solid ${accent}55`,
+          display:"flex", alignItems:"center", justifyContent:"center",
+          fontSize:18, lineHeight:1,
+        }}
+        aria-hidden
+      >
+        {coachIcon && COACH_ICON_OPTIONS.includes(coachIcon) ? coachIcon : initial}
+      </div>
+      <span style={{
+        flex:1, minWidth:0, fontSize:13.5, fontWeight:500, color:T.text,
+        lineHeight:1.45, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis",
+      }}>
+        {line}
+      </span>
+    </button>
+  );
+}
+
+function CoachBar({ coachName, coachIcon, habitColor, onOpenMic, onOpenText, coachEverOpened }) {
+  const coachLabelRaw = (coachName ?? "").trim() || "Coach";
+  const coachLabelShort = coachLabelRaw.length > 12 ? `${coachLabelRaw.slice(0, 11)}…` : coachLabelRaw;
+  const micColor = habitColor || T.accent;
+  const initial = coachLabelRaw.charAt(0).toUpperCase();
+  return (
+    <div
+      data-tour="coach-fab"
+      style={{
+        position:"relative",
+        display:"flex", alignItems:"center",
+        minHeight:52,
+        padding:"10px 12px",
+        background:T.surface,
+        borderTop:`0.5px solid ${T.border}`,
+        borderRadius:20,
+        boxShadow:"0 -4px 20px rgba(0,0,0,0.35)",
+        fontFamily:T.font,
+      }}
+    >
+      <div style={{ flex:1, display:"flex", justifyContent:"flex-start", alignItems:"center", minWidth:0 }}>
+        <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3, width:56, flexShrink:0 }}>
+          <div
+            style={{
+              width:28, height:28, borderRadius:"50%",
+              background:`${micColor}18`,
+              border:`1px solid ${micColor}66`,
+              display:"flex", alignItems:"center", justifyContent:"center",
+              fontSize:14, lineHeight:1,
+            }}
+            aria-hidden
+          >
+            {coachIcon && COACH_ICON_OPTIONS.includes(coachIcon) ? coachIcon : initial}
+          </div>
+          <span style={{
+            fontSize:9, fontWeight:600, color:T.muted, textAlign:"center",
+            lineHeight:1.15, maxWidth:56, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+          }}>
+            {coachLabelShort}
+          </span>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onOpenMic}
+        aria-label={`${coachLabelRaw} — voice`}
+        title="Voice"
+        style={{
+          position:"absolute", left:"50%", transform:"translateX(-50%)",
+          width:52, height:52, borderRadius:"50%",
+          border:`1px solid ${micColor}88`,
+          background:`linear-gradient(145deg, ${micColor}35 0%, ${micColor}12 55%, ${T.raised} 100%)`,
+          color:micColor,
+          cursor:"pointer",
+          display:"flex", alignItems:"center", justifyContent:"center",
+          boxShadow:`0 2px 12px rgba(0,0,0,0.35)`,
+          animation: coachEverOpened ? undefined : "coachFabPulse 2.4s ease-in-out infinite",
+        }}
+      >
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path d="M12 14a3 3 0 0 0 3-3V7a3 3 0 1 0-6 0v4a3 3 0 0 0 3 3Z" stroke="currentColor" strokeWidth="1.6"/>
+          <path d="M8 11v1a4 4 0 0 0 8 0v-1M12 18v2M9 22h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+        </svg>
+      </button>
+      <div style={{ flex:1, display:"flex", justifyContent:"flex-end", alignItems:"center" }}>
+        <button
+          type="button"
+          onClick={onOpenText}
+          aria-label={`${coachLabelRaw} — type`}
+          title="Type"
+          style={{
+            width:32, height:32, borderRadius:10,
+            border:`0.5px solid ${T.borderStrong}`,
+            background:T.raised,
+            color:T.sub,
+            cursor:"pointer",
+            display:"flex", alignItems:"center", justifyContent:"center",
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <rect x="4" y="6" width="16" height="12" rx="2" stroke="currentColor" strokeWidth="1.5"/>
+            <path d="M8 10h8M8 14h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
-function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote, onLogZero, onOpenLog, onOpenGoalLog, onEditGoal, onCompleteGoal, onDeleteGoal, onShareGoal, onEditHabit, onDeleteHabit, onShareHabit, sharingHabitId, onXPInfo, onAdd, onSaveLogEntry, hideFloatingAdd, coachEverOpened = true, onOpenCoach, onOpenGoalDetail }) {
+function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote, onLogZero, onOpenLog, onOpenGoalLog, onEditGoal, onCompleteGoal, onDeleteGoal, onShareGoal, onEditHabit, onDeleteHabit, onShareHabit, sharingHabitId, onXPInfo, onAdd, onSaveLogEntry, hideFloatingAdd, coachEverOpened = true, onOpenCoachMic, coachName, coachIcon, coachHabitColor, onOpenGoalDetail }) {
   const activeGoals = goals.filter(g => g.status !== "completed");
   const trackHabits = habits.filter(h => h.habitType !== "log");
   const logHabits = habits.filter(h => h.habitType === "log");
@@ -3798,22 +4005,34 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
       ? "Logs below — ring is for habits & goals"
       : "";
   if (habits.length === 0 && activeGoals.length === 0) return (
-    <div style={{ padding:"40px 28px 32px", textAlign:"center" }}>
-      <div style={{ fontSize:48, marginBottom:16 }}>⚒️</div>
-      <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, marginBottom:10 }}>Nothing forged yet.</div>
-      <div style={{ fontSize:14, color:T.muted, lineHeight:1.75, marginBottom:28 }}>
-        Add a habit to track daily, or tell the coach what outcome you're working toward — it will help you build a plan.
-      </div>
-      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-        <button onClick={onAdd} style={{ padding:"13px 24px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer" }}>
-          Add a habit
-        </button>
-        {onOpenCoach && (
-          <button onClick={onOpenCoach}
-            style={{ padding:"13px 24px", borderRadius:T.rsm, border:"0.5px solid rgba(200,144,42,0.5)", background:"rgba(200,144,42,0.08)", color:T.gold, fontSize:14, fontWeight:600, cursor:"pointer" }}>
-            ✨ Plan a goal with my coach
+    <div>
+      {onOpenCoachMic && (
+        <CoachGreeting
+          coachName={coachName}
+          coachIcon={coachIcon}
+          habits={habits}
+          goals={goals}
+          habitAccent={coachHabitColor}
+          onOpenMic={onOpenCoachMic}
+        />
+      )}
+      <div style={{ padding:"40px 28px 32px", textAlign:"center" }}>
+        <div style={{ fontSize:48, marginBottom:16 }}>⚒️</div>
+        <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, marginBottom:10 }}>Nothing forged yet.</div>
+        <div style={{ fontSize:14, color:T.muted, lineHeight:1.75, marginBottom:28 }}>
+          Add a habit to track daily, or tell the coach what outcome you're working toward — it will help you build a plan.
+        </div>
+        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+          <button onClick={onAdd} style={{ padding:"13px 24px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer" }}>
+            Add a habit
           </button>
-        )}
+          {onOpenCoachMic && (
+            <button onClick={onOpenCoachMic}
+              style={{ padding:"13px 24px", borderRadius:T.rsm, border:"0.5px solid rgba(200,144,42,0.5)", background:"rgba(200,144,42,0.08)", color:T.gold, fontSize:14, fontWeight:600, cursor:"pointer" }}>
+              ✨ Plan a goal with my coach
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -3825,7 +4044,7 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
       {showCoachNudge && (
         <button
           type="button"
-          onClick={onOpenCoach}
+          onClick={onOpenCoachMic}
           style={{
             display:"flex", alignItems:"center", gap:8,
             width:"calc(100% - 28px)", margin:"6px 14px 0",
@@ -3844,6 +4063,16 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
           </span>
         </button>
       )}
+      {onOpenCoachMic && (
+        <CoachGreeting
+          coachName={coachName}
+          coachIcon={coachIcon}
+          habits={habits}
+          goals={goals}
+          habitAccent={coachHabitColor}
+          onOpenMic={onOpenCoachMic}
+        />
+      )}
       <div data-tour="today-summary" style={{ margin:"6px 14px 16px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:"18px 20px", display:"flex", alignItems:"center", gap:18 }}>
         <Ring pct={pct}/>
         <div style={{ flex:1 }}>
@@ -3859,13 +4088,13 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
         const sections = [
           activeGoals.length > 0
             ? <><SLabel>Goals</SLabel> {activeGoals.map(g => <TodayGoalCard key={g.id} goal={g} onOpenLog={onOpenGoalLog} onEdit={onEditGoal} onComplete={onCompleteGoal} onDelete={onDeleteGoal} onShareGoal={onShareGoal} onOpen={onOpenGoalDetail}/>)}</>
-            : habits.length > 0 && onOpenCoach && (
+            : habits.length > 0 && onOpenCoachMic && (
               // No goals yet but has habits — invite them to plan toward an outcome
               <div key="goal-cta">
                 <SLabel>Goals</SLabel>
                 <button
                   type="button"
-                  onClick={onOpenCoach}
+                  onClick={onOpenCoachMic}
                   style={{
                     display:"flex", alignItems:"center", gap:14,
                     margin:"0 14px 10px", width:"calc(100% - 28px)",
@@ -3906,7 +4135,7 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
           aria-label="Add habit or goal"
           title="Add habit or goal"
           style={{
-            position:"fixed", bottom:210, right:18, height:52, padding:"0 18px 0 16px",
+            position:"fixed", bottom:276, right:18, height:52, padding:"0 18px 0 16px",
             borderRadius:26, border:"none",
             background:T.accent, color:"#fff", fontSize:14, fontWeight:700, lineHeight:1,
             cursor:"pointer", zIndex:99,
@@ -8264,7 +8493,7 @@ function GoalPlanPreview({ plan, onConfirm, onDismiss }) {
   );
 }
 
-function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onGoalLogged, onHabitRenamed, onGoalPlanConfirm }) {
+function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onGoalLogged, onHabitRenamed, onGoalPlanConfirm, openInputMode = null }) {
   const cName = coachName || "Coach";
   const isCreatorUser = user?.id === CREATOR_ID;
   // ── Warmer, context-aware greeting ─────────────────────────────────────────
@@ -8293,6 +8522,29 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
   const textareaRef = useRef(null);
   const coachOpenedAtRef = useRef(Date.now());
   const speech    = useSpeechInput(t => setInput(p => p.trim() ? p + " " + t : t), { autoRestart: true, meter: true });
+
+  useEffect(() => {
+    if (!openInputMode) return;
+    let cancelled = false;
+    const t = setTimeout(() => {
+      if (cancelled) return;
+      if (openInputMode === "text") {
+        textareaRef.current?.focus();
+        return;
+      }
+      if (openInputMode === "mic") {
+        if (!isPro) {
+          onUpgrade?.();
+          return;
+        }
+        if (!speech.supported) return;
+        speech.toggle();
+      }
+    }, 160);
+    return () => { cancelled = true; clearTimeout(t); };
+  // Mount-only: parent remounts via key when opening with a new mode.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function coachInputDisplayed() {
     if (speech.listening && speech.interim?.trim()) {
@@ -12303,6 +12555,10 @@ export default function App() {
   const [showXP,      setShowXP]     = useState(false);
   const [showHistory, setShowHistory]= useState(false);
   const [showCoach,   setShowCoach]  = useState(false);
+  /** How the coach sheet should prime input after open: voice vs keyboard. */
+  const [coachOpenMode, setCoachOpenMode] = useState(null);
+  /** Bumps on each coach open so AICoach remounts and mount effects re-run. */
+  const [coachInstanceKey, setCoachInstanceKey] = useState(0);
   // Whether the user has ever opened the AI coach in this browser. Used to drive
   // a subtle pulse on the FAB for first-time users so it doesn't vanish into the bg.
   const [coachEverOpened, setCoachEverOpened] = useState(() => {
@@ -14793,6 +15049,14 @@ export default function App() {
     addToast("✓ Habit updated");
   }
 
+  function openCoachWithMode(mode) {
+    try { localStorage.setItem("forged_coach_opened", "1"); } catch { /* ignore */ }
+    setCoachEverOpened(true);
+    setCoachOpenMode(mode);
+    setCoachInstanceKey(k => k + 1);
+    setShowCoach(true);
+  }
+
   // Gate adding habits at 5 for free users
   function handleStartAdd() {
     if (demoBounce()) return;
@@ -15077,7 +15341,7 @@ export default function App() {
       {flashes.map(f   => <XPFlash  key={f.id} {...f} onDone={() => setFlashes(fs  => fs.filter(x  => x.id !== f.id))}/>)}
       {toasts.map(t    => <Toast    key={t.id} msg={t.msg} onDone={() => setToasts(ts => ts.filter(x => x.id !== t.id))}/>)}
 
-      <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, paddingBottom:104 }}>
+      <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, paddingBottom:172 }}>
         {/* Top bar */}
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"22px 18px 8px" }}>
           <div>
@@ -15113,7 +15377,7 @@ export default function App() {
             >×</button>
           </div>
         )}
-        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} coachEverOpened={coachEverOpened} onOpenCoach={() => { try { localStorage.setItem("forged_coach_opened", "1"); } catch {} setCoachEverOpened(true); setShowCoach(true); }} hideFloatingAdd onOpenGoalDetail={id => setOpenGoalId(id)}/>}
+        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} coachEverOpened={coachEverOpened} onOpenCoachMic={() => openCoachWithMode("mic")} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} hideFloatingAdd onOpenGoalDetail={id => setOpenGoalId(id)}/>}
         {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)}/>}
         {screen === "insights" && <InsightsScreen habits={habits} goals={goals} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} userId={sessionUserId}/>}
         {screen === "social"   && <SocialScreen
@@ -15215,183 +15479,120 @@ export default function App() {
           onNotifCategoryChange={handleNotifCategoryChange}
         />}
 
-        {/* Coach FAB (+ Today-only Add habit below) — hidden on Profile */}
+        {/* Coach bar above nav (+ page guide / nudge / Today add). Hidden on Profile and while coach sheet open. */}
         {screen !== "profile" && (() => {
           const coachLabelRaw = (coachName ?? "").trim() || "Coach";
           const coachLabelShort = coachLabelRaw.length > 13 ? `${coachLabelRaw.slice(0, 12)}…` : coachLabelRaw;
           const showTodayAdd =
             screen === "today" &&
             (habits.length > 0 || goals.some(g => g.status !== "completed"));
+          const habitColor = habits.find(h => h.habitType !== "log")?.color || T.accent;
+          const showCoachBar =
+            !showCoach && ["today", "journal", "insights", "social"].includes(screen);
+          const safeBottom = "env(safe-area-inset-bottom, 0px)";
+          const aboveNav = `calc(62px + ${safeBottom})`;
+          const aboveCoachBar = `calc(132px + ${safeBottom})`;
           return (
-            <div
-              data-tour="coach-fab"
-              style={{
-                position:"fixed",
-                left:14,
-                bottom:108,
-                zIndex:102,
-                display:"flex",
-                flexDirection:"column",
-                alignItems:"flex-start",
-                justifyContent:"flex-end",
-                gap:10,
-              }}
-            >
-              <div
-                style={{
-                  display:"flex", flexDirection:"row", alignItems:"center", justifyContent:"flex-start",
-                  gap:10,
-                }}
-              >
-                <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:5, flexShrink:0 }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowCoach(true);
-                      try { localStorage.setItem("forged_coach_opened", "1"); } catch {}
-                      setCoachEverOpened(true);
-                    }}
-                    aria-label={`${coachLabelRaw} — AI coach`}
-                    title={`${coachLabelRaw} — AI coach`}
-                    style={{
-                      width:48, height:48,
-                      borderRadius:"50%",
-                      border:`1px solid rgba(200,144,42,0.55)`,
-                      background:`
-                        radial-gradient(circle at 30% 30%, rgba(200,144,42,0.35) 0%, rgba(200,144,42,0.12) 45%, rgba(24,24,22,0.98) 100%)
-                      `,
-                      backdropFilter:"blur(12px)",
-                      color:T.gold,
-                      cursor:"pointer",
-                      display:"flex", alignItems:"center", justifyContent:"center",
-                      boxShadow:"0 2px 14px rgba(0,0,0,0.4), 0 0 0 0 rgba(200,144,42,0.45)",
-                      animation: coachEverOpened ? undefined : "coachFabPulse 2.4s ease-in-out infinite",
-                      position:"relative",
-                      overflow:"hidden",
-                    }}
-                  >
-                    {coachIcon && COACH_ICON_OPTIONS.includes(coachIcon) ? (
-                      <span style={{ fontSize:22, lineHeight:1, filter:"drop-shadow(0 1px 2px rgba(0,0,0,0.4))" }} aria-hidden>{coachIcon}</span>
-                    ) : (
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
-                        <path d="M12 2l1.8 5.9L20 10l-6.2 2.1L12 22l-1.8-9.9L4 10l6.2-2.1L12 2z" fill="currentColor"/>
-                      </svg>
-                    )}
-                    {/* Tiny "AI" badge */}
-                    <span
-                      aria-hidden
+            <>
+              {!showCoach && (pageGuide?.page === screen || coachPageNudge) ? (
+                <div
+                  style={{
+                    position:"fixed",
+                    left:14,
+                    bottom:aboveCoachBar,
+                    zIndex:102,
+                    display:"flex",
+                    flexDirection:"row",
+                    alignItems:"flex-end",
+                    justifyContent:"flex-start",
+                    gap:10,
+                    maxWidth:"calc(100vw - 28px)",
+                  }}
+                >
+                  {pageGuide && pageGuide.page === screen ? (
+                    <div
+                      key={`guide-${pageGuide.page}`}
+                      role="dialog"
+                      aria-label="Coach tip"
                       style={{
-                        position:"absolute", top:-3, right:-3,
-                        fontSize:8, fontWeight:800,
-                        letterSpacing:"0.04em",
-                        color:"#1a1a16",
-                        background:"linear-gradient(135deg, #e7c46a, #c0892a)",
-                        padding:"2px 5px",
-                        borderRadius:8,
-                        border:"1px solid rgba(24,24,22,0.8)",
-                        lineHeight:1,
+                        position:"relative",
+                        maxWidth:260,
+                        padding:"11px 30px 12px 14px",
+                        borderRadius:"14px 14px 14px 4px",
+                        background:"rgba(24,24,22,0.98)",
+                        backdropFilter:"blur(12px)",
+                        WebkitBackdropFilter:"blur(12px)",
+                        border:"0.5px solid rgba(200,144,42,0.45)",
+                        boxShadow:"0 6px 26px rgba(0,0,0,0.5)",
+                        fontSize:12.5,
+                        lineHeight:1.55,
+                        color:T.text,
+                        textAlign:"left",
+                        animation:"coachGuideIn 0.42s cubic-bezier(0.22,1,0.36,1) both",
+                        flexShrink:1,
                       }}
                     >
-                      AI
-                    </span>
-                  </button>
-                  <span
-                    style={{
-                      fontSize:10, fontWeight:700, color:T.gold, textAlign:"center", lineHeight:1.25,
-                      maxWidth:92, wordBreak:"break-word", letterSpacing:"0.02em",
-                      textShadow:"0 1px 10px rgba(0,0,0,0.75)",
-                    }}
-                  >
-                    {coachLabelShort}
-                  </span>
-                </div>
-                {pageGuide && pageGuide.page === screen ? (
-                  // Persistent first-time AI guide for this page. Styled as an
-                  // AI chat bubble so it feels like the coach speaking, with a
-                  // tight tail pointing down-left toward the FAB label. Stays
-                  // until the user taps × or navigates to another page.
-                  <div
-                    key={`guide-${pageGuide.page}`}
-                    role="dialog"
-                    aria-label="Coach tip"
-                    style={{
-                      position:"relative",
-                      maxWidth:260,
-                      padding:"11px 30px 12px 14px",
-                      borderRadius:"14px 14px 14px 4px",
-                      background:"rgba(24,24,22,0.98)",
-                      backdropFilter:"blur(12px)",
-                      WebkitBackdropFilter:"blur(12px)",
-                      border:"0.5px solid rgba(200,144,42,0.45)",
-                      boxShadow:"0 6px 26px rgba(0,0,0,0.5)",
-                      fontSize:12.5,
-                      lineHeight:1.55,
-                      color:T.text,
-                      textAlign:"left",
-                      animation:"coachGuideIn 0.42s cubic-bezier(0.22,1,0.36,1) both",
-                      flexShrink:1,
-                    }}
-                  >
-                    <div style={{
-                      fontSize:9, fontWeight:700, color:T.gold,
-                      textTransform:"uppercase", letterSpacing:"0.1em",
-                      marginBottom:4,
-                    }}>
-                      {coachLabelShort}
+                      <div style={{
+                        fontSize:9, fontWeight:700, color:T.gold,
+                        textTransform:"uppercase", letterSpacing:"0.1em",
+                        marginBottom:4,
+                      }}>
+                        {coachLabelShort}
+                      </div>
+                      <div>{pageGuide.text}</div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          writePageGuideSeen(sessionUserId, pageGuide.page);
+                          setPageGuide(null);
+                        }}
+                        aria-label="Dismiss coach tip"
+                        style={{
+                          position:"absolute",
+                          top:4, right:4,
+                          width:22, height:22,
+                          borderRadius:"50%",
+                          border:"none",
+                          background:"transparent",
+                          color:T.muted,
+                          fontSize:15,
+                          lineHeight:1,
+                          cursor:"pointer",
+                          display:"flex", alignItems:"center", justifyContent:"center",
+                        }}
+                      >
+                        ×
+                      </button>
                     </div>
-                    <div>{pageGuide.text}</div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        writePageGuideSeen(sessionUserId, pageGuide.page);
-                        setPageGuide(null);
-                      }}
-                      aria-label="Dismiss coach tip"
+                  ) : coachPageNudge ? (
+                    <div
+                      key={coachPageNudge.id}
+                      role="status"
+                      aria-live="polite"
                       style={{
-                        position:"absolute",
-                        top:4, right:4,
-                        width:22, height:22,
-                        borderRadius:"50%",
-                        border:"none",
-                        background:"transparent",
-                        color:T.muted,
-                        fontSize:15,
-                        lineHeight:1,
-                        cursor:"pointer",
-                        display:"flex", alignItems:"center", justifyContent:"center",
+                        pointerEvents:"none",
+                        maxWidth:200,
+                        padding:"9px 12px",
+                        borderRadius:12,
+                        background:"rgba(24,24,22,0.96)",
+                        backdropFilter:"blur(12px)",
+                        WebkitBackdropFilter:"blur(12px)",
+                        border:"0.5px solid rgba(200,144,42,0.32)",
+                        boxShadow:"0 4px 22px rgba(0,0,0,0.38)",
+                        fontSize:12,
+                        lineHeight:1.45,
+                        color:T.sub,
+                        textAlign:"left",
+                        animation:`coachNudge ${COACH_NUDGE_DURATION_MS}ms cubic-bezier(0.22, 1, 0.36, 1) forwards`,
+                        userSelect:"none",
+                        flexShrink:1,
                       }}
                     >
-                      ×
-                    </button>
-                  </div>
-                ) : coachPageNudge ? (
-                  <div
-                    key={coachPageNudge.id}
-                    role="status"
-                    aria-live="polite"
-                    style={{
-                      pointerEvents:"none",
-                      maxWidth:200,
-                      padding:"9px 12px",
-                      borderRadius:12,
-                      background:"rgba(24,24,22,0.96)",
-                      backdropFilter:"blur(12px)",
-                      WebkitBackdropFilter:"blur(12px)",
-                      border:"0.5px solid rgba(200,144,42,0.32)",
-                      boxShadow:"0 4px 22px rgba(0,0,0,0.38)",
-                      fontSize:12,
-                      lineHeight:1.45,
-                      color:T.sub,
-                      textAlign:"left",
-                      animation:`coachNudge ${COACH_NUDGE_DURATION_MS}ms cubic-bezier(0.22, 1, 0.36, 1) forwards`,
-                      userSelect:"none",
-                      flexShrink:1,
-                    }}
-                  >
-                    {coachPageNudge.text}
-                  </div>
-                ) : null}
-              </div>
+                      {coachPageNudge.text}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               {showTodayAdd && (
                 <button
                   type="button"
@@ -15399,6 +15600,10 @@ export default function App() {
                   aria-label="Add habit or goal"
                   title="Add habit or goal"
                   style={{
+                    position:"fixed",
+                    right:14,
+                    bottom:aboveCoachBar,
+                    zIndex:102,
                     height:44,
                     padding:"0 14px 0 12px",
                     borderRadius:22,
@@ -15421,7 +15626,31 @@ export default function App() {
                   <span>Add habit</span>
                 </button>
               )}
-            </div>
+              {showCoachBar ? (
+                <div
+                  style={{
+                    position:"fixed",
+                    left:"50%",
+                    transform:"translateX(-50%)",
+                    width:"100%",
+                    maxWidth:430,
+                    bottom:aboveNav,
+                    zIndex:101,
+                    padding:"0 10px 0",
+                    boxSizing:"border-box",
+                  }}
+                >
+                  <CoachBar
+                    coachName={coachName}
+                    coachIcon={coachIcon}
+                    habitColor={habitColor}
+                    onOpenMic={() => openCoachWithMode("mic")}
+                    onOpenText={() => openCoachWithMode("text")}
+                    coachEverOpened={coachEverOpened}
+                  />
+                </div>
+              ) : null}
+            </>
           );
         })()}
 
@@ -15466,7 +15695,7 @@ export default function App() {
       {reflectId     && <ReflectModal  habit={reflectHabit}                  onClose={() => setReflectId(null)} onSave={handleSaveReflection} hasCoach={!!user.coachId}/>}
       {editId && !editGoalId && editHabit && !isGoalLikeHabitType(editHabit) && <EditModal habit={editHabit} onClose={() => setEditId(null)} onSave={handleEditSave}/>}
       {logId && logHabit?.habitType === "project"  && <LogProjectModal   habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
-      {showCoach   && <AICoach habits={habits} goals={goals} user={user} isPro={isPro} onClose={() => setShowCoach(false)} onUpgrade={() => setShowUpgrade(true)} coachName={coachName} currentScreen={screen}
+      {showCoach   && <AICoach key={coachInstanceKey} openInputMode={coachOpenMode} habits={habits} goals={goals} user={user} isPro={isPro} onClose={() => { setShowCoach(false); setCoachOpenMode(null); }} onUpgrade={() => setShowUpgrade(true)} coachName={coachName} currentScreen={screen}
           onHabitCreated={h  => setHabits(p => p.some(x => String(x.id) === String(h.id)) ? p.map(x => String(x.id) === String(h.id) ? h : x) : [...p, h])}
           onGoalCreated={g   => setGoals(p  => p.some(x => String(x.id) === String(g.id)) ? p.map(x => String(x.id) === String(g.id) ? g : x) : [...p, g])}
           onHabitLogged={(id, logs) => setHabits(p => p.map(h => String(h.id) === String(id) ? { ...h, logs } : h))}
