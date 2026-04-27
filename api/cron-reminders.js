@@ -170,7 +170,7 @@ const DEV_OWNER_ID = "5e9b4ba7-bf15-4e94-ab05-fe3306496973";
 
 // Bumped whenever the dev pool content changes. Surfaces in cron logs so
 // you can confirm production is running the latest pool, not a stale build.
-const DEV_POOL_VERSION = "v3-2026-04-25";
+const DEV_POOL_VERSION = "v4-2026-04-27";
 
 // Distinct titles ONLY used by the dev-owner branch so notifications are
 // visually distinguishable from the generic pool. If a notification ever
@@ -179,10 +179,9 @@ const DEV_POOL_VERSION = "v3-2026-04-25";
 const DEV_TITLE_DEFAULT     = "Forged ⚡ Captain";
 const DEV_TITLE_ALL_LOGGED  = "Forged 🔨 Captain";
 
-// Set true to send every hour (for testing whether hourly reminders motivate or annoy).
-// When false, reverts to single daily send at DEV_OWNER_SINGLE_HOUR.
-const DEV_OWNER_HOURLY_MODE = true;
-const DEV_OWNER_SINGLE_HOUR = 5;   // only used when DEV_OWNER_HOURLY_MODE = false
+// Send every N hours at the top of the hour (:00 bucket).
+// 2 = fire at 0,2,4,6,8,10,12,14,16,18,20,22 local time.
+const DEV_OWNER_SEND_INTERVAL_HOURS = 2;
 
 // Day names for in-message references
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -425,7 +424,7 @@ const DEV_POOLS = {
       "Came home. Sat down. The easy choice is nothing. Make the hard one.",
       "Two hours of actual work tonight beats a week of good fucking intentions.",
       "Open the laptop before you open the fridge. That's the order.",
-      "Six hours till bedtime. That's a lot of time to build. Or waste. Pick.",
+      "The evening belongs to you. Don't piss it away on autopilot.",
       "After-work autopilot is the killer. Snap the fuck out. Open the thing.",
       "Tonight you either move forward or stay in this exact same spot. Choose.",
       "The evening's a window, not a fucking couch. Use it.",
@@ -603,6 +602,159 @@ function pickDevOwnerMessage(habits, goals, todayYmd, localHour) {
   };
 }
 
+// ── Normal-user fixed send hours ───────────────────────────────────────────────
+// Every regular user gets a notification at these three local-time hours per day
+// (instead of their configured reminder_time). The cron's 5-minute windowed check
+// filters to :00 buckets at these hours only.
+const NORMAL_FIRE_HOURS = [7, 12, 19];
+
+/** Map a local hour → the slot label used for dedup keys and pool selection. */
+function normalUserSlot(hour) {
+  if (hour < 11) return "morning";
+  if (hour < 16) return "noon";
+  return "evening";
+}
+
+// ── Normal-user message pools ─────────────────────────────────────────────────
+// Tone: friendly, chatty, human — like a coach who actually cares.
+// Every message ends with "Love, Forged." — no exceptions.
+// Pools are weekday / weekend × morning / noon / evening.
+const NORMAL_POOLS = {
+  morning: {
+    weekday: [
+      "Morning mate, hope today's a good one. Give it hell. Love, Forged.",
+      "Good morning! Quick check-in before the day gets away from you — don't forget to log later. Love, Forged.",
+      "Morning! New day, fresh start — go make it count. Love, Forged.",
+      "Hey, hope you slept well. Today's yours — log your habits and give it everything. Love, Forged.",
+      "Rise and shine! Don't let the day run away before you've logged. You've got this. Love, Forged.",
+      "Morning — your habits are waiting. Log early and set the tone for the day. Love, Forged.",
+      "Morning, just a nudge to kick the day off right. Log when you get a sec. Love, Forged.",
+      "Hey, good morning. Make today the one you actually show up for. Love, Forged.",
+    ],
+    weekend: [
+      "Happy weekend! Hope you've got good plans — don't forget to log your habits along the way. Love, Forged.",
+      "Weekend morning — the best kind. No rush, just don't let the day slip by without logging. Love, Forged.",
+      "Morning! Free day, no agenda — just make it a good one. Love, Forged.",
+      "Hey, happy weekend. Rest up, move your body, and log when you're ready. Love, Forged.",
+      "Good morning! Even on the weekend, your habits matter. Quick log when you can. Love, Forged.",
+      "Weekend! Your time, your rules — just don't forget to check in. Love, Forged.",
+      "Morning! Whatever today looks like, keep the streak going. Love, Forged.",
+      "Happy weekend. Enjoy every bit of it — and log your habits while you're at it. Love, Forged.",
+    ],
+  },
+  noon: {
+    weekday: [
+      "Halfway through the day already — keep going, and log your shit later. Love, Forged.",
+      "Lunchtime check-in! Hope the morning treated you well. Don't forget to log. Love, Forged.",
+      "Midday nudge — you're doing great. Log your progress when you get a sec. Love, Forged.",
+      "Half the day done, legend. Take a breath and keep at it. Love, Forged.",
+      "Hey, just checking in. Hope the morning went well — finish strong this afternoon. Love, Forged.",
+      "Noon already! Don't let the afternoon sneak past without logging. Love, Forged.",
+      "Lunchtime! Your habits are waiting. Log and keep the streak alive. Love, Forged.",
+      "Midday check-in. The second half of the day is yours — make it count. Love, Forged.",
+    ],
+    weekend: [
+      "Lunchtime on a free day — hope it's been a good one so far. Don't forget to log. Love, Forged.",
+      "Midday! Hope the weekend's treating you well. Log when you can. Love, Forged.",
+      "Hey, halfway through — how's the weekend going? Quick log when you get a moment. Love, Forged.",
+      "Weekend midday check-in. Hope the morning was good — enjoy the rest of the day. Love, Forged.",
+      "Lunchtime! Even on weekends, your habits keep you sharp. Quick log? Love, Forged.",
+      "Hey! Hope you're having a great day. Log your habits and carry on. Love, Forged.",
+      "Midday on a free day — eat, log, relax, in whatever order works. Love, Forged.",
+      "Weekend noon check-in, mate. How's it going? Don't forget to log later. Love, Forged.",
+    ],
+  },
+  evening: {
+    weekday: [
+      "Evening check-in, legend. Don't forget to log how the day went. Love, Forged.",
+      "Hey, day's winding down — great time to log your habits before you switch off. Love, Forged.",
+      "Evening! Whatever happened today, log it and let it go. Tomorrow's another shot. Love, Forged.",
+      "End of the day — nice work getting through it. Log your habits and rest up. Love, Forged.",
+      "Evening nudge — don't let the day end without logging. Keeps the momentum going. Love, Forged.",
+      "Hey, hope the day treated you well. Log your progress before you call it a night. Love, Forged.",
+      "Evening! Quick log before you wind down. You've earned the rest. Love, Forged.",
+      "Day's done. Log it, reflect a bit, and get some rest. Love, Forged.",
+    ],
+    weekend: [
+      "Sunday, baby. Rest up or make moves — either way, make it count. Love, Forged.",
+      "Evening! Hope the weekend's been a good one. Log before you call it. Love, Forged.",
+      "Weekend evening check-in. Don't let the day end without logging. Love, Forged.",
+      "Hey, end of a free day — how'd it go? Log it and wind down. Love, Forged.",
+      "Evening! Whatever you got up to this weekend, don't forget to log it. Love, Forged.",
+      "Weekend's almost done — log before the week sneaks back in. Love, Forged.",
+      "Evening check-in, legend. Great weekend? Log it and keep the streak alive. Love, Forged.",
+      "Sunday evening. Log, reflect, and get ready to go again tomorrow. Love, Forged.",
+    ],
+  },
+};
+
+/**
+ * Message picker for normal users — time-slot aware, weekday/weekend aware,
+ * always signed "Love, Forged." Data-driven shoutouts fire first (all-logged,
+ * streak, urgent goal); pool message is the fallback.
+ */
+function pickNormalMessage(habits, goals, todayYmd, localHour) {
+  const TRACKABLE = ["daily", "weekly", "project", "limit"];
+  const trackableHabits = (habits || []).filter(
+    h => TRACKABLE.includes(h.habit_type) && h.habit_type !== "log"
+  );
+
+  // All habits logged today — congratulate them.
+  if (trackableHabits.length > 0 && trackableHabits.every(h => hasAnyLogOnDate(h, todayYmd))) {
+    const CONGRATS = [
+      "Every habit logged today — that's how it's done. Keep it up! Love, Forged.",
+      "All habits in. You showed up and got it done. Love, Forged.",
+      "Full house today — you're on fire. Love, Forged.",
+      "All done for the day. Keep this up and nothing stops you. Love, Forged.",
+      "Locked in. Every habit logged. That's the stuff. Love, Forged.",
+    ];
+    const idx = parseInt(todayYmd.replace(/-/g, ""), 10) % CONGRATS.length;
+    return { title: "Forged ✅", body: CONGRATS[idx] };
+  }
+
+  // Streak shoutout — only for daily habits with a meaningful run.
+  let bestStreak = 0;
+  let bestStreakHabit = null;
+  for (const h of habits || []) {
+    if (h.habit_type !== "daily") continue;
+    const s = getDailyStreak(h, todayYmd);
+    if (s > bestStreak) { bestStreak = s; bestStreakHabit = h; }
+  }
+  if (bestStreakHabit && bestStreak >= 3) {
+    const e = bestStreakHabit.emoji || "🔥";
+    return {
+      title: "Forged 🔥",
+      body: `${e} ${bestStreak} days of ${bestStreakHabit.name} — don't break the streak now. Love, Forged.`,
+    };
+  }
+
+  // Urgent goal deadline within 7 days.
+  const urgentGoals = (goals || [])
+    .filter(g => g.goal_status === "active" && g.target_date)
+    .map(g => ({ ...g, daysLeft: daysBetween(todayYmd, g.target_date) }))
+    .filter(g => g.daysLeft >= 0 && g.daysLeft <= 7)
+    .sort((a, b) => a.daysLeft - b.daysLeft);
+  if (urgentGoals.length > 0) {
+    const g = urgentGoals[0];
+    const e = g.emoji || "🎯";
+    const when = g.daysLeft === 0 ? "today" : g.daysLeft === 1 ? "tomorrow" : `in ${g.daysLeft} days`;
+    return {
+      title: "Forged 🎯",
+      body: `${e} "${g.name}" is due ${when}. Log your progress and give it a push. Love, Forged.`,
+    };
+  }
+
+  // Pool-based fallback — deterministic so same slot picks same message within a day.
+  const weekend = isWeekend(todayYmd);
+  const slot = normalUserSlot(localHour ?? 7);
+  const poolKey = weekend ? "weekend" : "weekday";
+  const pool = (NORMAL_POOLS[slot] || NORMAL_POOLS.morning)[poolKey];
+  const dateSeed = parseInt(todayYmd.replace(/-/g, ""), 10);
+  const seed = dateSeed * 11 + (localHour ?? 0) * 7;
+  const body = pool[Math.abs(seed) % pool.length];
+  return { title: "Forged", body };
+}
+
 // ── Message picker ─────────────────────────────────────────────────────────────
 
 function pickMessage(habits, goals, todayYmd) {
@@ -720,19 +872,20 @@ async function aiPickMessage(name, habits, goals, todayYmd) {
     ? `Upcoming deadlines: ${urgentGoals.map(g => `${g.name} in ${g.daysLeft}d`).join(", ")}`
     : "";
 
-  const prompt = `You are a habit coach sending ${name} a short push notification for their Forged app.
+  const prompt = `You are a friendly habit coach sending ${name} a short push notification for their Forged app.
 
 Their habits for local calendar date ${todayYmd}:
 ${summaries || "No habits yet"}
 ${goalLine}
 
-Write ONE push notification body (max 90 chars). Be direct, specific to their actual data, motivating but not cheesy. No hashtags, no quotes around it, just the text.
+Write ONE push notification body (max 110 chars). Be direct, warm, and specific to their actual data. No hashtags, no quotes around it, just the text. Always end with "Love, Forged." — no exceptions.
 
 Hard rules:
 - NEVER claim they completed a workout, session, or habit TODAY unless that habit's line explicitly shows logged today: true.
 - NEVER invent numbers, streaks, or events not present in the data above.
 - If every line shows logged today: false, do not congratulate them for finishing today — nudge them to log instead.
-- "log" / journal-only lines are omitted; do not mention them.`;
+- "log" / journal-only lines are omitted; do not mention them.
+- Always end the message with exactly: Love, Forged.`;
 
   try {
     const client = new Anthropic({ apiKey: apiKey.trim() });
@@ -894,7 +1047,7 @@ async function handler(req, res) {
         local_hour: now.hour,
         local_minute: now.minute,
         cron_mode: cronMode,
-        hourly_mode: DEV_OWNER_HOURLY_MODE,
+        send_interval_hours: DEV_OWNER_SEND_INTERVAL_HOURS,
         daily_reminders_enabled: sub.daily_reminders_enabled,
       });
     }
@@ -908,26 +1061,27 @@ async function handler(req, res) {
     }
 
     // ── Windowed mode ───────────────────────────────────────────────────
-    // Dev owner hourly mode: fire at the top of every hour (minute bucket 0).
-    // Dev owner single mode: fire at DEV_OWNER_SINGLE_HOUR:00 only.
-    // Everyone else: fire at their configured reminder_time bucket.
+    // Dev owner: fire at the :00 bucket of every even hour (0,2,4,...,22).
+    // Normal users: fire at 7am, 12pm, 7pm local time (:00 bucket only).
+    // This replaces the old per-user reminder_time approach — everyone gets
+    // the same three fixed daily touchpoints, and dev owner gets 12 per day.
     if (isWindowed) {
-      if (isDevOwner && DEV_OWNER_HOURLY_MODE) {
-        // Only the :00 bucket each hour — prevents firing every 5 minutes
-        if (bucketMinute(now.minute) !== 0) {
-          if (isDevOwner) console.log("[dev-owner] skip reason=window_not_top_of_hour", { minute: now.minute });
-          if (debug) trace.push({ user_id: sub.user_id, skipped: "window_not_top_of_hour", minute: now.minute });
+      if (isDevOwner) {
+        // Only even hours at the :00 bucket (every DEV_OWNER_SEND_INTERVAL_HOURS hours)
+        const isEvenHour = now.hour % DEV_OWNER_SEND_INTERVAL_HOURS === 0;
+        if (!isEvenHour || bucketMinute(now.minute) !== 0) {
+          console.log("[dev-owner] skip reason=window_not_interval_hour", {
+            hour: now.hour, minute: now.minute, interval: DEV_OWNER_SEND_INTERVAL_HOURS,
+          });
+          if (debug) trace.push({ user_id: sub.user_id, skipped: "window_not_interval_hour", hour: now.hour });
           skippedWindow++; continue;
         }
       } else {
-        const target = isDevOwner
-          ? { hour: DEV_OWNER_SINGLE_HOUR, minute: 0 }
-          : parseReminderTime(sub.reminder_time);
-        if (now.hour !== target.hour || bucketMinute(now.minute) !== bucketMinute(target.minute)) {
-          if (isDevOwner) console.log("[dev-owner] skip reason=window_miss", { now, target });
+        // Normal users: only fire at 7, 12, 19 local time, :00 bucket
+        if (!NORMAL_FIRE_HOURS.includes(now.hour) || bucketMinute(now.minute) !== 0) {
           if (debug) trace.push({
             user_id: sub.user_id, skipped: "window_miss",
-            tz, now_local: now, target,
+            tz, now_local: now, fire_hours: NORMAL_FIRE_HOURS,
           });
           skippedWindow++;
           continue;
@@ -936,12 +1090,13 @@ async function handler(req, res) {
     }
 
     // ── Dedupe ──────────────────────────────────────────────────────────
-    // Dev owner hourly: key = "YYYY-MM-DDH{hour}" — one send per local hour.
-    // Everyone else: key = "YYYY-MM-DD" — one send per local day.
-    // The hour key never equals a plain date string so regular users are unaffected.
-    const dedupKey = (isDevOwner && DEV_OWNER_HOURLY_MODE)
+    // Dev owner: key = "YYYY-MM-DDH{hour}" — one send per local hour (only even
+    //   hours fire, so effectively one per 2-hour window).
+    // Normal users: key = "YYYY-MM-DD_{slot}" where slot = morning|noon|evening —
+    //   allows up to 3 sends per day, one per slot, no duplicates within a slot.
+    const dedupKey = isDevOwner
       ? `${todayYmd}H${now.hour}`
-      : todayYmd;
+      : `${todayYmd}_${normalUserSlot(now.hour)}`;
 
     if (sub.last_reminder_sent_date && sub.last_reminder_sent_date === dedupKey) {
       if (isDevOwner) console.log("[dev-owner] skip reason=dedup", { dedupKey, last: sub.last_reminder_sent_date });
@@ -974,9 +1129,9 @@ async function handler(req, res) {
       });
     } else if (profile.is_pro && process.env.ANTHROPIC_API_KEY) {
       const aiMsg = await aiPickMessage(profile.name || "there", habits, goals, todayYmd);
-      ({ title, body } = aiMsg || pickMessage(habits, goals, todayYmd));
+      ({ title, body } = aiMsg || pickNormalMessage(habits, goals, todayYmd, now.hour));
     } else {
-      ({ title, body } = pickMessage(habits, goals, todayYmd));
+      ({ title, body } = pickNormalMessage(habits, goals, todayYmd, now.hour));
     }
 
     // Hard guard: dev owner must NEVER receive the generic title. If this
