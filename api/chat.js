@@ -29,7 +29,9 @@ const COACH_TOOLS = [
   {
     name: "create_habit",
     description:
-      "Creates a brand new habit or goal. Call ONLY when user asks to add/create/track something NEW. " +
+      "Creates a brand new HABIT (daily, weekly, project, limit). " +
+      "NEVER use this for goals (habit_type='goal') — goals use the <goal_plan> flow described in the system prompt. " +
+      "Call ONLY when user asks to add/create/track something NEW. " +
       "Ask one clarifying question first if type or key details are ambiguous. " +
       "If this tool returns success:false, tell the user it failed.",
     input_schema: {
@@ -455,12 +457,16 @@ async function handler(req, res) {
     }
 
     // ── Normal chat — stream directly (FIX: use .stream() not .create()) ─────
+    // max_tokens raised to 1000: goal-plan responses include a <goal_plan>
+    // JSON block (~150-200 tokens) + conversational text. At 500 the block was
+    // frequently truncated mid-JSON, causing parseGoalPlan to silently fail and
+    // the raw XML to leak into the chat bubble.
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("X-Accel-Buffering", "no");
 
     const chatStream = client.messages.stream({
-      model: "claude-haiku-4-5", max_tokens: 500,
+      model: "claude-haiku-4-5", max_tokens: 1000,
       system: cachedSystem(system), tools,
       messages: trimmedMessages,
     });

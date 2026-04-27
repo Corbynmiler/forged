@@ -115,6 +115,18 @@ function parseGoalPlan(text) {
   }
 }
 
+/**
+ * While a <goal_plan> block is still streaming (opening tag present, closing
+ * tag not yet received), strip everything from the opening tag onward so the
+ * user never sees raw partial JSON in the chat bubble.
+ */
+function stripPartialGoalPlan(text) {
+  if (!text || typeof text !== "string") return text;
+  // Complete block handled by parseGoalPlan — only strip incomplete ones
+  if (/<\/goal_plan>/.test(text)) return text; // let parseGoalPlan handle it
+  return text.replace(/<goal_plan>[\s\S]*$/, "").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 // ─── DESIGN TOKENS ────────────────────────────────────────────────────────────
 const T = {
   bg:"#0F0F0D", surface:"#1A1A16", raised:"#222220",
@@ -2368,8 +2380,6 @@ function LinkHabitsSheet({ goal, habits, onSave, onClose }) {
 function GoalDetailSheet({ goal, habits, onClose, onLog, onEdit, onComplete, onDelete, onCheckin, onLinkHabits }) {
   const [tab, setTab] = useState("overview"); // "overview" | "history" | "linked"
   const [showLinkSheet, setShowLinkSheet] = useState(false);
-  const [checkInNote, setCheckInNote] = useState("");
-  const [showCheckInNote, setShowCheckInNote] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   const stats   = getGoalProgress(goal);
@@ -2391,11 +2401,6 @@ function GoalDetailSheet({ goal, habits, onClose, onLog, onEdit, onComplete, onD
   const CHECK_IN_EMOJIS = ["😰", "😕", "😐", "🙂", "💪"];
   const pacingColors = { ahead:"#27AE60", "on-track":"#27AE60", behind:"#E74C3C", overdue:"#E74C3C", complete:"#27AE60" };
   const pacingLabels = { ahead:"Ahead of pace 🔥", "on-track":"On track ✓", behind:"Behind pace — push it", overdue:"Past deadline", complete:"Completed 🎉" };
-
-  function handleCheckinTap(rating) {
-    if (showCheckInNote) return;
-    onCheckin(goal.id, rating, "");
-  }
 
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", zIndex:400, display:"flex", alignItems:"flex-end", justifyContent:"center" }}
@@ -3793,15 +3798,23 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
       ? "Logs below — ring is for habits & goals"
       : "";
   if (habits.length === 0 && activeGoals.length === 0) return (
-    <div style={{ padding:"48px 28px", textAlign:"center" }}>
-      <div style={{ fontSize:48, marginBottom:18 }}>⚒️</div>
+    <div style={{ padding:"40px 28px 32px", textAlign:"center" }}>
+      <div style={{ fontSize:48, marginBottom:16 }}>⚒️</div>
       <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, marginBottom:10 }}>Nothing forged yet.</div>
       <div style={{ fontSize:14, color:T.muted, lineHeight:1.75, marginBottom:28 }}>
-        Pick one thing you keep meaning to change. Log it for a week. Then ask the coach what it's already seeing in your notes.
+        Add a habit to track daily, or tell the coach what outcome you're working toward — it will help you build a plan.
       </div>
-      <button onClick={onAdd} style={{ padding:"14px 32px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:15, fontWeight:500, cursor:"pointer" }}>
-        Add your first habit
-      </button>
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        <button onClick={onAdd} style={{ padding:"13px 24px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer" }}>
+          Add a habit
+        </button>
+        {onOpenCoach && (
+          <button onClick={onOpenCoach}
+            style={{ padding:"13px 24px", borderRadius:T.rsm, border:"0.5px solid rgba(200,144,42,0.5)", background:"rgba(200,144,42,0.08)", color:T.gold, fontSize:14, fontWeight:600, cursor:"pointer" }}>
+            ✨ Plan a goal with my coach
+          </button>
+        )}
+      </div>
     </div>
   );
 
@@ -3844,7 +3857,35 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
       {/* Tour target: wraps only the first non-empty section so the spotlight ring is tight */}
       {(() => {
         const sections = [
-          activeGoals.length > 0 && <><SLabel>Goals</SLabel> {activeGoals.map(g => <TodayGoalCard key={g.id} goal={g} onOpenLog={onOpenGoalLog} onEdit={onEditGoal} onComplete={onCompleteGoal} onDelete={onDeleteGoal} onShareGoal={onShareGoal} onOpen={onOpenGoalDetail}/>)}</>,
+          activeGoals.length > 0
+            ? <><SLabel>Goals</SLabel> {activeGoals.map(g => <TodayGoalCard key={g.id} goal={g} onOpenLog={onOpenGoalLog} onEdit={onEditGoal} onComplete={onCompleteGoal} onDelete={onDeleteGoal} onShareGoal={onShareGoal} onOpen={onOpenGoalDetail}/>)}</>
+            : habits.length > 0 && onOpenCoach && (
+              // No goals yet but has habits — invite them to plan toward an outcome
+              <div key="goal-cta">
+                <SLabel>Goals</SLabel>
+                <button
+                  type="button"
+                  onClick={onOpenCoach}
+                  style={{
+                    display:"flex", alignItems:"center", gap:14,
+                    margin:"0 14px 10px", width:"calc(100% - 28px)",
+                    padding:"14px 16px", borderRadius:T.r,
+                    border:"0.5px dashed rgba(200,144,42,0.4)",
+                    background:"rgba(200,144,42,0.04)",
+                    cursor:"pointer", textAlign:"left",
+                  }}
+                >
+                  <div style={{ width:38, height:38, borderRadius:11, background:"rgba(200,144,42,0.12)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>🎯</div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:14, fontWeight:500, color:T.text, marginBottom:2 }}>Set a goal with your coach</div>
+                    <div style={{ fontSize:12, color:T.muted, lineHeight:1.45 }}>
+                      Tell the AI what outcome you're working toward — it'll help you plan milestones and track progress.
+                    </div>
+                  </div>
+                  <div style={{ fontSize:16, color:T.gold, flexShrink:0 }}>→</div>
+                </button>
+              </div>
+            ),
           daily.length   > 0 && <><SLabel>Daily</SLabel>          {daily.map(h   => <DailyCard  key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId === h.id}/>)}</>,
           limit.length   > 0 && <><SLabel>Limits</SLabel>         {limit.map(h   => <LimitCard  key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId === h.id}/>)}</>,
           weekly.length  > 0 && <><SLabel>Weekly targets</SLabel> {weekly.map(h  => <WeeklyCard key={h.id} habit={h} onTap={onTap} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId === h.id}/>)}</>,
@@ -7582,14 +7623,20 @@ ${goals.map(g => {
   return `- [id:${g.id}] ${g.emoji || ""} ${g.name} (goal, ${g.currentValue}/${g.targetValue}${g.unit || ""}${due}, ${pct}% complete, status: ${g.status})`;
 }).join("\n")}` : ""}
 
-- create_habit: new habits only — never for edits.
+GOAL PLANNING — read this first:
+When the user wants to set a goal (an outcome measured by a number, e.g. lose weight, run a distance, save money), do NOT call create_habit. Instead:
+1. Ask up to 3 short questions if you still need: what number/outcome, by when, current starting point.
+2. Once you have enough info, embed a <goal_plan> block in your reply (valid JSON, no line breaks inside):
+<goal_plan>{"name":"Run 5K","emoji":"🏃","unit":"km","targetValue":5,"startValue":1,"direction":"increasing","targetDate":"2025-09-30","milestones":[{"date":"2025-07-31","label":"Hit 3K"}],"why":"Feel healthier"}</goal_plan>
+3. Tell the user: tap "Create this goal" on the card below to save it.
+The app renders a confirmation card from the <goal_plan> tag. Do not call create_habit for goals.
+
+Tools (habits only — not goals):
+- create_habit: new habits only — never for edits, never for goals.
 - edit_habit: existing habit; habit_id from [id:...] above.
 - log_habit: today — project → minutes; limit/goal → amount; daily/weekly → neither.
 - success:false from a tool → state failure; never claim success.
 - Missing required fields → one clarifying question.
-- Goal creation: when user wants to set a goal (outcome with a number to reach by a date), DON'T call create_habit. Instead ask 1–3 short clarifying questions to gather: (1) what specific outcome/number, (2) by when, (3) current starting point. Once you have enough info, include a <goal_plan> block in your reply then ask them to confirm:
-  <goal_plan>{"name":"Run a 5K","emoji":"🏃","unit":"km","startValue":1,"targetValue":5,"direction":"increasing","targetDate":"2025-09-30","milestones":[{"date":"2025-07-31","label":"Hit 3K"},{"date":"2025-08-31","label":"Hit 4K"}],"why":"Want to feel fit and healthy"}</goal_plan>
-  The app will render a goal card — tell user "Tap 'Create this goal' to save it." Do NOT call create_habit for goals.
 
 Streaks/logs above are authoritative; logged today:true = already done. Mobile chat — short. No invented data.${creatorCtx}`;
 }
@@ -8508,8 +8555,13 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
               {/* Starter prompt chips — tap to send. Tailored to current state. */}
               {(() => {
                 const hasHabits = habits.length > 0;
+                const hasGoals  = (goals || []).some(g => g.status !== "completed");
                 const firstHabit = habits[0];
                 const starters = [];
+                // Goal planning first when the user has no goals — most impactful action
+                if (!hasGoals) {
+                  starters.push("Help me set a goal");
+                }
                 if (hasHabits && firstHabit) {
                   starters.push(`Log my ${firstHabit.name.toLowerCase()} for today`);
                 }
@@ -8519,7 +8571,9 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
                 } else {
                   starters.push("Help me pick my first habit");
                 }
-                starters.push("Help me set a goal");
+                if (hasGoals) {
+                  starters.push("Am I on track with my goals?");
+                }
                 starters.push("Give me a pep talk");
                 return (
                   <div style={{ marginTop:6, display:"flex", flexDirection:"column", gap:6 }}>
@@ -8553,7 +8607,7 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
                       ))}
                     </div>
                     <div style={{ fontSize:11, color:T.muted, lineHeight:1.5, marginTop:2, padding:"0 2px" }}>
-                      I can log habits for you, add new ones, check your progress, and answer questions about your streaks.
+                      I can set goals with milestones, log habits, track your progress, and tell you what patterns I'm seeing.
                     </div>
                   </div>
                 );
@@ -8563,7 +8617,13 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
           {messages.map((m, i) => {
             // For assistant messages, check for an embedded <goal_plan> block.
             const parsed = m.role === "assistant" ? parseGoalPlan(m.content) : null;
-            const visibleText = parsed ? parsed.textWithout : m.content;
+            // While the block is still streaming, strip the raw partial XML so
+            // the user never sees "<goal_plan>{..." leaking into the bubble.
+            const visibleText = parsed
+              ? parsed.textWithout
+              : m.role === "assistant"
+                ? stripPartialGoalPlan(m.content)
+                : m.content;
             return (
               <div key={m.id || `${m.role}-${i}-${m.ts ?? ""}`} style={{ display:"flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
                 <div style={{ maxWidth:"90%", display:"flex", flexDirection:"column", alignItems: m.role === "user" ? "flex-end" : "flex-start", width: parsed ? "100%" : undefined }}>
