@@ -56,13 +56,16 @@ export function rowToGoal(row) {
     : startValue;
   const direction = (row.direction === "decreasing" || targetValue < startValue)
     ? "decreasing" : "increasing";
-  const lastLogDate = logs.length > 0
-    ? [...logs].sort((a, b) => b.date.localeCompare(a.date))[0].date
+  // Only numeric logs contribute to lastLogDate — milestone/why entries are metadata
+  // and can have future dates, which would corrupt "last active" display.
+  const lastLogDate = numericLogs.length > 0
+    ? [...numericLogs].sort((a, b) => b.date.localeCompare(a.date))[0].date
     : null;
   return {
     id:          row.id,
     name:        row.name,
     emoji:       row.emoji ?? "",
+    habitType:   "goal",
     unit:        row.unit ?? "",
     startValue,
     targetValue,
@@ -73,6 +76,7 @@ export function rowToGoal(row) {
     logs,
     lastLogDate,
     color:       row.color ?? "#E67E22",
+    sharedGoalId: row.shared_goal_id ?? undefined,
   };
 }
 
@@ -100,6 +104,7 @@ export function goalToRow(goal, userId) {
     daily_budget:      null,
     tap_increment:     1,
     daily_target_minutes: null,
+    shared_goal_id:    goal.sharedGoalId ?? null,
     updated_at:        new Date().toISOString(),
   };
 }

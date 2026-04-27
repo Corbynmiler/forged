@@ -94,6 +94,27 @@ function missedDayNeedsNote(missedMap, dateStr) {
   return Object.prototype.hasOwnProperty.call(missedMap, dateStr) && !(String(missedMap[dateStr] ?? "").trim());
 }
 
+// ─── GOAL PLAN PARSING ────────────────────────────────────────────────────────
+/**
+ * Extract and parse a <goal_plan>{json}</goal_plan> block from a coach message.
+ * Returns { plan, textWithout } if found and valid, or null.
+ * plan shape: { name, emoji, unit, startValue, targetValue, direction,
+ *               targetDate, milestones: [{date, label}], why }
+ */
+function parseGoalPlan(text) {
+  if (!text || typeof text !== "string") return null;
+  const match = text.match(/<goal_plan>([\s\S]*?)<\/goal_plan>/);
+  if (!match) return null;
+  try {
+    const plan = JSON.parse(match[1].trim());
+    if (!plan.name || plan.targetValue == null) return null;
+    const textWithout = text.replace(match[0], "").replace(/\n{3,}/g, "\n\n").trim();
+    return { plan, textWithout };
+  } catch {
+    return null;
+  }
+}
+
 // ─── DESIGN TOKENS ────────────────────────────────────────────────────────────
 const T = {
   bg:"#0F0F0D", surface:"#1A1A16", raised:"#222220",
@@ -2288,9 +2309,20 @@ function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete, onDelete, onShareG
   const stats = getGoalProgress(goal);
   const { isComplete } = stats;
   const barFillPct = goalBarFillWidthPct(stats);
-  const loggedToday = goal.logs?.some(l => l.date === todayStr()) || false;
+  const today = todayStr();
+  const loggedToday = goal.logs?.some(l => l.date === today && typeof l.value === "number") || false;
   const statusText = getGoalStatusText(goal, stats);
   const deadlineLine = goalTodayDeadlineLine(goal, stats, isComplete);
+
+  // Find the next upcoming milestone (from milestone log entries)
+  const nextMilestone = !isComplete
+    ? (goal.logs || [])
+        .filter(l => l.type === "milestone" && l.date && l.date >= today)
+        .sort((a, b) => a.date.localeCompare(b.date))[0] || null
+    : null;
+  const msInDays = nextMilestone
+    ? Math.round((parseLocal(nextMilestone.date) - parseLocal(today)) / 86400000)
+    : null;
   const [showMenu, setShowMenu] = useState(false);
   const [goalDeleteConfirm, setGoalDeleteConfirm] = useState(false);
   useEffect(() => {
@@ -2330,6 +2362,20 @@ function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete, onDelete, onShareG
         {deadlineLine ? (
           <div style={{ fontSize:11, color:T.sub, marginTop:7, lineHeight:1.45 }}>{deadlineLine}</div>
         ) : null}
+        {nextMilestone && (
+          <div style={{ marginTop:7, display:"inline-flex", alignItems:"center", gap:5, padding:"3px 8px", borderRadius:10, background:"rgba(200,144,42,0.1)", border:"0.5px solid rgba(200,144,42,0.25)" }}>
+            <span style={{ fontSize:9, color:T.gold }}>◆</span>
+            <span style={{ fontSize:11, color:T.gold, fontWeight:500 }}>
+              {nextMilestone.label}
+              {msInDays != null && (
+                <span style={{ color:T.hint, fontWeight:400 }}>
+                  {" — "}
+                  {msInDays === 0 ? "today" : msInDays === 1 ? "tomorrow" : `${msInDays}d away`}
+                </span>
+              )}
+            </span>
+          </div>
+        )}
       </div>
       {showMenu && !goalDeleteConfirm && (
         <div
@@ -4011,6 +4057,27 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
     }
   });
 
+  // Goal deadlines and milestones for this month view
+  const goalMarkerDays = {}; // { dayNum: [{ type:"deadline"|"milestone", label, color, emoji, isFuture }] }
+  (goals || []).filter(g => g.status !== "completed").forEach(g => {
+    if (g.targetDate) {
+      const d = parseLocal(g.targetDate);
+      if (d.getFullYear() === viewYear && d.getMonth() === viewMonth) {
+        const day = d.getDate();
+        if (!goalMarkerDays[day]) goalMarkerDays[day] = [];
+        goalMarkerDays[day].push({ type:"deadline", label:g.name, color:g.color, emoji:g.emoji, isFuture:g.targetDate >= tStr });
+      }
+    }
+    (g.logs || []).filter(l => l.type === "milestone" && l.date).forEach(ms => {
+      const d = parseLocal(ms.date);
+      if (d.getFullYear() === viewYear && d.getMonth() === viewMonth) {
+        const day = d.getDate();
+        if (!goalMarkerDays[day]) goalMarkerDays[day] = [];
+        goalMarkerDays[day].push({ type:"milestone", label:ms.label, color:g.color, emoji:g.emoji, isFuture:ms.date >= tStr });
+      }
+    });
+  });
+
   const tStr = todayStr();
   const missedDatesList = Object.keys(missedMap).sort((a, b) => b.localeCompare(a));
   const missedMarkedCount = missedDatesList.length;
@@ -4184,6 +4251,8 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
             <span>● logged</span>
             <span style={{ color:"rgba(230,126,34,0.9)", fontWeight:600 }}>? no log</span>
             <span style={{ color:T.amber, fontWeight:600 }}>✕ missed</span>
+            <span style={{ color:T.gold, fontWeight:600 }}>🎯 goal deadline</span>
+            <span style={{ color:T.gold }}>◆ milestone</span>
           </div>
 
           <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4, marginBottom:16 }}>
@@ -4199,30 +4268,42 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
               const canMarkMissed = !!(firstLogDate && ds >= firstLogDate && ds < tStr && !hasEntries);
               const isOpenDay = canMarkMissed && !isMissed;
               const habitColors = hasEntries ? [...new Set(entryDays[day].map(e => e.habitColor))].slice(0, 3) : [];
-              const clickable = hasEntries || isJourneyStart || isMissed || canMarkMissed;
+              const goalMarkers = goalMarkerDays[day] || [];
+              const hasDeadline = goalMarkers.some(m => m.type === "deadline");
+              const hasMilestone = goalMarkers.some(m => m.type === "milestone");
+              const anyGoalMarker = hasDeadline || hasMilestone;
+              const goalMarkerTooltip = goalMarkers.map(m => `${m.type === "deadline" ? "🎯 Deadline" : "◆ Milestone"}: ${m.label}`).join(" · ");
+              const clickable = hasEntries || isJourneyStart || isMissed || canMarkMissed || anyGoalMarker;
               let border = T.border;
               if (isSelected) border = T.accent;
               else if (isJourneyStart) border = T.gold;
               else if (isMissed) border = "rgba(230,126,34,0.45)";
+              else if (hasDeadline) border = "rgba(200,144,42,0.55)";
+              else if (hasMilestone) border = "rgba(200,144,42,0.3)";
               else if (isOpenDay) border = T.borderMid;
               else if (isToday) border = T.borderMid;
               return (
                 <button key={day} type="button"
+                  title={goalMarkerTooltip || undefined}
                   onClick={() => clickable && setSelectedDay(isSelected ? null : day)}
                   style={{
                     aspectRatio:"1", borderRadius:8,
                     border:`1px ${isOpenDay ? "dashed" : "solid"} ${border}`,
-                    background:isSelected ? "rgba(192,57,43,0.15)" : isJourneyStart && !hasEntries ? "rgba(200,144,42,0.08)" : isMissed ? "rgba(230,126,34,0.06)" : isToday ? T.surface : T.raised,
+                    background:isSelected ? "rgba(192,57,43,0.15)" : hasDeadline ? "rgba(200,144,42,0.1)" : hasMilestone ? "rgba(200,144,42,0.05)" : isJourneyStart && !hasEntries ? "rgba(200,144,42,0.08)" : isMissed ? "rgba(230,126,34,0.06)" : isToday ? T.surface : T.raised,
                     cursor:clickable ? "pointer" : "default",
-                    display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:2,
+                    display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:1,
                     padding:2, transition:"all 0.15s",
                   }}>
                   <span style={{
                     fontSize:11,
-                    color:isToday ? T.accent : isJourneyStart ? T.gold : hasEntries ? T.text : isMissed ? T.amber : T.muted,
-                    fontWeight:isToday || isJourneyStart || isMissed ? 500 : 400,
+                    color:isToday ? T.accent : isJourneyStart ? T.gold : hasEntries ? T.text : isMissed ? T.amber : anyGoalMarker ? T.gold : T.muted,
+                    fontWeight:isToday || isJourneyStart || isMissed || anyGoalMarker ? 500 : 400,
                   }}>{day}</span>
-                  {hasEntries ? (
+                  {hasDeadline ? (
+                    <span style={{ fontSize:9, lineHeight:1 }}>🎯</span>
+                  ) : hasMilestone ? (
+                    <span style={{ fontSize:8, color: goalMarkers.find(m=>m.type==="milestone")?.isFuture ? T.gold : T.hint, lineHeight:1 }}>◆</span>
+                  ) : hasEntries ? (
                     <div style={{ display:"flex", gap:2 }}>
                       {habitColors.map((c, ci) => <div key={ci} style={{ width:4, height:4, borderRadius:"50%", background:c }}/>)}
                     </div>
@@ -7110,6 +7191,9 @@ ${goals.map(g => {
 - log_habit: today — project → minutes; limit/goal → amount; daily/weekly → neither.
 - success:false from a tool → state failure; never claim success.
 - Missing required fields → one clarifying question.
+- Goal creation: when user wants to set a goal (outcome with a number to reach by a date), DON'T call create_habit. Instead ask 1–3 short clarifying questions to gather: (1) what specific outcome/number, (2) by when, (3) current starting point. Once you have enough info, include a <goal_plan> block in your reply then ask them to confirm:
+  <goal_plan>{"name":"Run a 5K","emoji":"🏃","unit":"km","startValue":1,"targetValue":5,"direction":"increasing","targetDate":"2025-09-30","milestones":[{"date":"2025-07-31","label":"Hit 3K"},{"date":"2025-08-31","label":"Hit 4K"}],"why":"Want to feel fit and healthy"}</goal_plan>
+  The app will render a goal card — tell user "Tap 'Create this goal' to save it." Do NOT call create_habit for goals.
 
 Streaks/logs above are authoritative; logged today:true = already done. Mobile chat — short. No invented data.${creatorCtx}`;
 }
@@ -7625,7 +7709,119 @@ function CoachRecordingBar({ speech }) {
   );
 }
 
-function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onGoalLogged, onHabitRenamed }) {
+// ─── GOAL PLAN PREVIEW ────────────────────────────────────────────────────────
+// Rendered inline in the coach chat whenever the AI outputs a <goal_plan> block.
+// Lets the user confirm or dismiss before anything is written to the database.
+function GoalPlanPreview({ plan, onConfirm, onDismiss }) {
+  const [confirming, setConfirming] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const color = plan.color || "#E67E22";
+  const milestones = (plan.milestones || []).filter(m => m.date && m.label).sort((a, b) => a.date.localeCompare(b.date));
+  const today = todayStr();
+
+  async function handleConfirm() {
+    if (confirming || done) return;
+    setConfirming(true);
+    try {
+      await onConfirm(plan);
+      setDone(true);
+    } catch {
+      setConfirming(false);
+    }
+  }
+
+  if (done) {
+    return (
+      <div style={{ margin:"8px 0 4px", padding:"12px 14px", borderRadius:14, background:"rgba(39,174,96,0.1)", border:"0.5px solid rgba(39,174,96,0.3)", display:"flex", alignItems:"center", gap:10 }}>
+        <span style={{ fontSize:20 }}>✅</span>
+        <div style={{ fontSize:13, color:T.green, fontWeight:500 }}>
+          {plan.emoji || "🎯"} <strong>{plan.name}</strong> added to your goals
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ margin:"8px 0 4px", borderRadius:14, background:T.surface, border:`0.5px solid rgba(200,144,42,0.35)`, overflow:"hidden" }}>
+      {/* Header row */}
+      <div style={{ padding:"13px 14px 10px", display:"flex", alignItems:"center", gap:10 }}>
+        <div style={{ width:38, height:38, borderRadius:11, background:color+"22", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>
+          {plan.emoji || "🎯"}
+        </div>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:14, fontWeight:600, color:T.text, lineHeight:1.3 }}>{plan.name}</div>
+          {plan.why && (
+            <div style={{ fontSize:11, color:T.muted, marginTop:1, fontStyle:"italic", lineHeight:1.4 }}>"{plan.why}"</div>
+          )}
+        </div>
+      </div>
+
+      {/* Progress target */}
+      <div style={{ padding:"0 14px 10px", display:"flex", gap:16, flexWrap:"wrap" }}>
+        <div style={{ fontSize:12, color:T.muted }}>
+          <span style={{ color:T.hint }}>Start: </span>
+          <strong style={{ color:T.text }}>{plan.startValue ?? 0}{plan.unit || ""}</strong>
+        </div>
+        <div style={{ fontSize:12, color:T.muted }}>
+          <span style={{ color:T.hint }}>Target: </span>
+          <strong style={{ color }}>
+            {plan.targetValue}{plan.unit || ""}
+            {plan.direction === "decreasing" ? " ↓" : " ↑"}
+          </strong>
+        </div>
+        {plan.targetDate && (
+          <div style={{ fontSize:12, color:T.muted }}>
+            <span style={{ color:T.hint }}>Deadline: </span>
+            <strong style={{ color:T.text }}>🎯 {fmtGoalDueHuman(plan.targetDate)}</strong>
+          </div>
+        )}
+      </div>
+
+      {/* Milestones */}
+      {milestones.length > 0 && (
+        <div style={{ padding:"0 14px 12px" }}>
+          <div style={{ fontSize:10, fontWeight:700, letterSpacing:"0.07em", textTransform:"uppercase", color:T.hint, marginBottom:6 }}>
+            Milestones
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+            {milestones.map((m, i) => {
+              const isFuture = m.date >= today;
+              return (
+                <div key={i} style={{ display:"flex", alignItems:"center", gap:8, fontSize:12 }}>
+                  <span style={{ color: isFuture ? T.gold : T.hint, fontSize:9 }}>◆</span>
+                  <span style={{ color: isFuture ? T.text : T.muted }}>{m.label}</span>
+                  <span style={{ color:T.hint, marginLeft:"auto", whiteSpace:"nowrap" }}>{fmtGoalDueHuman(m.date)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Actions */}
+      <div style={{ padding:"10px 14px 13px", borderTop:`0.5px solid ${T.border}`, display:"flex", gap:8 }}>
+        <button
+          type="button"
+          onClick={handleConfirm}
+          disabled={confirming}
+          style={{ flex:1, padding:"9px 14px", borderRadius:T.rsm, border:"none", background:T.gold, color:"#1a1a16", fontSize:13, fontWeight:700, cursor:confirming ? "default" : "pointer", opacity:confirming ? 0.7 : 1, transition:"opacity 0.15s" }}
+        >
+          {confirming ? "Creating…" : "Create this goal"}
+        </button>
+        <button
+          type="button"
+          onClick={onDismiss}
+          style={{ padding:"9px 14px", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:"none", color:T.muted, fontSize:13, cursor:"pointer" }}
+        >
+          Edit
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onGoalLogged, onHabitRenamed, onGoalPlanConfirm }) {
   const cName = coachName || "Coach";
   const isCreatorUser = user?.id === CREATOR_ID;
   // ── Warmer, context-aware greeting ─────────────────────────────────────────
@@ -7967,24 +8163,43 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, cu
               })()}
             </>
           ) : null}
-          {messages.map((m, i) => (
-            <div key={m.id || `${m.role}-${i}-${m.ts ?? ""}`} style={{ display:"flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
-              <div style={{ maxWidth:"85%", display:"flex", flexDirection:"column", alignItems: m.role === "user" ? "flex-end" : "flex-start" }}>
-                <div style={{
-                  padding:"10px 14px",
-                  borderRadius: m.role === "user" ? "14px 14px 3px 14px" : "14px 14px 14px 3px",
-                  background: m.role === "user" ? T.accent : T.surface,
-                  fontSize:14, color: m.role === "user" ? "#fff" : T.text,
-                  lineHeight:1.6, whiteSpace:"pre-wrap", wordBreak:"break-word",
-                }}>
-                  {m.content}
-                </div>
-                <div style={{ fontSize:10, color:T.hint, marginTop:3, alignSelf: m.role === "user" ? "flex-end" : "flex-end" }}>
-                  {formatCoachMsgTime(m.ts)}
+          {messages.map((m, i) => {
+            // For assistant messages, check for an embedded <goal_plan> block.
+            const parsed = m.role === "assistant" ? parseGoalPlan(m.content) : null;
+            const visibleText = parsed ? parsed.textWithout : m.content;
+            return (
+              <div key={m.id || `${m.role}-${i}-${m.ts ?? ""}`} style={{ display:"flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
+                <div style={{ maxWidth:"90%", display:"flex", flexDirection:"column", alignItems: m.role === "user" ? "flex-end" : "flex-start", width: parsed ? "100%" : undefined }}>
+                  {visibleText ? (
+                    <div style={{
+                      padding:"10px 14px",
+                      borderRadius: m.role === "user" ? "14px 14px 3px 14px" : "14px 14px 14px 3px",
+                      background: m.role === "user" ? T.accent : T.surface,
+                      fontSize:14, color: m.role === "user" ? "#fff" : T.text,
+                      lineHeight:1.6, whiteSpace:"pre-wrap", wordBreak:"break-word",
+                    }}>
+                      {visibleText}
+                    </div>
+                  ) : null}
+                  {parsed && (
+                    <GoalPlanPreview
+                      plan={parsed.plan}
+                      onConfirm={async (plan) => {
+                        if (onGoalPlanConfirm) await onGoalPlanConfirm(plan);
+                      }}
+                      onDismiss={() => {
+                        // Nudge user to clarify — put a prompt in the input box
+                        setInput("Can you adjust the goal — ");
+                      }}
+                    />
+                  )}
+                  <div style={{ fontSize:10, color:T.hint, marginTop:3, alignSelf:"flex-end" }}>
+                    {formatCoachMsgTime(m.ts)}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
 
           {/* Typing / action indicator (slow fetch ≈ server-side tools before stream) */}
           {loading && isExecutingAction ? (
@@ -14175,6 +14390,40 @@ export default function App() {
     addToast("✓ Goal added");
   }
 
+  /** Called when user confirms a <goal_plan> card from the AI coach chat. */
+  async function handleGoalPlanConfirm(plan) {
+    const milestones = (plan.milestones || [])
+      .filter(m => m.date && m.label)
+      .map((m, i) => ({
+        type: "milestone",
+        date: m.date,
+        label: m.label,
+        id: `ms_${Date.now()}_${i}`,
+      }));
+    const whyEntry = plan.why
+      ? [{ type: "goal_why", label: plan.why, id: `why_${Date.now()}` }]
+      : [];
+    const goal = {
+      id: `${Date.now()}.${Math.floor(Math.random() * 1000)}`,
+      name: plan.name,
+      emoji: plan.emoji || "🎯",
+      habitType: "goal",
+      unit: plan.unit || "",
+      startValue: Number(plan.startValue ?? 0),
+      targetValue: Number(plan.targetValue),
+      currentValue: Number(plan.startValue ?? 0),
+      direction: plan.direction || "increasing",
+      targetDate: plan.targetDate || null,
+      status: "active",
+      logs: [...milestones, ...whyEntry],
+      color: plan.color || "#E67E22",
+    };
+    const saved = await syncGoal(goal);
+    if (!saved) throw new Error("Save failed");
+    setGoals(prev => [...prev, goal]);
+    addToast(`✓ Goal "${plan.name}" created`);
+  }
+
   async function handleLogGoal(id, value, note) {
     const goal = resolveGoalForModal(id, goals, habits);
     if (!goal) return;
@@ -14737,6 +14986,7 @@ export default function App() {
           onHabitLogged={(id, logs) => setHabits(p => p.map(h => String(h.id) === String(id) ? { ...h, logs } : h))}
           onGoalLogged={(id, logs)  => setGoals(p  => p.map(g => String(g.id) === String(id) ? { ...g, logs } : g))}
           onHabitRenamed={(id, name) => setHabits(p => p.map(h => String(h.id) === String(id) ? { ...h, name } : h))}
+          onGoalPlanConfirm={handleGoalPlanConfirm}
         />}
       {showUpgrade && <BetaPaywallModal onClose={() => setShowUpgrade(false)}/>}
       {showShare && <ShareCardModal user={user} habits={habits} xp={xp} onClose={() => setShowShare(false)}/>}
