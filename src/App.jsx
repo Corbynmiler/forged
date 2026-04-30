@@ -911,12 +911,6 @@ function analyzeDeepInsights(habits = [], goals = []) {
   // overcount (a word in win+note+hard of one log = 3 hits); now it's clean.
   const topThemes = getDeepTopThemes(corpus, 4);
 
-  // Win/struggle themes only consider the actual win/hardPart text.
-  const winCorpus  = corpus.filter(e => e.winText).map(e => ({ ...e, text: e.winText }));
-  const hardCorpus = corpus.filter(e => e.hardText).map(e => ({ ...e, text: e.hardText }));
-  const topWinThemes      = getDeepTopThemes(winCorpus,  2);
-  const topStruggleThemes = getDeepTopThemes(hardCorpus, 2);
-
   // Tone distribution
   const pos = withTone.filter(e => e.tone.polarity === "pos").length;
   const neg = withTone.filter(e => e.tone.polarity === "neg").length;
@@ -981,19 +975,66 @@ function analyzeDeepInsights(habits = [], goals = []) {
     }
   }
 
+  // ── Momentum shift ────────────────────────────────────────────────────────
+  // Compare last 7 days vs prior 7 days per habit — surfaces which habits are
+  // gaining or losing consistency right now, not word-frequency tricks.
+  const cutoffThis  = daysAgo(6);   // last 7 days (today − 6 through today)
+  const cutoffPrior = daysAgo(13);  // prior 7 days
+  const momentumUp   = [];
+  const momentumDown = [];
+  for (const h of habits) {
+    const realLogs = (h.logs || []).filter(l => l.value !== "skip" && l.value !== "quicknote");
+    const thisWeek  = realLogs.filter(l => l.date >= cutoffThis).length;
+    const lastWeek  = realLogs.filter(l => l.date >= cutoffPrior && l.date < cutoffThis).length;
+    const diff = thisWeek - lastWeek;
+    if (diff >= 2 && thisWeek >= 1) {
+      momentumUp.push({ habitId: h.id, habitName: h.name, habitEmoji: h.emoji || "", color: h.color, thisWeek, lastWeek });
+    } else if (diff <= -2 && lastWeek >= 2) {
+      momentumDown.push({ habitId: h.id, habitName: h.name, habitEmoji: h.emoji || "", color: h.color, thisWeek, lastWeek });
+    }
+  }
+  momentumUp.sort((a, b) => (b.thisWeek - b.lastWeek) - (a.thisWeek - a.lastWeek));
+  momentumDown.sort((a, b) => (a.thisWeek - a.lastWeek) - (b.thisWeek - b.lastWeek));
+  const momentumShift = { up: momentumUp.slice(0, 2), down: momentumDown.slice(0, 2) };
+
+  // ── Consistency gaps ───────────────────────────────────────────────────────
+  // Habits that had real logs before 7 days ago but have gone silent this week.
+  const consistencyGaps = [];
+  for (const h of habits) {
+    const realLogs = (h.logs || []).filter(l => l.value !== "skip" && l.value !== "quicknote");
+    const thisWeek  = realLogs.filter(l => l.date >= cutoffThis).length;
+    const olderLogs = realLogs.filter(l => l.date < cutoffThis);
+    if (thisWeek === 0 && olderLogs.length >= 3) {
+      const lastLogDate = [...olderLogs].sort((a, b) => b.date.localeCompare(a.date))[0].date;
+      const daysSilent = Math.floor((Date.now() - new Date(lastLogDate).getTime()) / 86400000);
+      if (daysSilent <= 21) consistencyGaps.push({ habitId: h.id, habitName: h.name, habitEmoji: h.emoji || "", lastLogDate, daysSilent });
+    }
+  }
+  consistencyGaps.sort((a, b) => a.daysSilent - b.daysSilent); // most recently lapsed first
+
+  // ── Recent hard-part quotes ────────────────────────────────────────────────
+  // Actual text from recent hard-part entries — no word frequency, just what
+  // the user wrote, most recent first.
+  const recentHardPartQuotes = corpus
+    .filter(e => e.hardText && e.hardText.length >= 15)
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 3)
+    .map(e => ({ date: e.date, text: e.hardText, habitName: e.habitName || e.goalName || "" }));
+
   return {
     needsMoreData: false,
     totalEntries,
     totalWords,
     topThemes,
-    topWinThemes,
-    topStruggleThemes,
     toneMix: { pos, neg, neu },
     moodTrend,
     recentAvg,
     priorAvg,
     mostReflectedHabit,
     revisitEntry,
+    momentumShift,
+    consistencyGaps,
+    recentHardPartQuotes,
   };
 }
 
@@ -1001,7 +1042,8 @@ function analyzeDeepInsights(habits = [], goals = []) {
 // Purpose: avoid recomputing on every Insights render, but always recompute
 // when the user actually adds new written content. Cached under a user-scoped
 // key so multiple accounts on the same device don't collide.
-const DEEP_INSIGHTS_TTL_MS = 24 * 60 * 60 * 1000; // refresh at least every 24h
+const DEEP_INSIGHTS_TTL_MS   = 24 * 60 * 60 * 1000; // refresh at least every 24h
+const WEEKLY_SUMMARY_TTL_MS  = 24 * 60 * 60 * 1000; // generated summary cached 24h
 
 function deepInsightsCacheKey(userId) {
   return `forged_deep_insights:${userId || "anon"}`;
@@ -5524,7 +5566,49 @@ function EntryCard({ entry, onReflect }) {
 // section header so the page reads as a structured report rather than a stack
 // of similar cards. Empty/low-data cards show an intentional placeholder so a
 // fresh account doesn't see a wall of blank grids.
-function InsightsScreen({ habits, goals = [], onShowHistory, onShare, isPro = false, onUpgrade, userId = null }) {
+function InsightsScreen({ habits, goals = [], journalEntries = [], onShowHistory, onShare, isPro = false, onUpgrade, userId = null }) {
+  // ── Weekly summary state ───────────────────────────────────────────────────
+  const [weeklySummary,   setWeeklySummary]   = useState(null);
+  const [summaryLoading,  setSummaryLoading]  = useState(false);
+  const [summaryError,    setSummaryError]    = useState(null);
+
+  // Load from localStorage on mount / when userId changes
+  useEffect(() => {
+    if (!isPro || !userId) return;
+    try {
+      const raw = localStorage.getItem(`forged_weekly_summary:${userId}`);
+      if (raw) {
+        const { text, ts } = JSON.parse(raw);
+        if (text && Date.now() - ts < WEEKLY_SUMMARY_TTL_MS) setWeeklySummary(text);
+      }
+    } catch { /* ignore */ }
+  }, [userId, isPro]);
+
+  async function generateWeeklySummary() {
+    setSummaryLoading(true);
+    setSummaryError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("Not authenticated");
+      const res = await fetch("/api/weekly-summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ habits, goals, journalEntries, client_date: todayStr() }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Error ${res.status}`);
+      }
+      const { text } = await res.json();
+      setWeeklySummary(text);
+      try { localStorage.setItem(`forged_weekly_summary:${userId}`, JSON.stringify({ text, ts: Date.now() })); } catch { /* quota */ }
+    } catch (err) {
+      setSummaryError(err.message || "Generation failed");
+    } finally {
+      setSummaryLoading(false);
+    }
+  }
   function IC({ title, children, action, dataTour, subtitle }) {
     return (
       <div data-tour={dataTour} style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:18 }}>
@@ -5920,31 +6004,63 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare, isPro = fa
             </IC>
           )}
 
-          {/* Recurring wins — counts are per-day-it-came-up, not per-fragment */}
-          {deep.topWinThemes && deep.topWinThemes.length > 0 && (
-            <IC title="Wins that keep showing up" subtitle="Patterns across the wins you've logged on project habits.">
-              {deep.topWinThemes.map(t => (
-                <div key={t.term} style={{ padding:"8px 0", borderTop:`0.5px solid ${T.border}`, display:"flex", alignItems:"baseline", gap:10 }}>
-                  <div style={{ fontSize:13, color:T.green, fontWeight:600, textTransform:"capitalize" }}>{t.term}</div>
-                  <div style={{ fontSize:11, color:T.muted, flex:1 }}>came up on {t.count} {t.count === 1 ? "day" : "days"} you logged a win</div>
+          {/* Momentum shift — which habits gained or lost consistency this week vs last */}
+          {(deep.momentumShift?.up?.length > 0 || deep.momentumShift?.down?.length > 0) && (
+            <IC title="This week vs. last week" subtitle="Habits that picked up or dropped off compared to the prior 7 days.">
+              {deep.momentumShift.up.map(m => (
+                <div key={m.habitId} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 0", borderTop:`0.5px solid ${T.border}` }}>
+                  <span style={{ fontSize:16, flexShrink:0 }}>{m.habitEmoji}</span>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:13, color:T.text, fontWeight:500, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{m.habitName}</div>
+                    <div style={{ fontSize:11, color:T.muted, marginTop:1 }}>{m.lastWeek} → {m.thisWeek} days this week</div>
+                  </div>
+                  <div style={{ fontSize:12, fontWeight:700, color:T.green, flexShrink:0 }}>↑ picking up</div>
+                </div>
+              ))}
+              {deep.momentumShift.down.map(m => (
+                <div key={m.habitId} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 0", borderTop:`0.5px solid ${T.border}` }}>
+                  <span style={{ fontSize:16, flexShrink:0 }}>{m.habitEmoji}</span>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:13, color:T.text, fontWeight:500, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{m.habitName}</div>
+                    <div style={{ fontSize:11, color:T.muted, marginTop:1 }}>{m.lastWeek} → {m.thisWeek} days this week</div>
+                  </div>
+                  <div style={{ fontSize:12, fontWeight:700, color:T.amber, flexShrink:0 }}>↓ dropping off</div>
                 </div>
               ))}
             </IC>
           )}
 
-          {/* Recurring struggle — limited to actual hard-part text (was: mixed
-              hard parts AND any neg-toned reflection, which surfaced unrelated
-              moody words). */}
-          {deep.topStruggleThemes && deep.topStruggleThemes.length > 0 && (
-            <IC title="Recurring struggle" subtitle="Words that keep showing up in your hard-part notes.">
-              {deep.topStruggleThemes.map(t => (
-                <div key={t.term} style={{ padding:"8px 0", borderTop:`0.5px solid ${T.border}`, display:"flex", alignItems:"baseline", gap:10 }}>
-                  <div style={{ fontSize:13, color:T.amber, fontWeight:600, textTransform:"capitalize" }}>{t.term}</div>
-                  <div style={{ fontSize:11, color:T.muted, flex:1 }}>came up on {t.count} {t.count === 1 ? "day" : "days"} you flagged a hard part</div>
+          {/* Consistency gaps — habits that were active but have gone quiet this week */}
+          {deep.consistencyGaps?.length > 0 && (
+            <IC title="Gone quiet" subtitle="Was active recently but hasn't shown up this week.">
+              {deep.consistencyGaps.slice(0, 3).map(g => (
+                <div key={g.habitId} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 0", borderTop:`0.5px solid ${T.border}` }}>
+                  <span style={{ fontSize:16, flexShrink:0 }}>{g.habitEmoji}</span>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:13, color:T.text, fontWeight:500, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{g.habitName}</div>
+                    <div style={{ fontSize:11, color:T.muted, marginTop:1 }}>Last logged {fmtEntryDate(g.lastLogDate)} · {g.daysSilent} {g.daysSilent === 1 ? "day" : "days"} ago</div>
+                  </div>
+                  <div style={{ fontSize:18, flexShrink:0 }}>🔇</div>
+                </div>
+              ))}
+            </IC>
+          )}
+
+          {/* Hard-part quotes — what you actually wrote when things got hard */}
+          {deep.recentHardPartQuotes?.length > 0 && (
+            <IC title="What's been hard" subtitle="From your recent hard-part notes — in your own words.">
+              {deep.recentHardPartQuotes.map((q, i) => (
+                <div key={i} style={{ padding:"10px 0", borderTop: i > 0 ? `0.5px solid ${T.border}` : "none" }}>
+                  <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:5 }}>
+                    {fmtEntryDate(q.date)}{q.habitName ? ` · ${q.habitName}` : ""}
+                  </div>
+                  <div style={{ fontSize:13, color:T.sub, lineHeight:1.6, fontStyle:"italic" }}>
+                    "{truncateText(q.text, 180)}"
+                  </div>
                 </div>
               ))}
               <div style={{ fontSize:11, color:T.hint, lineHeight:1.6, marginTop:10, paddingTop:10, borderTop:`0.5px solid ${T.border}` }}>
-                Naming the pattern is half the fix. Try a note the next time it shows up.
+                Naming the pattern is half the fix.
               </div>
             </IC>
           )}
@@ -6010,37 +6126,59 @@ function InsightsScreen({ habits, goals = [], onShowHistory, onShare, isPro = fa
         </>
       )}
 
-      {/* AI pattern detection — kept as a clearly-distinct Pro teaser. What
-          we ship locally (above) is real but deterministic; the Pro card is
-          for LLM-written weekly summaries + proactive alerts in chat. */}
+      {/* Weekly brief — functional for Pro, upgrade CTA for non-Pro */}
       <div style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid rgba(200,144,42,0.28)`, padding:18, position:"relative", overflow:"hidden" }}>
-        <div style={{ position:"absolute", top:12, right:12, display:"flex", alignItems:"center", gap:6 }}>
-          {!isPro && (
+        {!isPro && (
+          <div style={{ position:"absolute", top:12, right:12 }}>
             <span style={{ fontSize:9, fontWeight:800, color:"#0F0F0D", background:T.gold, padding:"2px 7px", borderRadius:5, letterSpacing:"0.08em" }}>PRO</span>
-          )}
-          <span style={{ fontSize:9, color:T.hint, fontWeight:600, letterSpacing:"0.08em", textTransform:"uppercase" }}>Coming soon</span>
-        </div>
+          </div>
+        )}
         <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
           <div style={{ width:36, height:36, borderRadius:10, background:"rgba(200,144,42,0.12)", border:"0.5px solid rgba(200,144,42,0.35)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>🧠</div>
-          <div style={{ fontSize:14, fontWeight:600, color:T.text }}>Weekly pattern summary</div>
+          <div style={{ fontSize:14, fontWeight:600, color:T.text }}>Weekly brief</div>
         </div>
-        <div style={{ fontSize:12, color:T.sub, lineHeight:1.65, marginBottom: !isPro ? 12 : 0 }}>
-          The coach writes you a weekly brief — what shifted, what held, and what's worth paying attention to going into next week. Based on what you actually logged and wrote.
-        </div>
-        {!isPro && onUpgrade && (
-          <button
-            type="button"
-            onClick={onUpgrade}
-            style={{
-              marginTop:2, padding:"9px 16px", borderRadius:T.rsm,
-              border:`1px solid rgba(200,144,42,0.45)`,
-              background:"rgba(200,144,42,0.10)",
-              color:T.gold, fontSize:12, fontWeight:700, cursor:"pointer",
-              letterSpacing:"0.02em",
-            }}
-          >
-            Back the beta to get early access →
-          </button>
+
+        {!isPro ? (
+          <>
+            <div style={{ fontSize:12, color:T.sub, lineHeight:1.65, marginBottom:12 }}>
+              The coach writes you a weekly brief — what shifted, what held, and one thing worth paying attention to going into next week.
+            </div>
+            {onUpgrade && (
+              <button type="button" onClick={onUpgrade} style={{ padding:"9px 16px", borderRadius:T.rsm, border:`1px solid rgba(200,144,42,0.45)`, background:"rgba(200,144,42,0.10)", color:T.gold, fontSize:12, fontWeight:700, cursor:"pointer", letterSpacing:"0.02em" }}>
+                Upgrade to Pro →
+              </button>
+            )}
+          </>
+        ) : weeklySummary ? (
+          <>
+            <div style={{ fontSize:13, color:T.text, lineHeight:1.75, marginBottom:14, whiteSpace:"pre-wrap" }}>
+              {weeklySummary}
+            </div>
+            <button
+              type="button"
+              onClick={() => { setWeeklySummary(null); try { localStorage.removeItem(`forged_weekly_summary:${userId}`); } catch { /* ignore */ } }}
+              style={{ fontSize:11, color:T.hint, background:"none", border:"none", cursor:"pointer", padding:0 }}
+            >
+              ↻ Regenerate
+            </button>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize:12, color:T.sub, lineHeight:1.65, marginBottom:14 }}>
+              A 4–6 sentence brief from the coach — what you showed up for, where there were gaps, and one thing worth paying attention to next week.
+            </div>
+            {summaryError && (
+              <div style={{ fontSize:11, color:T.amber, marginBottom:10 }}>{summaryError}</div>
+            )}
+            <button
+              type="button"
+              onClick={generateWeeklySummary}
+              disabled={summaryLoading}
+              style={{ padding:"9px 16px", borderRadius:T.rsm, border:`1px solid rgba(200,144,42,0.45)`, background: summaryLoading ? "rgba(200,144,42,0.05)" : "rgba(200,144,42,0.10)", color: summaryLoading ? T.hint : T.gold, fontSize:12, fontWeight:700, cursor: summaryLoading ? "default" : "pointer", letterSpacing:"0.02em" }}
+            >
+              {summaryLoading ? "Generating…" : "Get my weekly brief →"}
+            </button>
+          </>
         )}
       </div>
 
@@ -8185,7 +8323,7 @@ function buildCoachSystemPrompt(user, habits, coachName, screen, goals = [], jou
   const creatorCtx = isCreator ? `
 
 ─── CONTEXT: YOU'RE TALKING TO THE PERSON WHO BUILT THIS APP ───
-${name} is the developer and creator of Forged. Treat them as a peer, not a coaching client. Skip generic encouragement — they know what they're building. Reference their actual data. Match the energy they bring: usually direct, builder-focused, no fluff.
+${name} is the developer and creator of Forged. Treat them as a sharp mate who ships — direct, specific, no corporate wellness tone. They still deserve replies that sound like someone actually read the message: nod at what happened, reference real details from their logs or wording. Never reduce to a one-word "logged" — that's lazy, not "peer mode". Match their energy (often builder-focused, low fluff) while staying human.
 When they mention "Forged", "the build", "the app", "shipping something", or "working on the product" — that's their software project, likely mapped to a project-type habit above. Treat it like any other project update and log it.` : "";
 
   return `You are ${coach}, talking with ${name} inside the Forged habit app.
@@ -8203,19 +8341,25 @@ ${goals.map(g => {
 }).join("\n")}` : ""}
 
 ─── HOW TO SOUND ───
-You're a smart, grounded companion — not a therapy bot, not a corporate wellness AI, not a cheerleader.
-- Short by default: 1–3 sentences. Go longer only when asked something genuinely complex.
-- Match their energy. Casual message in → casual reply. Thoughtful message in → thoughtful reply.
-- No hollow openers. Never start with "Great!", "Of course!", "Absolutely!", "Sure thing!" Just reply.
-- Don't lecture. Don't moralize. Don't over-explain what you just did.
-- One question max per reply, only when you genuinely need it to act. Never stack questions.
-- Don't start every reply with their name.
+You're a smart, grounded companion — closer to a decent mate than a therapist, corporate wellness bot, or cheerleader.
+- **Length (token-conscious):** Default 1–3 short sentences. If they wrote a lot, dumped their day, or logged several things at once → stretch to about 4–6 short sentences max — enough to show you listened, never an essay.
+- Match their energy. Casual in → casual out. Heavier in → steadier, plain acknowledgement (no therapy script, no "as your coach" voice).
+- Skip hollow hype ("Great job!", "Absolutely!", "Love that for you!"). Warmth comes from **specificity** — tie your reply to something they actually said (the habit, the mood, the streak, the rough bit).
+- Don't lecture, moralize, or narrate the database ("I have successfully updated…"). They feel the log in the app; you add the human bit.
+- One question max per reply, only when you need it to act. Never stack questions.
+- Don't start every reply with their name. Vary how you open.
+
+─── AFTER TOOLS (log_habit, log_journal, create_habit, edit_habit) ───
+Tools already ran — your reply is the human wrap-up. **Never** answer with only "done", "got it", "logged", "sorted", or a bare tick — always anchor at least one line to what *they* shared.
+- Quick tap-in ("gym done", "logged water"): still 1–2 friendly sentences — can be light, but not empty.
+- Bigger day / lots of logs: acknowledge the pile-up once ("that's a lot — it's all down now" vibe) without reading back a manifest.
+- Heavy or intense stuff: one grounded line that meets the moment — real, not robotic, not clinical. No motivational poster.
+- Multi-habit: you can group ("knocked off the run and the limit — both in") instead of bullet-by-bullet inventory unless clarity needs it.
 
 ─── WHEN TO ACT vs ASK ───
-If they tell you what they did, log it — don't ask permission first. Act, then confirm briefly in plain language.
+If they tell you what they did, log it — don't ask permission first. Act, then reply in plain human language (see above).
 "I went for a run" → log the run. "Two drinks tonight" → log the limit habit. "Three hours on the app" → log the project habit for 3h (180 min).
 Only ask a clarifying question if something critical is truly missing — like which habit to log when there are several candidates, or how long for project work if they didn't say.
-After logging: one natural sentence of confirmation. No bullet lists of "I logged X, updated Y, set Z."
 
 ─── PRODUCT CONTEXT ───
 Forged is the habit-tracking app ${name} is using — and may also be building. If they reference "Forged", "the build", "the app", "shipping a feature", or "working on the product", that's their software project. Look for a project-type habit in their list and log it. Don't treat "Forged" as an unknown reference.
@@ -8231,7 +8375,7 @@ The app renders a confirmation card from the <goal_plan> block. Never call creat
 ─── JOURNAL ───
 The user has a pure Journal — freeform daily entries, no streaks, no stats. Use the log_journal tool to save personal context: feelings, life events, thoughts, anything that doesn't fit neatly into a habit or goal.
 You can (and often should) call log_habit + log_journal in the same turn: pull out the structured data (sessions, limits, progress) into habits/goals, and save the broader human story to the journal.
-If the user does a big life dump, extract structured parts for habits/goals and write the rest — plus any personal context — to the journal. Don't ask permission; just route it naturally and confirm briefly.
+If the user does a big life dump, extract structured parts for habits/goals and write the rest — plus any personal context — to the journal. Don't ask permission; just route it naturally, then let your reply show you clocked what they said (not a stiff recap).
 ${journalEntries.length ? `Recent journal entries (for context — do not repeat these back verbatim):
 ${journalEntries.slice(0, 5).map(e => `[${e.date}] "${e.content.slice(0, 200)}${e.content.length > 200 ? "…" : ""}"`).join("\n")}` : ""}
 
@@ -12128,7 +12272,63 @@ function buildSessionBrief(client) {
   return items;
 }
 
-function CoachClientDetail({ client, onBack }) {
+/** Valid UUID for coach-summary API — demo/preview clients use non-UUID ids. */
+const COACH_SUMMARY_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Convincing sample AI brief for preview/demo clients (no API).
+ * Mirrors the tone of coach-summary — session-focused, specific, coach-native.
+ */
+function previewAiBriefFromClient(client) {
+  const first = String(client.name || "They").split(/\s+/)[0];
+  const out = [];
+  const localDsa = localDaysSince(client.lastActiveDate);
+  const habits = client.habits || [];
+
+  if (localDsa === 0) {
+    if (client.totalHabits > 0 && client.loggedTodayCount === client.totalHabits)
+      out.push(`${first} is fully logged today — lead with recognition, then ask what felt hardest (wins often hide friction).`);
+    else if (client.loggedTodayCount > 0)
+      out.push(`Partial day (${client.loggedTodayCount}/${client.totalHabits} habits). Ask what shifted their routine before you troubleshoot.`);
+    else
+      out.push(`${first} hasn't logged yet today. Keep the opener light — energy, schedule, or avoidance — stay curious, not corrective.`);
+  } else if (localDsa === 1) {
+    out.push(`Last seen yesterday — check how today landed before you dive into the dashboard.`);
+  } else if (localDsa !== null && localDsa >= 3) {
+    out.push(`${localDsa} days quiet — assume life load first. "What's been taking bandwidth?" beats a habit lecture.`);
+  } else {
+    out.push(`Sparse history — use the session to align on what a strong week looks like for them.`);
+  }
+
+  const topStreak = [...habits].filter(h => (h.streak || 0) >= 3).sort((a, b) => (b.streak || 0) - (a.streak || 0))[0];
+  if (topStreak) {
+    out.push(`${topStreak.emoji || "🔥"} ${topStreak.name} (${topStreak.streak}-day streak) is your anchor habit — reinforce identity before adding pressure elsewhere.`);
+  }
+
+  const gap = habits.filter(h => {
+    if (localDsa === 0 && h.loggedToday) return false;
+    const hd = h.lastLogDate ? localDaysSince(h.lastLogDate) : null;
+    return hd === null || hd >= 3;
+  }).slice(0, 2);
+  for (const h of gap) {
+    const hd = h.lastLogDate ? localDaysSince(h.lastLogDate) : null;
+    out.push(`${h.emoji || "•"} ${h.name} is quiet${hd != null ? ` (~${hd}d since last log)` : ""} — one concrete question beats a generic check-in.`);
+  }
+
+  const withNote = habits.find(h => h.recentNote && String(h.recentNote).trim());
+  if (withNote) {
+    const raw = String(withNote.recentNote);
+    const snip = raw.length > 100 ? `${raw.slice(0, 100)}…` : raw;
+    out.push(`They noted on ${withNote.name}: "${snip}" — reference it early so they feel seen.`);
+  }
+
+  if (out.length < 4) {
+    out.push(`Close with: "What would make next week feel 10% easier?" — surfaces blockers without you presuming them.`);
+  }
+  return out.slice(0, 5);
+}
+
+function CoachClientDetail({ client, onBack, useLocalAiBrief = false }) {
   const [detailTab, setDetailTab] = useState("brief"); // "brief" | "habits"
   const brief = buildSessionBrief(client);
   const localDsa = localDaysSince(client.lastActiveDate);
@@ -12146,7 +12346,13 @@ function CoachClientDetail({ client, onBack }) {
   const [aiLoading, setAiLoading]   = useState(false);
   const [aiErr, setAiErr]           = useState(null);
 
-  const fetchSummary = useCallback(async (signal) => {
+  const refreshAiBrief = useCallback(async () => {
+    if (useLocalAiBrief) {
+      setAiLoading(false);
+      setAiErr(null);
+      setAiBullets(previewAiBriefFromClient(client));
+      return;
+    }
     setAiLoading(true);
     setAiErr(null);
     try {
@@ -12155,7 +12361,6 @@ function CoachClientDetail({ client, onBack }) {
       if (!token) throw new Error("Not signed in");
       const res = await fetch(`/api/coach-summary?clientId=${encodeURIComponent(client.id)}`, {
         headers: { Authorization: `Bearer ${token}` },
-        signal,
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Could not load summary");
@@ -12164,15 +12369,42 @@ function CoachClientDetail({ client, onBack }) {
       if (e.name === "AbortError") return;
       setAiErr(e.message);
     } finally {
-      if (!signal?.aborted) setAiLoading(false);
+      setAiLoading(false);
     }
-  }, [client.id]);
+  }, [client, useLocalAiBrief]);
 
   useEffect(() => {
+    if (useLocalAiBrief) {
+      setAiLoading(false);
+      setAiErr(null);
+      setAiBullets(previewAiBriefFromClient(client));
+      return;
+    }
     const ctrl = new AbortController();
-    fetchSummary(ctrl.signal);
+    setAiBullets(null);
+    setAiLoading(true);
+    setAiErr(null);
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        if (!token) throw new Error("Not signed in");
+        const res = await fetch(`/api/coach-summary?clientId=${encodeURIComponent(client.id)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: ctrl.signal,
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "Could not load summary");
+        if (!ctrl.signal.aborted) setAiBullets(Array.isArray(json.summary) ? json.summary : []);
+      } catch (e) {
+        if (e.name === "AbortError") return;
+        if (!ctrl.signal.aborted) setAiErr(e.message);
+      } finally {
+        if (!ctrl.signal.aborted) setAiLoading(false);
+      }
+    })();
     return () => ctrl.abort();
-  }, [fetchSummary]);
+  }, [client, useLocalAiBrief]);
 
   const tabBtn = (id, label) => (
     <button
@@ -12256,10 +12488,13 @@ function CoachClientDetail({ client, onBack }) {
               <div style={{ display:"flex", alignItems:"center", gap:7 }}>
                 <span style={{ fontSize:10, fontWeight:700, color:T.gold, textTransform:"uppercase", letterSpacing:"0.07em" }}>AI pre-session brief</span>
                 <span style={{ fontSize:9, fontWeight:700, color:T.gold, background:"rgba(200,144,42,0.15)", padding:"1px 6px", borderRadius:6 }}>BETA</span>
+                {useLocalAiBrief && (
+                  <span style={{ fontSize:9, fontWeight:700, color:"#1a1a16", background:T.sub, padding:"1px 6px", borderRadius:6 }}>PREVIEW</span>
+                )}
               </div>
               <button
                 type="button"
-                onClick={() => { if (!aiLoading) fetchSummary(); }}
+                onClick={() => { if (!aiLoading) void refreshAiBrief(); }}
                 disabled={aiLoading}
                 style={{
                   display:"flex", alignItems:"center", gap:4,
@@ -12633,7 +12868,7 @@ const DEMO_CLIENTS = [
 ];
 
 function CoachApp({ onExit, isPreview, coachTier, isAdmin, coachOwnName }) {
-  const [coachTab,       setCoachTab]       = useState("clients"); // "clients" | "invite" | "you"
+  const [coachTab,       setCoachTab]       = useState("clients"); // "clients" | "you"
   const [coachScreen,    setCoachScreen]    = useState("list");
   const [selectedClient, setSelectedClient] = useState(null);
   const [data,           setData]           = useState(null);
@@ -12784,6 +13019,12 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin, coachOwnName }) {
   const subtitle  = clients.length === 0
     ? null
     : `${clients.length} client${clients.length === 1 ? "" : "s"} · ${activeThisWeekCount} active this week`;
+  const coachInitials = (() => {
+    const parts = (coachOwnName || "").trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return "FC";
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  })();
 
   // Bottom nav icon helper
   const navItem = (tab, icon, label) => {
@@ -12791,7 +13032,11 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin, coachOwnName }) {
     return (
       <button
         key={tab}
-        onClick={() => { setCoachTab(tab); if (tab === "clients") { setCoachScreen("list"); setSelectedClient(null); } }}
+        onClick={() => {
+          setCoachScreen("list");
+          setSelectedClient(null);
+          setCoachTab(tab);
+        }}
         style={{
           flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:3,
           background:"none", border:"none", cursor:"pointer", fontFamily:T.font,
@@ -12828,6 +13073,18 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin, coachOwnName }) {
               <div style={{ fontSize:11, color:T.muted, marginTop:4, letterSpacing:"0.01em" }}>
                 {subtitle}
               </div>
+            )}
+            {!showPaywall && coachTab === "clients" && coachScreen === "list" && (
+              <button
+                type="button"
+                onClick={() => { setCoachScreen("list"); setSelectedClient(null); setCoachTab("you"); }}
+                style={{
+                  marginTop:10, display:"block", fontSize:12, fontWeight:600, color:T.gold,
+                  background:"none", border:"none", cursor:"pointer", padding:0, fontFamily:T.font,
+                }}
+              >
+                Invite clients · share link & code →
+              </button>
             )}
           </div>
         </div>
@@ -12867,29 +13124,90 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin, coachOwnName }) {
         {showPaywall ? (
           <CoachPaywall />
 
-        /* ── INVITE TAB ─────────────────────────────────────────────────── */
-        ) : coachTab === "invite" ? (
-          <div style={{ padding:"28px 20px" }}>
-            <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:8 }}>Invite a client</div>
-            <div style={{ fontSize:13, color:T.muted, lineHeight:1.65, marginBottom:24 }}>
-              Share your personal link. When they sign up through it, they&apos;ll appear in your client list automatically — and get Forged Pro included for free.
+        /* ── YOU (profile + invites + account) ───────────────────────────── */
+        ) : coachTab === "you" ? (
+          <div style={{ padding:"20px 18px 28px" }}>
+            <div style={{ display:"flex", gap:14, alignItems:"center", marginBottom:20 }}>
+              <div style={{
+                width:56, height:56, borderRadius:16, flexShrink:0,
+                background:"linear-gradient(145deg, rgba(200,144,42,0.22), rgba(200,144,42,0.06))",
+                border:`1px solid rgba(200,144,42,0.35)`,
+                display:"flex", alignItems:"center", justifyContent:"center",
+                fontSize:18, fontWeight:700, color:T.gold, letterSpacing:"0.02em", fontFamily:T.font,
+              }}>
+                {coachInitials}
+              </div>
+              <div style={{ minWidth:0, flex:1 }}>
+                <div style={{ fontFamily:T.serif, fontSize:21, color:T.text, lineHeight:1.2 }}>
+                  {coachOwnName || "Your workspace"}
+                </div>
+                <div style={{ display:"flex", flexWrap:"wrap", alignItems:"center", gap:6, marginTop:8 }}>
+                  <span style={{ fontSize:9, fontWeight:700, color:"#1a1a16", background:T.gold, padding:"3px 8px", borderRadius:6, letterSpacing:"0.07em" }}>
+                    {coachTier ? "COACH · ACTIVE" : "COACH"}
+                  </span>
+                  {isPreview && (
+                    <span style={{ fontSize:9, fontWeight:700, color:T.gold, background:"rgba(200,144,42,0.14)", padding:"3px 8px", borderRadius:6, letterSpacing:"0.06em", border:`1px solid rgba(200,144,42,0.3)` }}>
+                      PREVIEW
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize:12, color:T.muted, marginTop:6, lineHeight:1.45 }}>
+                  {clients.length === 0
+                    ? "No clients yet — share your link to fill this workspace."
+                    : `${clients.length} client${clients.length === 1 ? "" : "s"} · ${activeThisWeekCount} active this week${needsAttention.length ? ` · ${needsAttention.length} need attention` : ""}`}
+                </div>
+              </div>
             </div>
-            <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:24 }}>
-              {["They get a personalised onboarding", "Forged Pro included (up to 15 clients)", "You see their habits and notes as they log"].map(line => (
+
+            <div style={{
+              background:T.surface, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px 16px", marginBottom:16,
+            }}>
+              <div style={{ fontSize:10, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:10 }}>
+                Workspace pulse
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                <div style={{ background:"rgba(255,255,255,0.03)", borderRadius:10, padding:"10px 12px", border:`1px solid ${T.border}` }}>
+                  <div style={{ fontSize:20, fontWeight:700, color:T.text, fontFamily:T.font }}>{activeThisWeekCount}</div>
+                  <div style={{ fontSize:11, color:T.hint, marginTop:2 }}>Active (7d)</div>
+                </div>
+                <div style={{ background:"rgba(255,255,255,0.03)", borderRadius:10, padding:"10px 12px", border:`1px solid ${T.border}` }}>
+                  <div style={{ fontSize:20, fontWeight:700, color: needsAttention.length ? T.amber : T.text, fontFamily:T.font }}>{needsAttention.length}</div>
+                  <div style={{ fontSize:11, color:T.hint, marginTop:2 }}>Need attention</div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setCoachTab("clients"); setCoachScreen("list"); setSelectedClient(null); }}
+                style={{
+                  width:"100%", marginTop:12, padding:"10px 0", borderRadius:10,
+                  background:"rgba(255,255,255,0.04)", border:`1px solid ${T.border}`,
+                  color:T.sub, fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:T.font,
+                }}
+              >
+                Open client list →
+              </button>
+            </div>
+
+            <div style={{ fontFamily:T.serif, fontSize:18, color:T.text, marginBottom:8 }}>Grow your practice</div>
+            <div style={{ fontSize:13, color:T.muted, lineHeight:1.65, marginBottom:16 }}>
+              Share your link — new signups land in your roster with Pro included. Existing Forged users can link with your coach code.
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:20 }}>
+              {["Personal onboarding path for each client", "Forged Pro for every seat (up to 15)", "Habits, streaks, and notes visible as they log"].map(line => (
                 <div key={line} style={{ display:"flex", alignItems:"flex-start", gap:9 }}>
                   <span style={{ color:T.gold, fontSize:12, lineHeight:1.6, flexShrink:0, fontWeight:700 }}>✓</span>
                   <span style={{ fontSize:13, color:T.sub, lineHeight:1.6 }}>{line}</span>
                 </div>
               ))}
             </div>
-            {inviteLink && (
+            {inviteLink ? (
               <>
                 <button
                   type="button"
                   onClick={copyInviteLink}
                   style={{
                     width:"100%", padding:"14px 0", borderRadius:12, border:"none",
-                    background: inviteCopied ? "#27AE60" : T.gold, color:"#1a1a16",
+                    background: inviteCopied ? T.green : T.gold, color:"#1a1a16",
                     fontSize:14, fontWeight:700, fontFamily:T.font, cursor:"pointer",
                     marginBottom:12, transition:"background 0.2s",
                     boxShadow:"0 2px 14px rgba(200,144,42,0.18)",
@@ -12902,65 +13220,54 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin, coachOwnName }) {
                   padding:"10px 12px", fontSize:11, color:T.sub,
                   overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
                   fontFamily:"ui-monospace, SFMono-Regular, Menlo, monospace",
-                  marginBottom:24,
+                  marginBottom:16,
                 }}>
                   {inviteLink}
                 </div>
               </>
+            ) : (
+              <div style={{ fontSize:12, color:T.muted, marginBottom:16, fontStyle:"italic" }}>
+                Sign in to generate your invite link.
+              </div>
             )}
-            {/* Coach code — alternative for existing users */}
             {coachCodeFormatted && (
               <div style={{
                 background:T.surface, border:`1px solid ${T.border}`,
-                borderRadius:12, padding:"14px 16px", marginBottom:12,
+                borderRadius:12, padding:"14px 16px", marginBottom:16,
               }}>
                 <div style={{ fontSize:10, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:8 }}>
-                  Coach code · for existing users
+                  Coach code · existing users
                 </div>
                 <div style={{ fontSize:26, fontWeight:700, color:T.text, letterSpacing:"0.14em", fontFamily:"ui-monospace, SFMono-Regular, Menlo, monospace", marginBottom:8 }}>
                   {coachCodeFormatted}
                 </div>
                 <div style={{ fontSize:12, color:T.muted, lineHeight:1.6 }}>
-                  Existing Forged users can enter this code in their Profile → &ldquo;Join a coach&rdquo; to link instantly — no new account needed.
+                  Enter in Profile → &ldquo;Join a coach&rdquo; to link instantly.
                 </div>
               </div>
             )}
-            <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:12, padding:"14px 16px" }}>
+            <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:12, padding:"14px 16px", marginBottom:24 }}>
               <div style={{ fontSize:10, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:8 }}>Client slots</div>
               <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                 <span style={{ fontSize:14, color:T.text }}>{clients.length} of 15 used</span>
-                <span style={{ fontSize:12, color: clients.length >= 15 ? "#E74C3C" : "#27AE60", fontWeight:600 }}>
+                <span style={{ fontSize:12, color: clients.length >= 15 ? T.accent : T.green, fontWeight:600 }}>
                   {clients.length >= 15 ? "At limit" : `${15 - clients.length} remaining`}
                 </span>
               </div>
               <div style={{ marginTop:8, height:4, background:"rgba(255,255,255,0.06)", borderRadius:2, overflow:"hidden" }}>
-                <div style={{ height:"100%", width:`${Math.min(100, (clients.length/15)*100)}%`, background: clients.length >= 15 ? "#E74C3C" : T.gold, borderRadius:2, transition:"width 0.4s" }}/>
+                <div style={{ height:"100%", width:`${Math.min(100, (clients.length/15)*100)}%`, background: clients.length >= 15 ? T.accent : T.gold, borderRadius:2, transition:"width 0.4s" }}/>
               </div>
             </div>
-          </div>
 
-        /* ── YOU TAB ─────────────────────────────────────────────────────── */
-        ) : coachTab === "you" ? (
-          <div style={{ padding:"28px 20px" }}>
-            <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:4 }}>
-              {coachOwnName || "Coach profile"}
-            </div>
-            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:28 }}>
-              <span style={{ fontSize:9, fontWeight:700, color:"#1a1a16", background:T.gold, padding:"3px 8px", borderRadius:6, letterSpacing:"0.07em" }}>
-                {coachTier ? "COACH · ACTIVE" : "COACH"}
-              </span>
-              {clients.length > 0 && (
-                <span style={{ fontSize:12, color:T.muted }}>{clients.length} client{clients.length===1?"":"s"}</span>
-              )}
-            </div>
-            <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:12, overflow:"hidden", marginBottom:12 }}>
+            <div style={{ fontFamily:T.serif, fontSize:18, color:T.text, marginBottom:12 }}>Account</div>
+            <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:12, overflow:"hidden", marginBottom:16 }}>
               <div style={{ padding:"12px 16px", borderBottom:`0.5px solid ${T.border}` }}>
                 <div style={{ fontSize:11, color:T.hint, marginBottom:2 }}>Display name</div>
                 <div style={{ fontSize:14, color:T.text }}>{coachOwnName || "—"}</div>
               </div>
               <div style={{ padding:"12px 16px" }}>
                 <div style={{ fontSize:11, color:T.hint, marginBottom:2 }}>Subscription</div>
-                <div style={{ fontSize:14, color: coachTier ? "#27AE60" : T.muted }}>
+                <div style={{ fontSize:14, color: coachTier ? T.green : T.muted }}>
                   {coachTier ? "Forged Coach · Active" : "No active plan"}
                 </div>
               </div>
@@ -12995,6 +13302,7 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin, coachOwnName }) {
           <CoachClientDetail
             client={selectedClient}
             onBack={() => { setCoachScreen("list"); setSelectedClient(null); }}
+            useLocalAiBrief={!COACH_SUMMARY_UUID_RE.test(String(selectedClient.id ?? ""))}
           />
         ) : (
           <div style={{ padding:"18px 16px 0" }}>
@@ -13163,8 +13471,7 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin, coachOwnName }) {
         zIndex:200,
       }}>
         {navItem("clients", "👥", "Clients")}
-        {navItem("invite",  "＋", "Invite")}
-        {navItem("you",     "⚙︎", "You")}
+        {navItem("you",     "👤", "You")}
       </div>
     </div>
   );
@@ -16183,7 +16490,7 @@ export default function App() {
         )}
         {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} coachEverOpened={coachEverOpened} onOpenCoachMic={() => openCoachWithMode("mic")} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} hideFloatingAdd onOpenGoalDetail={id => setOpenGoalId(id)}/>}
         {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} journalEntries={journalEntries} onSaveJournalEntry={handleSaveJournalEntry} initialTab={showJournalCompose ? "journal" : undefined} onInitialComposeDone={() => setShowJournalCompose(false)}/>}
-        {screen === "insights" && <InsightsScreen habits={habits} goals={goals} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} userId={sessionUserId}/>}
+        {screen === "insights" && <InsightsScreen habits={habits} goals={goals} journalEntries={journalEntries} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} userId={sessionUserId}/>}
         {screen === "social"   && <SocialScreen
           user={user} xp={xp} habits={habits}
           friends={friends} friendRequests={friendRequests} sentRequests={sentRequests} friendsLoading={friendsLoading}
