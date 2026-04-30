@@ -10283,6 +10283,134 @@ function NotifCategoryRow({ emoji, title, subtitle, checked, onChange, disabled,
   );
 }
 
+/** Shown in Profile for users who don't have a coach yet. Lets them enter a
+ *  coach code (8 hex chars, e.g. ABCD-1234) to link to an existing coach. */
+function JoinCoachSection({ onLinked }) {
+  const [code,    setCode]    = useState("");
+  const [busy,    setBusy]    = useState(false);
+  const [err,     setErr]     = useState("");
+  const [success, setSuccess] = useState(null); // { coachName }
+  const [open,    setOpen]    = useState(false);
+
+  function formatCode(raw) {
+    const clean = raw.replace(/[^a-fA-F0-9]/g, "").toUpperCase().slice(0, 8);
+    return clean.length > 4 ? `${clean.slice(0,4)}-${clean.slice(4)}` : clean;
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    const clean = code.replace(/-/g, "").toLowerCase();
+    if (clean.length < 6) { setErr("Code too short — try again"); return; }
+    setBusy(true); setErr("");
+    try {
+      // Look up the coach by UUID prefix
+      const { data: coaches, error: lookupErr } = await supabase
+        .from("profiles")
+        .select("id, name")
+        .eq("is_coach", true)
+        .ilike("id", `${clean}%`)
+        .limit(1);
+      if (lookupErr) throw new Error(lookupErr.message);
+      if (!coaches || coaches.length === 0) { setErr("Code not found — double-check and try again"); setBusy(false); return; }
+      const coach = coaches[0];
+      // Link via the existing accept-coach-invite endpoint
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("Not signed in");
+      const res = await fetch("/api/accept-coach-invite", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ coach: btoa(coach.id) }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to link");
+      setSuccess({ coachName: coach.name });
+      onLinked?.(coach.id, coach.name);
+    } catch (ex) {
+      setErr(ex.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (success) {
+    return (
+      <div style={{
+        margin:"0 14px 12px",
+        background:"linear-gradient(145deg, rgba(39,174,96,0.07), rgba(39,174,96,0.02))",
+        border:`1px solid rgba(39,174,96,0.28)`, borderRadius:14, padding:"14px 16px",
+      }}>
+        <div style={{ fontSize:10, fontWeight:700, color:"#27AE60", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>Coaching</div>
+        <div style={{ fontSize:15, fontWeight:600, color:T.text, marginBottom:4 }}>Connected to {success.coachName}</div>
+        <div style={{ fontSize:12, color:T.muted, lineHeight:1.6 }}>Your coach can now see your habits and notes. You&apos;ve also been upgraded to Forged Pro.</div>
+      </div>
+    );
+  }
+
+  if (!open) {
+    return (
+      <div style={{ margin:"0 14px 12px" }}>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          style={{
+            width:"100%", padding:"12px 16px", borderRadius:12, border:`1px solid ${T.border}`,
+            background:T.surface, color:T.muted, fontSize:13, cursor:"pointer",
+            fontFamily:T.font, textAlign:"left", display:"flex", alignItems:"center", justifyContent:"space-between",
+          }}
+        >
+          <span>Join a coach</span>
+          <span style={{ fontSize:18, color:T.hint }}>›</span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ margin:"0 14px 12px", background:T.raised, border:`0.5px solid ${T.border}`, borderRadius:14, padding:"14px 16px" }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
+        <div style={{ fontSize:14, fontWeight:600, color:T.text }}>Join a coach</div>
+        <button type="button" onClick={() => { setOpen(false); setErr(""); setCode(""); }}
+          style={{ background:"none", border:"none", color:T.muted, fontSize:18, cursor:"pointer", lineHeight:1 }}>×</button>
+      </div>
+      <div style={{ fontSize:12, color:T.muted, lineHeight:1.65, marginBottom:14 }}>
+        Enter the 8-character coach code your coach shared with you. You&apos;ll be linked instantly and upgraded to Pro.
+      </div>
+      <form onSubmit={handleSubmit}>
+        <input
+          value={code}
+          onChange={e => { setCode(formatCode(e.target.value)); setErr(""); }}
+          placeholder="ABCD-1234"
+          maxLength={9}
+          style={{
+            width:"100%", padding:"11px 14px", borderRadius:10, fontSize:18, fontWeight:700,
+            letterSpacing:"0.12em", textAlign:"center", fontFamily:"ui-monospace, SFMono-Regular, Menlo, monospace",
+            background:T.surface, border:`1px solid ${err ? "#E74C3C" : T.border}`,
+            color:T.text, outline:"none", boxSizing:"border-box", marginBottom:err ? 6 : 12,
+          }}
+          autoCapitalize="characters"
+          autoComplete="off"
+        />
+        {err && <div style={{ fontSize:12, color:"#E74C3C", marginBottom:10, textAlign:"center" }}>{err}</div>}
+        <button
+          type="submit"
+          disabled={busy || code.replace(/-/g,"").length < 6}
+          style={{
+            width:"100%", padding:"12px 0", borderRadius:10, border:"none",
+            background: (busy || code.replace(/-/g,"").length < 6) ? "rgba(255,255,255,0.07)" : T.gold,
+            color: (busy || code.replace(/-/g,"").length < 6) ? T.muted : "#1a1a16",
+            fontSize:14, fontWeight:700, fontFamily:T.font,
+            cursor: (busy || code.replace(/-/g,"").length < 6) ? "default" : "pointer",
+            transition:"background 0.2s, color 0.2s",
+          }}
+        >
+          {busy ? "Connecting…" : "Connect to coach"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onReplayPageGuides, onPreviewCoach, onSignOut, onShowTour, onUpgrade, coachName, coachIcon, onSaveCoach, notifEnabled, notifTime, notifLoading, notifPermission, dailyRemindersEnabled, nudgesEnabled, invitesEnabled, onNotifToggle, onNotifTimeChange, onNotifCategoryChange }) {
   const [editingName,    setEditingName]    = useState(false);
   const [nameVal,        setNameVal]        = useState(user.name);
@@ -10419,6 +10547,11 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
             {user.linkedCoachName ? `${user.linkedCoachName} can` : "Your coach can"} see your habit logs and notes to help prepare for your sessions.
           </div>
         </div>
+      )}
+
+      {/* Join a coach — shown when not yet linked */}
+      {!user.coachId && (
+        <JoinCoachSection onLinked={(coachId, coachName) => onUpdateUser({ coachId, linkedCoachName: coachName })} />
       )}
 
       {/* Account */}
@@ -12055,6 +12188,123 @@ function CoachSectionLabel({ label, count, anchorRef }) {
   );
 }
 
+// ── Demo clients for preview mode (admin/dev account only) ─────────────────
+// Shown when isPreview=true and there are no real clients yet.
+// Covers all three urgency buckets so the dashboard looks alive.
+function _demoLast7(pattern) {
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(Date.now() - (6 - i) * 86400000);
+    return { date: d.toISOString().slice(0, 10), logged: pattern[i], skip: false };
+  });
+}
+
+const DEMO_CLIENTS = [
+  {
+    id: "demo-sarah",
+    name: "Sarah K.",
+    email: "sarah@example.com",
+    xp: 1840,
+    isPro: true,
+    joinedAt: new Date(Date.now() - 21 * 86400000).toISOString(),
+    lastActiveDate: new Date().toISOString().slice(0, 10),
+    daysSinceActive: 0,
+    totalHabits: 4,
+    loggedTodayCount: 3,
+    habits: [
+      { name: "Morning run", emoji: "🏃", streak: 11, lastLogDate: new Date().toISOString().slice(0, 10), loggedToday: true,
+        recentNote: "Felt slow but pushed through. 4.2km done.", last7: _demoLast7([true,true,false,true,true,true,true]) },
+      { name: "No alcohol", emoji: "🚫", streak: 18, lastLogDate: new Date().toISOString().slice(0, 10), loggedToday: true,
+        recentNote: null, last7: _demoLast7([true,true,true,true,true,true,true]) },
+      { name: "Journalling", emoji: "📓", streak: 4, lastLogDate: new Date().toISOString().slice(0, 10), loggedToday: true,
+        recentNote: "Wrote about feeling stuck at work. Helpful.", last7: _demoLast7([false,true,true,false,true,true,true]) },
+      { name: "Cold shower", emoji: "🚿", streak: 2, lastLogDate: new Date(Date.now()-86400000).toISOString().slice(0,10), loggedToday: false,
+        recentNote: null, last7: _demoLast7([false,false,true,false,false,true,false]) },
+    ],
+  },
+  {
+    id: "demo-marcus",
+    name: "Marcus T.",
+    email: "marcus@example.com",
+    xp: 920,
+    isPro: true,
+    joinedAt: new Date(Date.now() - 42 * 86400000).toISOString(),
+    lastActiveDate: new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10),
+    daysSinceActive: 5,
+    totalHabits: 3,
+    loggedTodayCount: 0,
+    habits: [
+      { name: "Gym", emoji: "🏋️", streak: 0, lastLogDate: new Date(Date.now()-5*86400000).toISOString().slice(0,10), loggedToday: false,
+        recentNote: "Work's been mad this week, couldn't make it in.", last7: _demoLast7([true,true,true,false,false,false,false]) },
+      { name: "Meal prep", emoji: "🥗", streak: 0, lastLogDate: new Date(Date.now()-5*86400000).toISOString().slice(0,10), loggedToday: false,
+        recentNote: null, last7: _demoLast7([true,false,true,false,false,false,false]) },
+      { name: "8hrs sleep", emoji: "😴", streak: 0, lastLogDate: new Date(Date.now()-6*86400000).toISOString().slice(0,10), loggedToday: false,
+        recentNote: null, last7: _demoLast7([false,true,false,false,false,false,false]) },
+    ],
+  },
+  {
+    id: "demo-jamie",
+    name: "Jamie R.",
+    email: "jamie@example.com",
+    xp: 240,
+    isPro: true,
+    joinedAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+    lastActiveDate: new Date().toISOString().slice(0, 10),
+    daysSinceActive: 0,
+    totalHabits: 2,
+    loggedTodayCount: 2,
+    habits: [
+      { name: "Walk 10k steps", emoji: "🚶", streak: 2, lastLogDate: new Date().toISOString().slice(0,10), loggedToday: true,
+        recentNote: "Just getting started!", last7: _demoLast7([false,false,false,false,false,true,true]) },
+      { name: "No phone before 9am", emoji: "📵", streak: 2, lastLogDate: new Date().toISOString().slice(0,10), loggedToday: true,
+        recentNote: null, last7: _demoLast7([false,false,false,false,false,true,true]) },
+    ],
+  },
+  {
+    id: "demo-alex",
+    name: "Alex W.",
+    email: "alex@example.com",
+    xp: 3200,
+    isPro: true,
+    joinedAt: new Date(Date.now() - 90 * 86400000).toISOString(),
+    lastActiveDate: new Date(Date.now() - 1 * 86400000).toISOString().slice(0, 10),
+    daysSinceActive: 1,
+    totalHabits: 5,
+    loggedTodayCount: 0,
+    habits: [
+      { name: "Meditation", emoji: "🧘", streak: 22, lastLogDate: new Date(Date.now()-86400000).toISOString().slice(0,10), loggedToday: false,
+        recentNote: "20 mins this morning, really focused.", last7: _demoLast7([true,true,true,true,true,true,false]) },
+      { name: "Read 30 mins", emoji: "📚", streak: 8, lastLogDate: new Date(Date.now()-86400000).toISOString().slice(0,10), loggedToday: false,
+        recentNote: null, last7: _demoLast7([false,true,true,false,true,true,false]) },
+      { name: "No sugar", emoji: "🍬", streak: 4, lastLogDate: new Date(Date.now()-86400000).toISOString().slice(0,10), loggedToday: false,
+        recentNote: "Cravings bad on Friday but held it.", last7: _demoLast7([true,false,false,true,true,true,false]) },
+      { name: "Gym", emoji: "🏋️", streak: 0, lastLogDate: new Date(Date.now()-3*86400000).toISOString().slice(0,10), loggedToday: false,
+        recentNote: null, last7: _demoLast7([true,false,false,false,false,false,false]) },
+      { name: "Gratitude", emoji: "🙏", streak: 22, lastLogDate: new Date(Date.now()-86400000).toISOString().slice(0,10), loggedToday: false,
+        recentNote: null, last7: _demoLast7([true,true,true,true,true,true,false]) },
+    ],
+  },
+  {
+    id: "demo-priya",
+    name: "Priya S.",
+    email: "priya@example.com",
+    xp: 60,
+    isPro: true,
+    joinedAt: new Date(Date.now() - 7 * 86400000).toISOString(),
+    lastActiveDate: null,
+    daysSinceActive: null,
+    totalHabits: 3,
+    loggedTodayCount: 0,
+    habits: [
+      { name: "Morning yoga", emoji: "🧘", streak: 0, lastLogDate: null, loggedToday: false,
+        recentNote: null, last7: _demoLast7([false,false,false,false,false,false,false]) },
+      { name: "Water intake", emoji: "💧", streak: 0, lastLogDate: null, loggedToday: false,
+        recentNote: null, last7: _demoLast7([false,false,false,false,false,false,false]) },
+      { name: "Evening walk", emoji: "🌇", streak: 0, lastLogDate: null, loggedToday: false,
+        recentNote: null, last7: _demoLast7([false,false,false,false,false,false,false]) },
+    ],
+  },
+];
+
 function CoachApp({ onExit, isPreview, coachTier, isAdmin, coachOwnName }) {
   const [coachTab,       setCoachTab]       = useState("clients"); // "clients" | "invite" | "you"
   const [coachScreen,    setCoachScreen]    = useState("list");
@@ -12092,6 +12342,13 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin, coachOwnName }) {
     ? `https://forged-sage.vercel.app/?coach=${btoa(coachUserId)}`
     : null;
 
+  // Short 8-char code derived from coach UUID — for existing users to join via Profile.
+  // Formatted as ABCD-1234 for readability. Looked up by prefix in the DB.
+  const coachCode = coachUserId
+    ? coachUserId.replace(/-/g, "").slice(0, 8).toUpperCase()
+    : null;
+  const coachCodeFormatted = coachCode ? `${coachCode.slice(0,4)}-${coachCode.slice(4,8)}` : null;
+
   function copyInviteLink() {
     if (!inviteLink) return;
     navigator.clipboard.writeText(inviteLink).then(() => {
@@ -12100,7 +12357,10 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin, coachOwnName }) {
     });
   }
 
-  const clients = data?.clients ?? [];
+  const realClients = data?.clients ?? [];
+  // In preview mode with no real clients, show demo data so the workspace feels alive.
+  const useDemoClients = isPreview && realClients.length === 0;
+  const clients = useDemoClients ? DEMO_CLIENTS : realClients;
 
   // ── Bucket clients into urgency groups ─────────────────────────────────
   // A client can fit several buckets — pick once, in priority order, so each
@@ -12246,6 +12506,17 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin, coachOwnName }) {
         </div>
       </div>
 
+      {/* ── Preview / demo data banner ─────────────────────────────────── */}
+      {useDemoClients && (
+        <div style={{
+          background:"rgba(200,144,42,0.12)", borderBottom:`1px solid rgba(200,144,42,0.25)`,
+          padding:"9px 18px", display:"flex", alignItems:"center", gap:8,
+        }}>
+          <span style={{ fontSize:11, fontWeight:700, color:T.gold, letterSpacing:"0.04em" }}>PREVIEW</span>
+          <span style={{ fontSize:11, color:T.sub }}>· Demo data only — not real clients</span>
+        </div>
+      )}
+
       {/* ── Attention strip (clients tab, list view only) ───────────────── */}
       {!showPaywall && coachTab === "clients" && coachScreen === "list" && needsAttention.length > 0 && (
         <button
@@ -12309,6 +12580,23 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin, coachOwnName }) {
                   {inviteLink}
                 </div>
               </>
+            )}
+            {/* Coach code — alternative for existing users */}
+            {coachCodeFormatted && (
+              <div style={{
+                background:T.surface, border:`1px solid ${T.border}`,
+                borderRadius:12, padding:"14px 16px", marginBottom:12,
+              }}>
+                <div style={{ fontSize:10, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:8 }}>
+                  Coach code · for existing users
+                </div>
+                <div style={{ fontSize:26, fontWeight:700, color:T.text, letterSpacing:"0.14em", fontFamily:"ui-monospace, SFMono-Regular, Menlo, monospace", marginBottom:8 }}>
+                  {coachCodeFormatted}
+                </div>
+                <div style={{ fontSize:12, color:T.muted, lineHeight:1.6 }}>
+                  Existing Forged users can enter this code in their Profile → &ldquo;Join a coach&rdquo; to link instantly — no new account needed.
+                </div>
+              </div>
             )}
             <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:12, padding:"14px 16px" }}>
               <div style={{ fontSize:10, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:8 }}>Client slots</div>
@@ -12415,57 +12703,68 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin, coachOwnName }) {
 
             {/* Empty state */}
             {!loading && !err && clients.length === 0 && (
-              <div style={{ textAlign:"center", padding:"32px 8px 12px" }}>
-                <div style={{ fontSize:52, lineHeight:1, marginBottom:16 }}>👥</div>
-                <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, lineHeight:1.2, marginBottom:10 }}>
-                  Your coaching space is ready.
-                </div>
-                <div style={{ fontSize:14, color:T.muted, lineHeight:1.65, maxWidth:280, margin:"0 auto 22px" }}>
-                  Invite a client to start seeing their habits, patterns, and progress here.
+              <div style={{ padding:"28px 16px 12px" }}>
+                {/* Value headline */}
+                <div style={{ textAlign:"center", marginBottom:24 }}>
+                  <div style={{ fontSize:44, lineHeight:1, marginBottom:14 }}>👥</div>
+                  <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, lineHeight:1.25, marginBottom:8 }}>
+                    Your coaching workspace
+                  </div>
+                  <div style={{ fontSize:13, color:T.muted, lineHeight:1.7, maxWidth:290, margin:"0 auto" }}>
+                    When clients join through your link or code, you see their habits, streaks, and notes right here — ready before every session.
+                  </div>
                 </div>
 
-                <div style={{
-                  textAlign:"left", maxWidth:280, margin:"0 auto 22px",
-                  display:"flex", flexDirection:"column", gap:8,
-                }}>
+                {/* Value props cards */}
+                <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:24 }}>
                   {[
-                    "They get a personalised onboarding",
-                    "Forged Pro included for each client (up to 15)",
-                    "You see their habits and notes as they log",
-                  ].map(line => (
-                    <div key={line} style={{ display:"flex", alignItems:"flex-start", gap:9 }}>
-                      <span style={{ color:T.gold, fontSize:12, lineHeight:1.55, flexShrink:0, marginTop:1, fontWeight:700 }}>✓</span>
-                      <span style={{ fontSize:12, color:T.sub, lineHeight:1.55 }}>{line}</span>
+                    { icon:"📋", title:"Full habit visibility", body:"See every habit they track, their logs, streaks, and personal notes as they write them." },
+                    { icon:"✨", title:"AI pre-session brief", body:"Before each session, get an AI-generated summary of what shifted, what stalled, and what to ask." },
+                    { icon:"⚡", title:"Pro included", body:"Each client you add gets Forged Pro automatically — up to 15 seats included with your plan." },
+                  ].map(({ icon, title, body }) => (
+                    <div key={title} style={{
+                      background:T.surface, border:`1px solid ${T.border}`,
+                      borderRadius:12, padding:"13px 14px",
+                      display:"flex", alignItems:"flex-start", gap:12,
+                    }}>
+                      <span style={{ fontSize:18, flexShrink:0, lineHeight:1.4 }}>{icon}</span>
+                      <div>
+                        <div style={{ fontSize:13, fontWeight:600, color:T.text, marginBottom:3 }}>{title}</div>
+                        <div style={{ fontSize:12, color:T.muted, lineHeight:1.6 }}>{body}</div>
+                      </div>
                     </div>
                   ))}
                 </div>
 
+                {/* Primary CTA */}
                 {inviteLink && (
                   <button
                     type="button"
                     onClick={copyInviteLink}
                     style={{
-                      width:"100%", maxWidth:300, margin:"0 auto",
-                      padding:"13px 16px", borderRadius:12, border:"none",
+                      width:"100%", padding:"14px 0", borderRadius:12, border:"none",
                       background:T.gold, color:"#1a1a16",
                       fontSize:14, fontWeight:700, fontFamily:T.font,
-                      cursor:"pointer", display:"block",
+                      cursor:"pointer", marginBottom:12,
                       boxShadow:"0 2px 14px rgba(200,144,42,0.18)",
                     }}
                   >
-                    {inviteCopied ? "Link copied ✓" : "Invite your first client →"}
+                    {inviteCopied ? "Link copied ✓" : "Copy invite link →"}
                   </button>
                 )}
 
-                {inviteLink && (
-                  <div style={{
-                    marginTop:14, maxWidth:300, marginLeft:"auto", marginRight:"auto",
-                    background:T.surface, border:`1px solid ${T.border}`, borderRadius:10,
-                    padding:"8px 10px", fontSize:11, color:T.sub,
-                    overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
-                    fontFamily:"ui-monospace, SFMono-Regular, Menlo, monospace",
-                  }}>
-                    {inviteLink}
+                {/* Coach code — secondary path */}
+                {coachCodeFormatted && (
+                  <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:12, padding:"13px 16px", textAlign:"center" }}>
+                    <div style={{ fontSize:10, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>
+                      Or share your coach code
+                    </div>
+                    <div style={{ fontSize:22, fontWeight:700, color:T.text, letterSpacing:"0.14em", fontFamily:"ui-monospace, SFMono-Regular, Menlo, monospace", marginBottom:6 }}>
+                      {coachCodeFormatted}
+                    </div>
+                    <div style={{ fontSize:12, color:T.muted, lineHeight:1.5 }}>
+                      Existing Forged users can enter this in Profile → &ldquo;Join a coach&rdquo;
+                    </div>
                   </div>
                 )}
               </div>
