@@ -3,6 +3,15 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } fr
 import { flushSync, createPortal } from "react-dom";
 import { supabase, habitToRow, rowToHabit, rowToGoal, goalToRow } from "./supabase.js";
 
+/** Installed “Add to Home Screen” Web App (standalone), including iOS Safari PWA. */
+function isLikelyHomeScreenPwa() {
+  if (typeof window === "undefined") return false;
+  try {
+    if (window.matchMedia("(display-mode: standalone)").matches) return true;
+  } catch { /* ignore */ }
+  return window.navigator.standalone === true;
+}
+
 // ─── DATE UTILS ───────────────────────────────────────────────────────────────
 const DAYS   = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -4723,6 +4732,11 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
     }
   });
 
+  // tStr must be declared BEFORE goalMarkerDays — the forEach callbacks close over
+  // it synchronously, so declaring it after (as it was) caused a TDZ crash whenever
+  // any goal had a targetDate or milestone log entry.
+  const tStr = todayStr();
+
   // Goal deadlines and milestones for this month view
   const goalMarkerDays = {}; // { dayNum: [{ type:"deadline"|"milestone", label, color, emoji, isFuture }] }
   (goals || []).filter(g => g.status !== "completed").forEach(g => {
@@ -4743,8 +4757,6 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
       }
     });
   });
-
-  const tStr = todayStr();
   const missedDatesList = Object.keys(missedMap).sort((a, b) => b.localeCompare(a));
   const missedMarkedCount = missedDatesList.length;
   const mergedDatesSet = new Set([...dates, ...missedDatesList]);
@@ -11071,6 +11083,14 @@ function AuthScreen({ onSent, checkoutPending }) {
         setLoading(false);
         return;
       }
+      // #region agent log
+      dbgAuthLog({
+        hypothesisId: "B",
+        location: "App.jsx:AuthScreen:signIn",
+        message: "signInWithPassword_ok",
+        data: { uid8: data?.user?.id?.slice?.(0, 8) ?? null, hasSession: !!data?.session },
+      });
+      // #endregion
       // signInWithPassword succeeded — onAuthStateChange(SIGNED_IN) will take it from here
       setLoading(false);
     }
@@ -14542,7 +14562,6 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return;
       try {
-
         // ── Initial session ───────────────────────────────────────────────
         // Do not leave the loading screen until profile/habits load succeeds (or we show retry).
         if (event === "INITIAL_SESSION") {
@@ -14590,6 +14609,31 @@ export default function App() {
                 else setAccountLoadError(true);
                 setAuthScreen(false);
                 return;
+              }
+              // iOS/Android home-screen PWAs: storage + token refresh can lag INITIAL_SESSION(null).
+              // One refresh + re-read matches soft recovery and fixes “signed out until browser tab” reports.
+              if (isLikelyHomeScreenPwa()) {
+                try {
+                  await supabase.auth.refreshSession();
+                } catch (e) {
+                  console.warn("Auth: PWA post-probe refreshSession —", e?.message || e);
+                }
+                const { data: { session: pwaRecovered }, error: pwaRecErr } = await supabase.auth.getSession();
+                if (pwaRecErr) console.warn("Auth: PWA post-refresh getSession —", pwaRecErr.message);
+                if (pwaRecovered?.user?.id) {
+                  if (pwaRecovered.user.email) setAuthEmail(pwaRecovered.user.email);
+                  setSessionUserId(pwaRecovered.user.id);
+                  setAccountLoadError(false);
+                  accountDataLoadedRef.current = false;
+                  setAccountDataReady(false);
+                  userIdRef.current = null;
+                  const ok = await loadUserDataWithRetries(pwaRecovered.user.id, "INITIAL_SESSION_PWA_REFRESH");
+                  if (!mounted) return;
+                  if (ok) setAccountLoadError(false);
+                  else setAccountLoadError(true);
+                  setAuthScreen(false);
+                  return;
+                }
               }
               setSessionUserId(null);
               setAccountLoadError(false);
@@ -14776,6 +14820,9 @@ export default function App() {
       if (now - lastResumeDataFetchRef.current < 5000) return;
       lastResumeDataFetchRef.current = now;
       (async () => {
+        if (isLikelyHomeScreenPwa()) {
+          await supabase.auth.refreshSession().catch(() => {});
+        }
         const { data: { session } } = await supabase.auth.getSession();
         if (!session?.user?.id) return;
         if (loadingUidRef.current === session.user.id) return;
