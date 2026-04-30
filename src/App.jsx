@@ -192,6 +192,25 @@ function nextLevel(xp) {
 function isLoggedToday(h) {
   return h.logs.some(l => l.date === todayStr());
 }
+/**
+ * Whether this trackable counts toward the Today forged ring.
+ * Weekly: session today, weekly rest day (skip), or weekly target already met this week.
+ * Daily: done or rest — not raw isLoggedToday (avoids quicknote-only false positives).
+ */
+function isSatisfiedForTodayRing(h) {
+  const t = todayStr();
+  if (h.habitType === "weekly") {
+    const target = Math.max(1, Number(h.weeklyTarget) || 1);
+    if (hasRestDay(h, t)) return true;
+    if (getWeeklyCount(h) >= target) return true;
+    return h.logs.some(l => l.date === t && l.value === true);
+  }
+  if (h.habitType === "daily") {
+    return hasDailyCompletion(h, t) || hasRestDay(h, t);
+  }
+  if (h.habitType === "log") return false;
+  return isLoggedToday(h);
+}
 function todayLogs(h) {
   return h.logs.filter(l => l.date === todayStr());
 }
@@ -592,9 +611,9 @@ function getCompletionRate(h) {
   const cutoff = daysAgo(28);
   const recent = h.logs.filter(l => l.date >= cutoff);
   if (h.habitType === "weekly") {
-    // Sessions logged vs ideal (target × 4 weeks)
-    const ideal = h.weeklyTarget * 4;
-    return Math.min(100, Math.round((recent.length / ideal) * 100));
+    const ideal = Math.max(1, (h.weeklyTarget || 1) * 4);
+    const sessions = recent.filter(l => l.value === true).length;
+    return Math.min(100, Math.round((sessions / ideal) * 100));
   }
   // Build/project: count days where build target was met.
   if (h.habitType === "project") {
@@ -2142,16 +2161,29 @@ function DailyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDeleteHabit
   );
 }
 
-function WeeklyCard({ habit, onTap, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit }) {
-  const logged = isLoggedToday(habit);
+function WeeklyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit }) {
+  const t = todayStr();
+  const isSkip = hasRestDay(habit, t);
+  const sessionToday = habit.logs.some(l => l.date === t && l.value === true);
+  const satisfied = isSatisfiedForTodayRing(habit);
   const wk = getWeeklyCount(habit);
   const pct = Math.min(100, Math.round((wk / habit.weeklyTarget) * 100));
+  const targetMet = wk >= (habit.weeklyTarget || 1);
   const [habitMenuOpen, setHabitMenuOpen] = useState(false);
+  const [restOpen, setRestOpen] = useState(false);
+  const [restWhy, setRestWhy] = useState("");
   const longPeek = useTodayHabitLongPeekHandlers(setHabitMenuOpen, !!(onEditHabit && onDeleteHabit));
+  useEffect(() => {
+    if (sessionToday || isSkip) {
+      setRestOpen(false);
+      setRestWhy("");
+    }
+  }, [sessionToday, isSkip]);
+  const checkLogged = satisfied && !isSkip;
   return (
-    <div className="rc" style={cardStyle(logged, habit)} {...longPeek}>
+    <div className="rc" style={cardStyle(satisfied, habit)} {...longPeek}>
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
-        <IconBox habit={habit} logged={logged}/>
+        <IconBox habit={habit} logged={checkLogged}/>
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{habit.name}</div>
           <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>
@@ -2162,7 +2194,12 @@ function WeeklyCard({ habit, onTap, onAddNote, onEditHabit, onDeleteHabit, onSha
         {onEditHabit && onDeleteHabit && (
           <TodayOverflowDotsBtn expanded={habitMenuOpen} onToggle={() => setHabitMenuOpen(p => !p)} />
         )}
-        <CheckBtn logged={logged} habit={habit} onClick={e => onTap(habit.id, e)}/>
+        {isSkip
+          ? <button className="tap" onClick={() => onTap(habit.id, { currentTarget: { getBoundingClientRect: () => ({left:0,top:0,width:0,height:0}) } })}
+              style={{ width:44, height:44, borderRadius:"50%", flexShrink:0, border:`2px solid ${T.muted}`, background:T.surface, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, transition:"all 0.18s" }}>
+              🛡️
+            </button>
+          : <CheckBtn logged={checkLogged} habit={habit} onClick={e => onTap(habit.id, e)}/>}
       </div>
       {onEditHabit && onDeleteHabit && (
         <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} onShareHabit={onShareHabit} shareSaving={!!sharingThisHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} />
@@ -2179,9 +2216,61 @@ function WeeklyCard({ habit, onTap, onAddNote, onEditHabit, onDeleteHabit, onSha
             {wk >= habit.weeklyTarget ? "Target hit! 🎉" : `${habit.weeklyTarget - wk} more to go`}
           </span>
         </div>
+        {targetMet && !sessionToday && !isSkip && (
+          <div style={{ fontSize:11, color:T.hint, marginTop:8, lineHeight:1.45 }}>
+            Weekly target met — no session needed today for your ring.
+          </div>
+        )}
       </div>
-      {logged && <DoneBanner habit={habit}/>}
-      {logged && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote}/>}
+      {isSkip && (
+        <div style={{ margin:"0 15px 12px", background:"rgba(106,104,96,0.15)", borderRadius:T.rsm, padding:"8px 12px", display:"flex", flexDirection:"column", gap:6 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:16 }}>🛡️</span>
+            <span style={{ fontSize:12, fontWeight:500, color:T.muted }}>Weekly rest day — ring counts this; sessions this week unchanged</span>
+          </div>
+          {habit.logs.find(l => l.date === t && l.value === "skip")?.note?.trim() ? (
+            <div style={{ fontSize:12, color:T.sub, lineHeight:1.5, paddingLeft:24, fontStyle:"italic" }}>
+              {String(habit.logs.find(l => l.date === t && l.value === "skip").note).trim()}
+            </div>
+          ) : null}
+        </div>
+      )}
+      {sessionToday && !isSkip && <DoneBanner habit={habit}/>}
+      {sessionToday && !isSkip && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote}/>}
+      {!sessionToday && !isSkip && !targetMet && (
+        <div style={{ padding:"0 15px 12px" }}>
+          {restOpen ? (
+            <div style={{ borderRadius:T.rsm, border:`0.5px solid ${T.borderMid}`, background:T.surface, padding:"12px 12px 10px" }}>
+              <label style={{ display:"block", fontSize:12, fontWeight:500, color:T.text, marginBottom:6 }}>Weekly rest day? <span style={{ fontWeight:400, color:T.hint }}>(optional note)</span></label>
+              <textarea
+                value={restWhy}
+                onChange={e => setRestWhy(e.target.value)}
+                placeholder="Recovery, travel, light week…"
+                rows={2}
+                maxLength={200}
+                style={{ width:"100%", boxSizing:"border-box", resize:"vertical", borderRadius:8, border:`0.5px solid ${T.border}`, background:T.raised, color:T.text, fontSize:13, padding:10, fontFamily:T.font, lineHeight:1.45, marginBottom:10 }}
+              />
+              <div style={{ display:"flex", gap:8, justifyContent:"flex-end", flexWrap:"wrap" }}>
+                <button type="button" onClick={() => { setRestOpen(false); setRestWhy(""); }}
+                  style={{ fontSize:12, color:T.muted, background:"none", border:`0.5px solid ${T.border}`, borderRadius:T.rsm, padding:"8px 14px", cursor:"pointer" }}>
+                  Cancel
+                </button>
+                <button type="button" onClick={() => { onSkip(habit.id, restWhy.trim()); setRestOpen(false); setRestWhy(""); }}
+                  style={{ fontSize:12, fontWeight:600, color:"#1a1208", background:T.amber, border:"none", borderRadius:T.rsm, padding:"8px 16px", cursor:"pointer" }}>
+                  Confirm weekly rest
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display:"flex", justifyContent:"flex-end" }}>
+              <button type="button" onClick={() => { setRestOpen(true); setRestWhy(""); }}
+                style={{ fontSize:12, color:T.hint, background:"none", border:"none", cursor:"pointer", display:"flex", alignItems:"center", gap:4 }}>
+                🛡️ Weekly rest day
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -3800,7 +3889,7 @@ function buildCoachGreetingLine({ habits, goals }) {
   const trackHabits = (habits || []).filter(h => h.habitType !== "log");
   const activeGoals = (goals || []).filter(g => g.status !== "completed");
   const total = trackHabits.length;
-  const loggedCount = total ? trackHabits.filter(h => isLoggedToday(h)).length : 0;
+  const loggedCount = total ? trackHabits.filter(h => isSatisfiedForTodayRing(h)).length : 0;
   const all = total > 0 && loggedCount === total;
   const some = total > 0 && loggedCount > 0 && !all;
   const none = total > 0 && loggedCount === 0;
@@ -4034,7 +4123,7 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
   const activeGoals = goals.filter(g => g.status !== "completed");
   const trackHabits = habits.filter(h => h.habitType !== "log");
   const logHabits = habits.filter(h => h.habitType === "log");
-  const loggedCount = trackHabits.filter(h => isLoggedToday(h)).length;
+  const loggedCount = trackHabits.filter(h => isSatisfiedForTodayRing(h)).length;
   const totalTrackables = trackHabits.length;
   const pct = totalTrackables ? Math.round((loggedCount / totalTrackables) * 100) : 0;
   const hr = new Date().getHours();
@@ -4162,7 +4251,7 @@ function TodayScreen({ habits, goals = [], xp, onTap, onUndo, onSkip, onAddNote,
             ),
           daily.length   > 0 && <><SLabel>Daily</SLabel>          {daily.map(h   => <DailyCard  key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId === h.id}/>)}</>,
           limit.length   > 0 && <><SLabel>Limits</SLabel>         {limit.map(h   => <LimitCard  key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId === h.id}/>)}</>,
-          weekly.length  > 0 && <><SLabel>Weekly targets</SLabel> {weekly.map(h  => <WeeklyCard key={h.id} habit={h} onTap={onTap} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId === h.id}/>)}</>,
+          weekly.length  > 0 && <><SLabel>Weekly targets</SLabel> {weekly.map(h  => <WeeklyCard key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId === h.id}/>)}</>,
           project.length > 0 && <><SLabel>Build</SLabel>          {project.map(h => <ProjectCard key={h.id} habit={h} onOpenLog={onOpenLog} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId === h.id}/>)}</>,
           logHabits.length > 0 && onSaveLogEntry && <><SLabel>Logs</SLabel> {logHabits.map(h => <LogCard key={h.id} habit={h} onSaveEntry={onSaveLogEntry} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit}/>)}</>,
         ].filter(Boolean);
@@ -4627,8 +4716,74 @@ function HabitDayCard({ habit, logs, onReflect, onDeleteLogEntry }) {
   );
 }
 
+// ─── JOURNAL COMPOSE SHEET ────────────────────────────────────────────────────
+/** Bottom sheet for writing or editing a pure journal entry for a given date. */
+function JournalComposeSheet({ initialContent = "", date, onSave, onClose }) {
+  const [draft, setDraft] = useState(initialContent);
+  const taRef = useRef(null);
+  useEffect(() => { taRef.current?.focus(); }, []);
+
+  const displayDate = (() => {
+    const d = parseLocal(date);
+    return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+  })();
+
+  function handleSave() {
+    if (!draft.trim()) return;
+    onSave(date, draft.trim());
+    onClose();
+  }
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", zIndex:400, display:"flex", alignItems:"flex-end", justifyContent:"center" }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ width:430, maxWidth:"100vw", background:T.raised, borderRadius:"20px 20px 0 0", padding:"20px 16px 36px", boxSizing:"border-box" }}>
+        <div style={{ width:36, height:4, borderRadius:2, background:T.border, margin:"0 auto 16px" }}/>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
+          <div style={{ fontFamily:T.serif, fontSize:18, color:T.text }}>📓 {displayDate}</div>
+          <button type="button" onClick={onClose} style={{ background:"none", border:"none", color:T.muted, cursor:"pointer", fontSize:22, lineHeight:1, padding:"0 4px" }}>×</button>
+        </div>
+        <textarea
+          ref={taRef}
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          placeholder="Write anything — what happened today, how you're feeling, what's on your mind…"
+          rows={8}
+          style={{
+            width:"100%", boxSizing:"border-box", resize:"vertical",
+            borderRadius:T.r, border:`0.5px solid ${T.border}`,
+            background:T.surface, color:T.text, fontSize:14, lineHeight:1.65,
+            padding:"12px 14px", fontFamily:T.font,
+          }}
+        />
+        <div style={{ display:"flex", gap:10, marginTop:12 }}>
+          <button type="button" onClick={handleSave} disabled={!draft.trim()}
+            style={{ flex:1, padding:"12px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:600, cursor:draft.trim()?"pointer":"not-allowed", opacity:draft.trim()?1:0.5 }}>
+            Save entry
+          </button>
+          <button type="button" onClick={onClose}
+            style={{ padding:"12px 16px", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:"none", color:T.muted, fontSize:14, cursor:"pointer" }}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── JOURNAL SCREEN ───────────────────────────────────────────────────────────
-function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, journalUserId, isPro, onUpgrade }) {
+function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, journalUserId, isPro, onUpgrade, journalEntries = [], onSaveJournalEntry, initialTab, onInitialComposeDone }) {
+  // "activity" = habit/goal log history (existing), "journal" = pure journal entries
+  const [mainTab, setMainTab]   = useState(initialTab === "journal" ? "journal" : "activity");
+  const [composeDate, setComposeDate] = useState(initialTab === "journal" ? todayStr() : null); // null = closed, "YYYY-MM-DD" = open
+
+  // When navigating here from AddActionSheet "Write in journal", auto-open compose.
+  // Once the sheet closes, clear the trigger so subsequent navigations don't re-open.
+  useEffect(() => {
+    if (initialTab === "journal" && composeDate === null) {
+      onInitialComposeDone?.();
+    }
+  }, [composeDate]);
   const [filter, setFilter] = useState("all");
   const [viewMode, setViewMode] = useState("day"); // "day" | "week" | "month"
   const [monthOffset, setMonthOffset] = useState(0);
@@ -4814,34 +4969,124 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
 
   const listEmpty = sortedDatesDesc.length === 0;
 
+  // Sort journal entries newest first for the journal tab
+  const sortedJournalEntries = [...journalEntries].sort((a, b) => b.date.localeCompare(a.date));
+  const todayJournalEntry = journalEntries.find(e => e.date === tStr);
+
   return (
     <div data-tour="journal-list">
+      {/* Compose sheet */}
+      {composeDate && (
+        <JournalComposeSheet
+          date={composeDate}
+          initialContent={journalEntries.find(e => e.date === composeDate)?.content || ""}
+          onSave={(date, content) => onSaveJournalEntry?.(date, content)}
+          onClose={() => setComposeDate(null)}
+        />
+      )}
+
+      {/* Header */}
       <div style={{ padding:"16px 18px 10px", display:"flex", alignItems:"flex-end", justifyContent:"space-between", flexWrap:"wrap", gap:8 }}>
         <div>
           <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>Journal</div>
           <div style={{ fontSize:13, color:T.muted, marginTop:3 }}>
-            {loggedDaysCount} days logged
-            {missedMarkedCount > 0 ? (
-              <span> · <span style={{ color:T.muted }}>{missedMarkedCount} missed</span></span>
-            ) : null}
+            {mainTab === "activity" ? (
+              <>
+                {loggedDaysCount} days logged
+                {missedMarkedCount > 0 ? <span> · {missedMarkedCount} missed</span> : null}
+              </>
+            ) : (
+              <>{sortedJournalEntries.length} {sortedJournalEntries.length === 1 ? "entry" : "entries"}</>
+            )}
           </div>
         </div>
-        <div data-tour="journal-viewmode" style={{ display:"flex", background:T.surface, borderRadius:T.rsm, padding:3, gap:2 }}>
-          {[
-            ["day", "Day"],
-            ["week", "Week"],
-            ["month", "Month"],
-          ].map(([mode, label]) => (
-            <button key={mode} type="button" onClick={() => { setViewMode(mode); setSelectedDay(null); if (mode === "month") setListFullyExpanded(false); }}
-              style={{ padding:"5px 10px", borderRadius:7, border:"none", cursor:"pointer",
-                background:viewMode === mode ? T.raised : "none",
-                color:viewMode === mode ? T.text : T.muted, fontSize:11, fontWeight:500, transition:"all 0.15s" }}>
-              {label}
-            </button>
-          ))}
-        </div>
+        {mainTab === "activity" ? (
+          <div data-tour="journal-viewmode" style={{ display:"flex", background:T.surface, borderRadius:T.rsm, padding:3, gap:2 }}>
+            {[["day","Day"],["week","Week"],["month","Month"]].map(([mode, label]) => (
+              <button key={mode} type="button" onClick={() => { setViewMode(mode); setSelectedDay(null); if (mode === "month") setListFullyExpanded(false); }}
+                style={{ padding:"5px 10px", borderRadius:7, border:"none", cursor:"pointer",
+                  background:viewMode === mode ? T.raised : "none",
+                  color:viewMode === mode ? T.text : T.muted, fontSize:11, fontWeight:500, transition:"all 0.15s" }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <button type="button" onClick={() => setComposeDate(tStr)}
+            style={{ padding:"8px 14px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:13, fontWeight:600, cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
+            ✏️ Write
+          </button>
+        )}
       </div>
 
+      {/* Tab bar */}
+      <div style={{ display:"flex", gap:0, padding:"0 18px 14px" }}>
+        {[["activity","Activity"],["journal","Journal"]].map(([tab, label]) => (
+          <button key={tab} type="button" onClick={() => setMainTab(tab)}
+            style={{ padding:"6px 16px", borderRadius:0, border:"none", cursor:"pointer", fontSize:12, fontWeight:500,
+              background: mainTab === tab ? T.accent + "22" : "none",
+              color: mainTab === tab ? T.accent : T.muted,
+              borderBottom: mainTab === tab ? `2px solid ${T.accent}` : "2px solid transparent",
+              transition:"all 0.15s" }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── JOURNAL TAB ── */}
+      {mainTab === "journal" && (
+        <div style={{ padding:"0 16px 32px" }}>
+          {/* Today's entry card or prompt */}
+          {!todayJournalEntry ? (
+            <button type="button" onClick={() => setComposeDate(tStr)}
+              style={{ width:"100%", padding:"20px 18px", borderRadius:T.r, border:`1.5px dashed ${T.border}`, background:"none", cursor:"pointer", textAlign:"left", marginBottom:16, display:"flex", alignItems:"center", gap:14 }}>
+              <span style={{ fontSize:28 }}>📓</span>
+              <div>
+                <div style={{ fontSize:14, fontWeight:500, color:T.text }}>Write today's entry</div>
+                <div style={{ fontSize:12, color:T.muted, marginTop:3 }}>What happened today? How are you feeling? Anything on your mind.</div>
+              </div>
+            </button>
+          ) : (
+            <div style={{ marginBottom:16 }}>
+              <div style={{ fontSize:11, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:8 }}>Today</div>
+              <div style={{ padding:"14px 16px", background:T.surface, borderRadius:T.r, border:`0.5px solid ${T.border}`, position:"relative" }}>
+                <div style={{ fontSize:14, color:T.text, lineHeight:1.7, whiteSpace:"pre-wrap", wordBreak:"break-word" }}>{todayJournalEntry.content}</div>
+                <button type="button" onClick={() => setComposeDate(tStr)}
+                  style={{ marginTop:12, fontSize:12, color:T.accent, background:"none", border:"none", cursor:"pointer", padding:0, fontWeight:500 }}>
+                  + Add more →
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Past entries */}
+          {sortedJournalEntries.filter(e => e.date !== tStr).length === 0 && !todayJournalEntry && (
+            <div style={{ padding:"32px 0", textAlign:"center", color:T.muted, fontSize:13 }}>
+              No entries yet. Write your first one above.
+            </div>
+          )}
+          {sortedJournalEntries.filter(e => e.date !== tStr).map(entry => {
+            const d = parseLocal(entry.date);
+            const label = `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+            return (
+              <div key={entry.id || entry.date} style={{ marginBottom:14 }}>
+                <div style={{ fontSize:11, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>{label}</div>
+                <div style={{ padding:"14px 16px", background:T.surface, borderRadius:T.r, border:`0.5px solid ${T.border}` }}>
+                  <div style={{ fontSize:14, color:T.text, lineHeight:1.7, whiteSpace:"pre-wrap", wordBreak:"break-word" }}>{entry.content}</div>
+                  <button type="button" onClick={() => setComposeDate(entry.date)}
+                    style={{ marginTop:10, fontSize:12, color:T.muted, background:"none", border:"none", cursor:"pointer", padding:0 }}>
+                    Edit →
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── ACTIVITY TAB ── */}
+      {mainTab === "activity" && (
+      <>
       <div data-tour="journal-filters" style={{ display:"flex", gap:6, padding:"0 16px 14px", overflowX:"auto", WebkitOverflowScrolling:"touch" }}>
         {[{ id:"all", name:"All", emoji:"", color:T.accent }, ...habits.map(h => ({ id:`habit:${h.id}`, name:h.name, emoji:h.emoji, color:h.color })), ...goals.map(g => ({ id:`goal:${g.id}`, name:g.name, emoji:g.emoji, color:g.color }))].map(f => (
           <button key={f.id} type="button" onClick={() => { setFilter(f.id); setSelectedDay(null); }}
@@ -5218,6 +5463,8 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
               style={{ padding:"8px 14px", borderRadius:T.rsm, border:"none", background:"none", color:T.hint, fontSize:12, cursor:"pointer" }}>Clear mark</button>
           </div>
         </div>
+      )}
+      </>
       )}
 
       <div style={{ height:20 }}/>
@@ -6209,10 +6456,10 @@ function AddActionSheet({ onAddHabit, onAddGoal, onAddLog, onClose }) {
           </div>
         </button>
         <button type="button" onClick={onAddLog} style={{ display:"flex", alignItems:"center", gap:14, width:"100%", padding:"14px 16px", borderRadius:T.r, border:`0.5px solid ${T.borderStrong}`, background:T.surface, marginBottom:10, cursor:"pointer", textAlign:"left" }}>
-          <span style={{ fontSize:22 }}>📝</span>
+          <span style={{ fontSize:22 }}>📓</span>
           <div>
-            <div style={{ fontSize:15, fontWeight:500, color:T.text }}>Add a log</div>
-            <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>{HABIT_TYPES.log.desc}</div>
+            <div style={{ fontSize:15, fontWeight:500, color:T.text }}>Write in journal</div>
+            <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>Freeform daily entries — thoughts, feelings, events. No streaks, no stats.</div>
           </div>
         </button>
         <button type="button" onClick={onClose} style={{ width:"100%", padding:"13px", borderRadius:T.rsm, border:"none", background:T.surface, color:T.muted, fontSize:14, cursor:"pointer", marginTop:4 }}>Cancel</button>
@@ -7870,7 +8117,7 @@ function SocialScreen({ user, xp, habits, friends, friendRequests, sentRequests,
 // ─── AI HABIT COACH ──────────────────────────────────────────────────────────
 const CREATOR_ID = "5e9b4ba7-bf15-4e94-ab05-fe3306496973";
 
-function buildCoachSystemPrompt(user, habits, coachName, screen, goals = []) {
+function buildCoachSystemPrompt(user, habits, coachName, screen, goals = [], journalEntries = []) {
   const name = user?.name || "there";
   const coach = coachName || "Coach";
   const today = todayStr();
@@ -7981,10 +8228,18 @@ When the user wants a goal (any outcome tied to a number — lose weight, run a 
 3. Tell the user to tap "Create this goal" on the card below.
 The app renders a confirmation card from the <goal_plan> block. Never call create_habit for goals.
 
+─── JOURNAL ───
+The user has a pure Journal — freeform daily entries, no streaks, no stats. Use the log_journal tool to save personal context: feelings, life events, thoughts, anything that doesn't fit neatly into a habit or goal.
+You can (and often should) call log_habit + log_journal in the same turn: pull out the structured data (sessions, limits, progress) into habits/goals, and save the broader human story to the journal.
+If the user does a big life dump, extract structured parts for habits/goals and write the rest — plus any personal context — to the journal. Don't ask permission; just route it naturally and confirm briefly.
+${journalEntries.length ? `Recent journal entries (for context — do not repeat these back verbatim):
+${journalEntries.slice(0, 5).map(e => `[${e.date}] "${e.content.slice(0, 200)}${e.content.length > 200 ? "…" : ""}"`).join("\n")}` : ""}
+
 ─── TOOLS ───
 create_habit: new habits only — never for edits, never for goals. One clarifying question if type is genuinely unclear.
 edit_habit: existing habit; use habit_id from [id:…] in the list above.
 log_habit: project → minutes; limit/goal → amount; daily/weekly → nothing extra needed.
+log_journal: personal/narrative content — call alongside log_habit when relevant. Write in first person, user's own words.
 If a tool returns success:false, say it failed. Never claim success when it isn't.
 Data above is authoritative. Logged today: true means it's already done — don't log again unless they ask.${creatorCtx}`;
 }
@@ -8612,7 +8867,7 @@ function GoalPlanPreview({ plan, onConfirm, onDismiss }) {
   );
 }
 
-function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, coachIcon, coachAccentColor, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onGoalLogged, onHabitRenamed, onGoalPlanConfirm, openInputMode = null, pendingMessage = null }) {
+function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, coachIcon, coachAccentColor, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onGoalLogged, onHabitRenamed, onGoalPlanConfirm, onJournalLogged, journalEntries = [], openInputMode = null, pendingMessage = null }) {
   const cName = coachName || "Coach";
   const isCreatorUser = user?.id === CREATOR_ID;
   // ── Warmer, context-aware greeting ─────────────────────────────────────────
@@ -8774,7 +9029,7 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, co
           ...(token ? { "Authorization": `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
-          system:   buildCoachSystemPrompt(user, habits, cName, currentScreen, goals),
+          system:   buildCoachSystemPrompt(user, habits, cName, currentScreen, goals, journalEntries),
           messages: next.map(m => ({ role: m.role, content: m.content })),
           // Send the user's actual local date (YYYY-MM-DD) so AI logs land on
           // the correct calendar day. Server falls back to UTC if missing.
@@ -8859,6 +9114,12 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, co
                   });
                   const names = evt.logged.map(l => l.habit_name).join(", ");
                   setLastCreated({ name: names, emoji: "✅", type: "logged" });
+                }
+
+                // ── Journaled ─────────────────────────────────────────────────
+                if (evt.journaled?.length) {
+                  onJournalLogged?.(evt.journaled);
+                  setLastCreated({ name: "journal", emoji: "📓", type: "logged" });
                 }
 
                 if (evt.error) setError(evt.error);
@@ -10045,7 +10306,7 @@ function ShareCardModal({ user, habits, xp, onClose }) {
   const realLogs = habits.flatMap(h => h.logs.filter(l => l.value !== "quicknote" && l.value !== "skip"));
   const totalLogs = new Set(realLogs.map(l => l.date)).size; // unique days tracked
   const bestStreak = Math.max(0, ...habits.map(h => getStreak(h)));
-  const loggedToday = habits.filter(h => isLoggedToday(h)).length;
+  const loggedToday = habits.filter(h => h.habitType !== "log" && isSatisfiedForTodayRing(h)).length;
   const ws = currentWeekStart();
   const weekLogs = habits.reduce((s, h) => s + h.logs.filter(l => l.date >= ws && l.value !== "quicknote" && l.value !== "skip").length, 0);
   const weekTotal = habits.length * 7;
@@ -12991,7 +13252,9 @@ export default function App() {
   const [showAdd,     setShowAdd]    = useState(false);
   const [showAddGoal,    setShowAddGoal]    = useState(false);
   const [showAddChoice,  setShowAddChoice]  = useState(false);
-  const [showAddLog,     setShowAddLog]     = useState(false);
+  const [showAddLog,        setShowAddLog]        = useState(false);
+  const [journalEntries,    setJournalEntries]    = useState([]);
+  const [showJournalCompose,setShowJournalCompose]= useState(false);
   const [logGoalId,      setLogGoalId]      = useState(null);
   const [editGoalId,     setEditGoalId]     = useState(null);
   const [openGoalId,     setOpenGoalId]     = useState(null);
@@ -14264,6 +14527,27 @@ export default function App() {
     return null;
   }
 
+  async function handleSaveJournalEntry(date, content) {
+    const uid = userIdRef.current;
+    if (!uid || !date || !content?.trim()) return;
+    const { data, error } = await supabase
+      .from("journal_entries")
+      .upsert({ user_id: uid, date, content: content.trim(), updated_at: new Date().toISOString() }, { onConflict: "user_id,date" })
+      .select()
+      .single();
+    if (error) {
+      console.error("[Forged] saveJournalEntry:", error.message);
+      addToast("⚠️ Couldn't save journal entry");
+      return;
+    }
+    // Update local state (upsert by date)
+    setJournalEntries(prev => {
+      const exists = prev.some(e => e.date === date);
+      if (exists) return prev.map(e => e.date === date ? { ...e, content, updated_at: data.updated_at } : e);
+      return [data, ...prev].sort((a, b) => b.date.localeCompare(a.date));
+    });
+  }
+
   async function handleAvatarUpload(file) {
     const uid = userIdRef.current;
     if (!file || !uid) return;
@@ -14311,6 +14595,13 @@ export default function App() {
         habitsRes = await runQueryWithTimeout("habits", (signal) =>
           supabase.from("habits").select("*").eq("user_id", uid).order("created_at").abortSignal(signal)
         );
+
+        // Load journal entries (non-fatal — failure doesn't block the app)
+        supabase.from("journal_entries").select("id, date, content, created_at, updated_at")
+          .eq("user_id", uid).order("date", { ascending: false })
+          .then(({ data: jRows }) => {
+            if (jRows) setJournalEntries(jRows);
+          });
       } catch (err) {
         console.error("loadUserData: fetch failed —", err.message);
         accountDataLoadedRef.current = false;
@@ -15347,12 +15638,15 @@ export default function App() {
       tapped = { ...base, logs:[...logsWithoutNoneToday, { date:today, value:inc, note:"" }] };
     } else {
       const today = todayStr();
-      const logged = base.logs.some(l => l.date === today && l.value === true);
-      // On untap, only remove the "checked" marker (value:true) for today —
-      // preserve any reflection/note entries the user added separately.
-      tapped = logged
-        ? { ...base, logs: base.logs.filter(l => !(l.date === today && l.value === true)) }
-        : { ...base, logs:[...base.logs, { date: today, value: true, note: "" }] };
+      const hasTrue = base.logs.some(l => l.date === today && l.value === true);
+      // On untap, only remove the session marker (value:true). Replacing today's
+      // row when adding a session avoids duplicate dates if a rest day (skip) exists.
+      if (hasTrue) {
+        tapped = { ...base, logs: base.logs.filter(l => !(l.date === today && l.value === true)) };
+      } else {
+        const logsNoToday = base.logs.filter(l => l.date !== today);
+        tapped = { ...base, logs: [...logsNoToday, { date: today, value: true, note: "" }] };
+      }
     }
     const saved = await syncHabit(tapped);
     if (!saved) return;
@@ -15449,7 +15743,9 @@ export default function App() {
     const saved = await syncHabit(updated);
     if (!saved) return;
     setHabits(prev => prev.map(h => h.id === id ? updated : h));
-    addToast("🛡️ Rest day — streak protected");
+    addToast(habit.habitType === "weekly"
+      ? "🛡️ Weekly rest day — ring counts this; session tally unchanged"
+      : "🛡️ Rest day — streak protected");
   }
 
   // Add a quick note as a standalone log entry — each Done tap creates a separate record
@@ -15886,7 +16182,7 @@ export default function App() {
           </div>
         )}
         {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} coachEverOpened={coachEverOpened} onOpenCoachMic={() => openCoachWithMode("mic")} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} hideFloatingAdd onOpenGoalDetail={id => setOpenGoalId(id)}/>}
-        {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)}/>}
+        {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} journalEntries={journalEntries} onSaveJournalEntry={handleSaveJournalEntry} initialTab={showJournalCompose ? "journal" : undefined} onInitialComposeDone={() => setShowJournalCompose(false)}/>}
         {screen === "insights" && <InsightsScreen habits={habits} goals={goals} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} userId={sessionUserId}/>}
         {screen === "social"   && <SocialScreen
           user={user} xp={xp} habits={habits}
@@ -16205,7 +16501,7 @@ export default function App() {
         // going through the Add action sheet instead of the Habits tab.
         if (!isPro && habits.length >= 5) setShowUpgrade(true);
         else setShowAdd(true);
-      }} onAddGoal={() => { setShowAddChoice(false); setShowAddGoal(true); }} onAddLog={() => { setShowAddChoice(false); setShowAddLog(true); }} onClose={() => setShowAddChoice(false)}/>}
+      }} onAddGoal={() => { setShowAddChoice(false); setShowAddGoal(true); }} onAddLog={() => { setShowAddChoice(false); setScreen("journal"); setShowJournalCompose(true); }} onClose={() => setShowAddChoice(false)}/>}
       {showCoachTeaser && <CoachComingSoonSheet onClose={() => setShowCoachTeaser(false)} coachName={coachName} context={screen}/>}
       {logGoalId     && (() => { const g = resolveGoalForModal(logGoalId, goals, habits); return g ? <LogGoalModal goal={g} onClose={() => setLogGoalId(null)} onLog={(id, val, note) => { handleLogGoal(id, val, note); setLogGoalId(null); }}/> : null; })()}
       {editGoalId    && (() => { const g = resolveGoalForModal(editGoalId, goals, habits); return g ? <EditGoalModal goal={g} onClose={() => setEditGoalId(null)} onSave={handleEditGoalSave}/> : null; })()}
@@ -16229,6 +16525,16 @@ export default function App() {
           onGoalLogged={(id, logs)  => setGoals(p  => p.map(g => String(g.id) === String(id) ? { ...g, logs } : g))}
           onHabitRenamed={(id, name) => setHabits(p => p.map(h => String(h.id) === String(id) ? { ...h, name } : h))}
           onGoalPlanConfirm={handleGoalPlanConfirm}
+          journalEntries={journalEntries}
+          onJournalLogged={entries => {
+            // Re-fetch journal entries after AI writes so the Journal tab reflects it immediately
+            const uid = userIdRef.current;
+            if (uid) {
+              supabase.from("journal_entries").select("id, date, content, created_at, updated_at")
+                .eq("user_id", uid).order("date", { ascending: false })
+                .then(({ data: jRows }) => { if (jRows) setJournalEntries(jRows); });
+            }
+          }}
         />}
       {showUpgrade && <BetaPaywallModal onClose={() => setShowUpgrade(false)}/>}
       {showShare && <ShareCardModal user={user} habits={habits} xp={xp} onClose={() => setShowShare(false)}/>}

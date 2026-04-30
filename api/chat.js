@@ -85,7 +85,7 @@ const COACH_TOOLS = [
       "PROJECT: pass minutes (e.g. 60=1hr) + optional win/hard_part. " +
       "LIMIT: pass amount (number used today). " +
       "GOAL: pass amount (new current progress value). " +
-      "DAILY/WEEKLY: no extra fields needed — just logs done. " +
+      "DAILY/WEEKLY: set rest_day true to mark today as a rest day (skip — protects daily streak / counts toward Today ring for weekly without adding a session). Otherwise logs a normal done/session. " +
       "Can be called multiple times in one turn to log several habits at once. " +
       "If this tool returns success:false, tell the user it failed.",
     input_schema: {
@@ -98,8 +98,31 @@ const COACH_TOOLS = [
         win:        { type: "string",  description: "PROJECT: win/achievement to record." },
         hard_part:  { type: "string",  description: "PROJECT: blocker or hard part today." },
         note:       { type: "string",  description: "Short note or reflection." },
+        rest_day:   { type: "boolean", description: "DAILY or WEEKLY only: true = rest/skip for today (optional note). Does not add a weekly session." },
       },
       required: ["habit_id", "habit_name"],
+    },
+  },
+  {
+    name: "log_journal",
+    description:
+      "Saves a pure journal entry — personal thoughts, feelings, life events, reflections. " +
+      "Use this for anything personal/emotional/narrative that does NOT cleanly fit a habit or goal. " +
+      "You can call log_habit (or create_habit) AND log_journal in the same turn: " +
+      "log structured stuff (runs, sessions, limits) to habits, and log the broader human context here. " +
+      "If the user does a big life dump, extract structured parts for habits/goals and save the " +
+      "rest — plus any personal context — to the journal. " +
+      "Entries are appended to today's journal page if one already exists. " +
+      "Write in the user's own words as much as possible. First person.",
+    input_schema: {
+      type: "object",
+      properties: {
+        content: {
+          type: "string",
+          description: "The journal entry text. First person, user's own words. Can be multi-paragraph.",
+        },
+      },
+      required: ["content"],
     },
     // Prompt caching: marking the LAST tool with cache_control caches the
     // entire tools array (~700+ tokens of stable JSON) for ~5 minutes. Repeat
@@ -195,8 +218,10 @@ async function executeLogHabit(input, userId, db, clientDate) {
   } else if (htype === "goal") {
     if (input.amount == null) throw new Error("Goal logging needs 'amount' — the new current progress value.");
     logValue = input.amount;
+  } else if (htype === "daily" || htype === "weekly") {
+    logValue = input.rest_day === true ? "skip" : true;
   } else {
-    logValue = true; // daily / weekly
+    logValue = true;
   }
 
   let updatedLogs;
@@ -228,6 +253,42 @@ async function executeLogHabit(input, userId, db, clientDate) {
   if (upErr) throw new Error(`Log save failed: ${upErr.message}`);
 
   return { habit_id: input.habit_id, habit_name: input.habit_name, habit_type: htype, date: today, updatedLogs, logValue };
+}
+
+async function executeLogJournal(input, userId, db, clientDate) {
+  const date = clientDate || new Date().toISOString().slice(0, 10);
+  const content = (input.content || "").trim();
+  if (!content) throw new Error("Journal content cannot be empty.");
+
+  // Upsert: one entry per user per day. If an entry already exists, append the
+  // new content with a blank-line separator so multiple AI turns in a session
+  // don't clobber each other.
+  const { data: existing } = await db
+    .from("journal_entries")
+    .select("id, content")
+    .eq("user_id", userId)
+    .eq("date", date)
+    .maybeSingle();
+
+  if (existing) {
+    const merged = existing.content
+      ? `${existing.content}\n\n${content}`
+      : content;
+    const { error } = await db
+      .from("journal_entries")
+      .update({ content: merged, updated_at: new Date().toISOString() })
+      .eq("id", existing.id);
+    if (error) throw new Error(`Journal save failed: ${error.message}`);
+    return { date, mode: "appended", id: existing.id };
+  } else {
+    const { data: row, error } = await db
+      .from("journal_entries")
+      .insert({ user_id: userId, date, content })
+      .select()
+      .single();
+    if (error) throw new Error(`Journal save failed: ${error.message}`);
+    return { date, mode: "created", id: row.id };
+  }
 }
 
 // ── SSE helper ─────────────────────────────────────────────────────────────────
@@ -366,7 +427,7 @@ async function handler(req, res) {
     if (firstResp.stop_reason === "tool_use") {
       const toolBlocks = firstToolBlocks;
       const toolResults = [];
-      const actions = { created: null, edited: [], logged: [] };
+      const actions = { created: null, edited: [], logged: [], journaled: [] };
 
       // Sequential execution: AI sometimes calls create_habit followed by
       // log_habit on that same new habit in a single turn. Running them in
@@ -386,6 +447,10 @@ async function handler(req, res) {
             const r = await executeLogHabit(tb.input, userId, db, clientDate);
             actions.logged.push(r);
             result = { success: true, habit_name: r.habit_name, habit_type: r.habit_type, date: r.date, value_saved: r.logValue };
+          } else if (tb.name === "log_journal") {
+            const r = await executeLogJournal(tb.input, userId, db, clientDate);
+            actions.journaled.push(r);
+            result = { success: true, date: r.date, mode: r.mode };
           } else {
             result = { success: false, error: "Unknown tool — action was NOT performed." };
           }
@@ -439,10 +504,11 @@ async function handler(req, res) {
       }
 
       sse(res, {
-        done:    true,
-        created: actions.created,
-        edited:  actions.edited.length  ? actions.edited  : null,
-        logged:  actions.logged.length  ? actions.logged  : null,
+        done:     true,
+        created:  actions.created,
+        edited:   actions.edited.length    ? actions.edited    : null,
+        logged:   actions.logged.length    ? actions.logged    : null,
+        journaled:actions.journaled.length ? actions.journaled : null,
       });
       // Count this as one message against the free-tier daily quota.
       if (!isPro) {
