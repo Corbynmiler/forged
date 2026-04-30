@@ -183,6 +183,12 @@ const DEV_TITLE_ALL_LOGGED  = "Forged 🔨 Captain";
 // 2 = fire at 0,2,4,6,8,10,12,14,16,18,20,22 local time.
 const DEV_OWNER_SEND_INTERVAL_HOURS = 2;
 
+// Quiet hours for the dev-owner account only — no notifications during these hours.
+// DEV_QUIET_START (inclusive) → DEV_QUIET_END (exclusive, first allowed hour).
+// e.g. 22 → 6 means no sends from 10:00 PM through 5:59 AM; 6:00 AM is the first send.
+const DEV_QUIET_START = 22; // 10 PM
+const DEV_QUIET_END   = 6;  // 6 AM (first allowed hour)
+
 // Day names for in-message references
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -601,68 +607,90 @@ function normalUserSlot(hour) {
 const NORMAL_POOLS = {
   morning: {
     weekday: [
-      "Morning mate, hope today's a good one. Give it hell. Love, Forged.",
-      "Good morning! Quick check-in before the day gets away from you — don't forget to log later. Love, Forged.",
-      "Morning! New day, fresh start — go make it count. Love, Forged.",
-      "Hey, hope you slept well. Today's yours — log your habits and give it everything. Love, Forged.",
-      "Rise and shine! Don't let the day run away before you've logged. You've got this. Love, Forged.",
-      "Morning — your habits are waiting. Log early and set the tone for the day. Love, Forged.",
-      "Morning, just a nudge to kick the day off right. Log when you get a sec. Love, Forged.",
-      "Hey, good morning. Make today the one you actually show up for. Love, Forged.",
+      "Morning! Hope today's a good one — log your habits when you get a sec. Love, Forged.",
+      "Good morning! Before the day gets loud, a quick check-in. Log when you're ready. Love, Forged.",
+      "Rise and shine! Small wins early make the whole day feel better. Log when you can. Love, Forged.",
+      "Hey, hope the morning's treating you well. Don't forget to log your habits today. Love, Forged.",
+      "Morning nudge — no pressure, just don't let today slip by without checking in. Love, Forged.",
+      "Good morning! Your habits are what keep you grounded on the hectic days. Log when it suits. Love, Forged.",
+      "Hey, another day! Hope you're feeling good — log your habits when you get a moment. Love, Forged.",
+      "Morning check-in. Whatever the day brings, your habits keep you moving forward. Love, Forged.",
+      "Hey, hope you woke up feeling okay. Log when you can — even the rough days count. Love, Forged.",
+      "Morning! Before the to-do list takes over — quick habit check-in. You've got this. Love, Forged.",
+      "Another morning, another chance to show up for yourself. Log early if you can. Love, Forged.",
+      "Hey, good morning. Don't let today slip by without logging — you've been doing great. Love, Forged.",
     ],
     weekend: [
-      "Happy weekend! Hope you've got good plans — don't forget to log your habits along the way. Love, Forged.",
-      "Weekend morning — the best kind. No rush, just don't let the day slip by without logging. Love, Forged.",
-      "Morning! Free day, no agenda — just make it a good one. Love, Forged.",
-      "Hey, happy weekend. Rest up, move your body, and log when you're ready. Love, Forged.",
-      "Good morning! Even on the weekend, your habits matter. Quick log when you can. Love, Forged.",
-      "Weekend! Your time, your rules — just don't forget to check in. Love, Forged.",
-      "Morning! Whatever today looks like, keep the streak going. Love, Forged.",
-      "Happy weekend. Enjoy every bit of it — and log your habits while you're at it. Love, Forged.",
+      "Happy weekend! No alarm, no rush — just don't let the good stuff slip by without logging. Love, Forged.",
+      "Weekend morning! Hope it's a relaxed one. Log your habits when the coffee kicks in. Love, Forged.",
+      "Hey, hope you're enjoying the weekend. Check in with your habits when you get a moment. Love, Forged.",
+      "Morning! Free day ahead — do something you love, and don't forget to log it. Love, Forged.",
+      "Weekend check-in! Slower pace, same habits. Log when you're ready. Love, Forged.",
+      "Good morning! Weekends are for recharging — and keeping the streak alive. Log when you can. Love, Forged.",
+      "Hey, happy weekend. Rest, move, whatever feels right — just check in before the day escapes. Love, Forged.",
+      "Morning! Hope the weekend's starting well. Quick habit log when you get a chance. Love, Forged.",
+      "Hey, free day! Hope it's a good one — don't let it slip by without logging. Love, Forged.",
+      "Weekend morning nudge. No rush, but your habits are waiting whenever you're ready. Love, Forged.",
     ],
   },
   noon: {
     weekday: [
-      "Halfway through the day already — keep going, and log your shit later. Love, Forged.",
-      "Lunchtime check-in! Hope the morning treated you well. Don't forget to log. Love, Forged.",
-      "Midday nudge — you're doing great. Log your progress when you get a sec. Love, Forged.",
-      "Half the day done, legend. Take a breath and keep at it. Love, Forged.",
-      "Hey, just checking in. Hope the morning went well — finish strong this afternoon. Love, Forged.",
-      "Noon already! Don't let the afternoon sneak past without logging. Love, Forged.",
-      "Lunchtime! Your habits are waiting. Log and keep the streak alive. Love, Forged.",
-      "Midday check-in. The second half of the day is yours — make it count. Love, Forged.",
+      "Hey, midday check-in! Hope the morning went smoothly. Log your habits before the afternoon runs away. Love, Forged.",
+      "Lunchtime already! Halfway through — you're doing great. Log when you can. Love, Forged.",
+      "Midday nudge. Take a breath, eat something decent, and check in with your habits. Love, Forged.",
+      "Hey, hope lunchtime finds you well. Quick habit log when you get a sec. Love, Forged.",
+      "Noon check-in. Morning's behind you — the afternoon's still yours to make count. Love, Forged.",
+      "Lunchtime! Hope you're taking a proper break. Log your habits and recharge. Love, Forged.",
+      "Hey, just checking in. How's the day treating you? Log your progress when you get a moment. Love, Forged.",
+      "Midday nudge — don't let the afternoon sneak past without ticking off your habits. Love, Forged.",
+      "Halfway there! Log your habits, take a breath, and finish strong. Love, Forged.",
+      "Hey, lunchtime reminder. A quick log keeps the streak alive — check in when you can. Love, Forged.",
+      "Midday! If the morning was rough, the afternoon can turn it around. Log and carry on. Love, Forged.",
+      "Noon. Take a moment for yourself today — and your habits. Love, Forged.",
     ],
     weekend: [
-      "Lunchtime on a free day — hope it's been a good one so far. Don't forget to log. Love, Forged.",
-      "Midday! Hope the weekend's treating you well. Log when you can. Love, Forged.",
-      "Hey, halfway through — how's the weekend going? Quick log when you get a moment. Love, Forged.",
-      "Weekend midday check-in. Hope the morning was good — enjoy the rest of the day. Love, Forged.",
-      "Lunchtime! Even on weekends, your habits keep you sharp. Quick log? Love, Forged.",
-      "Hey! Hope you're having a great day. Log your habits and carry on. Love, Forged.",
-      "Midday on a free day — eat, log, relax, in whatever order works. Love, Forged.",
-      "Weekend noon check-in, mate. How's it going? Don't forget to log later. Love, Forged.",
+      "Lunchtime! Hope the morning was a good one. Quick habit check before the afternoon slips away. Love, Forged.",
+      "Midday weekend check-in. How's it going? Log your habits when you get a moment. Love, Forged.",
+      "Hey, hope you're having a nice relaxed day. Quick log when it suits you. Love, Forged.",
+      "Lunchtime on a free day — one of the better places to be. Log and enjoy the afternoon. Love, Forged.",
+      "Noon! Weekend or not, your habits are what keep the good stuff compounding. Log when you're ready. Love, Forged.",
+      "Hey, midday check-in. Whatever you've been up to this morning — log it and keep going. Love, Forged.",
+      "Lunchtime nudge. Eat well, log your habits, and make the most of the rest of the day. Love, Forged.",
+      "Midday! Hope the weekend's been kind so far. Quick habit check when you get a sec. Love, Forged.",
+      "Hey, halfway through a free day. Don't forget to log — even the easy days matter. Love, Forged.",
+      "Noon check-in on a free day. Log your habits, enjoy the afternoon. That's the whole plan. Love, Forged.",
     ],
   },
   evening: {
     weekday: [
-      "Evening check-in, legend. Don't forget to log how the day went. Love, Forged.",
-      "Hey, day's winding down — great time to log your habits before you switch off. Love, Forged.",
-      "Evening! Whatever happened today, log it and let it go. Tomorrow's another shot. Love, Forged.",
-      "End of the day — nice work getting through it. Log your habits and rest up. Love, Forged.",
-      "Evening nudge — don't let the day end without logging. Keeps the momentum going. Love, Forged.",
-      "Hey, hope the day treated you well. Log your progress before you call it a night. Love, Forged.",
-      "Evening! Quick log before you wind down. You've earned the rest. Love, Forged.",
-      "Day's done. Log it, reflect a bit, and get some rest. Love, Forged.",
+      "Hey, how was today? Whatever it threw at you — you showed up. Log before you switch off. Love, Forged.",
+      "Evening! Hope the day treated you well. Take a moment to log and let it go. Love, Forged.",
+      "End of the day. Some days are hard, some are great — log it either way. Love, Forged.",
+      "Evening check-in. You made it through another one. Log your habits and give yourself a moment. Love, Forged.",
+      "Hey, hope tonight finds you well. Quick log before you call it a day. Love, Forged.",
+      "Day's winding down. Log your habits before you switch off — it only takes a minute. Love, Forged.",
+      "Hey, just checking in. How'd today go? Log your habits and take a breath. Love, Forged.",
+      "Evening nudge — small check-in before the day closes out. Log and rest well. Love, Forged.",
+      "The day's behind you now. Log what you did, even the little stuff — it all adds up. Love, Forged.",
+      "Hey, hope you're winding down nicely. Quick habit log before you call it a night. Love, Forged.",
+      "End of day. You showed up today — make sure you log it before you forget. Love, Forged.",
+      "Evening! Whatever happened today, take a moment to reflect, log, and recharge. Love, Forged.",
+      "Day done. A quick log keeps the momentum alive for tomorrow. Love, Forged.",
+      "Hey, evening check-in. Log your habits, be proud of what you did, and rest up. Love, Forged.",
     ],
     weekend: [
-      "Sunday, baby. Rest up or make moves — either way, make it count. Love, Forged.",
-      "Evening! Hope the weekend's been a good one. Log before you call it. Love, Forged.",
-      "Weekend evening check-in. Don't let the day end without logging. Love, Forged.",
-      "Hey, end of a free day — how'd it go? Log it and wind down. Love, Forged.",
-      "Evening! Whatever you got up to this weekend, don't forget to log it. Love, Forged.",
-      "Weekend's almost done — log before the week sneaks back in. Love, Forged.",
-      "Evening check-in, legend. Great weekend? Log it and keep the streak alive. Love, Forged.",
-      "Sunday evening. Log, reflect, and get ready to go again tomorrow. Love, Forged.",
+      "Hey, hope the weekend's been a good one. Log your habits before you call it a day. Love, Forged.",
+      "Evening! Whatever today looked like — adventurous, restful, or in between — log it. Love, Forged.",
+      "Weekend's winding down. Log your habits and soak up whatever's left of the evening. Love, Forged.",
+      "Hey, end of a free day. How was it? Log it before the memory fades. Love, Forged.",
+      "Evening check-in. Whether you made the most of it or just needed the rest — both count. Log it. Love, Forged.",
+      "Weekend evening. The week's about to start again — log and finish on a good note. Love, Forged.",
+      "Hey, hope tonight's been a good one. Quick log before you call it a night. Love, Forged.",
+      "End of the weekend. Whatever you got up to, log it and rest well. Love, Forged.",
+      "Evening! Don't let the day slip by without logging — even the easy weekends matter. Love, Forged.",
+      "Hey, weekend's almost done. Log before you drift off — it literally takes a minute. Love, Forged.",
+      "Evening nudge. Log it, reflect on the weekend, and get ready to go again. Love, Forged.",
+      "Hey, how was the weekend? Log before you wind down — you'll be glad you did. Love, Forged.",
     ],
   },
 };
@@ -821,7 +849,7 @@ function pickMessage(habits, goals, todayYmd) {
   return { title: "Forged", body: "Time to log your habits 🔥" };
 }
 
-async function aiPickMessage(name, habits, goals, todayYmd) {
+async function aiPickMessage(name, habits, goals, todayYmd, localHour) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return null;
 
@@ -851,20 +879,34 @@ async function aiPickMessage(name, habits, goals, todayYmd) {
     ? `Upcoming deadlines: ${urgentGoals.map(g => `${g.name} in ${g.daysLeft}d`).join(", ")}`
     : "";
 
-  const prompt = `You are a friendly habit coach sending ${name} a short push notification for their Forged app.
+  const hour = localHour ?? 12;
+  const timeLabel = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
+  const toneHint = hour >= 19
+    ? "It's evening — lean into a warm end-of-day check-in. Ask how they're doing, acknowledge the day, be supportive. Less command, more care."
+    : hour < 10
+    ? "It's morning — be upbeat and gently encouraging. Help set a positive tone for the day ahead."
+    : "It's midday — be friendly and motivating. Acknowledge they're in the thick of the day.";
 
-Their habits for local calendar date ${todayYmd}:
+  const prompt = `You are a warm, friendly habit coach sending ${name} a push notification for their Forged app.
+
+Time of day: ${timeLabel} (local hour: ${hour})
+Date: ${todayYmd}
+
+Their habits:
 ${summaries || "No habits yet"}
 ${goalLine}
 
-Write ONE push notification body (max 110 chars). Be direct, warm, and specific to their actual data. No hashtags, no quotes around it, just the text. Always end with "Love, Forged." — no exceptions.
+Write ONE push notification body (max 110 chars). Start with "Hey ${name}," to feel personal and warm. Vary your tone — sometimes check how they're doing, sometimes gently celebrate what's going well, sometimes offer a light nudge. ${toneHint}
+
+No hashtags. No quotes around the message. Always end with "Love, Forged." — no exceptions.
 
 Hard rules:
-- NEVER claim they completed a workout, session, or habit TODAY unless that habit's line explicitly shows logged today: true.
+- NEVER open with a command like "Log one habit right now" — be warmer and more natural than that.
+- NEVER claim they completed a habit today unless that habit's line explicitly shows logged today: true.
 - NEVER invent numbers, streaks, or events not present in the data above.
-- If every line shows logged today: false, do not congratulate them for finishing today — nudge them to log instead.
-- "log" / journal-only lines are omitted; do not mention them.
-- Always end the message with exactly: Love, Forged.`;
+- If every line shows logged today: false, gently nudge them to log — do not congratulate.
+- "log"-type habits are omitted; do not mention them.
+- End with exactly: Love, Forged.`;
 
   try {
     const client = new Anthropic({ apiKey: apiKey.trim() });
@@ -1046,6 +1088,17 @@ async function handler(req, res) {
     // the same three fixed daily touchpoints, and dev owner gets 12 per day.
     if (isWindowed) {
       if (isDevOwner) {
+        // Quiet hours: no sends from DEV_QUIET_START (10pm) through DEV_QUIET_END-1 (5am).
+        // DEV_QUIET_END (6am) is the first allowed hour.
+        const isQuiet = now.hour >= DEV_QUIET_START || now.hour < DEV_QUIET_END;
+        if (isQuiet) {
+          console.log("[dev-owner] skip reason=quiet_hours", {
+            hour: now.hour, quiet_start: DEV_QUIET_START, quiet_end: DEV_QUIET_END,
+          });
+          if (debug) trace.push({ user_id: sub.user_id, skipped: "quiet_hours", hour: now.hour });
+          skippedWindow++; continue;
+        }
+
         // Only even hours at the :00 bucket (every DEV_OWNER_SEND_INTERVAL_HOURS hours)
         const isEvenHour = now.hour % DEV_OWNER_SEND_INTERVAL_HOURS === 0;
         if (!isEvenHour || bucketMinute(now.minute) !== 0) {
@@ -1107,7 +1160,7 @@ async function handler(req, res) {
         dedup_key: dedupKey,
       });
     } else if (profile.is_pro && process.env.ANTHROPIC_API_KEY) {
-      const aiMsg = await aiPickMessage(profile.name || "there", habits, goals, todayYmd);
+      const aiMsg = await aiPickMessage(profile.name || "there", habits, goals, todayYmd, now.hour);
       ({ title, body } = aiMsg || pickNormalMessage(habits, goals, todayYmd, now.hour));
     } else {
       ({ title, body } = pickNormalMessage(habits, goals, todayYmd, now.hour));
