@@ -4745,7 +4745,7 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
       if (d.getFullYear() === viewYear && d.getMonth() === viewMonth) {
         const day = d.getDate();
         if (!goalMarkerDays[day]) goalMarkerDays[day] = [];
-        goalMarkerDays[day].push({ type:"deadline", label:g.name, color:g.color, emoji:g.emoji, isFuture:g.targetDate >= tStr });
+        goalMarkerDays[day].push({ type:"deadline", label:g.name, color:g.color, emoji:g.emoji, isFuture:g.targetDate >= tStr, goalId:g.id, currentValue:g.currentValue, targetValue:g.targetValue, startValue:g.startValue, unit:g.unit||"" });
       }
     }
     (g.logs || []).filter(l => l.type === "milestone" && l.date).forEach(ms => {
@@ -4753,7 +4753,7 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
       if (d.getFullYear() === viewYear && d.getMonth() === viewMonth) {
         const day = d.getDate();
         if (!goalMarkerDays[day]) goalMarkerDays[day] = [];
-        goalMarkerDays[day].push({ type:"milestone", label:ms.label, color:g.color, emoji:g.emoji, isFuture:ms.date >= tStr });
+        goalMarkerDays[day].push({ type:"milestone", label:ms.label, color:g.color, emoji:g.emoji, isFuture:ms.date >= tStr, goalId:g.id, goalName:g.name });
       }
     });
   });
@@ -5001,6 +5001,8 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
             const selDs = dayStr(selectedDay);
             const selHabits = Object.values(allByDate[selDs] || {});
             const hasSelEntries = selHabits.length > 0;
+            const selGoalMarkers = goalMarkerDays[selectedDay] || [];
+            const hasGoalMarkers = selGoalMarkers.length > 0;
             const showMissedEditor = !hasSelEntries && firstLogDate && selDs >= firstLogDate && selDs < tStr;
             return (
               <div style={{ marginBottom:12 }}>
@@ -5013,6 +5015,56 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
                     <span style={{ fontSize:12, color:T.gold, fontWeight:500 }}>Day one — this is where your journey began.</span>
                   </div>
                 )}
+
+                {/* Goal deadline / milestone cards for this day */}
+                {hasGoalMarkers && (
+                  <div style={{ marginBottom: hasSelEntries ? 12 : 0 }}>
+                    {selGoalMarkers.map((m, mi) => {
+                      if (m.type === "deadline") {
+                        const range = (m.targetValue ?? 0) - (m.startValue ?? 0);
+                        const pct = range !== 0
+                          ? Math.max(0, Math.min(100, Math.round(((m.currentValue - m.startValue) / range) * 100)))
+                          : (m.currentValue >= m.targetValue ? 100 : 0);
+                        return (
+                          <div key={mi} style={{ padding:"12px 14px", background:T.surface, borderRadius:T.r, border:`0.5px solid ${m.color || T.border}55`, marginBottom:8 }}>
+                            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+                              <span style={{ fontSize:18 }}>{m.emoji || "🎯"}</span>
+                              <div style={{ flex:1 }}>
+                                <div style={{ fontSize:13, fontWeight:600, color:m.color || T.text, lineHeight:1.3 }}>{m.label}</div>
+                                <div style={{ fontSize:11, color:T.hint, marginTop:2 }}>🎯 Target deadline</div>
+                              </div>
+                            </div>
+                            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                              <span style={{ fontSize:12, color:T.muted }}>
+                                <strong style={{ color:m.color || T.text }}>{m.currentValue}{m.unit}</strong>
+                                {" of "}
+                                <strong style={{ color:T.text }}>{m.targetValue}{m.unit}</strong>
+                              </span>
+                              <span style={{ fontSize:12, color:T.hint }}>{pct}%</span>
+                            </div>
+                            <div style={{ height:5, borderRadius:3, background:T.raised, overflow:"hidden" }}>
+                              <div style={{ height:"100%", borderRadius:3, background:m.color || T.gold, width:`${pct}%`, transition:"width 0.4s" }} />
+                            </div>
+                          </div>
+                        );
+                      }
+                      if (m.type === "milestone") {
+                        return (
+                          <div key={mi} style={{ padding:"12px 14px", background:T.surface, borderRadius:T.r, border:`0.5px solid ${m.color || T.border}55`, marginBottom:8, display:"flex", alignItems:"flex-start", gap:10 }}>
+                            <span style={{ fontSize:16, marginTop:1 }}>{m.emoji || "◆"}</span>
+                            <div>
+                              <div style={{ fontSize:11, color:T.hint, marginBottom:3 }}>◆ Milestone · {m.goalName}</div>
+                              <div style={{ fontSize:13, fontWeight:600, color:m.color || T.text }}>{m.label}</div>
+                            </div>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })}
+                  </div>
+                )}
+
+                {/* Habit log entries */}
                 {hasSelEntries ? (
                   selHabits.map(({ habit, logs, entryKey }) => (
                     <HabitDayCard key={entryKey || habit.id} habit={habit} logs={logs} onReflect={onReflect} onDeleteLogEntry={onDeleteJournalLog}/>
@@ -5046,7 +5098,9 @@ function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, jour
                         </div>
                       </div>
                     ) : (
-                      <div style={{ padding:"20px 0", textAlign:"center", color:T.muted, fontSize:13 }}>No entries (future or before you started)</div>
+                      !hasGoalMarkers && (
+                        <div style={{ padding:"20px 0", textAlign:"center", color:T.muted, fontSize:13 }}>No entries (future or before you started)</div>
+                      )
                     )}
                   </div>
                 )}
@@ -11072,7 +11126,7 @@ function AuthScreen({ onSent, checkoutPending }) {
       setLoading(false);
     } else {
       // Always default to signInWithPassword — never auto-create
-      const { data, error } = await supabase.auth.signInWithPassword({ email: e, password: p });
+      const { error } = await supabase.auth.signInWithPassword({ email: e, password: p });
       if (error) {
         // Supabase returns "Invalid login credentials" for both wrong password AND
         // non-existent user — give a clearer message
@@ -11083,14 +11137,6 @@ function AuthScreen({ onSent, checkoutPending }) {
         setLoading(false);
         return;
       }
-      // #region agent log
-      dbgAuthLog({
-        hypothesisId: "B",
-        location: "App.jsx:AuthScreen:signIn",
-        message: "signInWithPassword_ok",
-        data: { uid8: data?.user?.id?.slice?.(0, 8) ?? null, hasSession: !!data?.session },
-      });
-      // #endregion
       // signInWithPassword succeeded — onAuthStateChange(SIGNED_IN) will take it from here
       setLoading(false);
     }
