@@ -136,6 +136,18 @@ function stripPartialGoalPlan(text) {
   return text.replace(/<goal_plan>[\s\S]*$/, "").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+/** Split coach reply into conversational body + server-appended action receipt (separator from api/chat.js). */
+function splitCoachReceipt(text) {
+  if (!text || typeof text !== "string") return { main: text, receipt: null };
+  const sep = "\n───\n";
+  const idx = text.indexOf(sep);
+  if (idx === -1) return { main: text, receipt: null };
+  return {
+    main: text.slice(0, idx).trimEnd(),
+    receipt: text.slice(idx + sep.length).trim(),
+  };
+}
+
 // ─── DESIGN TOKENS ────────────────────────────────────────────────────────────
 const T = {
   bg:"#0F0F0D", surface:"#1A1A16", raised:"#222220",
@@ -675,39 +687,6 @@ function getBestDayOfWeek(allRealLogs) {
   };
 }
 
-/**
- * Reflection / context coverage: what share of habit logs carry *any* written
- * context — reflection text, note text, project win text, project hard-part
- * text, or a standalone quick note. Fixes the prior bug where only `l.reflection`
- * was counted (quicknotes + notes + win/hardPart were invisible, dragging the
- * rate toward 0% for users who actually write plenty).
- */
-function getReflectionCoverage(habits) {
-  let total = 0, withText = 0;
-  let habitsThatPrompt = 0;
-  for (const h of habits || []) {
-    if (h.reflection) habitsThatPrompt++;
-    for (const l of h.logs || []) {
-      if (!l) continue;
-      if (l.value === "skip") continue; // skip days aren't "logs" for this purpose
-      total++;
-      if (l.value === "quicknote") {
-        // Quicknotes exist because the user typed something — count them only
-        // in the numerator if they actually have text (guard against empties).
-        if (String(l.note || "").trim()) withText++;
-        continue;
-      }
-      const refl = String(l.reflection || "").trim();
-      const note = String(l.note || "").trim();
-      const win  = l.value && typeof l.value === "object" && l.value.win      ? String(l.value.win).trim()      : "";
-      const hard = l.value && typeof l.value === "object" && l.value.hardPart ? String(l.value.hardPart).trim() : "";
-      if (refl || note || win || hard) withText++;
-    }
-  }
-  const coverage = total > 0 ? Math.round((withText / total) * 100) : 0;
-  return { coverage, logsWithReflection: withText, totalLogs: total, habitsThatPrompt };
-}
-
 // ─── DEEP INSIGHTS (from real user-written text) ──────────────────────────────
 // Everything below here powers the "Deeper insights" section on the Insights
 // screen. It runs entirely on-device (no LLM tokens) against text the user has
@@ -836,53 +815,66 @@ const DEEP_STOPWORDS = new Set([
   "another","each","every","off","only","once","now","soon","yet","ever",
 ]);
 
-function getDeepTopThemes(corpus, k = 3) {
-  const counts = new Map();
-  // For sample quotes, prefer a single sub-text (reflection / note / win /
-  // hard) that actually contains the term, so the quote reads naturally
-  // instead of being a joined paragraph from multiple sources.
-  function bestSampleForTerm(entry, term) {
-    const subs = [
-      entry.reflText && { date: entry.date, text: entry.reflText, kind: "reflection", habitName: entry.habitName, goalName: entry.goalName },
-      entry.noteText && { date: entry.date, text: entry.noteText, kind: "note",       habitName: entry.habitName, goalName: entry.goalName },
-      entry.winText  && { date: entry.date, text: entry.winText,  kind: "win",        habitName: entry.habitName, goalName: entry.goalName },
-      entry.hardText && { date: entry.date, text: entry.hardText, kind: "hard",       habitName: entry.habitName, goalName: entry.goalName },
-    ].filter(Boolean);
-    const re = new RegExp(`\\b${term}`, "i");
-    const matching = subs.filter(s => re.test(s.text));
-    const pool = matching.length ? matching : subs;
-    if (!pool.length) return entry;
-    // Prefer slightly longer (more context) but cap at 220 chars.
-    return pool.sort((a, b) => {
-      const ai = Math.min(a.text.length, 220);
-      const bi = Math.min(b.text.length, 220);
-      return bi - ai;
-    })[0];
-  }
+function bestDeepSampleForTerm(entry, term) {
+  const safe = String(term).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`\\b${safe}`, "i");
+  const subs = [
+    entry.reflText && { date: entry.date, text: entry.reflText, kind: "reflection", habitName: entry.habitName, goalName: entry.goalName },
+    entry.noteText && { date: entry.date, text: entry.noteText, kind: "note", habitName: entry.habitName, goalName: entry.goalName },
+    entry.winText  && { date: entry.date, text: entry.winText,  kind: "win", habitName: entry.habitName, goalName: entry.goalName },
+    entry.hardText && { date: entry.date, text: entry.hardText, kind: "hard", habitName: entry.habitName, goalName: entry.goalName },
+  ].filter(Boolean);
+  const matching = subs.filter(s => re.test(s.text));
+  const pool = matching.length ? matching : subs;
+  if (!pool.length) return null;
+  return pool.sort((a, b) => Math.min(b.text.length, 220) - Math.min(a.text.length, 220))[0];
+}
+
+/** Words that bridge multiple habits/goals — stronger signal than raw frequency. */
+function getCrossHabitLinks(corpus, k = 4) {
+  const termTo = new Map();
   for (const e of corpus) {
+    const sourceKey =
+      e.kind === "habit" && e.habitId ? `h:${e.habitId}` :
+      e.kind === "goal" && e.goalId ? `g:${e.goalId}` :
+      null;
+    if (!sourceKey) continue;
     const words = String(e.text).toLowerCase().match(/[a-z][a-z']+/g) || [];
     const seenInEntry = new Set();
     for (const w of words) {
       if (w.length < 4 || w.length > 18) continue;
       if (DEEP_STOPWORDS.has(w)) continue;
-      if (seenInEntry.has(w)) continue; // count once per entry, not per word-in-entry
+      if (seenInEntry.has(w)) continue;
       seenInEntry.add(w);
-      if (!counts.has(w)) counts.set(w, { count: 0, lastDate: null, sample: null });
-      const rec = counts.get(w);
-      rec.count++;
-      if (!rec.lastDate || e.date > rec.lastDate) rec.lastDate = e.date;
-      const candidate = bestSampleForTerm(e, w);
-      if (!rec.sample || (candidate.text.length > rec.sample.text.length && candidate.text.length < 260)) {
-        rec.sample = candidate;
+      if (!termTo.has(w)) {
+        termTo.set(w, { sourceKeys: new Set(), labels: new Map(), writingDays: 0, bestSample: null });
       }
+      const rec = termTo.get(w);
+      rec.sourceKeys.add(sourceKey);
+      rec.labels.set(sourceKey, e.habitName || e.goalName || "Track");
+      rec.writingDays++;
+      const cand = bestDeepSampleForTerm(e, w);
+      if (cand && (!rec.bestSample || cand.text.length > rec.bestSample.text.length)) rec.bestSample = cand;
     }
   }
-  return [...counts.entries()]
-    // Must appear in at least 2 separate writing-days to count as a recurring theme.
-    .filter(([, r]) => r.count >= 2)
-    .sort((a, b) => b[1].count - a[1].count || (b[1].lastDate || "").localeCompare(a[1].lastDate || ""))
+  return [...termTo.entries()]
+    .filter(([, r]) => r.sourceKeys.size >= 2 && r.writingDays >= 2)
+    .sort((a, b) => b[1].sourceKeys.size - a[1].sourceKeys.size || b[1].writingDays - a[1].writingDays)
     .slice(0, k)
-    .map(([term, r]) => ({ term, count: r.count, lastDate: r.lastDate, sample: r.sample }));
+    .map(([term, r]) => {
+      const labels = [...new Set(r.labels.values())].slice(0, 4);
+      const connection =
+        labels.length >= 3
+          ? `This theme shows up across ${labels.length} things you track (${labels.slice(0, 2).join(" · ")}…). Worth asking what ties them together.`
+          : `Keeps appearing when you write about ${labels[0]} and ${labels[1]} — a thread between them.`;
+      return {
+        term,
+        habitLabels: labels,
+        writingDays: r.writingDays,
+        sample: r.bestSample,
+        connection,
+      };
+    });
 }
 
 /**
@@ -907,9 +899,7 @@ function analyzeDeepInsights(habits = [], goals = []) {
 
   const withTone = corpus.map(e => ({ ...e, tone: getTextTone(e.text) }));
 
-  // Themes are counted per writing-day. With fragmented entries this used to
-  // overcount (a word in win+note+hard of one log = 3 hits); now it's clean.
-  const topThemes = getDeepTopThemes(corpus, 4);
+  const crossHabitLinks = getCrossHabitLinks(corpus, 4);
 
   // Tone distribution
   const pos = withTone.filter(e => e.tone.polarity === "pos").length;
@@ -1025,7 +1015,7 @@ function analyzeDeepInsights(habits = [], goals = []) {
     needsMoreData: false,
     totalEntries,
     totalWords,
-    topThemes,
+    crossHabitLinks,
     toneMix: { pos, neg, neu },
     moodTrend,
     recentAvg,
@@ -3722,8 +3712,8 @@ const PAGE_TOURS = {
     },
     {
       target: "[data-tour='insights-streaks']",
-      title: "Streaks and activity",
-      body: "Each habit's current streak alongside its last 7 days. Green squares are logged days. Your most consistent habit is highlighted at the bottom.",
+      title: "Activity summary",
+      body: "Quick read on streaks, your steadiest habit, and which day you usually log. Tap \"Show full activity breakdown\" for streak rows, 28-day rates, and the 12-week heatmap.",
       pad: 8,
     },
   ],
@@ -5562,27 +5552,86 @@ function EntryCard({ entry, onReflect }) {
 }
 
 // ─── INSIGHTS SCREEN ──────────────────────────────────────────────────────────
-// Sections: Activity → Deeper insights → Builds → Goals. Each section gets a
-// section header so the page reads as a structured report rather than a stack
-// of similar cards. Empty/low-data cards show an intentional placeholder so a
-// fresh account doesn't see a wall of blank grids.
-function InsightsScreen({ habits, goals = [], journalEntries = [], onShowHistory, onShare, isPro = false, onUpgrade, userId = null }) {
+// Hierarchy: summary stats → Weekly brief (hero) → Activity (collapsed detail) →
+// Pattern detection (cross-habit links + tone + expandable detail) → Builds → Goals.
+// Empty/low-data cards keep intentional placeholders so new accounts don’t see
+// blank grids.
+
+/** Split AI brief into skimmable blocks (paragraphs or grouped sentences). */
+function weeklyBriefBlocks(text) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) return [];
+  const byNl = trimmed.split(/\n\n+/).map(s => s.trim()).filter(Boolean);
+  if (byNl.length > 1) return byNl;
+  const sentences = trimmed.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [trimmed];
+  const blocks = [];
+  let cur = "";
+  for (const s of sentences) {
+    const part = s.trim();
+    if (!part) continue;
+    if ((cur + " " + part).length > 300 && cur) {
+      blocks.push(cur.trim());
+      cur = part;
+    } else {
+      cur = cur ? `${cur} ${part}` : part;
+    }
+  }
+  if (cur) blocks.push(cur);
+  return blocks.length ? blocks : [trimmed];
+}
+
+function InsightsScreen({ habits, goals = [], journalEntries = [], onShowHistory, onShare, isPro = false, onUpgrade, userId = null, userName = "" }) {
   // ── Weekly summary state ───────────────────────────────────────────────────
   const [weeklySummary,   setWeeklySummary]   = useState(null);
   const [summaryLoading,  setSummaryLoading]  = useState(false);
   const [summaryError,    setSummaryError]    = useState(null);
+  const [briefQuota,      setBriefQuota]      = useState(null);
+  const [activityExpanded, setActivityExpanded] = useState(false);
+  const [patternsMoreExpanded, setPatternsMoreExpanded] = useState(false);
 
-  // Load from localStorage on mount / when userId changes
+  const thisWeekStart = weekStartFor(todayStr());
+
+  async function refreshBriefQuota() {
+    if (!isPro || !userId) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+      const res = await fetch(`/api/weekly-summary?client_date=${encodeURIComponent(todayStr())}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const j = await res.json();
+      setBriefQuota({
+        used: j.used,
+        limit: j.limit,
+        week_start: j.week_start,
+        can_generate: j.can_generate,
+      });
+    } catch { /* ignore */ }
+  }
+
+  // Load cached brief + server quota on mount / when userId changes
   useEffect(() => {
     if (!isPro || !userId) return;
     try {
       const raw = localStorage.getItem(`forged_weekly_summary:${userId}`);
       if (raw) {
-        const { text, ts } = JSON.parse(raw);
-        if (text && Date.now() - ts < WEEKLY_SUMMARY_TTL_MS) setWeeklySummary(text);
+        const parsed = JSON.parse(raw);
+        const { text, ts, week_start: cachedWeek } = parsed;
+        const weekOk = cachedWeek === thisWeekStart;
+        if (text && weekOk && Date.now() - ts < WEEKLY_SUMMARY_TTL_MS) {
+          setWeeklySummary(text);
+        } else {
+          try { localStorage.removeItem(`forged_weekly_summary:${userId}`); } catch { /* ignore */ }
+          setWeeklySummary(null);
+        }
+      } else {
+        setWeeklySummary(null);
       }
     } catch { /* ignore */ }
-  }, [userId, isPro]);
+    refreshBriefQuota();
+  }, [userId, isPro, thisWeekStart]);
 
   async function generateWeeklySummary() {
     setSummaryLoading(true);
@@ -5594,42 +5643,102 @@ function InsightsScreen({ habits, goals = [], journalEntries = [], onShowHistory
       const res = await fetch("/api/weekly-summary", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ habits, goals, journalEntries, client_date: todayStr() }),
+        body: JSON.stringify({
+          habits,
+          goals,
+          journalEntries,
+          name: (userName || "").trim() || "there",
+          client_date: todayStr(),
+        }),
       });
+      const payload = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `Error ${res.status}`);
+        if (res.status === 429 && payload?.limit != null) {
+          setBriefQuota({
+            used: payload.used,
+            limit: payload.limit,
+            week_start: payload.week_start,
+            can_generate: false,
+          });
+        }
+        throw new Error(payload.error || `Error ${res.status}`);
       }
-      const { text } = await res.json();
+      const { text, used, limit, week_start } = payload;
       setWeeklySummary(text);
-      try { localStorage.setItem(`forged_weekly_summary:${userId}`, JSON.stringify({ text, ts: Date.now() })); } catch { /* quota */ }
+      if (typeof used === "number" && typeof limit === "number") {
+        setBriefQuota({
+          used,
+          limit,
+          week_start: week_start || thisWeekStart,
+          can_generate: used < limit,
+        });
+      } else {
+        refreshBriefQuota();
+      }
+      try {
+        localStorage.setItem(
+          `forged_weekly_summary:${userId}`,
+          JSON.stringify({ text, ts: Date.now(), week_start: week_start || thisWeekStart }),
+        );
+      } catch { /* quota */ }
     } catch (err) {
       setSummaryError(err.message || "Generation failed");
     } finally {
       setSummaryLoading(false);
     }
   }
-  function IC({ title, children, action, dataTour, subtitle }) {
+  function IC({ title, children, action, dataTour, subtitle, flush }) {
     return (
-      <div data-tour={dataTour} style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:18 }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom: subtitle ? 4 : 16 }}>
-          <div style={{ fontSize:10, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em" }}>{title}</div>
+      <div data-tour={dataTour} style={{ margin: flush ? "0 0 12px" : "0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:18 }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom: subtitle ? 6 : 14 }}>
+          <div style={{ fontSize:10, fontWeight:800, color:T.gold, textTransform:"uppercase", letterSpacing:"0.1em" }}>{title}</div>
           {action}
         </div>
         {subtitle && (
-          <div style={{ fontSize:11, color:T.hint, lineHeight:1.5, marginBottom:14 }}>{subtitle}</div>
+          <div style={{ fontSize:12, color:T.muted, lineHeight:1.55, marginBottom:14, fontWeight:450 }}>{subtitle}</div>
         )}
         {children}
       </div>
     );
   }
 
-  // Section header — structural divider between groups of cards.
-  function SectionTitle({ label, hint }) {
+  /** Progressive disclosure — full-width tap target, premium feel */
+  function InsightExpandable({ label, sublabel, open, onToggle, children }) {
     return (
-      <div style={{ margin:"22px 18px 10px" }}>
-        <div style={{ fontFamily:T.serif, fontSize:18, color:T.text, letterSpacing:"-0.01em" }}>{label}</div>
-        {hint && <div style={{ fontSize:11, color:T.hint, marginTop:2, lineHeight:1.55 }}>{hint}</div>}
+      <div style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, overflow:"hidden" }}>
+        <button
+          type="button"
+          onClick={onToggle}
+          style={{
+            width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between",
+            gap:12, padding:"16px 18px", background:"none", border:"none", cursor:"pointer",
+            fontFamily:T.font, textAlign:"left",
+          }}
+        >
+          <div style={{ minWidth:0, flex:1 }}>
+            <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:sublabel ? 6 : 0 }}>{label}</div>
+            {sublabel && <div style={{ fontSize:12, color:T.muted, lineHeight:1.55, fontWeight:450 }}>{sublabel}</div>}
+          </div>
+          <span style={{ fontSize:11, color:T.gold, fontWeight:700, flexShrink:0, letterSpacing:"0.06em" }}>{open ? "HIDE" : "SHOW"}</span>
+        </button>
+        {open && (
+          <div style={{ padding:"4px 14px 16px", borderTop:`0.5px solid ${T.border}` }}>
+            {children}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Section header — structural divider between groups of cards.
+  function SectionTitle({ label, hint, explainer }) {
+    return (
+      <div style={{ margin:"26px 18px 12px" }}>
+        <div style={{ fontFamily:T.serif, fontSize:21, fontWeight:400, color:T.text, letterSpacing:"-0.02em", lineHeight:1.2 }}>{label}</div>
+        {hint && (
+          <div style={{ fontSize:10, fontWeight:700, color:T.hint, marginTop:6, letterSpacing:"0.12em", textTransform:"uppercase" }}>{hint}</div>
+        )}
+        {explainer && <div style={{ fontSize:12, color:T.muted, marginTop:10, lineHeight:1.65, maxWidth:420 }}>{explainer}</div>}
       </div>
     );
   }
@@ -5666,9 +5775,6 @@ function InsightsScreen({ habits, goals = [], journalEntries = [], onShowHistory
 
   // Day-of-week pattern across real logs.
   const dow = getBestDayOfWeek(allRealLogs);
-  // Reflection coverage across all habit logs.
-  const refl = getReflectionCoverage(habits);
-
   // Deeper insights — computed from user-written text only (reflections, notes,
   // project wins, hard parts, goal notes). Cached under a per-user key with a
   // content-hash + 24h TTL so the analysis doesn't re-run on every render or
@@ -5677,8 +5783,13 @@ function InsightsScreen({ habits, goals = [], journalEntries = [], onShowHistory
     const corpus = getWrittenCorpus(habits, goals);
     const sig = hashCorpusSignature(corpus);
     const cached = readDeepInsightsCache(userId);
+    const cacheShapeOk =
+      !cached?.data ||
+      cached.data.needsMoreData === true ||
+      Array.isArray(cached.data.crossHabitLinks);
     if (
       cached &&
+      cacheShapeOk &&
       cached.sig === sig &&
       typeof cached.ts === "number" &&
       Date.now() - cached.ts < DEEP_INSIGHTS_TTL_MS
@@ -5690,10 +5801,23 @@ function InsightsScreen({ habits, goals = [], journalEntries = [], onShowHistory
     return data;
   }, [habits, goals, userId]);
 
+  const hasPatternMore = !deep.needsMoreData && (
+    (deep.momentumShift?.up?.length > 0 || deep.momentumShift?.down?.length > 0) ||
+    (deep.consistencyGaps?.length > 0) ||
+    (deep.recentHardPartQuotes?.length > 0) ||
+    !!deep.mostReflectedHabit ||
+    !!(deep.revisitEntry && deep.revisitEntry.text && deep.revisitEntry.text.length >= 60)
+  );
+
   // Totals across habit grids — used to decide if 12-week/28-day cards have
   // enough real data to render meaningfully vs. the empty hint.
   const anyHabitLogs = habits.some(h => h.logs.some(l => l.value !== "quicknote" && l.value !== "skip"));
   const anyCompletionAboveZero = habits.some(h => getCompletionRate(h) > 0);
+
+  const activitySummaryBits = [];
+  if (anyHabitLogs && longestBestStreak > 0) activitySummaryBits.push(`Best streak on any habit: ${longestBestStreak} days`);
+  if (dow.best && !dow.needsMoreData) activitySummaryBits.push(`You tend to log most on ${dow.best.label}s`);
+  if (mostConsistent && mostConsistentRate > 0) activitySummaryBits.push(`${mostConsistent.name} is your steadiest lately (${mostConsistentRate}% over 28 days)`);
 
   if (habits.length === 0) return (
     <div style={{ padding:"60px 28px", textAlign:"center" }}>
@@ -5712,30 +5836,162 @@ function InsightsScreen({ habits, goals = [], journalEntries = [], onShowHistory
       {/* Header */}
       <div style={{ padding:"16px 18px 10px", display:"flex", alignItems:"flex-end", justifyContent:"space-between" }}>
         <div>
-          <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>Forge report</div>
+          <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:6 }}>Insights</div>
+          <div style={{ fontFamily:T.serif, fontSize:30, color:T.text, letterSpacing:"-0.03em", lineHeight:1.05 }}>Forge report</div>
           {firstLogLabel && (
-            <div style={{ fontSize:12, color:T.muted, marginTop:3 }}>Forging since {firstLogLabel}</div>
+            <div style={{ fontSize:11, color:T.muted, marginTop:8, lineHeight:1.45 }}>Tracking since <span style={{ color:T.sub, fontWeight:600 }}>{firstLogLabel}</span></div>
           )}
         </div>
-        <button onClick={onShare} style={{ display:"flex", alignItems:"center", gap:6, padding:"8px 14px", borderRadius:T.rsm, background:"rgba(200,144,42,0.12)", border:"none", color:T.gold, fontSize:12, fontWeight:500, cursor:"pointer", marginBottom:4 }}>
+        <button onClick={onShare} style={{ display:"flex", alignItems:"center", gap:6, padding:"8px 14px", borderRadius:T.rsm, background:"rgba(200,144,42,0.12)", border:"none", color:T.gold, fontSize:12, fontWeight:600, cursor:"pointer", marginBottom:4 }}>
           📤 Share
         </button>
       </div>
 
       {/* Summary stats row */}
-      <div data-tour="insights-stats" style={{ margin:"0 14px 12px", display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8 }}>
+      <div data-tour="insights-stats" style={{ margin:"0 14px 8px", display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8 }}>
         <Stat label="tracked" value={totalTracked}/>
         <Stat label="days logged" value={totalDaysLogged} color={T.text}/>
         <Stat label="best streak" value={longestBestStreak > 0 ? `🔥${longestBestStreak}` : "—"} color={T.gold}/>
         <Stat label="total logs" value={totalLogsEver}/>
       </div>
+      <div style={{ margin:"0 18px 18px", fontSize:11, color:T.muted, lineHeight:1.55, maxWidth:400 }}>
+        <span style={{ color:T.hint, fontWeight:700, fontSize:10, letterSpacing:"0.08em", textTransform:"uppercase", marginRight:8 }}>At a glance</span>
+        What you track, how many different days you&apos;ve logged, your best streak, and total logging days.
+      </div>
+
+      {/* ══ Weekly brief — headline feature ═══════════════════════════════════ */}
+      <div style={{
+        margin:"0 14px 22px",
+        background:`linear-gradient(165deg, rgba(200,144,42,0.18) 0%, rgba(26,26,22,0.94) 38%, ${T.raised} 100%)`,
+        borderRadius:T.r,
+        border:`1px solid rgba(200,144,42,0.42)`,
+        padding:"22px 18px 20px",
+        position:"relative",
+        overflow:"hidden",
+        boxShadow:"0 2px 24px rgba(0,0,0,0.35), 0 1px 0 rgba(200,144,42,0.14)",
+      }}>
+        {!isPro && (
+          <div style={{ position:"absolute", top:14, right:14 }}>
+            <span style={{ fontSize:9, fontWeight:800, color:"#0F0F0D", background:T.gold, padding:"2px 7px", borderRadius:5, letterSpacing:"0.08em" }}>PRO</span>
+          </div>
+        )}
+        <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.14em", marginBottom:10 }}>YOUR WEEKLY BRIEF</div>
+        <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, letterSpacing:"-0.03em", lineHeight:1.15, marginBottom:10, maxWidth:320 }}>
+          What actually moved this week
+        </div>
+        <div style={{ fontSize:12, color:T.muted, lineHeight:1.6, marginBottom:14, maxWidth:360, fontWeight:450 }}>
+          Plain-language read on what held, what slipped, and what deserves attention. <strong style={{ color:T.sub, fontWeight:600 }}>Uses AI</strong> — capped so it stays sustainable.
+        </div>
+        {isPro && briefQuota && (
+          <div style={{
+            fontSize:11, color: briefQuota.can_generate ? T.sub : T.amber, marginBottom:14,
+            padding:"8px 11px", borderRadius:8, background:"rgba(0,0,0,0.22)", border:`0.5px solid ${T.border}`,
+            lineHeight:1.5,
+          }}>
+            <span style={{ fontWeight:700, color:T.text }}>{Math.max(0, briefQuota.limit - briefQuota.used)}</span> of {briefQuota.limit} fresh briefs left for the week of {fmtWeekRange(briefQuota.week_start || thisWeekStart)}.
+            {!briefQuota.can_generate && " Resets next Monday."}
+          </div>
+        )}
+
+        {!isPro ? (
+          <>
+            {onUpgrade && (
+              <button type="button" onClick={onUpgrade} style={{ padding:"11px 18px", borderRadius:T.rsm, border:`1px solid rgba(200,144,42,0.5)`, background:"rgba(200,144,42,0.18)", color:T.gold, fontSize:13, fontWeight:700, cursor:"pointer", letterSpacing:"0.02em" }}>
+                Unlock with Pro →
+              </button>
+            )}
+          </>
+        ) : weeklySummary ? (
+          <>
+            <div style={{ marginBottom:16 }}>
+              {(() => {
+                const blocks = weeklyBriefBlocks(weeklySummary);
+                return blocks.map((block, i) => (
+                <div
+                  key={i}
+                  style={{
+                    fontSize:14,
+                    color:T.text,
+                    lineHeight:1.72,
+                    fontWeight:450,
+                    marginBottom: i < blocks.length - 1 ? 14 : 0,
+                    paddingBottom: i < blocks.length - 1 ? 14 : 0,
+                    borderBottom: i < blocks.length - 1 ? `0.5px solid rgba(255,255,255,0.06)` : "none",
+                  }}
+                >
+                  {block}
+                </div>
+                ));
+              })()}
+            </div>
+            <div style={{ display:"flex", flexWrap:"wrap", alignItems:"center", gap:12 }}>
+              <button
+                type="button"
+                onClick={() => { setWeeklySummary(null); try { localStorage.removeItem(`forged_weekly_summary:${userId}`); } catch { /* ignore */ } }}
+                style={{ fontSize:12, color:T.gold, background:"none", border:"none", cursor:"pointer", padding:0, fontWeight:700 }}
+              >
+                ↻ New brief
+              </button>
+              {briefQuota && !briefQuota.can_generate && (
+                <span style={{ fontSize:11, color:T.amber }}>No generations left this week.</span>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            {summaryError && (
+              <div style={{ fontSize:12, color:T.amber, marginBottom:10, lineHeight:1.5 }}>{summaryError}</div>
+            )}
+            <button
+              type="button"
+              onClick={generateWeeklySummary}
+              disabled={summaryLoading || (briefQuota && !briefQuota.can_generate)}
+              style={{
+                padding:"12px 22px", borderRadius:T.rsm, border:`1px solid rgba(200,144,42,0.55)`,
+                background: summaryLoading || (briefQuota && !briefQuota.can_generate) ? "rgba(200,144,42,0.08)" : T.gold,
+                color: summaryLoading || (briefQuota && !briefQuota.can_generate) ? T.hint : "#0F0F0D",
+                fontSize:13, fontWeight:800, cursor: summaryLoading || (briefQuota && !briefQuota.can_generate) ? "default" : "pointer", letterSpacing:"0.02em",
+              }}
+            >
+              {summaryLoading ? "Writing your brief…" : briefQuota && !briefQuota.can_generate ? "Limit reached this week" : "Generate my weekly brief"}
+            </button>
+          </>
+        )}
+      </div>
 
       {/* ══ Activity ══════════════════════════════════════════════════════════ */}
-      <SectionTitle label="Activity" hint="How consistent you've been — and where the gaps are." />
+      <SectionTitle
+        label="Activity"
+        hint="By the numbers"
+        explainer="Streaks, completion bars, and heatmaps live below. This section is support — your weekly brief and patterns carry the story."
+      />
 
+      <div data-tour="insights-streaks" style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:14 }}>
+        <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:10 }}>Highlights</div>
+        <div style={{ fontSize:13, color:T.sub, lineHeight:1.65, marginBottom:12, fontWeight:450 }}>
+          {activitySummaryBits.length > 0
+            ? activitySummaryBits.map((line, i) => (
+                <div key={i} style={{ marginBottom: i < activitySummaryBits.length - 1 ? 8 : 0, paddingLeft:11, borderLeft:`3px solid rgba(200,144,42,0.55)` }}>{line}</div>
+              ))
+            : "Log a few more days and we’ll drop your streak leader, steadiest habit, and strongest weekday here."}
+        </div>
+        <button
+          type="button"
+          onClick={() => setActivityExpanded(e => !e)}
+          style={{
+            width:"100%", padding:"10px 14px", borderRadius:T.rsm, border:`0.5px solid ${T.border}`,
+            background:"rgba(255,255,255,0.04)", color:T.text, fontSize:11, fontWeight:700,
+            cursor:"pointer", fontFamily:T.font,
+          }}
+        >
+          {activityExpanded ? "Hide charts & streaks" : "Show streaks, rates & 12-week grids"}
+        </button>
+      </div>
+
+      {activityExpanded && (
+      <>
       {/* Streaks */}
       <IC
-        dataTour="insights-streaks"
         title="Streaks"
         action={<button onClick={onShowHistory} style={{ fontSize:12, color:T.accent, background:"none", border:"none", cursor:"pointer", fontWeight:500 }}>Full history →</button>}
       >
@@ -5905,6 +6161,8 @@ function InsightsScreen({ habits, goals = [], journalEntries = [], onShowHistory
           </EmptyHint>
         )}
       </IC>
+      </>
+      )}
 
       {/* ══ Deeper insights — from what you've actually written ═══════════════
           Pulls from reflections, notes, project wins, hard parts, and goal
@@ -5912,91 +6170,91 @@ function InsightsScreen({ habits, goals = [], journalEntries = [], onShowHistory
           above) so token cost is zero and analysis only re-runs when there's
           new writing or the cache expires. */}
       <SectionTitle
-        label="Pattern detection"
+        label="Patterns in your words"
         hint={deep.needsMoreData
-          ? "Add a line when you log — what went well, what didn't. After a few entries this section finds the recurring patterns in what you write."
-          : "Pulled from your own words — reflections, notes, wins, and blockers. Gets more specific the more you write."}
+          ? "Needs a bit more writing"
+          : "What keeps linking together"}
+        explainer={deep.needsMoreData
+          ? "Add a line when you log (win, hard part, or note). We read that text — not checkmarks — to spot ideas that bridge habits and how the mood of your words shifts week to week."
+          : "We look for ideas that show up across more than one habit or goal, and compare the last week you wrote something to the week before. Not clinical — just a structured skim of your own language."}
       />
 
       {deep.needsMoreData ? (
         // Single intentional low-data state rather than 4 empty cards.
-        <IC title="Write more to unlock this">
+        <IC title="Keep logging — then this lights up">
           <EmptyHint icon="📝">
-            Add a line or two when you log — what went well, what got in the way. After a few entries, this section finds recurring themes, flags what keeps coming up, and reads the tone behind your week. That's where the useful stuff is.
+            A single sentence when you check in is enough. After a few days with notes, we’ll surface threads that tie different habits together and flag whether your wording has leaned lighter or heavier lately.
           </EmptyHint>
         </IC>
       ) : (
         <>
-          {/* Themes in your words */}
-          {deep.topThemes && deep.topThemes.length > 0 && (
+          {deep.crossHabitLinks && deep.crossHabitLinks.length > 0 && (
             <IC
-              title="Themes in your words"
-              subtitle="Words that keep coming back across what you've written."
+              title="Threads across what you track"
+              subtitle="Ideas that appear in more than one habit or goal — not random word counts."
             >
-              <div style={{ display:"flex", flexWrap:"wrap", gap:7, marginBottom:10 }}>
-                {deep.topThemes.map((t, i) => (
-                  <div key={t.term} style={{
-                    padding:"6px 11px",
-                    borderRadius:999,
-                    background: i === 0 ? "rgba(200,144,42,0.12)" : T.surface,
-                    border: i === 0 ? "0.5px solid rgba(200,144,42,0.4)" : `0.5px solid ${T.border}`,
-                    fontSize:12,
-                    color: i === 0 ? T.gold : T.text,
-                    fontWeight: i === 0 ? 600 : 500,
-                    display:"flex", alignItems:"center", gap:6,
-                  }}>
-                    <span>{t.term}</span>
-                    <span style={{ fontSize:10, color: i === 0 ? T.gold : T.muted, opacity:0.9 }}>·</span>
-                    <span style={{ fontSize:10, color: i === 0 ? T.gold : T.muted }}>{t.count} {t.count === 1 ? "day" : "days"}</span>
+              <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+                {deep.crossHabitLinks.map((link, i) => (
+                  <div key={`${link.term}-${i}`} style={{ paddingBottom: i < deep.crossHabitLinks.length - 1 ? 14 : 0, borderBottom: i < deep.crossHabitLinks.length - 1 ? `0.5px solid ${T.border}` : "none" }}>
+                    <div style={{ display:"flex", flexWrap:"wrap", alignItems:"baseline", gap:8, marginBottom:8 }}>
+                      <span style={{ fontFamily:T.serif, fontSize:17, color:T.gold, fontWeight:400, letterSpacing:"-0.02em" }}>{link.term}</span>
+                      <span style={{ fontSize:10, color:T.hint, fontWeight:700, letterSpacing:"0.06em", textTransform:"uppercase" }}>
+                        {link.habitLabels.join(" · ")}
+                      </span>
+                    </div>
+                    <div style={{ fontSize:13, color:T.text, lineHeight:1.6, fontWeight:500, marginBottom:link.sample ? 10 : 0 }}>
+                      {link.connection}
+                    </div>
+                    {link.sample?.text && (
+                      <div style={{ borderLeft:`2px solid rgba(200,144,42,0.45)`, paddingLeft:11 }}>
+                        <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:4 }}>
+                          From {fmtEntryDate(link.sample.date)}
+                        </div>
+                        <div style={{ fontSize:12.5, color:T.muted, lineHeight:1.55, fontStyle:"italic" }}>
+                          “{truncateText(link.sample.text, 200)}”
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
-              {deep.topThemes[0]?.sample && (
-                <div style={{ borderLeft:`2px solid ${T.gold}`, paddingLeft:10, marginTop:4 }}>
-                  <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:3 }}>
-                    From {fmtEntryDate(deep.topThemes[0].sample.date)}
-                  </div>
-                  <div style={{ fontSize:12.5, color:T.sub, lineHeight:1.55, fontStyle:"italic" }}>
-                    “{truncateText(deep.topThemes[0].sample.text, 180)}”
-                  </div>
-                </div>
-              )}
             </IC>
           )}
 
-          {/* Tone trend — only when we have enough recent + prior entries to compare honestly */}
           {deep.moodTrend && (
-            <IC title="Tone trend" subtitle="Last 7 days vs. the week before, from your reflections and notes.">
+            <IC
+              title="Light vs. heavy wording"
+              subtitle="We scan for simple upbeat vs. heavy words in everything you wrote — then compare the last 7 days you journaled to the 7 days before. Rough signal, not therapy."
+            >
               {(() => {
                 const total = deep.toneMix.pos + deep.toneMix.neg + deep.toneMix.neu || 1;
                 const posPct = Math.round((deep.toneMix.pos / total) * 100);
                 const negPct = Math.round((deep.toneMix.neg / total) * 100);
                 const neuPct = Math.max(0, 100 - posPct - negPct);
                 const label =
-                  deep.moodTrend === "rising"    ? { text: "Skewing more positive lately", color: T.green } :
-                  deep.moodTrend === "declining" ? { text: "Skewing more negative lately",  color: T.amber } :
-                                                    { text: "Steady — no clear shift",       color: T.sub };
+                  deep.moodTrend === "rising"    ? { text: "Leaning lighter than the week before", color: T.green, tail: "Your word choices tilted a bit more toward the positive list vs. the prior week." } :
+                  deep.moodTrend === "declining" ? { text: "Leaning heavier than the week before",  color: T.amber, tail: "More of the heavy-word list showed up vs. the week prior — worth noticing, not diagnosing." } :
+                                                    { text: "About the same tone as last week",       color: T.sub, tail: "No big swing between the two windows we compare." };
                 return (
                   <>
-                    <div style={{ fontSize:13, color:label.color, fontWeight:600, lineHeight:1.55, marginBottom:10 }}>
+                    <div style={{ fontSize:15, color:label.color, fontWeight:700, lineHeight:1.45, marginBottom:8, letterSpacing:"-0.02em" }}>
                       {label.text}
+                    </div>
+                    <div style={{ fontSize:12, color:T.muted, lineHeight:1.6, marginBottom:12, fontWeight:450 }}>
+                      {label.tail}
                     </div>
                     <div style={{ display:"flex", height:8, borderRadius:4, overflow:"hidden", background:T.surface, marginBottom:8 }}>
                       <div style={{ width:`${posPct}%`, background:T.green, transition:"width 0.6s ease" }}/>
                       <div style={{ width:`${neuPct}%`, background:T.border }}/>
                       <div style={{ width:`${negPct}%`, background:T.amber, transition:"width 0.6s ease" }}/>
                     </div>
-                    <div style={{ display:"flex", justifyContent:"space-between", fontSize:10.5, color:T.hint }}>
-                      <span><span style={{ color:T.green }}>●</span> positive {deep.toneMix.pos}</span>
-                      <span>neutral {deep.toneMix.neu}</span>
-                      <span><span style={{ color:T.amber }}>●</span> rough {deep.toneMix.neg}</span>
+                    <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, color:T.hint, fontWeight:600 }}>
+                      <span><span style={{ color:T.green }}>●</span> lighter {deep.toneMix.pos}</span>
+                      <span>mixed {deep.toneMix.neu}</span>
+                      <span><span style={{ color:T.amber }}>●</span> heavier {deep.toneMix.neg}</span>
                     </div>
-                    <div style={{ fontSize:11, color:T.hint, lineHeight:1.6, marginTop:12 }}>
-                      {deep.moodTrend === "rising"
-                        ? "Whatever you've been doing the last week — more of that."
-                        : deep.moodTrend === "declining"
-                        ? "Worth naming what's weighing on you. The Coach can help you unpack it."
-                        : "Consistent tone. Good baseline to build on."}
+                    <div style={{ fontSize:10, color:T.hint, lineHeight:1.55, marginTop:10, fontStyle:"normal" }}>
+                      Score delta (last window vs. prior): {(deep.recentAvg - deep.priorAvg) >= 0 ? "+" : ""}{(deep.recentAvg - deep.priorAvg).toFixed(1)} on our tiny keyword scale.
                     </div>
                   </>
                 );
@@ -6004,188 +6262,111 @@ function InsightsScreen({ habits, goals = [], journalEntries = [], onShowHistory
             </IC>
           )}
 
-          {/* Momentum shift — which habits gained or lost consistency this week vs last */}
-          {(deep.momentumShift?.up?.length > 0 || deep.momentumShift?.down?.length > 0) && (
-            <IC title="This week vs. last week" subtitle="Habits that picked up or dropped off compared to the prior 7 days.">
-              {deep.momentumShift.up.map(m => (
-                <div key={m.habitId} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 0", borderTop:`0.5px solid ${T.border}` }}>
-                  <span style={{ fontSize:16, flexShrink:0 }}>{m.habitEmoji}</span>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:13, color:T.text, fontWeight:500, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{m.habitName}</div>
-                    <div style={{ fontSize:11, color:T.muted, marginTop:1 }}>{m.lastWeek} → {m.thisWeek} days this week</div>
-                  </div>
-                  <div style={{ fontSize:12, fontWeight:700, color:T.green, flexShrink:0 }}>↑ picking up</div>
-                </div>
-              ))}
-              {deep.momentumShift.down.map(m => (
-                <div key={m.habitId} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 0", borderTop:`0.5px solid ${T.border}` }}>
-                  <span style={{ fontSize:16, flexShrink:0 }}>{m.habitEmoji}</span>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:13, color:T.text, fontWeight:500, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{m.habitName}</div>
-                    <div style={{ fontSize:11, color:T.muted, marginTop:1 }}>{m.lastWeek} → {m.thisWeek} days this week</div>
-                  </div>
-                  <div style={{ fontSize:12, fontWeight:700, color:T.amber, flexShrink:0 }}>↓ dropping off</div>
-                </div>
-              ))}
-            </IC>
-          )}
+          {hasPatternMore && (
+            <InsightExpandable
+              label="Deeper detail"
+              sublabel="Momentum vs. last week, habits that went quiet, hard lines you saved, where you write the most, and one past note worth rereading."
+              open={patternsMoreExpanded}
+              onToggle={() => setPatternsMoreExpanded(o => !o)}
+            >
+              {/* Momentum shift — which habits gained or lost consistency this week vs last */}
+              {(deep.momentumShift?.up?.length > 0 || deep.momentumShift?.down?.length > 0) && (
+                <IC flush title="This week vs. last week" subtitle="Which habits you hit more or less often than the week before.">
+                  {deep.momentumShift.up.map(m => (
+                    <div key={m.habitId} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 0", borderTop:`0.5px solid ${T.border}` }}>
+                      <span style={{ fontSize:16, flexShrink:0 }}>{m.habitEmoji}</span>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontSize:13, color:T.text, fontWeight:500, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{m.habitName}</div>
+                        <div style={{ fontSize:11, color:T.muted, marginTop:1 }}>{m.lastWeek} → {m.thisWeek} days this week</div>
+                      </div>
+                      <div style={{ fontSize:12, fontWeight:700, color:T.green, flexShrink:0 }}>↑ picking up</div>
+                    </div>
+                  ))}
+                  {deep.momentumShift.down.map(m => (
+                    <div key={m.habitId} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 0", borderTop:`0.5px solid ${T.border}` }}>
+                      <span style={{ fontSize:16, flexShrink:0 }}>{m.habitEmoji}</span>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontSize:13, color:T.text, fontWeight:500, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{m.habitName}</div>
+                        <div style={{ fontSize:11, color:T.muted, marginTop:1 }}>{m.lastWeek} → {m.thisWeek} days this week</div>
+                      </div>
+                      <div style={{ fontSize:12, fontWeight:700, color:T.amber, flexShrink:0 }}>↓ dropping off</div>
+                    </div>
+                  ))}
+                </IC>
+              )}
 
-          {/* Consistency gaps — habits that were active but have gone quiet this week */}
-          {deep.consistencyGaps?.length > 0 && (
-            <IC title="Gone quiet" subtitle="Was active recently but hasn't shown up this week.">
-              {deep.consistencyGaps.slice(0, 3).map(g => (
-                <div key={g.habitId} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 0", borderTop:`0.5px solid ${T.border}` }}>
-                  <span style={{ fontSize:16, flexShrink:0 }}>{g.habitEmoji}</span>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:13, color:T.text, fontWeight:500, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{g.habitName}</div>
-                    <div style={{ fontSize:11, color:T.muted, marginTop:1 }}>Last logged {fmtEntryDate(g.lastLogDate)} · {g.daysSilent} {g.daysSilent === 1 ? "day" : "days"} ago</div>
+              {/* Consistency gaps — habits that were active but have gone quiet this week */}
+              {deep.consistencyGaps?.length > 0 && (
+                <IC flush title="Gone quiet" subtitle="These were active before but have not shown up this week — a nudge to check in, not a judgement.">
+                  {deep.consistencyGaps.slice(0, 3).map(g => (
+                    <div key={g.habitId} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 0", borderTop:`0.5px solid ${T.border}` }}>
+                      <span style={{ fontSize:16, flexShrink:0 }}>{g.habitEmoji}</span>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontSize:13, color:T.text, fontWeight:500, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{g.habitName}</div>
+                        <div style={{ fontSize:11, color:T.muted, marginTop:1 }}>Last logged {fmtEntryDate(g.lastLogDate)} · {g.daysSilent} {g.daysSilent === 1 ? "day" : "days"} ago</div>
+                      </div>
+                      <div style={{ fontSize:18, flexShrink:0 }}>🔇</div>
+                    </div>
+                  ))}
+                </IC>
+              )}
+
+              {/* Hard-part quotes — what you actually wrote when things got hard */}
+              {deep.recentHardPartQuotes?.length > 0 && (
+                <IC flush title="What's been hard" subtitle="Lines you saved on tough days — useful to see the pattern in your own words.">
+                  {deep.recentHardPartQuotes.map((q, i) => (
+                    <div key={i} style={{ padding:"10px 0", borderTop: i > 0 ? `0.5px solid ${T.border}` : "none" }}>
+                      <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:5 }}>
+                        {fmtEntryDate(q.date)}{q.habitName ? ` · ${q.habitName}` : ""}
+                      </div>
+                      <div style={{ fontSize:13, color:T.sub, lineHeight:1.6, fontStyle:"italic" }}>
+                        "{truncateText(q.text, 180)}"
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{ fontSize:11, color:T.hint, lineHeight:1.6, marginTop:10, paddingTop:10, borderTop:`0.5px solid ${T.border}` }}>
+                    Naming the pattern is half the fix.
                   </div>
-                  <div style={{ fontSize:18, flexShrink:0 }}>🔇</div>
-                </div>
-              ))}
-            </IC>
-          )}
+                </IC>
+              )}
 
-          {/* Hard-part quotes — what you actually wrote when things got hard */}
-          {deep.recentHardPartQuotes?.length > 0 && (
-            <IC title="What's been hard" subtitle="From your recent hard-part notes — in your own words.">
-              {deep.recentHardPartQuotes.map((q, i) => (
-                <div key={i} style={{ padding:"10px 0", borderTop: i > 0 ? `0.5px solid ${T.border}` : "none" }}>
-                  <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:5 }}>
-                    {fmtEntryDate(q.date)}{q.habitName ? ` · ${q.habitName}` : ""}
+              {deep.mostReflectedHabit && (
+                <IC flush title="What you write about most" subtitle="The habit that shows up most in your notes — often where you're doing the emotional work.">
+                  <div style={{ fontSize:13, color:T.sub, lineHeight:1.6 }}>
+                    <strong style={{ color:T.text }}>{deep.mostReflectedHabit.name}</strong> shows up in your writing more than anything else — <strong style={{ color:T.text }}>{deep.mostReflectedHabit.days}</strong> {deep.mostReflectedHabit.days === 1 ? "day" : "days"} of notes so far. That's usually where the real work is happening.
                   </div>
-                  <div style={{ fontSize:13, color:T.sub, lineHeight:1.6, fontStyle:"italic" }}>
-                    "{truncateText(q.text, 180)}"
+                </IC>
+              )}
+
+              {deep.revisitEntry && deep.revisitEntry.text && deep.revisitEntry.text.length >= 60 && (
+                <IC flush title="Worth revisiting" subtitle="Something you wrote recently that might still ring true.">
+                  <div style={{ borderLeft:`2px solid ${T.accent}`, paddingLeft:12 }}>
+                    <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:4 }}>
+                      {fmtEntryDate(deep.revisitEntry.date)}
+                      {deep.revisitEntry.habitName ? ` · ${deep.revisitEntry.habitName}` : ""}
+                      {deep.revisitEntry.goalName  ? ` · ${deep.revisitEntry.goalName}`  : ""}
+                      {deep.revisitEntry.kind === "win"  ? " · win"      : ""}
+                      {deep.revisitEntry.kind === "hard" ? " · hard part": ""}
+                    </div>
+                    <div style={{ fontSize:13, color:T.text, lineHeight:1.65, fontStyle:"italic" }}>
+                      “{truncateText(deep.revisitEntry.text, 260)}”
+                    </div>
                   </div>
-                </div>
-              ))}
-              <div style={{ fontSize:11, color:T.hint, lineHeight:1.6, marginTop:10, paddingTop:10, borderTop:`0.5px solid ${T.border}` }}>
-                Naming the pattern is half the fix.
-              </div>
-            </IC>
-          )}
-
-          {/* Most written about — gated inside analyzeDeepInsights so it only
-              fires when the leader is meaningfully ahead. Counts UNIQUE
-              writing days per habit (prior bug counted text fragments, so a
-              project log inflated its number 3-4×). */}
-          {deep.mostReflectedHabit && (
-            <IC title="What you write about most">
-              <div style={{ fontSize:13, color:T.sub, lineHeight:1.6 }}>
-                <strong style={{ color:T.text }}>{deep.mostReflectedHabit.name}</strong> shows up in your writing more than anything else — <strong style={{ color:T.text }}>{deep.mostReflectedHabit.days}</strong> {deep.mostReflectedHabit.days === 1 ? "day" : "days"} of notes so far. That's usually where the real work is happening.
-              </div>
-            </IC>
-          )}
-
-          {/* Worth revisiting — pulls one real piece of writing (not the
-              joined fragment soup), so the quote reads cleanly. */}
-          {deep.revisitEntry && deep.revisitEntry.text && deep.revisitEntry.text.length >= 60 && (
-            <IC title="Worth revisiting" subtitle="Something you wrote recently that might be worth re-reading.">
-              <div style={{ borderLeft:`2px solid ${T.accent}`, paddingLeft:12 }}>
-                <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:4 }}>
-                  {fmtEntryDate(deep.revisitEntry.date)}
-                  {deep.revisitEntry.habitName ? ` · ${deep.revisitEntry.habitName}` : ""}
-                  {deep.revisitEntry.goalName  ? ` · ${deep.revisitEntry.goalName}`  : ""}
-                  {deep.revisitEntry.kind === "win"  ? " · win"      : ""}
-                  {deep.revisitEntry.kind === "hard" ? " · hard part": ""}
-                </div>
-                <div style={{ fontSize:13, color:T.text, lineHeight:1.65, fontStyle:"italic" }}>
-                  “{truncateText(deep.revisitEntry.text, 260)}”
-                </div>
-              </div>
-            </IC>
-          )}
-
-          {/* Reflection coverage — kept here because it's about self-awareness
-              depth, not surface activity. Logic now counts reflection + note +
-              win + hardPart + quicknote text (prior bug: only reflection). */}
-          {refl.totalLogs >= 3 && (
-            <IC title="Reflection coverage">
-              <div>
-                <div style={{ fontSize:13, color:T.sub, lineHeight:1.6, marginBottom:10 }}>
-                  <strong style={{ color:T.text }}>{refl.coverage}%</strong> of your logs have a note, reflection, win, or hard-part attached — {refl.logsWithReflection} of {refl.totalLogs}.
-                </div>
-                <div style={{ height:7, background:T.surface, borderRadius:4, overflow:"hidden", marginBottom:10 }}>
-                  <div style={{
-                    height:"100%", borderRadius:4,
-                    background: refl.coverage >= 40 ? T.green : refl.coverage >= 15 ? T.gold : T.amber,
-                    width:`${Math.max(refl.coverage, refl.coverage > 0 ? 4 : 0)}%`,
-                    transition:"width 0.7s ease",
-                  }}/>
-                </div>
-                <div style={{ fontSize:11, color:T.hint, lineHeight:1.6 }}>
-                  {refl.coverage < 15
-                    ? "One line when you log is enough. The more you write, the more specific the patterns get."
-                    : refl.coverage < 40
-                    ? "Reflections are how the app gets specific about you — the patterns sharpen the more you write."
-                    : "You're reflecting consistently. This is the data that makes pattern detection actually work."}
-                </div>
-              </div>
-            </IC>
+                </IC>
+              )}
+            </InsightExpandable>
           )}
         </>
       )}
 
-      {/* Weekly brief — functional for Pro, upgrade CTA for non-Pro */}
-      <div style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid rgba(200,144,42,0.28)`, padding:18, position:"relative", overflow:"hidden" }}>
-        {!isPro && (
-          <div style={{ position:"absolute", top:12, right:12 }}>
-            <span style={{ fontSize:9, fontWeight:800, color:"#0F0F0D", background:T.gold, padding:"2px 7px", borderRadius:5, letterSpacing:"0.08em" }}>PRO</span>
-          </div>
-        )}
-        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
-          <div style={{ width:36, height:36, borderRadius:10, background:"rgba(200,144,42,0.12)", border:"0.5px solid rgba(200,144,42,0.35)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>🧠</div>
-          <div style={{ fontSize:14, fontWeight:600, color:T.text }}>Weekly brief</div>
-        </div>
-
-        {!isPro ? (
-          <>
-            <div style={{ fontSize:12, color:T.sub, lineHeight:1.65, marginBottom:12 }}>
-              The coach writes you a weekly brief — what shifted, what held, and one thing worth paying attention to going into next week.
-            </div>
-            {onUpgrade && (
-              <button type="button" onClick={onUpgrade} style={{ padding:"9px 16px", borderRadius:T.rsm, border:`1px solid rgba(200,144,42,0.45)`, background:"rgba(200,144,42,0.10)", color:T.gold, fontSize:12, fontWeight:700, cursor:"pointer", letterSpacing:"0.02em" }}>
-                Upgrade to Pro →
-              </button>
-            )}
-          </>
-        ) : weeklySummary ? (
-          <>
-            <div style={{ fontSize:13, color:T.text, lineHeight:1.75, marginBottom:14, whiteSpace:"pre-wrap" }}>
-              {weeklySummary}
-            </div>
-            <button
-              type="button"
-              onClick={() => { setWeeklySummary(null); try { localStorage.removeItem(`forged_weekly_summary:${userId}`); } catch { /* ignore */ } }}
-              style={{ fontSize:11, color:T.hint, background:"none", border:"none", cursor:"pointer", padding:0 }}
-            >
-              ↻ Regenerate
-            </button>
-          </>
-        ) : (
-          <>
-            <div style={{ fontSize:12, color:T.sub, lineHeight:1.65, marginBottom:14 }}>
-              A 4–6 sentence brief from the coach — what you showed up for, where there were gaps, and one thing worth paying attention to next week.
-            </div>
-            {summaryError && (
-              <div style={{ fontSize:11, color:T.amber, marginBottom:10 }}>{summaryError}</div>
-            )}
-            <button
-              type="button"
-              onClick={generateWeeklySummary}
-              disabled={summaryLoading}
-              style={{ padding:"9px 16px", borderRadius:T.rsm, border:`1px solid rgba(200,144,42,0.45)`, background: summaryLoading ? "rgba(200,144,42,0.05)" : "rgba(200,144,42,0.10)", color: summaryLoading ? T.hint : T.gold, fontSize:12, fontWeight:700, cursor: summaryLoading ? "default" : "pointer", letterSpacing:"0.02em" }}
-            >
-              {summaryLoading ? "Generating…" : "Get my weekly brief →"}
-            </button>
-          </>
-        )}
-      </div>
-
       {/* ══ Builds (project habits) ══════════════════════════════════════════ */}
       {projectHabits.length > 0 && (
         <>
-          <SectionTitle label="Builds" hint="What you're actually building — time, wins, and the hard parts." />
+          <SectionTitle
+            label="Builds"
+            hint="Deep work and side projects you track with time."
+            explainer="For “build” habits you log minutes, wins, and rough patches. This section totals your hours, what went well lately, and where you said it was hard — so you see the arc of the project, not just today’s checkbox."
+          />
           {projectHabits.map(h => {
             const s = getProjectStats(h);
             return (
@@ -6220,7 +6401,11 @@ function InsightsScreen({ habits, goals = [], journalEntries = [], onShowHistory
       {/* ══ Goals ════════════════════════════════════════════════════════════ */}
       {activeGoals.length > 0 && (
         <>
-          <SectionTitle label="Goals" hint="Where you are vs. where you said you'd be." />
+          <SectionTitle
+            label="Goals"
+            hint="Numeric targets you're working toward."
+            explainer="Each goal shows where you are now vs your target, a simple progress bar, and recent measurements. It matters because you can spot drift early — before the deadline sneaks up."
+          />
           {activeGoals.map(g => {
             const stats = getGoalProgress(g);
             const { isComplete } = stats;
@@ -8349,12 +8534,20 @@ You're a smart, grounded companion — closer to a decent mate than a therapist,
 - One question max per reply, only when you need it to act. Never stack questions.
 - Don't start every reply with their name. Vary how you open.
 
+─── MIXED MESSAGES (build + gym + life in one dump) ───
+When one message mixes structured updates (sessions, minutes, calories, goal amounts, limits) AND personal/emotional/life narrative:
+1. Call log_habit for every structured fact you can map to a habit or goal (use [id:…] from the list).
+2. If there is any remaining human context — feelings, stress, relationships, story, or "everything else" — call log_journal with that text in their voice (first person). Same turn as the habit logs when both apply.
+3. Do not skip log_journal because the message is long or you already called several tools — personal content belongs in Journal.
+4. Only claim something saved if you will see success:true in the tool results you get back; if log_journal failed, say that part did not save.
+
 ─── AFTER TOOLS (log_habit, log_journal, create_habit, edit_habit) ───
-Tools already ran — your reply is the human wrap-up. **Never** answer with only "done", "got it", "logged", "sorted", or a bare tick — always anchor at least one line to what *they* shared.
-- Quick tap-in ("gym done", "logged water"): still 1–2 friendly sentences — can be light, but not empty.
-- Bigger day / lots of logs: acknowledge the pile-up once ("that's a lot — it's all down now" vibe) without reading back a manifest.
-- Heavy or intense stuff: one grounded line that meets the moment — real, not robotic, not clinical. No motivational poster.
-- Multi-habit: you can group ("knocked off the run and the limit — both in") instead of bullet-by-bullet inventory unless clarity needs it.
+Tools already ran. Your reply is conversational only — the app will append a truthful "Saved this turn" checklist after your text, so do **not** write your own bullet list of what was saved (avoid duplicate or fake inventories).
+**Never** answer with only "done", "got it", "logged", "sorted", or a bare tick — anchor at least one line to what *they* shared.
+- Quick tap-in: 1–2 friendly sentences.
+- Bigger day / mixed dump: show you heard the substance; you don't need to enumerate saves (the checklist handles that).
+- Heavy or intense stuff: one grounded line — real, not clinical.
+- If any tool returned success:false, acknowledge that specific miss honestly.
 
 ─── WHEN TO ACT vs ASK ───
 If they tell you what they did, log it — don't ask permission first. Act, then reply in plain human language (see above).
@@ -8373,9 +8566,10 @@ When the user wants a goal (any outcome tied to a number — lose weight, run a 
 The app renders a confirmation card from the <goal_plan> block. Never call create_habit for goals.
 
 ─── JOURNAL ───
-The user has a pure Journal — freeform daily entries, no streaks, no stats. Use the log_journal tool to save personal context: feelings, life events, thoughts, anything that doesn't fit neatly into a habit or goal.
-You can (and often should) call log_habit + log_journal in the same turn: pull out the structured data (sessions, limits, progress) into habits/goals, and save the broader human story to the journal.
-If the user does a big life dump, extract structured parts for habits/goals and write the rest — plus any personal context — to the journal. Don't ask permission; just route it naturally, then let your reply show you clocked what they said (not a stiff recap).
+The Journal tab is freeform (one page per calendar day). Use log_journal for personal/emotional/narrative content that isn't just a habit log line.
+In mixed messages, habit tools capture the scoreboard; log_journal captures the story. Both in one turn when the message contains both.
+Write log_journal content as continuous first-person prose — their voice, their words. If they sent a voice note, reshape into 2–4 readable sentences. No bullet points. The entry should read naturally when re-read weeks later.
+When in doubt about whether personal context belongs in journal, save it — a spare sentence in journal is far better than losing meaningful context. Only skip log_journal if the entire message is structured data with zero personal content.
 ${journalEntries.length ? `Recent journal entries (for context — do not repeat these back verbatim):
 ${journalEntries.slice(0, 5).map(e => `[${e.date}] "${e.content.slice(0, 200)}${e.content.length > 200 ? "…" : ""}"`).join("\n")}` : ""}
 
@@ -8420,6 +8614,162 @@ function bumpCoachMsgCountInStorage() {
 }
 
 const COACH_STREAM_ID = "__streaming__";
+/** One rolling thread per user per local calendar day; trimmed for storage + display. Server still uses last 12 msgs only. */
+const COACH_DAY_MAX_MESSAGES = 24;
+const COACH_API_MESSAGE_CAP  = 12;
+
+function coachDayLocalKey(userId, dayYmd) {
+  return `forged_coach_day:v1:${userId}:${dayYmd}`;
+}
+
+function loadCoachDayMessages(userId) {
+  if (!userId) return null;
+  const day = todayStr();
+  try {
+    const raw = localStorage.getItem(coachDayLocalKey(userId, day));
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    if (!o || o.day !== day || !Array.isArray(o.messages)) return null;
+    return o.messages.slice(-COACH_DAY_MAX_MESSAGES).map((m, i) => ({
+      role: m.role === "user" ? "user" : "assistant",
+      content: String(m.content ?? ""),
+      ts: typeof m.ts === "number" ? m.ts : Date.now() - (o.messages.length - i),
+    }));
+  } catch {
+    return null;
+  }
+}
+
+function saveCoachDayMessages(userId, dayYmd, messages) {
+  if (!userId || !dayYmd) return;
+  try {
+    const cleaned = messages
+      .filter(m => m.id !== COACH_STREAM_ID)
+      .slice(-COACH_DAY_MAX_MESSAGES)
+      .map(m => ({ role: m.role, content: m.content, ts: m.ts }));
+    const key = coachDayLocalKey(userId, dayYmd);
+    if (cleaned.length === 0) {
+      localStorage.removeItem(key);
+      return;
+    }
+    localStorage.setItem(key, JSON.stringify({ v: 1, day: dayYmd, messages: cleaned, updatedAt: Date.now() }));
+  } catch { /* quota / private mode */ }
+}
+
+/**
+ * Coach bubbles: **bold**, *italic*, paragraph breaks — no raw markdown noise.
+ * Keeps implementation tiny (no markdown lib) and mobile-safe.
+ */
+function coachRichTextToElements(text, { strongColor, baseColor, keyRoot = "r" }) {
+  if (text == null || text === "") return null;
+  const out = [];
+  let k = 0;
+
+  function pushItalicBold(segment, isBold) {
+    if (!segment) return;
+    const rest = segment;
+    const it = /\*([^*\n]+)\*/g;
+    let li = 0;
+    let m;
+    const chunk = [];
+    while ((m = it.exec(rest)) !== null) {
+      if (m.index > li) chunk.push(<span key={`${keyRoot}-${k++}`} style={{ color: baseColor }}>{rest.slice(li, m.index)}</span>);
+      chunk.push(<em key={`${keyRoot}-${k++}`} style={{ color: baseColor, opacity: 0.92 }}>{m[1]}</em>);
+      li = m.index + m[0].length;
+    }
+    if (li < rest.length) chunk.push(<span key={`${keyRoot}-${k++}`} style={{ color: baseColor }}>{rest.slice(li)}</span>);
+    if (isBold) {
+      out.push(<strong key={`${keyRoot}-${k++}`} style={{ fontWeight: 700, color: strongColor }}>{chunk}</strong>);
+    } else {
+      out.push(...chunk);
+    }
+  }
+
+  const boldSplit = String(text).split(/(\*\*[\s\S]+?\*\*)/g);
+  for (const piece of boldSplit) {
+    const boldM = piece.match(/^\*\*([\s\S]+)\*\*$/);
+    if (boldM) {
+      pushItalicBold(boldM[1], true);
+    } else {
+      pushItalicBold(piece, false);
+    }
+  }
+  return out.length ? out : [<span key={`${keyRoot}-0`} style={{ color: baseColor }}>{text}</span>];
+}
+
+/**
+ * Renders the server-appended action receipt as clickable chips.
+ * Each ✓/✗ line becomes a pill that navigates to the relevant screen.
+ * onNavigateTo + onClose are optional — if absent chips are non-interactive.
+ */
+function CoachReceiptChips({ receiptText, onNavigateTo, onClose }) {
+  const lines = String(receiptText || "").split("\n").filter(l => /^[✓✗]/.test(l.trimStart()));
+  if (!lines.length) return null;
+  return (
+    <div style={{ display:"flex", flexWrap:"wrap", gap:5 }}>
+      {lines.map((line, i) => {
+        const isError  = line.trimStart().startsWith("✗");
+        const isJournal = line.includes("Journal");
+        const label = line.replace(/^[✓✗]\s*/, "").trim();
+        const navTarget = isJournal ? "journal" : "today";
+        const canNav = !isError && !!onNavigateTo;
+        return (
+          <button
+            key={i}
+            type="button"
+            onClick={canNav ? () => { onNavigateTo(navTarget); onClose?.(); } : undefined}
+            style={{
+              display:"inline-flex", alignItems:"center", gap:4,
+              padding:"4px 10px", borderRadius:20, fontSize:11.5, fontWeight:500,
+              border:`0.5px solid ${isError ? "rgba(230,126,34,0.4)" : "rgba(39,174,96,0.35)"}`,
+              background: isError ? "rgba(230,126,34,0.08)" : "rgba(39,174,96,0.09)",
+              color: isError ? "#E67E22" : "#27AE60",
+              cursor: canNav ? "pointer" : "default",
+              fontFamily:"inherit",
+              lineHeight:1.3,
+            }}
+          >
+            <span>{isError ? "✗" : "✓"}</span>
+            <span>{label}</span>
+            {canNav && <span style={{ opacity:0.55, fontSize:9.5 }}>→</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function CoachFormattedBubble({ text, isUser, muted }) {
+  const baseColor = muted ? T.sub : (isUser ? "#fff" : T.text);
+  const strongColor = muted ? T.muted : (isUser ? "#fff" : T.text);
+  const paras = String(text || "").split(/\n\n+/);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: muted ? 8 : 10 }}>
+      {paras.map((p, pi) => {
+        const lines = p.split("\n");
+        return (
+          <div
+            key={pi}
+            style={{
+              margin: 0,
+              lineHeight: muted ? 1.55 : 1.62,
+              fontSize: muted ? 12 : 14,
+              letterSpacing: "-0.01em",
+              wordBreak: "break-word",
+            }}
+          >
+            {lines.map((line, li) => (
+              <span key={li}>
+                {li > 0 ? <br /> : null}
+                {coachRichTextToElements(line, { strongColor, baseColor, keyRoot: `p${pi}-l${li}` })}
+              </span>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 /** Coach chat bubble footer — e.g. "3:05 pm" */
 function formatCoachMsgTime(ts) {
@@ -9011,7 +9361,7 @@ function GoalPlanPreview({ plan, onConfirm, onDismiss }) {
   );
 }
 
-function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, coachIcon, coachAccentColor, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onGoalLogged, onHabitRenamed, onGoalPlanConfirm, onJournalLogged, journalEntries = [], openInputMode = null, pendingMessage = null }) {
+function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, coachIcon, coachAccentColor, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onGoalLogged, onHabitRenamed, onGoalPlanConfirm, onJournalLogged, journalEntries = [], openInputMode = null, pendingMessage = null, onNavigateTo = null }) {
   const cName = coachName || "Coach";
   const isCreatorUser = user?.id === CREATOR_ID;
   // ── Warmer, context-aware greeting ─────────────────────────────────────────
@@ -9029,17 +9379,77 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, co
       : buildCoachGreeting({ name: user?.name, habits, goals });
   }
   const greeting = greetingRef.current;
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState(() => {
+    const uid = user?.id;
+    if (!uid) return [];
+    const loaded = loadCoachDayMessages(uid);
+    return loaded?.length ? loaded : [];
+  });
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const coachPersistDayRef = useRef(todayStr());
   const [input,    setInput]    = useState("");
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState(null);
-  const [lastCreated, setLastCreated] = useState(null);
   const [freeCoachMsgsToday, setFreeCoachMsgsToday] = useState(0);
   const [isExecutingAction, setIsExecutingAction] = useState(false);
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
   const coachOpenedAtRef = useRef(Date.now());
   const speech    = useSpeechInput(t => setInput(p => p.trim() ? p + " " + t : t), { autoRestart: true, meter: true });
+
+  // Hydrate today's thread from localStorage (one conversation per local calendar day).
+  useLayoutEffect(() => {
+    if (!user?.id) {
+      setMessages([]);
+      return;
+    }
+    const day = todayStr();
+    coachPersistDayRef.current = day;
+    const loaded = loadCoachDayMessages(user.id);
+    setMessages(loaded?.length ? loaded : []);
+  }, [user?.id]);
+
+  // New local day while coach is open → fresh thread (storage key is day-scoped).
+  useEffect(() => {
+    function rollIfMidnight() {
+      const d = todayStr();
+      if (d !== coachPersistDayRef.current) {
+        coachPersistDayRef.current = d;
+        setMessages([]);
+      }
+    }
+    const id = setInterval(rollIfMidnight, 45000);
+    function onVis() {
+      if (document.visibilityState === "visible") rollIfMidnight();
+    }
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, []);
+
+  // Persist thread (debounced); same-day key only.
+  useEffect(() => {
+    if (!user?.id) return;
+    const day = todayStr();
+    if (day !== coachPersistDayRef.current) return;
+    const t = setTimeout(() => saveCoachDayMessages(user.id, day, messages), 320);
+    return () => clearTimeout(t);
+  }, [messages, user?.id]);
+
+  // Flush before tab close / refresh so the debounced save isn't lost.
+  useEffect(() => {
+    if (!user?.id) return;
+    function flush() {
+      const day = todayStr();
+      if (day !== coachPersistDayRef.current) return;
+      saveCoachDayMessages(user.id, day, messagesRef.current);
+    }
+    window.addEventListener("pagehide", flush);
+    return () => window.removeEventListener("pagehide", flush);
+  }, [user?.id]);
 
   useEffect(() => {
     if (!openInputMode) return;
@@ -9060,7 +9470,7 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, co
       }
     }, 160);
     return () => { cancelled = true; clearTimeout(t); };
-  // Mount-only: parent remounts via key when opening with a new mode.
+  // Mount-only: coach sheet remounts each open (showCoach toggle).
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -9152,15 +9562,21 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, co
     };
     setInput("");
     setError(null);
-    setLastCreated(null);
+    const sendDay = todayStr();
+    let baseMessages = messages;
+    if (sendDay !== coachPersistDayRef.current) {
+      coachPersistDayRef.current = sendDay;
+      baseMessages = [];
+    }
     const userMsg = { role: "user", content: trimmed, ts: Date.now() };
-    const next = messages.length === 0
+    const next = baseMessages.length === 0
       ? [
           { role: "assistant", content: greeting, ts: coachOpenedAtRef.current },
           userMsg,
         ]
-      : [...messages, userMsg];
+      : [...baseMessages, userMsg];
     setMessages(next);
+    if (user?.id) saveCoachDayMessages(user.id, sendDay, next);
     setLoading(true);
     setIsExecutingAction(false);
     try {
@@ -9174,7 +9590,8 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, co
         },
         body: JSON.stringify({
           system:   buildCoachSystemPrompt(user, habits, cName, currentScreen, goals, journalEntries),
-          messages: next.map(m => ({ role: m.role, content: m.content })),
+          // Match server cap (api/chat.js slice -12): token-safe, full day kept in localStorage only.
+          messages: next.map(m => ({ role: m.role, content: m.content })).slice(-COACH_API_MESSAGE_CAP),
           // Send the user's actual local date (YYYY-MM-DD) so AI logs land on
           // the correct calendar day. Server falls back to UTC if missing.
           client_date: todayStr(),
@@ -9220,15 +9637,24 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, co
               }
               if (evt.done) {
                 bumpAfterSuccess();
-                // Finalise — remove stream id marker
-                setMessages(prev => prev.map(m => m.id === COACH_STREAM_ID ? { role: "assistant", content: m.content, ts: m.ts ?? Date.now() } : m));
+                const receiptBlock = evt.receipt && String(evt.receipt).trim()
+                  ? `\n\n${String(evt.receipt).trim()}`
+                  : "";
+                const finalContent = (fullText.trim() ? fullText.trim() : "") + receiptBlock;
+                const doneDay = todayStr();
+                coachPersistDayRef.current = doneDay;
+                // Finalise — remove stream id marker; append server truth receipt (never model-invented)
+                setMessages(prev => {
+                  const nextMsgs = prev.map(m => m.id === COACH_STREAM_ID ? { role: "assistant", content: finalContent || fullText, ts: m.ts ?? Date.now() } : m);
+                  if (user?.id) saveCoachDayMessages(user.id, doneDay, nextMsgs);
+                  return nextMsgs;
+                });
 
                 // ── Created ───────────────────────────────────────────────────
                 if (evt.created) {
                   const row = evt.created;
                   if (row.habit_type === "goal") onGoalCreated?.(rowToGoal(row));
                   else onHabitCreated?.(rowToHabit(row));
-                  setLastCreated({ name: row.name, emoji: row.emoji || "✨", type: "created" });
                 }
 
                 // ── Edited ────────────────────────────────────────────────────
@@ -9236,34 +9662,28 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, co
                   evt.edited.forEach(edit => {
                     const row = edit.updatedRow;
                     if (!row) return;
-                    // Route to the correct state bucket
                     if (row.habit_type === "goal") {
-                      onGoalCreated?.(rowToGoal(row)); // upserts by id
+                      onGoalCreated?.(rowToGoal(row));
                     } else {
-                      onHabitCreated?.(rowToHabit(row)); // upserts by id
+                      onHabitCreated?.(rowToHabit(row));
                     }
                   });
-                  setLastCreated({ name: evt.edited[0].habit_name, emoji: "✏️", type: "edited" });
                 }
 
                 // ── Logged ────────────────────────────────────────────────────
                 if (evt.logged?.length) {
                   evt.logged.forEach(l => {
                     if (l.habit_type === "goal") {
-                      // Update goals state
                       onGoalLogged?.(l.habit_id, l.updatedLogs);
                     } else {
                       onHabitLogged?.(l.habit_id, l.updatedLogs);
                     }
                   });
-                  const names = evt.logged.map(l => l.habit_name).join(", ");
-                  setLastCreated({ name: names, emoji: "✅", type: "logged" });
                 }
 
                 // ── Journaled ─────────────────────────────────────────────────
                 if (evt.journaled?.length) {
                   onJournalLogged?.(evt.journaled);
-                  setLastCreated({ name: "journal", emoji: "📓", type: "logged" });
                 }
 
                 if (evt.error) setError(evt.error);
@@ -9343,9 +9763,9 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, co
                     borderRadius:"14px 14px 14px 3px",
                     background:T.surface,
                     fontSize:14, color:T.text,
-                    lineHeight:1.6, whiteSpace:"pre-wrap", wordBreak:"break-word",
+                    lineHeight:1.6, wordBreak:"break-word",
                   }}>
-                    {greeting}
+                    <CoachFormattedBubble text={greeting} isUser={false} />
                   </div>
                   <div style={{ fontSize:10, color:T.hint, marginTop:3, alignSelf:"flex-end" }}>
                     {formatCoachMsgTime(coachOpenedAtRef.current)}
@@ -9420,23 +9840,40 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, co
             const parsed = m.role === "assistant" ? parseGoalPlan(m.content) : null;
             // While the block is still streaming, strip the raw partial XML so
             // the user never sees "<goal_plan>{..." leaking into the bubble.
-            const visibleText = parsed
+            const rawVisible = parsed
               ? parsed.textWithout
               : m.role === "assistant"
                 ? stripPartialGoalPlan(m.content)
                 : m.content;
+            const { main: coachMain, receipt: coachReceipt } =
+              m.role === "assistant" ? splitCoachReceipt(rawVisible) : { main: rawVisible, receipt: null };
             return (
               <div key={m.id || `${m.role}-${i}-${m.ts ?? ""}`} style={{ display:"flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
                 <div style={{ maxWidth:"90%", display:"flex", flexDirection:"column", alignItems: m.role === "user" ? "flex-end" : "flex-start", width: parsed ? "100%" : undefined }}>
-                  {visibleText ? (
+                  {(coachMain || coachReceipt) ? (
                     <div style={{
                       padding:"10px 14px",
                       borderRadius: m.role === "user" ? "14px 14px 3px 14px" : "14px 14px 14px 3px",
                       background: m.role === "user" ? T.accent : T.surface,
                       fontSize:14, color: m.role === "user" ? "#fff" : T.text,
-                      lineHeight:1.6, whiteSpace:"pre-wrap", wordBreak:"break-word",
+                      lineHeight:1.6, wordBreak:"break-word",
                     }}>
-                      {visibleText}
+                      {coachMain ? (
+                        <CoachFormattedBubble text={coachMain} isUser={m.role === "user"} />
+                      ) : null}
+                      {coachReceipt ? (
+                        <div style={{
+                          marginTop: coachMain ? 10 : 0,
+                          paddingTop: coachMain ? 10 : 0,
+                          borderTop: coachMain ? `0.5px solid ${T.border}` : "none",
+                        }}>
+                          <CoachReceiptChips
+                            receiptText={coachReceipt}
+                            onNavigateTo={onNavigateTo}
+                            onClose={onClose}
+                          />
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                   {parsed && (
@@ -9480,22 +9917,6 @@ function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, co
           {/* Error */}
           {error && (
             <div style={{ textAlign:"center", fontSize:12, color:T.accent, padding:"4px 8px" }}>{error}</div>
-          )}
-
-          {/* Created confirmation pill */}
-          {lastCreated && (
-            <div style={{ display:"flex", justifyContent:"center" }}>
-              <div style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"6px 12px", borderRadius:20, background:"rgba(39,174,96,0.15)", border:"0.5px solid rgba(39,174,96,0.35)", fontSize:12, color:T.green }}>
-                <span>{lastCreated.emoji}</span>
-                <span>
-                  <strong>{lastCreated.name}</strong>
-                  {lastCreated.type === "created" && " added to your habits"}
-                  {lastCreated.type === "logged"  && " logged for today"}
-                  {lastCreated.type === "edited"  && " updated"}
-                  {lastCreated.type === "renamed" && " renamed"}
-                </span>
-              </div>
-            </div>
           )}
 
           <div ref={bottomRef}/>
@@ -10778,7 +11199,7 @@ function JoinCoachSection({ onLinked }) {
       const { data: coaches, error: lookupErr } = await supabase
         .from("profiles")
         .select("id, name")
-        .eq("is_coach", true)
+        .or("is_coach.eq.true,coach_tier.not.is.null")
         .ilike("id", `${clean}%`)
         .limit(1);
       if (lookupErr) throw new Error(lookupErr.message);
@@ -10882,7 +11303,7 @@ function JoinCoachSection({ onLinked }) {
   );
 }
 
-function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onReplayPageGuides, onPreviewCoach, onSignOut, onShowTour, onUpgrade, coachName, coachIcon, onSaveCoach, notifEnabled, notifTime, notifLoading, notifPermission, dailyRemindersEnabled, nudgesEnabled, invitesEnabled, onNotifToggle, onNotifTimeChange, onNotifCategoryChange }) {
+function ProfileScreen({ user, xp, habits, isPro, isCoach, stripeCustomerId, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onReplayPageGuides, onPreviewCoach, onPreviewCoachWorkspace, onSignOut, onShowTour, onUpgrade, coachName, coachIcon, onSaveCoach, notifEnabled, notifTime, notifLoading, notifPermission, dailyRemindersEnabled, nudgesEnabled, invitesEnabled, onNotifToggle, onNotifTimeChange, onNotifCategoryChange }) {
   const [editingName,    setEditingName]    = useState(false);
   const [nameVal,        setNameVal]        = useState(user.name);
   const [showCoachSheet, setShowCoachSheet] = useState(false);
@@ -11023,6 +11444,38 @@ function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, aut
       {/* Join a coach — shown when not yet linked */}
       {!user.coachId && (
         <JoinCoachSection onLinked={(coachId, coachName) => onUpdateUser({ coachId, linkedCoachName: coachName })} />
+      )}
+
+      {/* Forged Coach — discovery for professionals (consumer accounts only) */}
+      {!isCoach && typeof onPreviewCoachWorkspace === "function" && (
+        <div style={{
+          margin:"0 14px 12px",
+          background:`linear-gradient(165deg, rgba(200,144,42,0.12) 0%, ${T.raised} 55%)`,
+          border:`1px solid rgba(200,144,42,0.35)`,
+          borderRadius:14,
+          padding:"16px 18px",
+        }}>
+          <div style={{ fontSize:10, fontWeight:700, color:T.gold, letterSpacing:"0.1em", marginBottom:8 }}>FORGED COACH</div>
+          <div style={{ fontFamily:T.serif, fontSize:18, color:T.text, lineHeight:1.25, marginBottom:8 }}>
+            Run 1:1s? See habits before every session.
+          </div>
+          <div style={{ fontSize:12, color:T.muted, lineHeight:1.65, marginBottom:14 }}>
+            Client roster, streaks, notes, and an AI pre-session brief — built for coaches, separate from the habit app your clients use.
+          </div>
+          <button
+            type="button"
+            onClick={onPreviewCoachWorkspace}
+            style={{
+              width:"100%", padding:"12px 14px", borderRadius:T.rsm, border:`1px solid rgba(200,144,42,0.5)`,
+              background:T.gold, color:"#0F0F0D", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:T.font,
+            }}
+          >
+            Preview coach workspace (demo)
+          </button>
+          <div style={{ fontSize:11, color:T.hint, lineHeight:1.6, marginTop:12 }}>
+            <strong style={{ color:T.sub }}>How access works today:</strong> your profile is marked as a coach in Forged (we onboard coaches in batches), then you subscribe in-app ($49/mo, up to 15 clients, Stripe). Promo codes work at checkout if you have one.
+          </div>
+        </div>
       )}
 
       {/* Account */}
@@ -11489,7 +11942,7 @@ function SetPasswordScreen({ onDone }) {
   );
 }
 
-function AuthScreen({ onSent, checkoutPending }) {
+function AuthScreen({ onSent, checkoutPending, onPreviewCoachWorkspace }) {
   const [mode,       setMode]       = useState("signin"); // "signin" | "signup" | "forgot"
   const [email,      setEmail]      = useState("");
   const [password,   setPassword]   = useState("");
@@ -11654,6 +12107,24 @@ function AuthScreen({ onSent, checkoutPending }) {
           </button>
         )}
       </div>
+      {typeof onPreviewCoachWorkspace === "function" && (
+        <button
+          type="button"
+          onClick={onPreviewCoachWorkspace}
+          style={{
+            width:"100%", marginTop:28, padding:"14px 16px", borderRadius:T.rsm,
+            border:`1px solid rgba(200,144,42,0.45)`, background:"rgba(200,144,42,0.08)",
+            color:T.gold, fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:T.font,
+          }}
+        >
+          See the coach workspace (demo) — no account needed
+        </button>
+      )}
+      {typeof onPreviewCoachWorkspace === "function" && (
+        <div style={{ fontSize:11, color:T.hint, textAlign:"center", marginTop:12, lineHeight:1.55, padding:"0 8px" }}>
+          Sample clients &amp; session prep — same screen real coaches use. Consumer app preview is separate on the home flow.
+        </div>
+      )}
     </div>
   );
 }
@@ -12302,7 +12773,7 @@ function previewAiBriefFromClient(client) {
 
   const topStreak = [...habits].filter(h => (h.streak || 0) >= 3).sort((a, b) => (b.streak || 0) - (a.streak || 0))[0];
   if (topStreak) {
-    out.push(`${topStreak.emoji || "🔥"} ${topStreak.name} (${topStreak.streak}-day streak) is your anchor habit — reinforce identity before adding pressure elsewhere.`);
+    out.push(`Strongest thread: ${topStreak.name} (${topStreak.streak}d) — ask what made sticking with it easier than they expected.`);
   }
 
   const gap = habits.filter(h => {
@@ -12312,18 +12783,18 @@ function previewAiBriefFromClient(client) {
   }).slice(0, 2);
   for (const h of gap) {
     const hd = h.lastLogDate ? localDaysSince(h.lastLogDate) : null;
-    out.push(`${h.emoji || "•"} ${h.name} is quiet${hd != null ? ` (~${hd}d since last log)` : ""} — one concrete question beats a generic check-in.`);
+    out.push(`${h.name} has gone quiet${hd != null ? ` (${hd}d)` : ""} — worth a light check-in before you problem-solve.`);
   }
 
   const withNote = habits.find(h => h.recentNote && String(h.recentNote).trim());
   if (withNote) {
     const raw = String(withNote.recentNote);
     const snip = raw.length > 100 ? `${raw.slice(0, 100)}…` : raw;
-    out.push(`They noted on ${withNote.name}: "${snip}" — reference it early so they feel seen.`);
+    out.push(`They left this on ${withNote.name}: "${snip}" — bring it up early.`);
   }
 
   if (out.length < 4) {
-    out.push(`Close with: "What would make next week feel 10% easier?" — surfaces blockers without you presuming them.`);
+    out.push(`Session closer idea: "What would make next week feel a little lighter?"`);
   }
   return out.slice(0, 5);
 }
@@ -12660,6 +13131,9 @@ function CoachPaywall() {
         <div style={{ fontSize:13, color:T.muted, lineHeight:1.6, maxWidth:320, margin:"0 auto" }}>
           See who's building momentum, who's going quiet, and what's worth asking — without chasing anyone for an update.
         </div>
+        <div style={{ fontSize:12, color:T.sub, lineHeight:1.65, maxWidth:340, margin:"16px auto 0", padding:"12px 14px", background:"rgba(255,255,255,0.04)", borderRadius:12, border:`0.5px solid ${T.border}` }}>
+          <strong style={{ color:T.text }}>Why you&apos;re seeing this:</strong> your account is already tagged as a coach in Forged. After you subscribe, Stripe keeps your coach access active. If checkout fails, contact support — we don&apos;t sell this plan without the coach flag on your profile.
+        </div>
       </div>
 
       {/* Plan card */}
@@ -12867,7 +13341,7 @@ const DEMO_CLIENTS = [
   },
 ];
 
-function CoachApp({ onExit, isPreview, coachTier, isAdmin, coachOwnName }) {
+function CoachApp({ onExit, isPreview, publicPreview, coachTier, isAdmin, coachOwnName }) {
   const [coachTab,       setCoachTab]       = useState("clients"); // "clients" | "you"
   const [coachScreen,    setCoachScreen]    = useState("list");
   const [selectedClient, setSelectedClient] = useState(null);
@@ -12876,6 +13350,7 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin, coachOwnName }) {
   const [err,            setErr]            = useState(null);
   const [coachUserId,    setCoachUserId]    = useState(null);
   const [inviteCopied,   setInviteCopied]   = useState(false);
+  const [loadTimedOut,    setLoadTimedOut]   = useState(false);
   // Dismissed "X just joined" banners — keyed by client id so refetching
   // doesn't reanimate something the coach already acknowledged.
   const [dismissedToasts, setDismissedToasts] = useState(() => new Set());
@@ -12884,21 +13359,101 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin, coachOwnName }) {
   const showPaywall = !isAdmin && !isPreview && !coachTier;
 
   useEffect(() => {
+    let cancelled = false;
+    let abortCtl = null;
+    let timeoutId = null;
+
     (async () => {
+      setLoadTimedOut(false);
+      // Auth-screen public demo: never wait on coach-data (avoids hung fetch + ghost session issues).
+      if (publicPreview) {
+        setCoachUserId(null);
+        setData({ clients: [], asOf: localTodayYmd() });
+        setErr(null);
+        setLoading(false);
+        return;
+      }
+
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const token = session?.access_token;
-        if (!token) { setErr("Not signed in"); setLoading(false); return; }
-        setCoachUserId(session.user?.id || null);
-        if (showPaywall) { setLoading(false); return; }
+        if (!token) {
+          setCoachUserId(null);
+          if (showPaywall) { if (!cancelled) setLoading(false); return; }
+          if (isPreview) {
+            if (!cancelled) {
+              setData({ clients: [], asOf: localTodayYmd() });
+              setErr(null);
+              setLoading(false);
+            }
+            return;
+          }
+          if (!cancelled) { setErr("Not signed in"); setLoading(false); }
+          return;
+        }
+        if (!cancelled) setCoachUserId(session.user?.id || null);
+        if (showPaywall) { if (!cancelled) setLoading(false); return; }
+
+        // Preview (signed-in): bounded fetch — fall back to demo clients on timeout or error.
+        if (isPreview) {
+          abortCtl = new AbortController();
+          timeoutId = setTimeout(() => {
+            abortCtl.abort();
+            if (!cancelled) setLoadTimedOut(true);
+          }, 12000);
+          try {
+            const res = await fetch("/api/coach-data", {
+              headers: { Authorization: `Bearer ${token}` },
+              signal: abortCtl.signal,
+            });
+            clearTimeout(timeoutId);
+            timeoutId = null;
+            const json = await res.json().catch(() => ({}));
+            if (!cancelled) {
+              if (res.ok) {
+                setData(json);
+                setErr(null);
+              } else {
+                setData({ clients: [], asOf: localTodayYmd() });
+                setErr(null);
+              }
+              setLoading(false);
+            }
+          } catch (e) {
+            clearTimeout(timeoutId);
+            timeoutId = null;
+            if (!cancelled) {
+              setData({ clients: [], asOf: localTodayYmd() });
+              setErr(null);
+              setLoading(false);
+            }
+          }
+          return;
+        }
+
         const res = await fetch("/api/coach-data", { headers: { Authorization: `Bearer ${token}` } });
         const json = await res.json();
-        if (!res.ok) { setErr(json.error || "Failed to load"); setLoading(false); return; }
-        setData(json);
-      } catch (e) { setErr(e.message); }
-      finally { setLoading(false); }
+        if (!cancelled) {
+          if (!res.ok) { setErr(json.error || "Failed to load"); setLoading(false); return; }
+          setData(json);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          if (isPreview) {
+            setData({ clients: [], asOf: localTodayYmd() });
+            setErr(null);
+          } else setErr(e.message);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     })();
-  }, [showPaywall]);
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+      if (abortCtl) abortCtl.abort();
+    };
+  }, [showPaywall, isPreview, publicPreview]);
 
   const inviteLink = coachUserId
     ? `https://forged-sage.vercel.app/?coach=${btoa(coachUserId)}`
@@ -12920,8 +13475,8 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin, coachOwnName }) {
   }
 
   const realClients = data?.clients ?? [];
-  // In preview mode with no real clients, show demo data so the workspace feels alive.
-  const useDemoClients = isPreview && realClients.length === 0;
+  // Public demo or preview with no roster: show packaged demo clients.
+  const useDemoClients = publicPreview || (isPreview && realClients.length === 0);
   const clients = useDemoClients ? DEMO_CLIENTS : realClients;
 
   // ── Bucket clients into urgency groups ─────────────────────────────────
@@ -13052,11 +13607,47 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin, coachOwnName }) {
   return (
     <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg }}>
 
+      {publicPreview && (
+        <div style={{
+          background:"linear-gradient(180deg, rgba(200,144,42,0.22), rgba(200,144,42,0.1))",
+          borderBottom:`1px solid rgba(200,144,42,0.4)`,
+          padding:"10px 16px",
+          display:"flex",
+          alignItems:"center",
+          justifyContent:"space-between",
+          gap:12,
+        }}>
+          <span style={{ fontSize:12, fontWeight:700, color:T.gold, letterSpacing:"0.02em", lineHeight:1.35 }}>
+            Public demo · sample clients only · nothing is saved
+          </span>
+          {typeof onExit === "function" && (
+            <button
+              type="button"
+              onClick={onExit}
+              style={{
+                flexShrink:0,
+                fontSize:12,
+                fontWeight:800,
+                color:"#1a1a16",
+                background:T.gold,
+                padding:"8px 14px",
+                borderRadius:10,
+                border:"none",
+                cursor:"pointer",
+                fontFamily:T.font,
+              }}
+            >
+              Exit demo
+            </button>
+          )}
+        </div>
+      )}
+
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div style={{ padding:"18px 18px 14px", borderBottom:`0.5px solid ${T.border}` }}>
         <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:12 }}>
           <div style={{ minWidth:0, flex:1 }}>
-            <div style={{ display:"flex", alignItems:"center", gap:9, marginBottom:3 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:9, marginBottom:3, flexWrap:"wrap" }}>
               <span style={{ fontFamily:T.serif, fontSize:24, color:T.text, letterSpacing:"-0.01em", lineHeight:1.15 }}>
                 {greeting}
               </span>
@@ -13087,6 +13678,27 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin, coachOwnName }) {
               </button>
             )}
           </div>
+          {isPreview && typeof onExit === "function" && !publicPreview && (
+            <button
+              type="button"
+              onClick={onExit}
+              style={{
+                flexShrink:0,
+                fontSize:11,
+                fontWeight:800,
+                color:"#1a1a16",
+                background:T.gold,
+                padding:"8px 12px",
+                borderRadius:10,
+                border:"none",
+                cursor:"pointer",
+                fontFamily:T.font,
+                letterSpacing:"0.03em",
+              }}
+            >
+              Exit preview
+            </button>
+          )}
         </div>
       </div>
 
@@ -13098,6 +13710,12 @@ function CoachApp({ onExit, isPreview, coachTier, isAdmin, coachOwnName }) {
         }}>
           <span style={{ fontSize:11, fontWeight:700, color:T.gold, letterSpacing:"0.04em" }}>PREVIEW</span>
           <span style={{ fontSize:11, color:T.sub }}>· Demo data only — not real clients</span>
+        </div>
+      )}
+
+      {loadTimedOut && !loading && useDemoClients && (
+        <div style={{ fontSize:11, color:T.muted, padding:"6px 18px 0", lineHeight:1.45 }}>
+          Showing sample clients — connection took too long. You can still explore the demo.
         </div>
       )}
 
@@ -13570,8 +14188,6 @@ export default function App() {
   const [showCoach,   setShowCoach]  = useState(false);
   /** How the coach sheet should prime input after open: voice vs keyboard. */
   const [coachOpenMode, setCoachOpenMode] = useState(null);
-  /** Bumps on each coach open so AICoach remounts and mount effects re-run. */
-  const [coachInstanceKey, setCoachInstanceKey] = useState(0);
   // Whether the user has ever opened the AI coach in this browser. Used to drive
   // a subtle pulse on the FAB for first-time users so it doesn't vanish into the bg.
   const [coachEverOpened, setCoachEverOpened] = useState(() => {
@@ -13610,7 +14226,6 @@ export default function App() {
         try { localStorage.setItem("forged_coach_opened", "1"); } catch { /* ignore */ }
         setCoachEverOpened(true);
         setCoachOpenMode("text");
-        setCoachInstanceKey(k => k + 1);
         setShowCoach(true);
       }
     }
@@ -13643,6 +14258,8 @@ export default function App() {
   // paywall in CoachApp — coaches without a tier see the subscribe screen.
   const [coachTier,      setCoachTier]      = useState(null);
   const [previewCoach,   setPreviewCoach]   = useState(false);
+  /** Signed-out (or from auth) demo of coach shell — does not require coach subscription */
+  const [publicCoachPreview, setPublicCoachPreview] = useState(false);
   /** From profiles.stripe_customer_id — used for Stripe Customer Portal */
   const [stripeCustomerId, setStripeCustomerId] = useState(null);
   const [coachName,      setCoachName]      = useState("Coach");
@@ -15707,6 +16324,31 @@ export default function App() {
     }
   }
 
+  // Public coach demo — no sign-in; exits back to auth or main shell
+  if (!loading && publicCoachPreview) {
+    return (
+      <>
+        <style>{CSS}</style>
+        <CoachApp
+          onExit={async () => {
+            try {
+              await supabase.auth.signOut();
+            } catch {
+              /* ignore */
+            }
+            setPublicCoachPreview(false);
+            setAuthScreen(true);
+          }}
+          isPreview
+          publicPreview
+          coachTier={null}
+          isAdmin={false}
+          coachOwnName=""
+        />
+      </>
+    );
+  }
+
   // Show password recovery screen
   if (!loading && passwordRecovery) {
     return (
@@ -15725,7 +16367,11 @@ export default function App() {
     }
     return (
       <><style>{CSS}</style>
-      <AuthScreen onSent={email => setPendingEmail(email)} checkoutPending={localStorage.getItem('forged_checkout_pending') === '1'} /></>
+      <AuthScreen
+        onSent={email => setPendingEmail(email)}
+        checkoutPending={localStorage.getItem('forged_checkout_pending') === '1'}
+        onPreviewCoachWorkspace={() => setPublicCoachPreview(true)}
+      /></>
     );
   }
 
@@ -16164,7 +16810,6 @@ export default function App() {
     try { localStorage.setItem("forged_coach_opened", "1"); } catch { /* ignore */ }
     setCoachEverOpened(true);
     setCoachOpenMode(mode);
-    setCoachInstanceKey(k => k + 1);
     setShowCoach(true);
   }
 
@@ -16414,6 +17059,8 @@ export default function App() {
   }
 
   async function handleSignOut() {
+    setPublicCoachPreview(false);
+    setPreviewCoach(false);
     // onAuthStateChange will fire SIGNED_OUT and handle all state resets
     await supabase.auth.signOut();
   }
@@ -16429,6 +17076,7 @@ export default function App() {
         <CoachApp
           onExit={previewCoach ? () => setPreviewCoach(false) : null}
           isPreview={!!previewCoach}
+          publicPreview={false}
           coachTier={coachTier}
           isAdmin={isAdmin}
           coachOwnName={user.name || ""}
@@ -16490,7 +17138,7 @@ export default function App() {
         )}
         {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} coachEverOpened={coachEverOpened} onOpenCoachMic={() => openCoachWithMode("mic")} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} hideFloatingAdd onOpenGoalDetail={id => setOpenGoalId(id)}/>}
         {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} journalEntries={journalEntries} onSaveJournalEntry={handleSaveJournalEntry} initialTab={showJournalCompose ? "journal" : undefined} onInitialComposeDone={() => setShowJournalCompose(false)}/>}
-        {screen === "insights" && <InsightsScreen habits={habits} goals={goals} journalEntries={journalEntries} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} userId={sessionUserId}/>}
+        {screen === "insights" && <InsightsScreen habits={habits} goals={goals} journalEntries={journalEntries} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} userId={sessionUserId} userName={user.name || ""}/>}
         {screen === "social"   && <SocialScreen
           user={user} xp={xp} habits={habits}
           friends={friends} friendRequests={friendRequests} sentRequests={sentRequests} friendsLoading={friendsLoading}
@@ -16516,7 +17164,7 @@ export default function App() {
           isPro={isPro}
           onUpgrade={() => setShowUpgrade(true)}
         />}
-        {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} stripeCustomerId={stripeCustomerId} refCode={refCode}
+        {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} isCoach={isCoach} stripeCustomerId={stripeCustomerId} refCode={refCode}
           authEmail={authEmail}
           onUpgrade={() => setShowUpgrade(true)}
           onUpdateUser={updates => {
@@ -16556,6 +17204,7 @@ export default function App() {
           onResetOnboarding={() => setOnboarded(false)}
           onPreviewOnboarding={() => setPreviewOnboarding(true)}
           onPreviewCoach={() => setPreviewCoach(true)}
+          onPreviewCoachWorkspace={() => setPreviewCoach(true)}
           onReplayPageGuides={() => {
             // Dev-only: wipe the 4 page-guide seen flags so the first-time
             // AI bubble re-triggers on next visit to Today/Journal/Insights/
@@ -16818,7 +17467,7 @@ export default function App() {
       {reflectId     && <ReflectModal  habit={reflectHabit}                  onClose={() => setReflectId(null)} onSave={handleSaveReflection} hasCoach={!!user.coachId}/>}
       {editId && !editGoalId && editHabit && !isGoalLikeHabitType(editHabit) && <EditModal habit={editHabit} onClose={() => setEditId(null)} onSave={handleEditSave}/>}
       {logId && logHabit?.habitType === "project"  && <LogProjectModal   habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
-      {showCoach   && <AICoach key={coachInstanceKey} openInputMode={coachOpenMode}
+      {showCoach   && <AICoach key={sessionUserId || "anon"} openInputMode={coachOpenMode}
           pendingMessage={coachPendingMsg}
           habits={habits} goals={goals} user={user} isPro={isPro}
           onClose={() => { setShowCoach(false); setCoachOpenMode(null); setCoachPendingMsg(null); }}
@@ -16826,6 +17475,7 @@ export default function App() {
           coachIcon={coachIcon}
           coachAccentColor={habits.find(h => h.habitType !== "log")?.color || T.accent}
           currentScreen={screen}
+          onNavigateTo={(s) => setScreen(s)}
           onHabitCreated={h  => setHabits(p => p.some(x => String(x.id) === String(h.id)) ? p.map(x => String(x.id) === String(h.id) ? h : x) : [...p, h])}
           onGoalCreated={g   => setGoals(p  => p.some(x => String(x.id) === String(g.id)) ? p.map(x => String(x.id) === String(g.id) ? g : x) : [...p, g])}
           onHabitLogged={(id, logs) => setHabits(p => p.map(h => String(h.id) === String(id) ? { ...h, logs } : h))}

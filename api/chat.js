@@ -106,14 +106,14 @@ const COACH_TOOLS = [
   {
     name: "log_journal",
     description:
-      "Saves a pure journal entry — personal thoughts, feelings, life events, reflections. " +
-      "Use this for anything personal/emotional/narrative that does NOT cleanly fit a habit or goal. " +
-      "You can call log_habit (or create_habit) AND log_journal in the same turn: " +
-      "log structured stuff (runs, sessions, limits) to habits, and log the broader human context here. " +
-      "If the user does a big life dump, extract structured parts for habits/goals and save the " +
-      "rest — plus any personal context — to the journal. " +
-      "Entries are appended to today's journal page if one already exists. " +
-      "Write in the user's own words as much as possible. First person.",
+      "Saves to the Journal tab (freeform daily page) — personal thoughts, feelings, relationships, stress, life story, " +
+      "anything emotional or narrative that is NOT just numbers/sessions to log on a habit. " +
+      "If the user sends ONE message that mixes Forged/build/gym/calories (structured) WITH personal/life/emotional content, " +
+      "you MUST call log_habit for each structured fact AND log_journal for the human story in the SAME turn when both exist. " +
+      "Do not omit log_journal to save tokens — the user expects the personal part in Journal. " +
+      "Put structured facts in habits; put feelings, context, and narrative in log_journal (first person, their words). " +
+      "Appends to today's page if an entry already exists. " +
+      "If this tool returns success:false in the tool result, you did NOT save — say so honestly.",
     input_schema: {
       type: "object",
       properties: {
@@ -140,6 +140,77 @@ function cachedSystem(system) {
   const text = typeof system === "string" ? system : "";
   if (!text.trim()) return "";
   return [{ type: "text", text, cache_control: { type: "ephemeral" } }];
+}
+
+/** Post-tool confirmation: keep cached client system + a short uncached turn hint (saves repeating the whole prompt in a new cache block). */
+function systemBlocksForToolConfirmation(system) {
+  const text = typeof system === "string" ? system : "";
+  const blocks = [];
+  if (text.trim()) {
+    blocks.push({ type: "text", text, cache_control: { type: "ephemeral" } });
+  }
+  blocks.push({
+    type: "text",
+    text:
+      "THIS TURN ONLY: The user message after yours contains JSON tool_result payloads — those are authoritative (success or failure per tool). " +
+      "Reply in natural, human language first: meet what they said with specificity. " +
+      "If any tool_result has success:false, say clearly that that part failed and why — never imply it saved. " +
+      "Do NOT write your own bullet list of what was saved; the client appends an accurate checklist after your text. " +
+      "No new tool calls. Match length: quick log → 1–2 sentences; big mixed dump → up to ~6 short sentences. Hard cap ~140 words for your prose.",
+  });
+  return blocks;
+}
+
+/** Plain-text receipt derived only from executed tools — never from the model's wording. */
+function buildActionReceipt(outcomes) {
+  if (!outcomes?.length) return "";
+  const lines = ["───", "Saved this turn"];
+  let hasLine = false;
+  for (const o of outcomes) {
+    if (!o.success) continue;
+    hasLine = true;
+    if (o.tool === "log_habit") {
+      const n = o.habit_name || "Habit";
+      const ht = o.habit_type;
+      let suffix = "";
+      if (ht === "project" && o.value_saved && typeof o.value_saved === "object") {
+        const mins = o.value_saved.minutes;
+        if (mins != null) suffix = ` · ${mins} min`;
+      } else if ((ht === "limit" || ht === "goal") && typeof o.value_saved === "number") {
+        suffix = ` · ${o.value_saved}`;
+      } else if ((ht === "daily" || ht === "weekly") && o.value_saved === "skip") {
+        suffix = " · rest day";
+      }
+      lines.push(`✓ Logged ${n}${suffix}`);
+    } else if (o.tool === "log_journal") {
+      lines.push(
+        o.mode === "appended"
+          ? "✓ Journal — added to today's page"
+          : `✓ Journal — saved (${o.date})`,
+      );
+    } else if (o.tool === "create_habit") {
+      lines.push(`✓ Created ${o.name} (${o.habit_type})`);
+    } else if (o.tool === "edit_habit") {
+      lines.push(`✓ Updated ${o.habit_name}`);
+    }
+  }
+  for (const o of outcomes) {
+    if (o.success) continue;
+    hasLine = true;
+    if (o.tool === "log_journal") {
+      lines.push(`✗ Journal — ${o.error || "couldn't save"}`);
+    } else if (o.tool === "log_habit") {
+      lines.push(`✗ ${o.habit_name || "Habit"} — ${o.error || "couldn't log"}`);
+    } else if (o.tool === "create_habit") {
+      lines.push(`✗ Create habit — ${o.error || "failed"}`);
+    } else if (o.tool === "edit_habit") {
+      lines.push(`✗ Edit ${o.habit_name || "habit"} — ${o.error || "failed"}`);
+    } else {
+      lines.push(`✗ ${o.tool} — ${o.error || "failed"}`);
+    }
+  }
+  if (!hasLine) lines.push("(No changes applied.)");
+  return lines.join("\n");
 }
 
 // ── Executors ──────────────────────────────────────────────────────────────────
@@ -381,14 +452,9 @@ async function handler(req, res) {
   try {
     // ── First call — detect tool_use ─────────────────────────────────────────
     // max_tokens MUST be generous enough to fit ALL tool_use blocks the model
-    // wants to emit. Each tool_use is ~50-100 tokens of JSON. A multi-log
-    // request (e.g. build + gym + calories + weight) easily needs 400+. If
-    // we run out of tokens mid-response, stop_reason flips to "max_tokens"
-    // (NOT "tool_use") and the tool-execution branch below is skipped —
-    // which historically caused silent log failures while the model still
-    // produced a confirmation-style text reply. 1500 fits ~15 tool calls.
+    // wants to emit. Mixed dumps (many habits + log_journal) need headroom.
     const firstResp = await client.messages.create({
-      model: "claude-haiku-4-5", max_tokens: 1500,
+      model: "claude-haiku-4-5", max_tokens: 2048,
       system: cachedSystem(system), tools,
       messages: trimmedMessages,
     });
@@ -419,7 +485,7 @@ async function handler(req, res) {
         partial_tools: firstToolBlocks.map(t => t.name),
       });
       return res.status(502).json({
-        error: "That message had too many actions for one turn. Try logging two or three at a time.",
+        error: "That message had too many coach actions for one turn (habits + journal). Try splitting into two messages, or fewer logs at once.",
       });
     }
 
@@ -428,6 +494,8 @@ async function handler(req, res) {
       const toolBlocks = firstToolBlocks;
       const toolResults = [];
       const actions = { created: null, edited: [], logged: [], journaled: [] };
+      /** @type {Array<{ tool: string, success: boolean, error?: string, habit_name?: string, habit_type?: string, name?: string, value_saved?: unknown, date?: string, mode?: string }>} */
+      const outcomes = [];
 
       // Sequential execution: AI sometimes calls create_habit followed by
       // log_habit on that same new habit in a single turn. Running them in
@@ -439,23 +507,43 @@ async function handler(req, res) {
             const row = await executeCreateHabit(tb.input, userId, db);
             actions.created = row;
             result = { success: true, id: row.id, name: row.name, habit_type: row.habit_type };
+            outcomes.push({ tool: "create_habit", success: true, name: row.name, habit_type: row.habit_type });
           } else if (tb.name === "edit_habit") {
             const r = await executeEditHabit(tb.input, userId, db);
             actions.edited.push(r);
             result = { success: true, habit_name: r.habit_name, fields_updated: Object.keys(r.updates).filter(k => k !== "updated_at") };
+            outcomes.push({ tool: "edit_habit", success: true, habit_name: r.habit_name });
           } else if (tb.name === "log_habit") {
             const r = await executeLogHabit(tb.input, userId, db, clientDate);
             actions.logged.push(r);
             result = { success: true, habit_name: r.habit_name, habit_type: r.habit_type, date: r.date, value_saved: r.logValue };
+            outcomes.push({
+              tool: "log_habit",
+              success: true,
+              habit_name: r.habit_name,
+              habit_type: r.habit_type,
+              value_saved: r.logValue,
+            });
           } else if (tb.name === "log_journal") {
             const r = await executeLogJournal(tb.input, userId, db, clientDate);
             actions.journaled.push(r);
             result = { success: true, date: r.date, mode: r.mode };
+            outcomes.push({ tool: "log_journal", success: true, date: r.date, mode: r.mode });
           } else {
             result = { success: false, error: "Unknown tool — action was NOT performed." };
+            outcomes.push({ tool: tb.name, success: false, error: result.error });
           }
         } catch (err) {
           result = { success: false, error: err.message };
+          const fail = {
+            tool: tb.name,
+            success: false,
+            error: err.message,
+            habit_name: tb.input?.habit_name,
+          };
+          if (tb.name === "log_journal") delete fail.habit_name;
+          if (tb.name === "create_habit") fail.name = tb.input?.name;
+          outcomes.push(fail);
         }
         // Per-tool trace so we can pinpoint failures in Vercel logs without
         // leaking sensitive data (no notes / reflection text).
@@ -481,15 +569,17 @@ async function handler(req, res) {
 
       // Stream confirmation — Claude now knows exact success/failure per action.
       // We intentionally leave `tools` available so Claude can chain a follow-up
-      // tool call if needed (rare). max_tokens raised to 600 — 350 was tight
-      // for confirmations covering 4+ actions.
+      // tool call if needed (rare). max_tokens 480: enough for several warm
+      // sentences; client prompt + turn hint cap verbosity (~120 words).
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("X-Accel-Buffering", "no");
 
+      const receiptText = buildActionReceipt(outcomes);
+
       const confirmStream = client.messages.stream({
-        model: "claude-haiku-4-5", max_tokens: 600,
-        system: cachedSystem(system), tools,
+        model: "claude-haiku-4-5", max_tokens: 900,
+        system: systemBlocksForToolConfirmation(system), tools,
         messages: [
           ...trimmedMessages,
           { role: "assistant", content: firstResp.content },
@@ -509,6 +599,8 @@ async function handler(req, res) {
         edited:   actions.edited.length    ? actions.edited    : null,
         logged:   actions.logged.length    ? actions.logged    : null,
         journaled:actions.journaled.length ? actions.journaled : null,
+        receipt:  receiptText || null,
+        tool_failures: outcomes.some(o => !o.success) ? outcomes.filter(o => !o.success) : null,
       });
       // Count this as one message against the free-tier daily quota.
       if (!isPro) {
