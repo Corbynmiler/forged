@@ -12,6 +12,32 @@ function isLikelyHomeScreenPwa() {
   return window.navigator.standalone === true;
 }
 
+/**
+ * Returns true if Supabase has stored any session tokens in localStorage.
+ * Supabase v2 stores session as "sb-{project-ref}-auth-token".
+ * We use this to distinguish "genuinely new/signed-out user" (no tokens → show demo)
+ * from "returning user with an expired access token being refreshed" (tokens exist → wait).
+ * Prevents ghost-account flash on deployed apps where INITIAL_SESSION fires null
+ * while Supabase is mid-refresh of an expired access token.
+ */
+function hasStoredSupabaseSession() {
+  if (typeof localStorage === "undefined") return false;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || !k.startsWith("sb-") || !k.endsWith("-auth-token")) continue;
+      const raw = localStorage.getItem(k);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw);
+      // Supabase v2: { access_token, refresh_token, ... }
+      // Wrapped form:  { data: { session: { access_token, refresh_token } } }
+      if (parsed?.refresh_token || parsed?.access_token) return true;
+      if (parsed?.data?.session?.access_token || parsed?.data?.session?.refresh_token) return true;
+    }
+  } catch { /* ignore — read-only check, never throws to caller */ }
+  return false;
+}
+
 // ─── DATE UTILS ───────────────────────────────────────────────────────────────
 const DAYS   = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -15839,6 +15865,9 @@ export default function App() {
           }, LOAD_BUDGET_MS);
 
           initialAuthHandledRef.current = true;
+          // When set to true inside the try block, the finally skips setLoading(false)
+          // so the loading spinner stays visible while waiting for TOKEN_REFRESHED.
+          let waitingForTokenRefresh = false;
           try {
             if (session?.user?.id) {
               if (session.user.email) setAuthEmail(session.user.email);
@@ -15896,25 +15925,51 @@ export default function App() {
                   return;
                 }
               }
-              setSessionUserId(null);
-              setAccountLoadError(false);
-              accountDataLoadedRef.current = false;
-              setAccountDataReady(false);
-              userIdRef.current = null;
-              if (mounted) {
-                if (!shownDemoRef.current) {
-                  shownDemoRef.current = true;
-                  setHabits(buildDemoHabits());
-                  setUser({ name:"", avatarUrl:null });
-                  setDemoMode(true);
-                } else {
+              // ── Stored-session check ─────────────────────────────────────
+              // INITIAL_SESSION fires null when the stored access token is expired
+              // and Supabase is mid-refresh. On the live/deployed app this is the
+              // normal first-load path for ANY returning user (1h token TTL).
+              // If we detect stored session tokens, stay on the loading screen and
+              // let TOKEN_REFRESHED deliver the session rather than flashing demo data.
+              if (hasStoredSupabaseSession()) {
+                waitingForTokenRefresh = true;
+                setSessionUserId(null);
+                setAccountLoadError(false);
+                accountDataLoadedRef.current = false;
+                setAccountDataReady(false);
+                userIdRef.current = null;
+                setDemoMode(false);
+                setAuthScreen(false);
+                // Safety net: if TOKEN_REFRESHED never fires within 12 s, give up and go to auth.
+                setTimeout(() => {
+                  if (!mounted || accountDataLoadedRef.current || loadingUidRef.current) return;
+                  console.warn("Auth: TOKEN_REFRESHED did not arrive within 12s after stored-session detection");
+                  setLoading(false);
                   setAuthScreen(true);
+                }, 12000);
+              } else {
+                // No stored tokens → genuinely new or fully signed-out user.
+                setSessionUserId(null);
+                setAccountLoadError(false);
+                accountDataLoadedRef.current = false;
+                setAccountDataReady(false);
+                userIdRef.current = null;
+                if (mounted) {
+                  if (!shownDemoRef.current) {
+                    shownDemoRef.current = true;
+                    setHabits(buildDemoHabits());
+                    setUser({ name:"", avatarUrl:null });
+                    setDemoMode(true);
+                  } else {
+                    setAuthScreen(true);
+                  }
                 }
               }
             }
           } finally {
             clearTimeout(loadBudgetTimer);
-            if (mounted) setLoading(false);
+            // Keep the loading screen visible when waiting for TOKEN_REFRESHED.
+            if (mounted && !waitingForTokenRefresh) setLoading(false);
           }
           return;
         }
@@ -16009,11 +16064,15 @@ export default function App() {
         // ── Token refresh ─────────────────────────────────────────────────
         // After idle, JWT renews but PostgREST may have failed earlier; reload if data never loaded.
         if (event === "TOKEN_REFRESHED" && session?.user?.id) {
+          lastSignedInUidRef.current = session.user.id;
           if (session.user.email && mounted) setAuthEmail(session.user.email);
+          setSessionUserId(session.user.id);
           if (loadingUidRef.current === session.user.id) {
             return;
           }
           if (!accountDataLoadedRef.current) {
+            setDemoMode(false);
+            setHabits([]);
             setLoading(true);
             const tokenBudget = setTimeout(() => {
               if (!mounted) return;
