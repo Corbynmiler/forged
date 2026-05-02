@@ -38,6 +38,49 @@ function hasStoredSupabaseSession() {
   return false;
 }
 
+// ── Startup reload recovery ───────────────────────────────────────────────
+// Track the startup timestamp in the URL `_fst` (first-startup-time) param.
+// Survives window.location.reload() (URL is preserved) but is cleared when
+// the user opens the PWA home-screen tile fresh (loads the manifest start_url
+// which has no params). This replaces the sessionStorage-based reload counter
+// which persisted across PWA background/foreground cycles and caused the
+// "stuck forever after 2 reloads" bug.
+const _fstParam = (() => {
+  try { return new URLSearchParams(window.location.search).get("_fst"); } catch { return null; }
+})();
+const _startupTs = (_fstParam && /^\d+$/.test(_fstParam)) ? parseInt(_fstParam, 10) : Date.now();
+/** True once we have been attempting startup recovery for more than 45 s. */
+const startupReloadExpired = Boolean(_fstParam) && (Date.now() - _startupTs) > 45000;
+
+/** Hard-reload the page, preserving the _fst timestamp so we can detect timeout across reloads. */
+function reloadForStartupRecovery(label) {
+  try {
+    if (label) console.log("[Forged] startup reload:", label, "elapsed:", Date.now() - _startupTs, "ms");
+    const url = new URL(window.location.href);
+    url.searchParams.set("_fst", String(_startupTs));
+    window.location.replace(url.toString());
+  } catch {
+    window.location.reload();
+  }
+}
+
+/**
+ * Safe-area padding for iOS notch / Dynamic Island / home indicator.
+ * Requires `viewport-fit=cover` (see index.html).
+ */
+function cssPadTopSafe(basePx) {
+  return `calc(${basePx}px + env(safe-area-inset-top, 0px))`;
+}
+function cssPadXSafe(basePx) {
+  return {
+    paddingLeft: `max(${basePx}px, env(safe-area-inset-left, 0px))`,
+    paddingRight: `max(${basePx}px, env(safe-area-inset-right, 0px))`,
+  };
+}
+function cssPadBottomSafe(basePx) {
+  return `max(${basePx}px, env(safe-area-inset-bottom, 0px))`;
+}
+
 // ─── DATE UTILS ───────────────────────────────────────────────────────────────
 const DAYS   = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -10384,14 +10427,17 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
     outline:"none", boxSizing:"border-box",
   };
 
-  const wrap = { fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column" };
+  const wrap = {
+    fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column",
+    paddingTop: "env(safe-area-inset-top, 0px)",
+  };
 
   // Shared progress header — slim bar + "Step X of Y" label. Replaces the red
   // dot row that used to feel opaque. `currentNum` is 1-based.
   function ProgressHeader({ currentNum, total = DISPLAY_TOTAL }) {
     const pct = Math.max(0, Math.min(100, Math.round((currentNum / total) * 100)));
     return (
-      <div style={{ padding:"24px 24px 0" }}>
+      <div style={{ paddingTop: 24, paddingBottom: 0, ...cssPadXSafe(24) }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:8 }}>
           <div style={{ fontSize:10, fontWeight:600, color:T.muted, textTransform:"uppercase", letterSpacing:"0.12em" }}>
             Step {currentNum} of {total}
@@ -11940,7 +11986,11 @@ function SetPasswordScreen({ onDone }) {
   }
 
   return (
-    <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column", justifyContent:"center", padding:"0 28px" }}>
+    <div style={{
+      fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg,
+      display:"flex", flexDirection:"column", justifyContent:"center",
+      paddingTop: cssPadTopSafe(24), paddingBottom: cssPadBottomSafe(24), ...cssPadXSafe(28),
+    }}>
       <div style={{ fontFamily:T.serif, fontSize:40, color:T.text, marginBottom:32 }}>Forged.</div>
       {done ? (
         <div style={{ textAlign:"center" }}>
@@ -12042,7 +12092,11 @@ function AuthScreen({ onSent, checkoutPending, onPreviewCoachWorkspace }) {
     setForgotSent(true);
   }
 
-  const wrap = { fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column", justifyContent:"center", padding:"0 28px" };
+  const wrap = {
+    fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg,
+    display:"flex", flexDirection:"column", justifyContent:"center",
+    paddingTop: cssPadTopSafe(24), paddingBottom: cssPadBottomSafe(24), ...cssPadXSafe(28),
+  };
 
   // ── Forgot password view ──────────────────────────────────────────────
   if (mode === "forgot") return (
@@ -12163,7 +12217,11 @@ function AuthScreen({ onSent, checkoutPending, onPreviewCoachWorkspace }) {
 
 function CheckEmailScreen({ email, onBack }) {
   return (
-    <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column", justifyContent:"center", padding:"0 28px", textAlign:"center" }}>
+    <div style={{
+      fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg,
+      display:"flex", flexDirection:"column", justifyContent:"center", textAlign:"center",
+      paddingTop: cssPadTopSafe(24), paddingBottom: cssPadBottomSafe(24), ...cssPadXSafe(28),
+    }}>
       <div style={{ fontSize:52, marginBottom:20 }}>✉️</div>
       <div style={{ fontFamily:T.serif, fontSize:28, color:T.text, marginBottom:12 }}>Confirm your email</div>
       <div style={{ fontSize:14, color:T.muted, lineHeight:1.8, marginBottom:32 }}>
@@ -12184,7 +12242,8 @@ function DemoBanner({ onGetStarted }) {
     <div style={{
       position:"sticky", top:0, zIndex:200,
       background:"rgba(192,57,43,0.96)", backdropFilter:"blur(8px)",
-      padding:"10px 18px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:10,
+      paddingTop: cssPadTopSafe(10), paddingBottom: 10, ...cssPadXSafe(18),
+      display:"flex", alignItems:"center", justifyContent:"space-between", gap:10,
     }}>
       <div style={{ fontSize:13, color:"#fff", lineHeight:1.4, flex:1 }}>
         You're in preview — create an account to start for real.
@@ -13643,7 +13702,7 @@ function CoachApp({ onExit, isPreview, publicPreview, coachTier, isAdmin, coachO
         <div style={{
           background:"linear-gradient(180deg, rgba(200,144,42,0.22), rgba(200,144,42,0.1))",
           borderBottom:`1px solid rgba(200,144,42,0.4)`,
-          padding:"10px 16px",
+          paddingTop: cssPadTopSafe(10), paddingBottom: 10, ...cssPadXSafe(16),
           display:"flex",
           alignItems:"center",
           justifyContent:"space-between",
@@ -13676,7 +13735,10 @@ function CoachApp({ onExit, isPreview, publicPreview, coachTier, isAdmin, coachO
       )}
 
       {/* ── Header ─────────────────────────────────────────────────────── */}
-      <div style={{ padding:"18px 18px 14px", borderBottom:`0.5px solid ${T.border}` }}>
+      <div style={{
+        paddingTop: publicPreview ? 18 : cssPadTopSafe(18), paddingBottom: 14, ...cssPadXSafe(18),
+        borderBottom:`0.5px solid ${T.border}`,
+      }}>
         <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:12 }}>
           <div style={{ minWidth:0, flex:1 }}>
             <div style={{ display:"flex", alignItems:"center", gap:9, marginBottom:3, flexWrap:"wrap" }}>
@@ -13738,7 +13800,7 @@ function CoachApp({ onExit, isPreview, publicPreview, coachTier, isAdmin, coachO
       {useDemoClients && (
         <div style={{
           background:"rgba(200,144,42,0.12)", borderBottom:`1px solid rgba(200,144,42,0.25)`,
-          padding:"9px 18px", display:"flex", alignItems:"center", gap:8,
+          paddingTop: 9, paddingBottom: 9, ...cssPadXSafe(18), display:"flex", alignItems:"center", gap:8,
         }}>
           <span style={{ fontSize:11, fontWeight:700, color:T.gold, letterSpacing:"0.04em" }}>PREVIEW</span>
           <span style={{ fontSize:11, color:T.sub }}>· Demo data only — not real clients</span>
@@ -15681,8 +15743,6 @@ export default function App() {
       accountDataLoadedRef.current = true;
       setAccountLoadError(false);
       setAccountDataReady(true);
-      // Clear the reload counter so a future session can self-heal again.
-      try { sessionStorage.removeItem("forged_reload_count"); } catch { /* ignore */ }
       return true;
     } catch (err) {
       console.error("loadUserData exception:", err);
@@ -15757,18 +15817,14 @@ export default function App() {
       if (ok) {
         setAuthScreen(false);
       } else {
-        // In-app retry failed. A page reload is guaranteed to work because by
-        // now the token is fresh in localStorage and a new Supabase client
-        // instance starts clean. Guard against reload loops via sessionStorage.
-        const reloadCount = parseInt(sessionStorage.getItem("forged_reload_count") || "0", 10);
-        if (reloadCount < 2) {
-          console.log("[Forged] retryAccountDataLoad: in-app retry failed, reloading (attempt", reloadCount + 1, ")");
-          sessionStorage.setItem("forged_reload_count", String(reloadCount + 1));
-          window.location.reload();
+        // In-app retry failed. If we are still within the 45 s startup recovery
+        // window, do a clean page reload (fresh Supabase client + token). After
+        // the window expires we have been at this > 45 s — show the error screen.
+        if (!startupReloadExpired) {
+          reloadForStartupRecovery("retryAccountDataLoad-fallback");
           return;
         }
-        // Reload limit reached — persistent failure. Show error UI.
-        console.error("[Forged] retryAccountDataLoad: reload limit reached, showing error UI");
+        console.error("[Forged] retryAccountDataLoad: startup window expired, showing error UI");
         setAccountLoadError(true);
       }
     } finally {
@@ -15980,12 +16036,17 @@ export default function App() {
                 userIdRef.current = null;
                 setDemoMode(false);
                 setAuthScreen(false);
-                // Safety net: if TOKEN_REFRESHED never fires within 20 s, give up and go to auth.
-                // 20 s (was 12 s) to accommodate slow mobile token refresh round-trips.
+                // Safety net: if TOKEN_REFRESHED never fires within 20 s, reload the page
+                // (network hiccup or storage race — a fresh load usually fixes it).
+                // After the 45 s startup window expires, fall back to auth instead.
                 setTimeout(() => {
                   waitingForTokenRefreshRef.current = false;
                   if (!mounted || accountDataLoadedRef.current || loadingUidRef.current) return;
                   console.warn("Auth: TOKEN_REFRESHED did not arrive within 20s after stored-session detection");
+                  if (!startupReloadExpired) {
+                    reloadForStartupRecovery("token-refresh-timeout");
+                    return;
+                  }
                   setLoading(false);
                   setAuthScreen(true);
                 }, 20000);
@@ -16174,23 +16235,34 @@ export default function App() {
       if (waitingForTokenRefreshRef.current) return;
       if (softRecoveryAttemptedRef.current) return;
       softRecoveryAttemptedRef.current = true;
-      attemptSoftSessionRecovery("watchdog-15s");
-    }, 15000);
+      attemptSoftSessionRecovery("watchdog-8s");
+    }, 8000);
     return () => clearTimeout(t);
   }, [loading]);
 
   // ─── Auto-retry on accountLoadError ─────────────────────────────────────────
   // When the initial load fails (e.g. mobile cold-start PostgREST timeout),
-  // automatically attempt one silent recovery 2 s later so the user never
-  // has to tap anything. On mobile PWA there is no browser-level refresh
-  // button, so the app MUST self-heal.
-  // autoRetryFiredRef prevents this from looping if the retry also fails
-  // (retryAccountDataLoad falls back to window.location.reload() in that case).
+  // recover automatically so the user never has to tap anything.
+  //
+  // Within the 45 s startup window: reload immediately via reloadForStartupRecovery
+  // so the next load gets a clean Supabase client with a fresh token.
+  //
+  // After 45 s (startupReloadExpired): try one in-app retry and if that also
+  // fails, show the error screen with a manual "Try again" button.
+  //
+  // autoRetryFiredRef prevents this from looping — set before any async work.
   useEffect(() => {
     if (!accountLoadError || !sessionUserId) return;
     if (autoRetryFiredRef.current) return;
+    autoRetryFiredRef.current = true;
+    if (!startupReloadExpired) {
+      // Still within recovery window — reload immediately (no visible error flash).
+      reloadForStartupRecovery("accountLoadError-auto");
+      return;
+    }
+    // Startup window expired — try in-app retry once, then give up.
     const t = setTimeout(() => {
-      if (!accountLoadError || autoRetryFiredRef.current) return;
+      if (!accountLoadError) return;
       retryAccountDataLoad();
     }, 2000);
     return () => clearTimeout(t);
@@ -16504,29 +16576,33 @@ export default function App() {
   if (loading) {
     return (
       <><style>{CSS}</style>
-      <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:20 }}>
+      <div style={{
+        fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg,
+        display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:20,
+        paddingTop: cssPadTopSafe(20), paddingBottom: cssPadBottomSafe(20), ...cssPadXSafe(20),
+        boxSizing:"border-box",
+      }}>
         <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>Forged.</div>
         <div style={{ width:22, height:22, border:`2px solid ${T.border}`, borderTopColor:T.accent, borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
-        <div style={{ fontSize:12, color:T.hint, animation:"fadeIn 1s ease 8s both", textAlign:"center", lineHeight:1.6 }}>
-          Taking longer than usual?<br/>
-          <button onClick={() => attemptSoftSessionRecovery("loading-button")} style={{ background:"none", border:"none", color:T.muted, fontSize:12, cursor:"pointer", textDecoration:"underline", padding:0, marginTop:4 }}>Tap to retry</button>
-        </div>
       </div></>
     );
   }
 
-  // Signed in but profile/habits failed after automatic retry.
-  // This screen is rarely seen — the auto-retry effect fires 2 s after
-  // accountLoadError is set and retryAccountDataLoad falls back to
-  // window.location.reload() if the in-app retry also fails. This UI is
-  // only shown when the reload limit is reached (persistent server issue).
-  if (!loading && !authScreen && sessionUserId && accountLoadError) {
+  // Signed in but profile/habits failed after exhausting all automatic recovery
+  // attempts (> 45 s). Only shown once startupReloadExpired — before that the
+  // auto-retry effect silently reloads the page instead of surfacing this screen.
+  if (!loading && !authScreen && sessionUserId && accountLoadError && startupReloadExpired) {
     return (
       <><style>{CSS}</style>
-      <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"0 28px", textAlign:"center", gap:16 }}>
+      <div style={{
+        fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg,
+        display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", textAlign:"center", gap:16,
+        paddingTop: cssPadTopSafe(24), paddingBottom: cssPadBottomSafe(24), ...cssPadXSafe(28),
+        boxSizing:"border-box",
+      }}>
         <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>Forged.</div>
         <div style={{ fontSize:15, color:T.muted, lineHeight:1.7 }}>
-          Having trouble loading your account. Check your connection and tap below to try again.
+          Having trouble loading your account. Check your connection and try again.
         </div>
         <button type="button" onClick={() => retryAccountDataLoad()}
           style={{ padding:"14px 24px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:15, fontWeight:600, cursor:"pointer" }}>
@@ -16540,7 +16616,12 @@ export default function App() {
   if (!loading && !authScreen && sessionUserId && !accountDataReady && !accountLoadError) {
     return (
       <><style>{CSS}</style>
-      <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:20 }}>
+      <div style={{
+        fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg,
+        display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:20,
+        paddingTop: cssPadTopSafe(20), paddingBottom: cssPadBottomSafe(20), ...cssPadXSafe(20),
+        boxSizing:"border-box",
+      }}>
         <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>Forged.</div>
         <div style={{ width:22, height:22, border:`2px solid ${T.border}`, borderTopColor:T.accent, borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
         <div style={{ fontSize:12, color:T.hint }}>Loading your account…</div>
@@ -16556,7 +16637,7 @@ export default function App() {
         {toasts.map(t => <Toast key={t.id} msg={t.msg} onDone={() => setToasts(ts => ts.filter(x => x.id !== t.id))}/>)}
         <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, paddingBottom:104 }}>
           <DemoBanner onGetStarted={() => { setDemoMode(false); setHabits([]); shownDemoRef.current = true; setAuthScreen(true); }} />
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 18px 8px" }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", paddingTop:16, paddingBottom:8, ...cssPadXSafe(18) }}>
             <div>
               <div style={{ fontFamily:T.serif, fontSize:30, color:T.text, letterSpacing:"-0.01em" }}>Forged</div>
               <div style={{ fontSize:11, color:T.muted, marginTop:1 }}>{fmtDate()}</div>
@@ -16586,23 +16667,30 @@ export default function App() {
   if (!loading && !authScreen && previewOnboarding) {
     return (
       <><style>{CSS}</style>
-      <div style={{ position:"fixed", top:0, left:"50%", transform:"translateX(-50%)", zIndex:9999, background:"rgba(200,144,42,0.18)", borderBottom:`1px solid ${T.gold}`, padding:"6px 18px", fontSize:11, color:T.gold, fontFamily:T.font, width:430, maxWidth:"100vw", textAlign:"center", boxSizing:"border-box" }}>
+      <div style={{
+        position:"fixed", top:0, left:"50%", transform:"translateX(-50%)", zIndex:9999,
+        background:"rgba(200,144,42,0.18)", borderBottom:`1px solid ${T.gold}`,
+        paddingTop: cssPadTopSafe(6), paddingBottom: 6, ...cssPadXSafe(18),
+        fontSize:11, color:T.gold, fontFamily:T.font, width:430, maxWidth:"100vw", textAlign:"center", boxSizing:"border-box",
+      }}>
         🔒 Preview mode — no changes will be saved
       </div>
-      <OnboardingScreen
-        onComplete={() => setPreviewOnboarding(false)}
-        onSaveProgress={() => Promise.resolve()}
-        onCheckout={() => {
-          addToast("Preview mode — Stripe skipped");
-          setPreviewOnboarding(false);
-          return Promise.resolve();
-        }}
-        onSkip={() => setPreviewOnboarding(false)}
-        notifEnabled={notifEnabled}
-        notifLoading={notifLoading}
-        notifPermission={notifPermission}
-        onNotifToggle={handleNotifToggle}
-      /></>
+      <div style={{ paddingTop: 36 }}>
+        <OnboardingScreen
+          onComplete={() => setPreviewOnboarding(false)}
+          onSaveProgress={() => Promise.resolve()}
+          onCheckout={() => {
+            addToast("Preview mode — Stripe skipped");
+            setPreviewOnboarding(false);
+            return Promise.resolve();
+          }}
+          onSkip={() => setPreviewOnboarding(false)}
+          notifEnabled={notifEnabled}
+          notifLoading={notifLoading}
+          notifPermission={notifPermission}
+          onNotifToggle={handleNotifToggle}
+        />
+      </div></>
     );
   }
 
@@ -17227,7 +17315,7 @@ export default function App() {
 
       <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, paddingBottom:172 }}>
         {/* Top bar */}
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"22px 18px 8px" }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", paddingTop: cssPadTopSafe(22), paddingBottom: 8, ...cssPadXSafe(18) }}>
           <div>
             <div style={{ fontFamily:T.serif, fontSize:30, color:T.text, letterSpacing:"-0.01em" }}>Forged</div>
             <div style={{ fontSize:12, color:T.muted, marginTop:1, lineHeight:1.35 }}>
@@ -17244,7 +17332,7 @@ export default function App() {
 
         {/* Notification nudge banner — shown on Today screen when not enabled */}
         {screen === "today" && !notifEnabled && !notifNudgeDismissed && notifPermission !== "denied" && (
-          <div style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 14px", background:"rgba(200,144,42,0.1)", borderBottom:`0.5px solid rgba(200,144,42,0.22)` }}>
+          <div style={{ display:"flex", alignItems:"center", gap:10, paddingTop: 9, paddingBottom: 9, ...cssPadXSafe(14), background:"rgba(200,144,42,0.1)", borderBottom:`0.5px solid rgba(200,144,42,0.22)` }}>
             <span style={{ fontSize:16, flexShrink:0 }}>🔔</span>
             <span style={{ flex:1, fontSize:12, color:T.sub, lineHeight:1.5 }}>Get daily reminders to keep your streak.</span>
             <button
