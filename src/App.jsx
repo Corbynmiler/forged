@@ -14381,6 +14381,13 @@ export default function App() {
   // if Supabase is genuinely offline or the session is truly invalid.
   const softRecoveryAttemptedRef = useRef(false);
   const softRecoveryInFlightRef = useRef(false);
+  // Coordination: set while INITIAL_SESSION(null) is waiting for TOKEN_REFRESHED.
+  // The watchdog must not call refreshSession() during this window — it races
+  // with Supabase's own internal token refresh and leaves the client in a
+  // confused state that causes PostgREST 401s / timeouts.
+  const waitingForTokenRefreshRef = useRef(false);
+  // Prevents the accountLoadError auto-retry from looping on persistent failures.
+  const autoRetryFiredRef = useRef(false);
 
   // XP anti-abuse guard: once a habit earns XP for a specific day, toggling
   // it off/on again that day should never mint extra XP.
@@ -15517,7 +15524,9 @@ export default function App() {
     if (loadingUidRef.current === uid) return false;
     loadingUidRef.current = uid;
     try {
-      const FETCH_MS = 12000;
+      // 18 s: mobile cold-start PostgREST connections commonly take 10-15 s
+      // on first open after the device woke from background.
+      const FETCH_MS = 18000;
       async function runQueryWithTimeout(label, queryFactory) {
         const aborter = new AbortController();
         let timeoutId = null;
@@ -15666,6 +15675,8 @@ export default function App() {
       accountDataLoadedRef.current = true;
       setAccountLoadError(false);
       setAccountDataReady(true);
+      // Clear the reload counter so a future session can self-heal again.
+      try { sessionStorage.removeItem("forged_reload_count"); } catch { /* ignore */ }
       return true;
     } catch (err) {
       console.error("loadUserData exception:", err);
@@ -15715,13 +15726,14 @@ export default function App() {
 
   async function retryAccountDataLoad() {
     setAccountLoadError(false);
+    autoRetryFiredRef.current = true; // prevent auto-retry from re-triggering
     setLoading(true);
     try {
       loadingUidRef.current = null;
       retryLoadPromiseRef.current = null;
       retryLoadUidRef.current = null;
       const { data: { session: preRefreshSession }, error: preSessionErr } = await supabase.auth.getSession();
-      if (preSessionErr) console.warn("retryAccountDataLoad: getSession —", preSessionErr.message);
+      if (preSessionErr) console.warn("retryAccountDataLoad: getSession -", preSessionErr.message);
       const initialUid = preRefreshSession?.user?.id || sessionUserId;
       if (!initialUid) {
         setAuthScreen(true);
@@ -15731,13 +15743,28 @@ export default function App() {
       if (preRefreshSession?.user?.email) setAuthEmail(preRefreshSession.user.email);
 
       const { error: refErr } = await supabase.auth.refreshSession();
-      if (refErr) console.warn("retryAccountDataLoad: refreshSession —", refErr.message);
+      if (refErr) console.warn("retryAccountDataLoad: refreshSession -", refErr.message);
       const { data: { session: postRefreshSession }, error: postSessionErr } = await supabase.auth.getSession();
-      if (postSessionErr) console.warn("retryAccountDataLoad: post-refresh getSession —", postSessionErr.message);
+      if (postSessionErr) console.warn("retryAccountDataLoad: post-refresh getSession -", postSessionErr.message);
       const retryUid = postRefreshSession?.user?.id || initialUid;
       const ok = await loadUserDataWithRetries(retryUid, "manual-retry", { skipDedupe: true });
-      if (!ok) setAccountLoadError(true);
-      else setAuthScreen(false);
+      if (ok) {
+        setAuthScreen(false);
+      } else {
+        // In-app retry failed. A page reload is guaranteed to work because by
+        // now the token is fresh in localStorage and a new Supabase client
+        // instance starts clean. Guard against reload loops via sessionStorage.
+        const reloadCount = parseInt(sessionStorage.getItem("forged_reload_count") || "0", 10);
+        if (reloadCount < 2) {
+          console.log("[Forged] retryAccountDataLoad: in-app retry failed, reloading (attempt", reloadCount + 1, ")");
+          sessionStorage.setItem("forged_reload_count", String(reloadCount + 1));
+          window.location.reload();
+          return;
+        }
+        // Reload limit reached — persistent failure. Show error UI.
+        console.error("[Forged] retryAccountDataLoad: reload limit reached, showing error UI");
+        setAccountLoadError(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -15854,7 +15881,10 @@ export default function App() {
         if (event === "INITIAL_SESSION") {
           clearTimeout(bailout);
           // If profile/habits hang (blocked network / wrong origin), never leave the user on a dead spinner.
-          const LOAD_BUDGET_MS = 32000;
+          // 60 s: with 18 s per query (profile + habits = 36 s max per attempt)
+          // we need at least 37 s to let one full attempt complete. 60 s gives
+          // room for a full attempt plus one backoff + second attempt.
+          const LOAD_BUDGET_MS = 60000;
           const loadBudgetTimer = setTimeout(() => {
             if (!mounted) return;
             console.warn("Auth: account load exceeded budget — unblocking UI (use Retry if needed)");
@@ -15900,16 +15930,17 @@ export default function App() {
                 setAuthScreen(false);
                 return;
               }
-              // iOS/Android home-screen PWAs: storage + token refresh can lag INITIAL_SESSION(null).
-              // One refresh + re-read matches soft recovery and fixes “signed out until browser tab” reports.
+              // iOS/Android home-screen PWAs: Supabase's internal token refresh fires
+              // asynchronously, so INITIAL_SESSION(null) can arrive before the refresh
+              // completes. Do NOT call refreshSession() explicitly here — it races with
+              // Supabase's own internal refresh and can leave the client in a state where
+              // PostgREST queries return 401s or time out even with a valid session.
+              // Instead, probe getSession() once (instant if refresh already completed)
+              // and fall through to hasStoredSupabaseSession() if the token is still
+              // being refreshed internally.
               if (isLikelyHomeScreenPwa()) {
-                try {
-                  await supabase.auth.refreshSession();
-                } catch (e) {
-                  console.warn("Auth: PWA post-probe refreshSession —", e?.message || e);
-                }
                 const { data: { session: pwaRecovered }, error: pwaRecErr } = await supabase.auth.getSession();
-                if (pwaRecErr) console.warn("Auth: PWA post-refresh getSession —", pwaRecErr.message);
+                if (pwaRecErr) console.warn("Auth: PWA getSession probe:", pwaRecErr.message);
                 if (pwaRecovered?.user?.id) {
                   if (pwaRecovered.user.email) setAuthEmail(pwaRecovered.user.email);
                   setSessionUserId(pwaRecovered.user.id);
@@ -15917,13 +15948,15 @@ export default function App() {
                   accountDataLoadedRef.current = false;
                   setAccountDataReady(false);
                   userIdRef.current = null;
-                  const ok = await loadUserDataWithRetries(pwaRecovered.user.id, "INITIAL_SESSION_PWA_REFRESH");
+                  const ok = await loadUserDataWithRetries(pwaRecovered.user.id, "INITIAL_SESSION_PWA_PROBE");
                   if (!mounted) return;
                   if (ok) setAccountLoadError(false);
                   else setAccountLoadError(true);
                   setAuthScreen(false);
                   return;
                 }
+                // Session still null (Supabase refresh still in progress) — fall through
+                // to hasStoredSupabaseSession() and wait for TOKEN_REFRESHED.
               }
               // ── Stored-session check ─────────────────────────────────────
               // INITIAL_SESSION fires null when the stored access token is expired
@@ -15933,6 +15966,7 @@ export default function App() {
               // let TOKEN_REFRESHED deliver the session rather than flashing demo data.
               if (hasStoredSupabaseSession()) {
                 waitingForTokenRefresh = true;
+                waitingForTokenRefreshRef.current = true; // tells watchdog to stay out
                 setSessionUserId(null);
                 setAccountLoadError(false);
                 accountDataLoadedRef.current = false;
@@ -15940,13 +15974,15 @@ export default function App() {
                 userIdRef.current = null;
                 setDemoMode(false);
                 setAuthScreen(false);
-                // Safety net: if TOKEN_REFRESHED never fires within 12 s, give up and go to auth.
+                // Safety net: if TOKEN_REFRESHED never fires within 20 s, give up and go to auth.
+                // 20 s (was 12 s) to accommodate slow mobile token refresh round-trips.
                 setTimeout(() => {
+                  waitingForTokenRefreshRef.current = false;
                   if (!mounted || accountDataLoadedRef.current || loadingUidRef.current) return;
-                  console.warn("Auth: TOKEN_REFRESHED did not arrive within 12s after stored-session detection");
+                  console.warn("Auth: TOKEN_REFRESHED did not arrive within 20s after stored-session detection");
                   setLoading(false);
                   setAuthScreen(true);
-                }, 12000);
+                }, 20000);
               } else {
                 // No stored tokens → genuinely new or fully signed-out user.
                 setSessionUserId(null);
@@ -16015,7 +16051,7 @@ export default function App() {
             setLoading(false);
             setAuthScreen(false);
             setAccountLoadError(true);
-          }, 32000);
+          }, 60000);
           try {
             const ok = await loadUserDataWithRetries(session.user.id, "SIGNED_IN");
             if (mounted) {
@@ -16064,6 +16100,7 @@ export default function App() {
         // ── Token refresh ─────────────────────────────────────────────────
         // After idle, JWT renews but PostgREST may have failed earlier; reload if data never loaded.
         if (event === "TOKEN_REFRESHED" && session?.user?.id) {
+          waitingForTokenRefreshRef.current = false; // session delivered — watchdog can stand down
           lastSignedInUidRef.current = session.user.id;
           if (session.user.email && mounted) setAuthEmail(session.user.email);
           setSessionUserId(session.user.id);
@@ -16079,7 +16116,7 @@ export default function App() {
               setLoading(false);
               setAuthScreen(false);
               setAccountLoadError(true);
-            }, 32000);
+            }, 60000);
             try {
               const ok = await loadUserDataWithRetries(session.user.id, "TOKEN_REFRESHED");
               if (mounted) {
@@ -16114,22 +16151,45 @@ export default function App() {
   // When the loading screen sticks (INITIAL_SESSION dropped, slow token
   // refresh, mobile storage hydration race, etc.) the user used to be left
   // staring at a spinner with no recourse but a hard reload. Run one
-  // automatic in-app session recovery at 10s — this matches what a manual
+  // automatic in-app session recovery at 15s — this matches what a manual
   // refresh would fix, but without losing app state.
+  //
+  // IMPORTANT: must not fire while waitingForTokenRefreshRef is true. Calling
+  // refreshSession() during Supabase's own internal token refresh races with
+  // that refresh and leaves the client in a confused state.
   useEffect(() => {
     if (!loading) return;
     if (softRecoveryAttemptedRef.current) return;
     const t = setTimeout(() => {
-      // Only act if no real load is in flight. If a load IS in flight
-      // (loadingUidRef.current set), let it finish — it has its own 32s
-      // budget and we'd just compete with it.
+      // Back off if: a real load is in flight, we are waiting for
+      // TOKEN_REFRESHED (Supabase is already refreshing internally), or another
+      // watchdog already ran.
       if (loadingUidRef.current) return;
+      if (waitingForTokenRefreshRef.current) return;
       if (softRecoveryAttemptedRef.current) return;
       softRecoveryAttemptedRef.current = true;
-      attemptSoftSessionRecovery("watchdog-10s");
-    }, 10000);
+      attemptSoftSessionRecovery("watchdog-15s");
+    }, 15000);
     return () => clearTimeout(t);
   }, [loading]);
+
+  // ─── Auto-retry on accountLoadError ─────────────────────────────────────────
+  // When the initial load fails (e.g. mobile cold-start PostgREST timeout),
+  // automatically attempt one silent recovery 2 s later so the user never
+  // has to tap anything. On mobile PWA there is no browser-level refresh
+  // button, so the app MUST self-heal.
+  // autoRetryFiredRef prevents this from looping if the retry also fails
+  // (retryAccountDataLoad falls back to window.location.reload() in that case).
+  useEffect(() => {
+    if (!accountLoadError || !sessionUserId) return;
+    if (autoRetryFiredRef.current) return;
+    const t = setTimeout(() => {
+      if (!accountLoadError || autoRetryFiredRef.current) return;
+      retryAccountDataLoad();
+    }, 2000);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountLoadError, sessionUserId]);
 
   // ─── Session + data refresh on resume / bfcache ──────────────────────────────
   useEffect(() => {
@@ -16449,22 +16509,22 @@ export default function App() {
     );
   }
 
-  // Signed in but profile/habits failed after retries — never show empty main as if "no data"
+  // Signed in but profile/habits failed after automatic retry.
+  // This screen is rarely seen — the auto-retry effect fires 2 s after
+  // accountLoadError is set and retryAccountDataLoad falls back to
+  // window.location.reload() if the in-app retry also fails. This UI is
+  // only shown when the reload limit is reached (persistent server issue).
   if (!loading && !authScreen && sessionUserId && accountLoadError) {
     return (
       <><style>{CSS}</style>
       <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"0 28px", textAlign:"center", gap:16 }}>
         <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>Forged.</div>
         <div style={{ fontSize:15, color:T.muted, lineHeight:1.7 }}>
-          You&apos;re signed in, but we couldn&apos;t load your profile and habits. Check your connection and try again.
+          Having trouble loading your account. Check your connection and tap below to try again.
         </div>
         <button type="button" onClick={() => retryAccountDataLoad()}
           style={{ padding:"14px 24px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:15, fontWeight:600, cursor:"pointer" }}>
-          Retry
-        </button>
-        <button type="button" onClick={() => window.location.reload()}
-          style={{ background:"none", border:"none", color:T.muted, fontSize:13, cursor:"pointer" }}>
-          Refresh page
+          Try again
         </button>
       </div></>
     );
