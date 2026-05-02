@@ -49,8 +49,8 @@ const _fstParam = (() => {
   try { return new URLSearchParams(window.location.search).get("_fst"); } catch { return null; }
 })();
 const _startupTs = (_fstParam && /^\d+$/.test(_fstParam)) ? parseInt(_fstParam, 10) : Date.now();
-/** True once we have been attempting startup recovery for more than 45 s. */
-const startupReloadExpired = Boolean(_fstParam) && (Date.now() - _startupTs) > 45000;
+/** True once we have been attempting startup recovery for more than 60 s. */
+const startupReloadExpired = Boolean(_fstParam) && (Date.now() - _startupTs) > 60000;
 
 /** Hard-reload the page, preserving the _fst timestamp so we can detect timeout across reloads. */
 function reloadForStartupRecovery(label) {
@@ -11381,7 +11381,7 @@ function JoinCoachSection({ onLinked }) {
   );
 }
 
-function ProfileScreen({ user, xp, habits, isPro, isCoach, stripeCustomerId, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onReplayPageGuides, onPreviewCoach, onPreviewCoachWorkspace, onSignOut, onShowTour, onUpgrade, coachName, coachIcon, onSaveCoach, notifEnabled, notifTime, notifLoading, notifPermission, dailyRemindersEnabled, nudgesEnabled, invitesEnabled, onNotifToggle, onNotifTimeChange, onNotifCategoryChange }) {
+function ProfileScreen({ user, xp, habits, isPro, isCoach, stripeCustomerId, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onReplayPageGuides, onPreviewCoach, onSignOut, onShowTour, onUpgrade, coachName, coachIcon, onSaveCoach, notifEnabled, notifTime, notifLoading, notifPermission, dailyRemindersEnabled, nudgesEnabled, invitesEnabled, onNotifToggle, onNotifTimeChange, onNotifCategoryChange }) {
   const [editingName,    setEditingName]    = useState(false);
   const [nameVal,        setNameVal]        = useState(user.name);
   const [showCoachSheet, setShowCoachSheet] = useState(false);
@@ -11522,38 +11522,6 @@ function ProfileScreen({ user, xp, habits, isPro, isCoach, stripeCustomerId, ref
       {/* Join a coach — shown when not yet linked */}
       {!user.coachId && (
         <JoinCoachSection onLinked={(coachId, coachName) => onUpdateUser({ coachId, linkedCoachName: coachName })} />
-      )}
-
-      {/* Forged Coach — discovery for professionals (consumer accounts only) */}
-      {!isCoach && typeof onPreviewCoachWorkspace === "function" && (
-        <div style={{
-          margin:"0 14px 12px",
-          background:`linear-gradient(165deg, rgba(200,144,42,0.12) 0%, ${T.raised} 55%)`,
-          border:`1px solid rgba(200,144,42,0.35)`,
-          borderRadius:14,
-          padding:"16px 18px",
-        }}>
-          <div style={{ fontSize:10, fontWeight:700, color:T.gold, letterSpacing:"0.1em", marginBottom:8 }}>FORGED COACH</div>
-          <div style={{ fontFamily:T.serif, fontSize:18, color:T.text, lineHeight:1.25, marginBottom:8 }}>
-            Run 1:1s? See habits before every session.
-          </div>
-          <div style={{ fontSize:12, color:T.muted, lineHeight:1.65, marginBottom:14 }}>
-            Client roster, streaks, notes, and an AI pre-session brief — built for coaches, separate from the habit app your clients use.
-          </div>
-          <button
-            type="button"
-            onClick={onPreviewCoachWorkspace}
-            style={{
-              width:"100%", padding:"12px 14px", borderRadius:T.rsm, border:`1px solid rgba(200,144,42,0.5)`,
-              background:T.gold, color:"#0F0F0D", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:T.font,
-            }}
-          >
-            Preview coach workspace (demo)
-          </button>
-          <div style={{ fontSize:11, color:T.hint, lineHeight:1.6, marginTop:12 }}>
-            <strong style={{ color:T.sub }}>How access works today:</strong> your profile is marked as a coach in Forged (we onboard coaches in batches), then you subscribe in-app ($49/mo, up to 15 clients, Stripe). Promo codes work at checkout if you have one.
-          </div>
-        </div>
       )}
 
       {/* Account */}
@@ -12024,7 +11992,7 @@ function SetPasswordScreen({ onDone }) {
   );
 }
 
-function AuthScreen({ onSent, checkoutPending, onPreviewCoachWorkspace }) {
+function AuthScreen({ onSent, checkoutPending, onCoachSignupIntent }) {
   const [mode,       setMode]       = useState("signin"); // "signin" | "signup" | "forgot"
   const [email,      setEmail]      = useState("");
   const [password,   setPassword]   = useState("");
@@ -12193,23 +12161,18 @@ function AuthScreen({ onSent, checkoutPending, onPreviewCoachWorkspace }) {
           </button>
         )}
       </div>
-      {typeof onPreviewCoachWorkspace === "function" && (
+      {typeof onCoachSignupIntent === "function" && (
         <button
           type="button"
-          onClick={onPreviewCoachWorkspace}
+          onClick={onCoachSignupIntent}
           style={{
-            width:"100%", marginTop:28, padding:"14px 16px", borderRadius:T.rsm,
-            border:`1px solid rgba(200,144,42,0.45)`, background:"rgba(200,144,42,0.08)",
-            color:T.gold, fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:T.font,
+            width:"100%", marginTop:28, padding:"12px 16px", borderRadius:T.rsm,
+            border:`0.5px solid ${T.borderStrong}`, background:"none",
+            color:T.muted, fontSize:13, fontWeight:500, cursor:"pointer", fontFamily:T.font,
           }}
         >
-          See the coach workspace (demo) — no account needed
+          Professional coach? Request Forged Coach access
         </button>
-      )}
-      {typeof onPreviewCoachWorkspace === "function" && (
-        <div style={{ fontSize:11, color:T.hint, textAlign:"center", marginTop:12, lineHeight:1.55, padding:"0 8px" }}>
-          Sample clients &amp; session prep — same screen real coaches use. Consumer app preview is separate on the home flow.
-        </div>
       )}
     </div>
   );
@@ -14352,7 +14315,7 @@ export default function App() {
   // paywall in CoachApp — coaches without a tier see the subscribe screen.
   const [coachTier,      setCoachTier]      = useState(null);
   const [previewCoach,   setPreviewCoach]   = useState(false);
-  /** Signed-out (or from auth) demo of coach shell — does not require coach subscription */
+  /** Signed-out coach shell demo — only opened via `?coach_dev_preview=1` (dev / QA), not consumer auth UI */
   const [publicCoachPreview, setPublicCoachPreview] = useState(false);
   /** From profiles.stripe_customer_id — used for Stripe Customer Portal */
   const [stripeCustomerId, setStripeCustomerId] = useState(null);
@@ -14462,6 +14425,22 @@ export default function App() {
   useEffect(() => {
     setXpAwardedDates(new Set());
   }, [sessionUserId]);
+
+  // Dev / QA: unsigned coach shell — open with `?coach_dev_preview=1` (param is stripped). Not linked from consumer auth.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const q = new URLSearchParams(window.location.search);
+      if (q.get("coach_dev_preview") !== "1") return;
+      setPublicCoachPreview(true);
+      q.delete("coach_dev_preview");
+      const nextSearch = q.toString();
+      const path = window.location.pathname + (nextSearch ? `?${nextSearch}` : "") + window.location.hash;
+      window.history.replaceState({}, "", path);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   useEffect(() => {
     const today = todayStr();
@@ -15592,9 +15571,10 @@ export default function App() {
     if (loadingUidRef.current === uid) return false;
     loadingUidRef.current = uid;
     try {
-      // 18 s: mobile cold-start PostgREST connections commonly take 10-15 s
-      // on first open after the device woke from background.
-      const FETCH_MS = 18000;
+      // 8 s per query: allows slow-but-working mobile connections while still
+      // detecting truly stuck connections quickly. Both queries together = 16 s
+      // max per attempt before loadUserData returns false and the retry loop fires.
+      const FETCH_MS = 8000;
       async function runQueryWithTimeout(label, queryFactory) {
         const aborter = new AbortController();
         let timeoutId = null;
@@ -15764,10 +15744,10 @@ export default function App() {
 
     retryLoadUidRef.current = uid;
     const loadPromise = (async () => {
-    // First attempt fires immediately — INITIAL_SESSION already guarantees the
-    // auth token is fully settled by the time we get here. Subsequent retries
-    // use exponential backoff in case of transient network/PostgREST hiccups.
-    const backoffs = [0, 1500, 3000, 6000, 10000];
+    // First attempt fires immediately. One retry after 2 s for transient hiccups.
+    // Keeping this short (2 attempts × 8 s FETCH_MS = 16 s max) so the startup
+    // last-resort reload triggers quickly rather than waiting through many retries.
+    const backoffs = [0, 2000];
     for (let attempt = 0; attempt < backoffs.length; attempt++) {
       if (backoffs[attempt] > 0) await new Promise(r => setTimeout(r, backoffs[attempt]));
       if (attempt > 0) console.log(`[Forged] loadUserData retry ${attempt}/${backoffs.length - 1} (${source})`);
@@ -15942,11 +15922,11 @@ export default function App() {
         // Do not leave the loading screen until profile/habits load succeeds (or we show retry).
         if (event === "INITIAL_SESSION") {
           clearTimeout(bailout);
-          // If profile/habits hang (blocked network / wrong origin), never leave the user on a dead spinner.
-          // 60 s: with 18 s per query (profile + habits = 36 s max per attempt)
-          // we need at least 37 s to let one full attempt complete. 60 s gives
-          // room for a full attempt plus one backoff + second attempt.
-          const LOAD_BUDGET_MS = 60000;
+          // Safety net: if loadUserDataWithRetries somehow hangs beyond the
+          // per-query FETCH_MS timeouts, unblock the UI after 20 s. With
+          // FETCH_MS=8s and 2 attempts the loop finishes in ≤ 18 s anyway,
+          // so this fires only if something truly unexpected locks up.
+          const LOAD_BUDGET_MS = 20000;
           const loadBudgetTimer = setTimeout(() => {
             if (!mounted) return;
             console.warn("Auth: account load exceeded budget — unblocking UI (use Retry if needed)");
@@ -16154,6 +16134,7 @@ export default function App() {
           setIsAdmin(false);
           setIsCoach(false);
           setPreviewCoach(false);
+          setPublicCoachPreview(false);
           setStripeCustomerId(null);
           setRefCode(null);
           setAuthEmail(null);
@@ -16183,7 +16164,7 @@ export default function App() {
               setLoading(false);
               setAuthScreen(false);
               setAccountLoadError(true);
-            }, 60000);
+            }, 20000);
             try {
               const ok = await loadUserDataWithRetries(session.user.id, "TOKEN_REFRESHED");
               if (mounted) {
@@ -16239,6 +16220,36 @@ export default function App() {
     }, 8000);
     return () => clearTimeout(t);
   }, [loading]);
+
+  // ─── Startup last-resort reload ───────────────────────────────────────────
+  // The watchdog above only fires when NO data load is in progress. This effect
+  // is the backstop for the more common stuck case: TOKEN_REFRESHED fired and
+  // a data load IS running, but the Supabase/PostgREST connection is in a bad
+  // state (cold after backgrounding) and queries keep timing out.
+  //
+  // If loading is still true 15 s from mount and account data has not landed,
+  // do a clean page reload. A reload resets the Supabase client and TCP
+  // connections — the same effect as force-closing and reopening the PWA tile,
+  // which the user reported always fixes the issue.
+  //
+  // Guards:
+  //   - Date.now() - mountTimeRef.current > 3000: only fires for the startup
+  //     load (loading became true at mount). Skips mid-session manual retries.
+  //   - waitingForTokenRefreshRef.current: skip if Supabase is still doing its
+  //     internal token refresh (can take up to 20 s on slow connections).
+  //   - startupReloadExpired: stop reloading after 60 s of total attempts.
+  useEffect(() => {
+    if (!loading || accountDataReady || startupReloadExpired) return;
+    // Not a startup load (loading became true mid-session, e.g. manual retry).
+    if (Date.now() - mountTimeRef.current > 3000) return;
+    const t = setTimeout(() => {
+      if (!loading || accountDataReady || accountDataLoadedRef.current) return;
+      if (waitingForTokenRefreshRef.current) return; // still mid-token-refresh
+      if (startupReloadExpired) return;
+      reloadForStartupRecovery("startup-stuck-15s");
+    }, 15000);
+    return () => clearTimeout(t);
+  }, [loading, accountDataReady]);
 
   // ─── Auto-retry on accountLoadError ─────────────────────────────────────────
   // When the initial load fails (e.g. mobile cold-start PostgREST timeout),
@@ -16567,7 +16578,13 @@ export default function App() {
       <AuthScreen
         onSent={email => setPendingEmail(email)}
         checkoutPending={localStorage.getItem('forged_checkout_pending') === '1'}
-        onPreviewCoachWorkspace={() => setPublicCoachPreview(true)}
+        onCoachSignupIntent={() => {
+          window.location.href =
+            "mailto:hello@forged.app?subject=Forged%20Coach%20%E2%80%94%20coach%20access%20request&body=" +
+            encodeURIComponent(
+              "Hi — I'm interested in Forged Coach (client roster / session prep).\n\nName:\nWebsite or social:\nApprox. number of 1:1 clients:\n",
+            );
+        }}
       /></>
     );
   }
@@ -17417,7 +17434,6 @@ export default function App() {
           onResetOnboarding={() => setOnboarded(false)}
           onPreviewOnboarding={() => setPreviewOnboarding(true)}
           onPreviewCoach={() => setPreviewCoach(true)}
-          onPreviewCoachWorkspace={() => setPreviewCoach(true)}
           onReplayPageGuides={() => {
             // Dev-only: wipe the 4 page-guide seen flags so the first-time
             // AI bubble re-triggers on next visit to Today/Journal/Insights/
