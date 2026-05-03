@@ -11965,10 +11965,10 @@ function SetPasswordScreen({ onDone }) {
           src="/logo-icon.png"
           alt="Forged"
           style={{
-            width:104, height:104,
+            width:148, height:148,
             display:"block",
             margin:"0 auto",
-            filter:"drop-shadow(0 0 28px rgba(200,144,42,0.32))",
+            filter:"drop-shadow(0 2px 36px rgba(200,144,42,0.22))",
           }}
         />
         <div style={{ fontFamily:T.serif, fontSize:34, color:T.text, marginTop:16, letterSpacing:"0.01em" }}>
@@ -12090,10 +12090,10 @@ function AuthScreen({ onSent, checkoutPending, onCoachSignupIntent }) {
           src="/logo-icon.png"
           alt="Forged"
           style={{
-            width:104, height:104,
+            width:148, height:148,
             display:"block",
             margin:"0 auto",
-            filter:"drop-shadow(0 0 28px rgba(200,144,42,0.32))",
+            filter:"drop-shadow(0 2px 36px rgba(200,144,42,0.22))",
           }}
         />
         <div style={{ fontFamily:T.serif, fontSize:34, color:T.text, marginTop:16, letterSpacing:"0.01em" }}>
@@ -12149,10 +12149,10 @@ function AuthScreen({ onSent, checkoutPending, onCoachSignupIntent }) {
           src="/logo-icon.png"
           alt="Forged"
           style={{
-            width:104, height:104,
+            width:148, height:148,
             display:"block",
             margin:"0 auto",
-            filter:"drop-shadow(0 0 28px rgba(200,144,42,0.32))",
+            filter:"drop-shadow(0 2px 36px rgba(200,144,42,0.22))",
           }}
         />
         <div style={{ fontFamily:T.serif, fontSize:34, color:T.text, marginTop:16, letterSpacing:"0.01em" }}>
@@ -12235,10 +12235,10 @@ function CheckEmailScreen({ email, onBack }) {
         src="/logo-icon.png"
         alt="Forged"
         style={{
-          width:72, height:72,
+          width:96, height:96,
           display:"block",
           margin:"0 auto 10px",
-          filter:"drop-shadow(0 0 20px rgba(200,144,42,0.28))",
+          filter:"drop-shadow(0 2px 28px rgba(200,144,42,0.2))",
         }}
       />
       <div style={{ fontFamily:T.serif, fontSize:26, color:T.text, marginBottom:28, letterSpacing:"0.01em" }}>
