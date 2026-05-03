@@ -11955,11 +11955,26 @@ function SetPasswordScreen({ onDone }) {
 
   return (
     <div style={{
-      fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg,
+      fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh",
+      background:`radial-gradient(ellipse 380px 320px at 50% 38%, rgba(200,144,42,0.08) 0%, transparent 65%), ${T.bg}`,
       display:"flex", flexDirection:"column", justifyContent:"center",
       paddingTop: cssPadTopSafe(24), paddingBottom: cssPadBottomSafe(24), ...cssPadXSafe(28),
     }}>
-      <div style={{ fontFamily:T.serif, fontSize:40, color:T.text, marginBottom:32 }}>Forged.</div>
+      <div style={{ textAlign:"center", marginBottom:32 }}>
+        <img
+          src="/logo-icon.png"
+          alt="Forged"
+          style={{
+            width:104, height:104,
+            display:"block",
+            margin:"0 auto",
+            filter:"drop-shadow(0 0 28px rgba(200,144,42,0.32))",
+          }}
+        />
+        <div style={{ fontFamily:T.serif, fontSize:34, color:T.text, marginTop:16, letterSpacing:"0.01em" }}>
+          Forged.
+        </div>
+      </div>
       {done ? (
         <div style={{ textAlign:"center" }}>
           <div style={{ fontSize:48, marginBottom:16 }}>✓</div>
@@ -12061,7 +12076,8 @@ function AuthScreen({ onSent, checkoutPending, onCoachSignupIntent }) {
   }
 
   const wrap = {
-    fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg,
+    fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh",
+    background:`radial-gradient(ellipse 380px 320px at 50% 38%, rgba(200,144,42,0.08) 0%, transparent 65%), ${T.bg}`,
     display:"flex", flexDirection:"column", justifyContent:"center",
     paddingTop: cssPadTopSafe(24), paddingBottom: cssPadBottomSafe(24), ...cssPadXSafe(28),
   };
@@ -12069,7 +12085,21 @@ function AuthScreen({ onSent, checkoutPending, onCoachSignupIntent }) {
   // ── Forgot password view ──────────────────────────────────────────────
   if (mode === "forgot") return (
     <div style={wrap}>
-      <div style={{ fontFamily:T.serif, fontSize:40, color:T.text, marginBottom:32 }}>Forged.</div>
+      <div style={{ textAlign:"center", marginBottom:36 }}>
+        <img
+          src="/logo-icon.png"
+          alt="Forged"
+          style={{
+            width:104, height:104,
+            display:"block",
+            margin:"0 auto",
+            filter:"drop-shadow(0 0 28px rgba(200,144,42,0.32))",
+          }}
+        />
+        <div style={{ fontFamily:T.serif, fontSize:34, color:T.text, marginTop:16, letterSpacing:"0.01em" }}>
+          Forged.
+        </div>
+      </div>
       {forgotSent ? (
         <div style={{ textAlign:"center" }}>
           <div style={{ fontSize:48, marginBottom:16 }}>📧</div>
@@ -12113,15 +12143,30 @@ function AuthScreen({ onSent, checkoutPending, onCoachSignupIntent }) {
   const ready = (email.trim() || false) && (password || false) && !loading;
   return (
     <div style={wrap}>
-      <div style={{ fontFamily:T.serif, fontSize:40, color:T.text, marginBottom:8 }}>Forged.</div>
+      {/* Logo + brand header */}
+      <div style={{ textAlign:"center", marginBottom:36 }}>
+        <img
+          src="/logo-icon.png"
+          alt="Forged"
+          style={{
+            width:104, height:104,
+            display:"block",
+            margin:"0 auto",
+            filter:"drop-shadow(0 0 28px rgba(200,144,42,0.32))",
+          }}
+        />
+        <div style={{ fontFamily:T.serif, fontSize:34, color:T.text, marginTop:16, letterSpacing:"0.01em" }}>
+          Forged.
+        </div>
+        <div style={{ fontSize:13, color:T.muted, marginTop:6, letterSpacing:"0.03em" }}>
+          {mode === "signin" ? "Welcome back." : "Build the life you intend."}
+        </div>
+      </div>
       {checkoutPending && (
         <div style={{ background:"rgba(200,144,42,0.12)", border:"0.5px solid rgba(200,144,42,0.35)", borderRadius:10, padding:"12px 16px", marginBottom:20, fontSize:13, color:"#C8902A", lineHeight:1.6 }}>
           ✓ Payment received — sign in to access your account.
         </div>
       )}
-      <div style={{ fontSize:15, color:T.muted, marginBottom:32 }}>
-        {mode === "signin" ? "Welcome back" : "Create your account"}
-      </div>
       <input type="email" placeholder="you@example.com" autoFocus
         value={email}
         onChange={e => setEmail(e.target.value)}
@@ -12181,11 +12226,25 @@ function AuthScreen({ onSent, checkoutPending, onCoachSignupIntent }) {
 function CheckEmailScreen({ email, onBack }) {
   return (
     <div style={{
-      fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg,
+      fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh",
+      background:`radial-gradient(ellipse 380px 320px at 50% 38%, rgba(200,144,42,0.08) 0%, transparent 65%), ${T.bg}`,
       display:"flex", flexDirection:"column", justifyContent:"center", textAlign:"center",
       paddingTop: cssPadTopSafe(24), paddingBottom: cssPadBottomSafe(24), ...cssPadXSafe(28),
     }}>
-      <div style={{ fontSize:52, marginBottom:20 }}>✉️</div>
+      <img
+        src="/logo-icon.png"
+        alt="Forged"
+        style={{
+          width:72, height:72,
+          display:"block",
+          margin:"0 auto 10px",
+          filter:"drop-shadow(0 0 20px rgba(200,144,42,0.28))",
+        }}
+      />
+      <div style={{ fontFamily:T.serif, fontSize:26, color:T.text, marginBottom:28, letterSpacing:"0.01em" }}>
+        Forged.
+      </div>
+      <div style={{ fontSize:48, marginBottom:20 }}>✉️</div>
       <div style={{ fontFamily:T.serif, fontSize:28, color:T.text, marginBottom:12 }}>Confirm your email</div>
       <div style={{ fontSize:14, color:T.muted, lineHeight:1.8, marginBottom:32 }}>
         We sent a confirmation link to<br/>
