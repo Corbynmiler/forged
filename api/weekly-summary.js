@@ -138,10 +138,7 @@ async function handler(req, res) {
     return res.status(401).json({ error: "Invalid token" });
   }
 
-  if (!isPro) {
-    return res.status(403).json({ error: "Weekly summaries are a Pro feature." });
-  }
-
+  // Parse client date + week bucket (needed by both Pro and free-trial paths)
   const clientDate =
     req.method === "GET"
       ? (typeof req.query?.client_date === "string" ? req.query.client_date : "")
@@ -150,37 +147,70 @@ async function handler(req, res) {
   const weekStart = weekStartFromClientYmd(anchor);
   if (!weekStart) return res.status(400).json({ error: "Invalid client_date" });
 
-  const { data: usageRow, error: usageReadErr } = await db
-    .from("weekly_brief_generation_usage")
-    .select("generation_count")
-    .eq("user_id", userId)
-    .eq("week_start", weekStart)
-    .maybeSingle();
-  if (usageReadErr) {
-    console.error("[weekly-summary] quota read:", usageReadErr.message);
-    captureException(usageReadErr, { route: "weekly-summary", userId, step: "quota-read" });
-    return res.status(503).json({
-      error: "Weekly brief quota isn’t available yet. Apply the latest Supabase migration (weekly_brief_generation_usage), then try again.",
-    });
-  }
-  const used = typeof usageRow?.generation_count === "number" ? usageRow.generation_count : 0;
+  // Non-Pro users get one free lifetime brief, tracked via the usage table.
+  if (!isPro) {
+    const { data: allUsage } = await db
+      .from("weekly_brief_generation_usage")
+      .select("generation_count")
+      .eq("user_id", userId);
+    const totalEver = (allUsage || []).reduce((s, r) => s + (r.generation_count || 0), 0);
+    const freeTrialUsed = totalEver >= 1;
 
-  if (req.method === "GET") {
-    return res.json({
-      limit: WEEKLY_BRIEF_GEN_LIMIT,
-      used,
-      week_start: weekStart,
-      can_generate: used < WEEKLY_BRIEF_GEN_LIMIT,
-    });
+    if (req.method === "GET") {
+      return res.json({
+        free_trial: true,
+        free_trial_used: freeTrialUsed,
+        limit: 1,
+        used: freeTrialUsed ? 1 : 0,
+        week_start: weekStart,
+        can_generate: !freeTrialUsed,
+      });
+    }
+
+    if (freeTrialUsed) {
+      return res.status(403).json({
+        error: "Your free brief has been used. Upgrade to Pro for weekly briefs.",
+        free_trial_used: true,
+      });
+    }
+    // Free trial available — fall through to generation with used=0
   }
 
-  if (used >= WEEKLY_BRIEF_GEN_LIMIT) {
-    return res.status(429).json({
-      error: `You’ve used all ${WEEKLY_BRIEF_GEN_LIMIT} weekly brief generations for this week. They reset next Monday.`,
-      limit: WEEKLY_BRIEF_GEN_LIMIT,
-      used,
-      week_start: weekStart,
-    });
+  // Pro: read this week’s quota
+  let used = 0;
+  if (isPro) {
+    const { data: usageRow, error: usageReadErr } = await db
+      .from("weekly_brief_generation_usage")
+      .select("generation_count")
+      .eq("user_id", userId)
+      .eq("week_start", weekStart)
+      .maybeSingle();
+    if (usageReadErr) {
+      console.error("[weekly-summary] quota read:", usageReadErr.message);
+      captureException(usageReadErr, { route: "weekly-summary", userId, step: "quota-read" });
+      return res.status(503).json({
+        error: "Weekly brief quota isn’t available yet. Apply the latest Supabase migration (weekly_brief_generation_usage), then try again.",
+      });
+    }
+    used = typeof usageRow?.generation_count === "number" ? usageRow.generation_count : 0;
+
+    if (req.method === "GET") {
+      return res.json({
+        limit: WEEKLY_BRIEF_GEN_LIMIT,
+        used,
+        week_start: weekStart,
+        can_generate: used < WEEKLY_BRIEF_GEN_LIMIT,
+      });
+    }
+
+    if (used >= WEEKLY_BRIEF_GEN_LIMIT) {
+      return res.status(429).json({
+        error: `You’ve used all ${WEEKLY_BRIEF_GEN_LIMIT} weekly brief generations for this week. They reset next Monday.`,
+        limit: WEEKLY_BRIEF_GEN_LIMIT,
+        used,
+        week_start: weekStart,
+      });
+    }
   }
 
   const { habits, goals, journalEntries, name, client_date: bodyClientDate } = req.body || {};
@@ -215,12 +245,13 @@ async function handler(req, res) {
       captureException(upsertErr, { route: "weekly-summary", userId, step: "quota-upsert" });
     }
 
-    console.log(JSON.stringify({ level: "info", msg: "weekly-summary generated", userId, words: text.split(/\s+/).length, weekStart, genCount: nextCount }));
+    console.log(JSON.stringify({ level: "info", msg: "weekly-summary generated", userId, words: text.split(/\s+/).length, weekStart, genCount: nextCount, isPro }));
     return res.json({
       text,
-      limit: WEEKLY_BRIEF_GEN_LIMIT,
+      limit: isPro ? WEEKLY_BRIEF_GEN_LIMIT : 1,
       used: nextCount,
       week_start: weekStart,
+      ...(isPro ? {} : { free_trial: true }),
     });
   } catch (err) {
     console.error("[weekly-summary] error:", err?.message);

@@ -151,23 +151,25 @@ async function handler(req, res) {
   // ── Call Claude ─────────────────────────────────────────────────────────
   const clientName = clientProfile.name || "the client";
   const system =
-    "You are helping a coach prepare for a 1:1 session with their client. " +
-    "Be sharp, specific, and grounded in the data. Do NOT fabricate. " +
-    "Output up to 5 bullet points, one per line, no numbering, no markdown. " +
-    "Each bullet must be under 15 words. " +
-    "Cover: what's going well, what's struggling, and end with one question worth asking.";
+    "You are writing a short pre-session note TO the coach (second person: 'you'), as if you're their assistant who read the client's last two weeks of logs. " +
+    "Sound like a colleague's heads-up — not a dashboard, not therapy speak. " +
+    "Do NOT fabricate. Do NOT repeat the same number or streak in multiple lines. " +
+    "Do NOT start every line with the client's name or the same habit name pattern. " +
+    "Output up to 5 lines, one bullet per line, plain text only — no numbering, no markdown, no emojis. " +
+    "Each line under 20 words. Lines 1–4: angles for the session (momentum, gaps, one quote from notes if present). " +
+    "Line 5 only: one natural question they could ask the client — not a survey.";
 
   const userText =
     `Client: ${clientName}\n` +
     `Last 14 days of habit data (JSON):\n${JSON.stringify(compact)}\n\n` +
-    `Write the brief now. Max 5 bullets, each under 15 words. Last bullet is the question.`;
+    `Write the note now. Vary how each line starts. Last line = one question only.`;
 
   try {
     const ai = new Anthropic({ apiKey: apiKey.trim() });
     const resp = await Promise.race([
       ai.messages.create({
         model: "claude-haiku-4-5",
-        max_tokens: 350,
+        max_tokens: 420,
         system: cachedSystem(system),
         messages: [{ role: "user", content: userText }],
       }),

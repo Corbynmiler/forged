@@ -1,0 +1,1 @@
+-- Log tracks: journal-style `habits` rows with habit_type = 'log' (app-enforced; no DB constraint change).

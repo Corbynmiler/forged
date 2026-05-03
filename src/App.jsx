@@ -5655,13 +5655,15 @@ function InsightsScreen({ habits, goals = [], journalEntries = [], onShowHistory
   const [summaryLoading,  setSummaryLoading]  = useState(false);
   const [summaryError,    setSummaryError]    = useState(null);
   const [briefQuota,      setBriefQuota]      = useState(null);
+  // null = still checking, true = free trial available, false = already used
+  const [freeBrief,       setFreeBrief]       = useState(null);
   const [activityExpanded, setActivityExpanded] = useState(false);
   const [patternsMoreExpanded, setPatternsMoreExpanded] = useState(false);
 
   const thisWeekStart = weekStartFor(todayStr());
 
   async function refreshBriefQuota() {
-    if (!isPro || !userId) return;
+    if (!userId) return;
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
@@ -5671,18 +5673,22 @@ function InsightsScreen({ habits, goals = [], journalEntries = [], onShowHistory
       });
       if (!res.ok) return;
       const j = await res.json();
-      setBriefQuota({
-        used: j.used,
-        limit: j.limit,
-        week_start: j.week_start,
-        can_generate: j.can_generate,
-      });
+      if (j.free_trial) {
+        setFreeBrief(!j.free_trial_used);
+      } else {
+        setBriefQuota({
+          used: j.used,
+          limit: j.limit,
+          week_start: j.week_start,
+          can_generate: j.can_generate,
+        });
+      }
     } catch { /* ignore */ }
   }
 
   // Load cached brief + server quota on mount / when userId changes
   useEffect(() => {
-    if (!isPro || !userId) return;
+    if (!userId) return;
     try {
       const raw = localStorage.getItem(`forged_weekly_summary:${userId}`);
       if (raw) {
@@ -5730,11 +5736,16 @@ function InsightsScreen({ habits, goals = [], journalEntries = [], onShowHistory
             can_generate: false,
           });
         }
+        if (res.status === 403 && payload?.free_trial_used) {
+          setFreeBrief(false);
+        }
         throw new Error(payload.error || `Error ${res.status}`);
       }
-      const { text, used, limit, week_start } = payload;
+      const { text, used, limit, week_start, free_trial } = payload;
       setWeeklySummary(text);
-      if (typeof used === "number" && typeof limit === "number") {
+      if (free_trial) {
+        setFreeBrief(false);
+      } else if (typeof used === "number" && typeof limit === "number") {
         setBriefQuota({
           used,
           limit,
@@ -5939,7 +5950,7 @@ function InsightsScreen({ habits, goals = [], journalEntries = [], onShowHistory
         overflow:"hidden",
         boxShadow:"0 2px 24px rgba(0,0,0,0.35), 0 1px 0 rgba(200,144,42,0.14)",
       }}>
-        {!isPro && (
+        {!isPro && freeBrief !== true && !weeklySummary && (
           <div style={{ position:"absolute", top:14, right:14 }}>
             <span style={{ fontSize:9, fontWeight:800, color:"#0F0F0D", background:T.gold, padding:"2px 7px", borderRadius:5, letterSpacing:"0.08em" }}>PRO</span>
           </div>
@@ -5962,11 +5973,55 @@ function InsightsScreen({ habits, goals = [], journalEntries = [], onShowHistory
           </div>
         )}
 
-        {!isPro ? (
+        {!isPro && !weeklySummary ? (
           <>
+            {freeBrief === true ? (
+              <>
+                {summaryError && (
+                  <div style={{ fontSize:12, color:T.amber, marginBottom:10, lineHeight:1.5 }}>{summaryError}</div>
+                )}
+                <button
+                  type="button"
+                  onClick={generateWeeklySummary}
+                  disabled={summaryLoading}
+                  style={{
+                    padding:"12px 22px", borderRadius:T.rsm, border:`1px solid rgba(200,144,42,0.55)`,
+                    background: summaryLoading ? "rgba(200,144,42,0.08)" : T.gold,
+                    color: summaryLoading ? T.hint : "#0F0F0D",
+                    fontSize:13, fontWeight:800, cursor: summaryLoading ? "default" : "pointer", letterSpacing:"0.02em",
+                  }}
+                >
+                  {summaryLoading ? "Writing your brief…" : "Generate your first brief — free ✨"}
+                </button>
+                <div style={{ fontSize:11, color:T.hint, marginTop:9, lineHeight:1.5 }}>
+                  One on us. Upgrade to Pro for a fresh brief every week.
+                </div>
+              </>
+            ) : (
+              <>
+                {onUpgrade && (
+                  <button type="button" onClick={onUpgrade} style={{ padding:"11px 18px", borderRadius:T.rsm, border:`1px solid rgba(200,144,42,0.5)`, background:"rgba(200,144,42,0.18)", color:T.gold, fontSize:13, fontWeight:700, cursor:"pointer", letterSpacing:"0.02em" }}>
+                    Unlock with Pro →
+                  </button>
+                )}
+              </>
+            )}
+          </>
+        ) : !isPro && weeklySummary ? (
+          <>
+            <div style={{ marginBottom:16 }}>
+              {(() => {
+                const blocks = weeklyBriefBlocks(weeklySummary);
+                return blocks.map((block, i) => (
+                  <div key={i} style={{ fontSize:14, color:T.text, lineHeight:1.72, fontWeight:450, marginBottom: i < blocks.length - 1 ? 14 : 0, paddingBottom: i < blocks.length - 1 ? 14 : 0, borderBottom: i < blocks.length - 1 ? `0.5px solid rgba(255,255,255,0.06)` : "none" }}>
+                    {block}
+                  </div>
+                ));
+              })()}
+            </div>
             {onUpgrade && (
               <button type="button" onClick={onUpgrade} style={{ padding:"11px 18px", borderRadius:T.rsm, border:`1px solid rgba(200,144,42,0.5)`, background:"rgba(200,144,42,0.18)", color:T.gold, fontSize:13, fontWeight:700, cursor:"pointer", letterSpacing:"0.02em" }}>
-                Unlock with Pro →
+                Get Pro for weekly briefs →
               </button>
             )}
           </>
@@ -11067,7 +11122,7 @@ function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
 
   const features = [
     { icon:"∞",  label:"Unlimited habits",    free:"Up to 5",      pro:"No limit",               live:true },
-    { icon:"🤖", label:"AI coach messages",    free:"5 per day",    pro:"Unlimited",              live:true },
+    { icon:"🤖", label:"AI coach messages",    free:"10 per day",   pro:"Unlimited",              live:true },
     { icon:"🎙️", label:"Voice logging",         free:"—",            pro:"Talk to log & reflect",  live:true },
     { icon:"💪", label:"Nudge a friend",       free:"—",            pro:"Keep each other honest", live:true },
     { icon:"📜", label:"Full history",         free:"Last 7 days",  pro:"Every entry, forever",   live:true },
@@ -12207,17 +12262,23 @@ function AuthScreen({ onSent, checkoutPending, onCoachSignupIntent }) {
         )}
       </div>
       {typeof onCoachSignupIntent === "function" && (
-        <button
-          type="button"
-          onClick={onCoachSignupIntent}
-          style={{
-            width:"100%", marginTop:28, padding:"12px 16px", borderRadius:T.rsm,
-            border:`0.5px solid ${T.borderStrong}`, background:"none",
-            color:T.muted, fontSize:13, fontWeight:500, cursor:"pointer", fontFamily:T.font,
-          }}
-        >
-          Professional coach? Request Forged Coach access
-        </button>
+        <div style={{ marginTop:32, borderTop:`0.5px solid ${T.border}`, paddingTop:24 }}>
+          <div style={{ fontSize:11, color:T.hint, textAlign:"center", marginBottom:12, lineHeight:1.5 }}>
+            Running 1:1 clients? See their habits before every session.
+          </div>
+          <button
+            type="button"
+            onClick={onCoachSignupIntent}
+            style={{
+              width:"100%", padding:"13px 16px", borderRadius:T.rsm,
+              border:`1px solid rgba(200,144,42,0.45)`, background:"rgba(200,144,42,0.07)",
+              color:T.gold, fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:T.font,
+              letterSpacing:"0.01em",
+            }}
+          >
+            Apply for Forged Coach — $49/mo →
+          </button>
+        </div>
       )}
     </div>
   );

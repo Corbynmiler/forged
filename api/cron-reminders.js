@@ -119,14 +119,32 @@ function hasRestDay(h, dateStr) {
   return (h.logs || []).some(l => l.date === dateStr && l.value === "skip");
 }
 
-/** Matches client `isLoggedToday`: any saved log row for that calendar day (Today ring %). */
 function hasAnyLogOnDate(h, dateStr) {
   return (h.logs || []).some(l => l.date === dateStr);
 }
 
+/** Matches client `isSatisfiedForTodayRing` for non-log habits (Today ring %). */
+function forgedRingSatisfiedTodayRow(h, todayYmd) {
+  if (h.habit_type === "log") return false;
+  const logs = h.logs || [];
+  if (h.habit_type === "weekly") {
+    const target = Math.max(1, Number(h.weekly_target) || 1);
+    if (hasRestDay(h, todayYmd)) return true;
+    const ws = weekStartMondayFromYmd(todayYmd);
+    const weekEnd = addCalendarDays(ws, 6);
+    const count = logs.filter(l => l.date >= ws && l.date <= weekEnd && l.value === true).length;
+    if (count >= target) return true;
+    return logs.some(l => l.date === todayYmd && l.value === true);
+  }
+  if (h.habit_type === "daily") {
+    return hasDailyCompletion(h, todayYmd) || hasRestDay(h, todayYmd);
+  }
+  return hasAnyLogOnDate(h, todayYmd);
+}
+
 /**
- * Stricter "real progress today" for AI copy — avoids congratulating a workout that did not happen.
- * Weekly: counts a session only when value === true that day (not a blank row / quicknote alone).
+ * Stricter "real progress today" for AI copy — aligns with the Today forged ring
+ * (weekly: session, rest day, or weekly target already met).
  */
 function strictLoggedProgressToday(h, todayYmd) {
   if (h.habit_type === "log") return false;
@@ -136,7 +154,7 @@ function strictLoggedProgressToday(h, todayYmd) {
     return hasDailyCompletion(h, todayYmd) || hasRestDay(h, todayYmd);
   }
   if (h.habit_type === "weekly") {
-    return logs.some(l => l.date === todayYmd && l.value === true);
+    return forgedRingSatisfiedTodayRow(h, todayYmd);
   }
   if (h.habit_type === "project") {
     return qualifiesBuildDay(h, todayYmd);
@@ -544,7 +562,7 @@ function pickDevOwnerMessage(habits, goals, todayYmd, localHour) {
   );
   const allLogged =
     trackableHabits.length > 0 &&
-    trackableHabits.every(h => hasAnyLogOnDate(h, todayYmd));
+    trackableHabits.every(h => forgedRingSatisfiedTodayRow(h, todayYmd));
 
   const weekend = isWeekend(todayYmd);
   const slot = getTimeSlot(localHour ?? 8);
@@ -707,7 +725,7 @@ function pickNormalMessage(habits, goals, todayYmd, localHour) {
   );
 
   // All habits logged today — congratulate them.
-  if (trackableHabits.length > 0 && trackableHabits.every(h => hasAnyLogOnDate(h, todayYmd))) {
+  if (trackableHabits.length > 0 && trackableHabits.every(h => forgedRingSatisfiedTodayRow(h, todayYmd))) {
     const CONGRATS = [
       "Every habit logged today — that's how it's done. Keep it up! Love, Forged.",
       "All habits in. You showed up and got it done. Love, Forged.",
@@ -770,7 +788,7 @@ function pickMessage(habits, goals, todayYmd) {
     h => TRACKABLE.includes(h.habit_type) && h.habit_type !== "log"
   );
 
-  if (trackableHabits.length > 0 && trackableHabits.every(h => hasAnyLogOnDate(h, todayYmd))) {
+  if (trackableHabits.length > 0 && trackableHabits.every(h => forgedRingSatisfiedTodayRow(h, todayYmd))) {
     const CONGRATS = [
       "Every habit logged. That's how it's built. ⚒️",
       "100% today. You showed up and got it done. 🔥",
