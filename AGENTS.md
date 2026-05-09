@@ -6,7 +6,7 @@ This file is read by Cursor, Claude Code, and any other agent supporting `AGENTS
 
 Forged is a habit / goal / coach app. Stack:
 
-- **Frontend**: Vite + React 19, single `src/App.jsx` (~14k lines, intentionally — see "Splitting App.jsx" below)
+- **Frontend**: Vite + React 19, `src/App.jsx` (~3.6k lines, router shell only) + extracted modules in `src/components/`, `src/screens/`, `src/hooks/`, `src/coach/`, `src/theme.js`, `src/utils.js`
 - **Backend**: Vercel serverless functions in `api/*.js` (Node, ESM)
 - **DB / Auth**: Supabase (Postgres + Auth + Realtime), migrations in `supabase/migrations/`
 - **AI coach**: `@anthropic-ai/sdk` directly, model `claude-haiku-4-5`, custom SSE streaming, Anthropic tool-use loop
