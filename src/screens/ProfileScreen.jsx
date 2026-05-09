@@ -4,10 +4,11 @@ import { supabase } from "../supabase.js";
 import {
   getLevel, nextLevel, getStreak, getBestStreak,
   isSatisfiedForTodayRing, currentWeekStart, fmtDate,
-  openForgedFeedbackMailto, normalizeCoachIcon,
+  openForgedFeedbackMailto,
 } from "../utils.js";
 import { Modal, GBtn, lbl, inp, Stat, ToggleSwitch, NotifCategoryRow, JoinCoachSection } from "../components/ui.jsx";
 import { useScrollLock } from "../hooks/useScrollLock.js";
+import { CoachSettingsSheet } from "./SocialScreen.jsx";
 
 export function ShareCardModal({ user, habits, xp, onClose }) {
   useScrollLock(true);
@@ -89,83 +90,6 @@ export function ShareCardModal({ user, habits, xp, onClose }) {
         <button onClick={onClose} style={{ width:"100%", marginTop:14, padding:14, borderRadius:T.rsm, border:"none", background:T.raised, color:T.muted, fontSize:14, cursor:"pointer" }}>
           Close
         </button>
-      </div>
-    </div>
-  );
-}
-function CoachSettingsSheet({ onClose, onSave, initialName, initialIcon }) {
-  useScrollLock(true);
-  const [nameDraft, setNameDraft] = useState((initialName ?? "").trim() || "Coach");
-  const [iconDraft, setIconDraft] = useState(() => normalizeCoachIcon(initialIcon));
-  useEffect(() => {
-    setNameDraft((initialName ?? "").trim() || "Coach");
-    setIconDraft(normalizeCoachIcon(initialIcon));
-  }, [initialName, initialIcon]);
-  return (
-    <div style={{ position:"fixed", inset:0, minHeight:"100dvh", background:"rgba(0,0,0,0.52)", zIndex:302, display:"flex", alignItems:"flex-end", justifyContent:"center", overscrollBehavior:"contain", touchAction:"none" }}
-      onClick={e => e.target === e.currentTarget && onClose()}>
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{ width:430, maxWidth:"100vw", background:T.raised, borderRadius:"20px 20px 0 0", padding:"22px 20px 36px", borderTop:`0.5px solid ${T.borderMid}`, boxSizing:"border-box", touchAction:"auto" }}
-      >
-        <div style={{ width:36, height:4, borderRadius:2, background:T.border, margin:"0 auto 18px" }}/>
-        <div style={{ fontFamily:T.serif, fontSize:20, color:T.text, marginBottom:14 }}>AI coach</div>
-        <label style={{ ...lbl, marginBottom:6 }}>Coach name</label>
-        <input
-          style={{ ...inp, marginBottom:8 }}
-          value={nameDraft}
-          onChange={e => setNameDraft(e.target.value)}
-          placeholder="e.g. Atlas, Sam…"
-          maxLength={PROFILE_COACH_NAME_MAX}
-          autoFocus
-        />
-        <div style={{ fontSize:11, color:T.hint, marginBottom:18 }}>
-          {nameDraft.trim().length}/{PROFILE_COACH_NAME_MAX} characters
-        </div>
-        <div style={{ fontSize:10, fontWeight:500, color:T.muted, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.07em" }}>Coach icon</div>
-        <div style={{ fontSize:11, color:T.hint, marginBottom:8, lineHeight:1.35 }}>Scroll the grid — {COACH_ICON_OPTIONS.length} to choose from</div>
-        <div style={{
-          display:"grid", gridTemplateColumns:"repeat(6, 1fr)", gap:8, marginBottom:22,
-          maxHeight: "min(32vh, 280px)",
-          overflowY: "auto", WebkitOverflowScrolling: "touch", paddingRight: 4,
-        }}
-        >
-          {COACH_ICON_OPTIONS.map(ic => (
-            <button
-              key={ic}
-              type="button"
-              onClick={() => setIconDraft(ic)}
-              style={{
-                aspectRatio:1, borderRadius:T.rsm,
-                border:`0.5px solid ${iconDraft === ic ? T.gold : T.borderStrong}`,
-                background: iconDraft === ic ? "rgba(200,144,42,0.14)" : T.surface,
-                fontSize:22, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center",
-                lineHeight:1, padding:0,
-              }}
-            >
-              {ic}
-            </button>
-          ))}
-        </div>
-        <div style={{ display:"flex", gap:10 }}>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{ flex:1, padding:13, borderRadius:T.rsm, border:`0.5px solid ${T.borderStrong}`, background:"none", color:T.muted, fontSize:14, fontWeight:500, cursor:"pointer" }}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              onSave({ name: clampProfileCoachName(nameDraft.trim() || "Coach"), icon: iconDraft });
-              onClose();
-            }}
-            style={{ flex:1, padding:13, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer" }}
-          >
-            Save
-          </button>
-        </div>
       </div>
     </div>
   );

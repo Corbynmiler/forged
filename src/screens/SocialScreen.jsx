@@ -250,7 +250,7 @@ export function AddActionSheet({ onAddHabit, onAddGoal, onAddLog, onClose }) {
 }
 
 /** Bottom sheet: edit AI coach name and preset icon. */
-function CoachSettingsSheet({ onClose, onSave, initialName, initialIcon }) {
+export function CoachSettingsSheet({ onClose, onSave, initialName, initialIcon }) {
   useScrollLock(true);
   const [nameDraft, setNameDraft] = useState((initialName ?? "").trim() || "Coach");
   const [iconDraft, setIconDraft] = useState(() => normalizeCoachIcon(initialIcon));

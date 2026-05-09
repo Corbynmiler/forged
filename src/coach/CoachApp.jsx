@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { T, cssPadTopSafe, cssPadXSafe } from "../theme.js";
 import { supabase } from "../supabase.js";
 import { fmtDateLong, isLegacyProgressType } from "../utils.js";
+import { ActivityDots, CompletionBar } from "../components/ui.jsx";
 
 /** Contextual coach hint when landing on a main tab (Profile omits FAB — no nudge). One shot per navigation; no interval. */
 const COACH_PAGE_NUDGES = {
@@ -130,35 +131,6 @@ function mergedLast7(habits) {
     logged: habits.some(h => h.last7[i]?.logged),
     skip:   !habits.some(h => h.last7[i]?.logged) && habits.some(h => h.last7[i]?.skip),
   }));
-}
-
-function ActivityDots({ last7, size = 9 }) {
-  return (
-    <div style={{ display:"flex", gap:3 }}>
-      {(last7 || []).map((d, i) => (
-        <div
-          key={i}
-          title={d.date}
-          style={{
-            width:size, height:size, borderRadius:2,
-            background: d.logged ? "#27AE60" : d.skip ? "rgba(200,144,42,0.45)" : "rgba(255,255,255,0.08)",
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-// Thin progress bar — today's completion ratio
-function CompletionBar({ done, total }) {
-  if (!total) return null;
-  const pct = Math.round((done / total) * 100);
-  const bar = done === total ? "#27AE60" : done > 0 ? T.gold : "rgba(255,255,255,0.08)";
-  return (
-    <div style={{ marginTop:6, height:3, background:"rgba(255,255,255,0.06)", borderRadius:2, overflow:"hidden" }}>
-      <div style={{ width:`${pct}%`, height:"100%", background:bar, borderRadius:2, transition:"width 0.4s" }} />
-    </div>
-  );
 }
 
 // ── Local-timezone date helpers for the coach workspace ───────────────────────

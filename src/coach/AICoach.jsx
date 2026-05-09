@@ -20,6 +20,7 @@ import {
 import { Modal, GBtn, PBtn, FG, lbl, inp } from "../components/ui.jsx";
 import { useSpeechInput, MicBtn, mergeDictationIntoText, polishInterimDisplay } from "../hooks/useSpeechInput.jsx";
 import { useScrollLock } from "../hooks/useScrollLock.js";
+import { buildDemoHabits } from "../screens/OnboardingScreen.jsx";
 
 export function CoachBar({ coachName, coachIcon, habitColor, onOpenMic, onOpenText, coachEverOpened, isListening = false, listeningInterim = "" }) {
   const coachLabelRaw = (coachName ?? "").trim() || "Coach";
@@ -3301,54 +3302,6 @@ const FOCUS_OPTIONS = [
   { label:"Reducing something",   emoji:"🎯", habitType:"limit",    name:"Limit",       dailyBudget:60, unit:"min", color:"#8E44AD", reflectionPrompt:"What triggered the urge?" },
   { label:"Something else",       emoji:"✨", habitType:"daily",    name:"My habit",    color:"#C0392B", reflectionPrompt:"How did it go today?" },
 ];
-
-function buildDemoHabits() {
-  return [
-    {
-      id:"demo-1", name:"Gym", emoji:"🏋️", habitType:"weekly", weeklyTarget:3,
-      color:"#C0392B", streak:4, bestStreak:4, reflection:true,
-      reflectionPrompt:"What felt strong? What needs work?",
-      logs:[
-        { date:daysAgo(1), value:true, note:"" },
-        { date:daysAgo(3), value:true, note:"", reflection:"Bench felt heavy but got through it." },
-        { date:daysAgo(5), value:true, note:"", reflection:"Best squat session in weeks." },
-        { date:daysAgo(8), value:true, note:"" },
-        { date:daysAgo(10), value:true, note:"", reflection:"Low energy — skipped isolation work." },
-        { date:daysAgo(12), value:true, note:"" },
-      ],
-    },
-    {
-      id:"demo-2", name:"Read", emoji:"📚", habitType:"daily",
-      color:"#C8902A", streak:6, bestStreak:11, reflection:true,
-      reflectionPrompt:"What's one idea worth keeping?",
-      logs:[
-        { date:todayStr(), value:true, note:"" },
-        { date:daysAgo(1), value:true, note:"", reflection:"The idea about deep work resonated." },
-        { date:daysAgo(2), value:true, note:"" },
-        { date:daysAgo(3), value:true, note:"", reflection:"Hard to focus but got 20 pages in." },
-        { date:daysAgo(4), value:true, note:"" },
-        { date:daysAgo(5), value:true, note:"" },
-        { date:daysAgo(7), value:true, note:"" },
-        { date:daysAgo(9), value:true, note:"" },
-        { date:daysAgo(11), value:true, note:"" },
-        { date:daysAgo(13), value:true, note:"" },
-      ],
-    },
-    {
-      id:"demo-3", name:"Weight goal", emoji:"⚖️", habitType:"progress",
-      startValue:88, targetValue:82, unit:"kg",
-      color:"#E67E22", streak:0, bestStreak:0, reflection:true,
-      reflectionPrompt:"How many meals today? Energy levels?",
-      logs:[
-        { date:daysAgo(2), value:87.2, note:"", reflection:"3 meals, felt good." },
-        { date:daysAgo(4), value:87.5, note:"" },
-        { date:daysAgo(7), value:87.8, note:"" },
-        { date:daysAgo(10), value:88.1, note:"", reflection:"Had a big dinner." },
-        { date:daysAgo(13), value:88.4, note:"" },
-      ],
-    },
-  ];
-}
 
 const HABIT_ANNOTATIONS = {
   daily: "Daily habits work best when you attach them to something you already do — morning coffee, after lunch, before bed. The streak counter tracks consecutive completed days (or protected rest days).",

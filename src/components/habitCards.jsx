@@ -125,7 +125,6 @@ export function useTodayHabitLongPeekHandlers(setPeek, enabled) {
     },
     onPointerUpCapture: clearLp,
     onPointerCancelCapture: clearLp,
-    onPointerLeaveCapture: clearLp,
   };
 }
 
