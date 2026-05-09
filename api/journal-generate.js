@@ -118,7 +118,8 @@ Rules:
 - No corporate language. No "great job". No filler. No "it's important to remember"
 - If not much happened, say so plainly — a short honest entry is better than a padded one
 - Skip "Why:" and "Pattern:" lines entirely if there's nothing real to say for them
-- Max 200 words total`;
+- Max 200 words total
+- PLAIN TEXT ONLY. No markdown. No asterisks, no bold (**), no underscores, no backticks, no special formatting characters whatsoever. The title is plain text.`;
 }
 
 async function handler(req, res) {

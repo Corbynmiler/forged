@@ -526,7 +526,7 @@ function JournalComposeSheet({ initialContent = "", date, onSave, onClose }) {
 // ─── JOURNAL SCREEN ───────────────────────────────────────────────────────────
 export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, journalUserId, isPro, onUpgrade, journalEntries = [], onSaveJournalEntry, initialTab, onInitialComposeDone, userName = "" }) {
   // "activity" = habit/goal log history (existing), "journal" = pure journal entries
-  const [mainTab, setMainTab]   = useState(initialTab === "journal" ? "journal" : "activity");
+  const [mainTab, setMainTab]   = useState(initialTab === "activity" ? "activity" : "journal");
   const [composeDate, setComposeDate] = useState(initialTab === "journal" ? todayStr() : null); // null = closed, "YYYY-MM-DD" = open
 
   // When navigating here from AddActionSheet "Write in journal", auto-open compose.
@@ -585,13 +585,24 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
     });
   }
 
+  function stripMarkdown(text) {
+    if (!text) return text;
+    return text
+      .replace(/\*\*(.+?)\*\*/g, "$1")
+      .replace(/\*(.+?)\*/g, "$1")
+      .replace(/__(.+?)__/g, "$1")
+      .replace(/_(.+?)_/g, "$1")
+      .replace(/`(.+?)`/g, "$1")
+      .trim();
+  }
+
   function tryParseEntry(content) {
     if (!content) return null;
     const KEYWORDS = ["Wins:", "Missed:", "Why:", "Pattern:", "Tomorrow:"];
     if (!KEYWORDS.some(k => content.includes(k))) return null;
     const lines = content.split("\n").map(l => l.trim()).filter(Boolean);
     if (lines.length < 3) return null;
-    const title = lines[0];
+    const title = stripMarkdown(lines[0]);
     let i = 1;
     const narrativeLines = [];
     while (i < lines.length && !KEYWORDS.some(k => lines[i].startsWith(k))) {
@@ -602,7 +613,7 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
     while (i < lines.length) {
       for (const kw of KEYWORDS) {
         if (lines[i].startsWith(kw)) {
-          sections[kw.slice(0, -1).toLowerCase()] = lines[i].slice(kw.length).trim();
+          sections[kw.slice(0, -1).toLowerCase()] = stripMarkdown(lines[i].slice(kw.length).trim());
           break;
         }
       }
@@ -806,7 +817,7 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
                 {missedMarkedCount > 0 ? <span> · {missedMarkedCount} missed</span> : null}
               </>
             ) : (
-              <>{sortedJournalEntries.length} {sortedJournalEntries.length === 1 ? "entry" : "entries"}</>
+              <>{sortedJournalEntries.length > 0 ? `${sortedJournalEntries.length} ${sortedJournalEntries.length === 1 ? "entry" : "entries"}` : "Your daily story, written by Forged"}</>
             )}
           </div>
         </div>
@@ -826,7 +837,7 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
 
       {/* Tab bar */}
       <div style={{ display:"flex", gap:0, padding:"0 18px 14px" }}>
-        {[["activity","Activity"],["journal","Journal"]].map(([tab, label]) => (
+        {[["journal","Journal"],["activity","Activity"]].map(([tab, label]) => (
           <button key={tab} type="button" onClick={() => setMainTab(tab)}
             style={{ padding:"6px 16px", borderRadius:0, border:"none", cursor:"pointer", fontSize:12, fontWeight:500,
               background: mainTab === tab ? T.accent + "22" : "none",
@@ -841,59 +852,6 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
       {/* ── JOURNAL TAB ── */}
       {mainTab === "journal" && (
         <div style={{ paddingBottom:32 }}>
-
-          {/* ── Mini month calendar ── */}
-          <div style={{ padding:"0 14px 20px" }}>
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
-              <button type="button" onClick={() => { setMonthOffset(o => o + 1); setJournalSelectedDate(null); }}
-                style={{ background:"none", border:"none", color:T.muted, cursor:"pointer", fontSize:20, padding:"4px 10px" }}>‹</button>
-              <div style={{ fontFamily:T.serif, fontSize:16, color:T.text }}>{monthLabel}</div>
-              <button type="button" onClick={() => { setMonthOffset(o => Math.max(0, o - 1)); setJournalSelectedDate(null); }}
-                disabled={monthOffset === 0}
-                style={{ background:"none", border:"none", color:monthOffset === 0 ? T.hint : T.muted, cursor:monthOffset === 0 ? "default" : "pointer", fontSize:20, padding:"4px 10px" }}>›</button>
-            </div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:3, marginBottom:4 }}>
-              {["M","T","W","T","F","S","S"].map((d, i) => (
-                <div key={i} style={{ textAlign:"center", fontSize:9, color:T.hint, fontWeight:500 }}>{d}</div>
-              ))}
-            </div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:3 }}>
-              {Array.from({ length:startPad }, (_, i) => <div key={`jpad-${i}`} />)}
-              {Array.from({ length:daysInMonth }, (_, i) => {
-                const day = i + 1;
-                const ds = dayStr(day);
-                const hasJournal = !!journalEntries.find(e => e.date === ds);
-                const isToday = ds === tStr;
-                const isMissed = Object.prototype.hasOwnProperty.call(missedMap, ds);
-                const isSelected = journalSelectedDate === ds;
-                return (
-                  <button key={day} type="button"
-                    onClick={() => {
-                      const next = isSelected ? null : ds;
-                      setJournalSelectedDate(next);
-                      if (next && hasJournal && next !== tStr) {
-                        setExpandedJournalDates(prev => { const n = new Set(prev); n.add(next); return n; });
-                      }
-                    }}
-                    style={{
-                      aspectRatio:"1", borderRadius:7,
-                      border:`1px solid ${isSelected ? T.accent : isToday ? T.borderMid : T.border}`,
-                      background:isSelected ? T.accent + "22" : isToday ? T.surface : T.raised,
-                      cursor:"pointer",
-                      display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:1,
-                      padding:1, transition:"all 0.12s",
-                    }}>
-                    <span style={{ fontSize:10, color:isToday ? T.accent : hasJournal ? T.text : isMissed ? T.amber : T.hint, fontWeight:isToday ? 600 : hasJournal ? 500 : 400 }}>{day}</span>
-                    {hasJournal ? (
-                      <div style={{ width:4, height:4, borderRadius:"50%", background:T.accent }} />
-                    ) : isMissed ? (
-                      <div style={{ fontSize:7, fontWeight:700, color:T.amber }}>✕</div>
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
 
           {/* ── Today's entry ── */}
           <div style={{ padding:"0 16px 24px" }}>
@@ -1034,6 +992,14 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
               No entries yet. Talk to Forged today and tap "Write today's entry".
             </div>
           )}
+
+          {/* ── Activity log link ── */}
+          <div style={{ padding:"28px 16px 0", textAlign:"center" }}>
+            <button type="button" onClick={() => setMainTab("activity")}
+              style={{ background:"none", border:`0.5px solid ${T.border}`, borderRadius:T.rsm, padding:"8px 18px", fontSize:12, color:T.muted, cursor:"pointer" }}>
+              View activity log →
+            </button>
+          </div>
         </div>
       )}
 
