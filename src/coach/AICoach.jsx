@@ -1,16 +1,21 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { T, COACH_ICON_OPTIONS, WEEKLY_SUMMARY_TTL_MS, CREATOR_ID, HABIT_TYPES, XP_LEVELS, COLORS, DAYS, MONTHS } from "../theme.js";
 import { supabase } from "../supabase.js";
 import {
-  todayStr, daysAgo, parseLocal, fmtDate, fmtEntryDate,
+  todayStr, daysAgo, parseLocal, fmtDate, fmtEntryDate, fmtWeekRange,
+  currentWeekStart, weekStartFor,
   getStreak, getWeeklyCount, isSatisfiedForTodayRing,
-  getGoalProgress, goalBarFillWidthPct, getGoalPacing, fmtGoalDueHuman, getProgressStats, formatWithUnit,
+  getGoalProgress, goalBarFillWidthPct, getGoalPacing, fmtGoalDueHuman,
+  getProgressStats, getProjectStats, getBuildDayMinutes, getLimitDayTotal,
+  getLatestValue, formatWithUnit,
+  inferProgressDirection, isLegacyProgressType,
   mergedLast7, clientRowMeta, clientInsightLine, buildSessionBrief,
   coachGreetingForNow,
-  splitCoachReceipt, parseGoalPlan,
-  getHabitCardStreakSuffix, truncateText,
   COACH_NUDGE_DURATION_MS, COACH_SUMMARY_UUID_RE,
+  splitCoachReceipt, parseGoalPlan, stripPartialGoalPlan,
+  loadJournalMissedMap, saveJournalMissedMap,
+  getHabitCardStreakSuffix, truncateText,
 } from "../utils.js";
 import { Modal, GBtn, PBtn, FG, lbl, inp } from "../components/ui.jsx";
 import { useSpeechInput, MicBtn, mergeDictationIntoText, polishInterimDisplay } from "../hooks/useSpeechInput.jsx";
