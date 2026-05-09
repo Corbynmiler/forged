@@ -1,0 +1,206 @@
+// ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
+import { T, COACH_ICON_OPTIONS } from "../theme.js";
+import { todayStr, isSatisfiedForTodayRing, getLevel, getStreak } from "../utils.js";
+import { Ring, SLabel } from "../components/ui.jsx";
+import {
+  DailyCard, WeeklyCard, ProjectCard, LimitCard, LogCard,
+  TodayGoalCard,
+} from "../components/habitCards.jsx";
+
+// ── Coach greeting helpers (deterministic, no AI) ──────────────────────────
+function coachGreetingDaysLeft(targetYmd) {
+  const t = todayStr();
+  if (!targetYmd || targetYmd < t) return null;
+  return Math.round((new Date(targetYmd + "T12:00:00") - new Date(t + "T12:00:00")) / 86400000);
+}
+
+function buildCoachGreetingLine({ habits, goals }) {
+  const hr  = new Date().getHours();
+  const tod = hr < 12 ? "morning" : hr < 17 ? "afternoon" : "evening";
+  const trackHabits = (habits || []).filter(h => h.habitType !== "log");
+  const activeGoals = (goals || []).filter(g => g.status !== "completed");
+  const total = trackHabits.length;
+  const loggedCount = total ? trackHabits.filter(h => isSatisfiedForTodayRing(h)).length : 0;
+  const all  = total > 0 && loggedCount === total;
+  const some = total > 0 && loggedCount > 0 && !all;
+  const none = total > 0 && loggedCount === 0;
+
+  let urgent = null, bestLeft = 8;
+  for (const g of activeGoals) {
+    if (!g.targetDate) continue;
+    const left = coachGreetingDaysLeft(g.targetDate);
+    if (left != null && left >= 0 && left < 7 && left < bestLeft) { bestLeft = left; urgent = { g, left }; }
+  }
+  if (urgent) {
+    const nm = String(urgent.g.name || "Goal").slice(0, 22);
+    if (urgent.left === 0) return `"${nm}" is due today — check in?`;
+    if (urgent.left === 1) return `"${nm}" due tomorrow — on track?`;
+    return `"${nm}" in ${urgent.left} days — one step today?`;
+  }
+
+  let topH = null, topS = 0;
+  for (const h of trackHabits) {
+    const s = getStreak(h);
+    if (s >= 5 && s > topS) { topS = s; topH = h; }
+  }
+  if (topH) return `${String(topH.name || "Habit").slice(0, 18)} — ${topS}-day streak. Keep it?`;
+
+  if (all)  return tod === "morning" ? "All habits in — you're ahead today." : tod === "afternoon" ? "Full sweep already — nice." : "Everything logged — how was the day?";
+  if (some) return tod === "morning" ? "Good start — clear the rest when ready." : tod === "afternoon" ? "Halfway through — log what's left?" : "Solid progress — finish the set tonight?";
+  if (none) return tod === "morning" ? "Morning — tap a habit when you're ready." : tod === "afternoon" ? "Still time to log something today." : "Evening — log what you got done?";
+  return tod === "morning" ? "How's the morning going?" : tod === "evening" ? "How did today go?" : "How's the day going?";
+}
+
+export function CoachGreeting({ coachName, coachIcon, habits, goals, habitAccent, onOpenMic }) {
+  const displayName = (coachName || "Coach").trim() || "Coach";
+  const body  = buildCoachGreetingLine({ habits, goals });
+  const line  = `${displayName}: ${body}`;
+  const initial = displayName.charAt(0).toUpperCase();
+  const accent  = habitAccent || T.accent;
+  return (
+    <button type="button" onClick={onOpenMic} aria-label={`Open ${displayName} — voice`}
+      style={{ display:"flex", alignItems:"center", gap:12, width:"calc(100% - 28px)", margin:"8px 14px 0", padding:"12px 14px", background:T.surface, border:`0.5px solid ${T.border}`, borderLeft:`3px solid ${accent}`, borderRadius:T.rsm, cursor:"pointer", textAlign:"left", fontFamily:T.font, boxSizing:"border-box" }}>
+      <div style={{ width:36, height:36, borderRadius:"50%", flexShrink:0, background:`${accent}22`, border:`1px solid ${accent}55`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, lineHeight:1 }} aria-hidden>
+        {coachIcon && COACH_ICON_OPTIONS.includes(coachIcon) ? coachIcon : initial}
+      </div>
+      <span style={{ flex:1, minWidth:0, fontSize:13.5, fontWeight:500, color:T.text, lineHeight:1.45, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>
+        {line}
+      </span>
+    </button>
+  );
+}
+
+// ── TodayScreen ────────────────────────────────────────────────────────────
+export function TodayScreen({
+  habits, goals = [], xp,
+  onTap, onUndo, onSkip, onAddNote, onLogZero, onOpenLog,
+  onOpenGoalLog, onEditGoal, onCompleteGoal, onDeleteGoal, onShareGoal,
+  onEditHabit, onDeleteHabit, onShareHabit, sharingHabitId,
+  onXPInfo, onAdd, onSaveLogEntry, hideFloatingAdd,
+  coachEverOpened = true, onOpenCoachMic,
+  coachName, coachIcon, coachHabitColor, onOpenGoalDetail,
+  onOpenBrief = null,
+}) {
+  const activeGoals    = goals.filter(g => g.status !== "completed");
+  const trackHabits    = habits.filter(h => h.habitType !== "log");
+  const logHabits      = habits.filter(h => h.habitType === "log");
+  const loggedCount    = trackHabits.filter(h => isSatisfiedForTodayRing(h)).length;
+  const totalTrackables = trackHabits.length;
+  const pct = totalTrackables ? Math.round((loggedCount / totalTrackables) * 100) : 0;
+  const hr  = new Date().getHours();
+  const greeting = hr < 12 ? "Rise and forge." : hr < 17 ? "Keep the heat up." : "Finish strong.";
+  const level = getLevel(xp);
+  const daily   = habits.filter(h => h.habitType === "daily");
+  const limit   = habits.filter(h => h.habitType === "limit");
+  const weekly  = habits.filter(h => h.habitType === "weekly");
+  const project = habits.filter(h => h.habitType === "project");
+  const ringSummary = totalTrackables
+    ? `${loggedCount} of ${totalTrackables} logged`
+    : logHabits.length
+      ? "Logs below — ring is for habits & goals"
+      : "";
+
+  if (habits.length === 0 && activeGoals.length === 0) return (
+    <div>
+      {onOpenCoachMic && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic}/>}
+      <div style={{ padding:"40px 28px 32px", textAlign:"center" }}>
+        <div style={{ fontSize:48, marginBottom:16 }}>⚒️</div>
+        <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, marginBottom:10 }}>Nothing forged yet.</div>
+        <div style={{ fontSize:14, color:T.muted, lineHeight:1.75, marginBottom:28 }}>
+          Add a habit to track daily, or tell the coach what outcome you're working toward — it will help you build a plan.
+        </div>
+        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+          <button onClick={onAdd} style={{ padding:"13px 24px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer" }}>Add a habit</button>
+          {onOpenCoachMic && (
+            <button onClick={onOpenCoachMic} style={{ padding:"13px 24px", borderRadius:T.rsm, border:"0.5px solid rgba(200,144,42,0.5)", background:"rgba(200,144,42,0.08)", color:T.gold, fontSize:14, fontWeight:600, cursor:"pointer" }}>
+              ✨ Plan a goal with my coach
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  // Show a brief-prompt card once the user has 7+ logged days and hasn't used their free brief
+  const uniqueLoggedDays = (() => {
+    const days = new Set();
+    habits.forEach(h => h.logs.forEach(l => {
+      if (l.value !== "quicknote" && l.value !== "skip") days.add(l.date);
+    }));
+    return days.size;
+  })();
+  const showBriefHook = !!onOpenBrief && uniqueLoggedDays >= 7;
+
+  const showCoachNudge = habits.length > 0 && !coachEverOpened;
+  return (
+    <div>
+      {showCoachNudge && (
+        <button type="button" onClick={onOpenCoachMic}
+          style={{ display:"flex", alignItems:"center", gap:8, width:"calc(100% - 28px)", margin:"6px 14px 0", padding:"9px 12px", background:"linear-gradient(90deg, rgba(200,144,42,0.14), rgba(200,144,42,0.04))", border:"0.5px solid rgba(200,144,42,0.35)", borderRadius:T.rsm, color:T.gold, fontSize:12, fontWeight:600, cursor:"pointer", textAlign:"left", fontFamily:T.font }}>
+          <span aria-hidden style={{ fontSize:14, lineHeight:1 }}>✨</span>
+          <span style={{ color:T.sub, fontWeight:500, flex:1, lineHeight:1.35 }}>
+            Your coach reads your logs and notes — <span style={{ color:T.gold, fontWeight:700 }}>tap to ask</span> what it's already noticed.
+          </span>
+        </button>
+      )}
+      {onOpenCoachMic && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic}/>}
+      {showBriefHook && (
+        <button type="button" onClick={onOpenBrief}
+          style={{ display:"flex", alignItems:"center", gap:12, width:"calc(100% - 28px)", margin:"8px 14px 0", padding:"12px 14px", background:"linear-gradient(90deg, rgba(200,144,42,0.12), rgba(200,144,42,0.04))", border:"0.5px solid rgba(200,144,42,0.4)", borderRadius:T.rsm, cursor:"pointer", textAlign:"left", fontFamily:T.font, boxSizing:"border-box" }}>
+          <div style={{ fontSize:20, flexShrink:0, lineHeight:1 }}>✨</div>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:13, fontWeight:600, color:T.gold, marginBottom:2 }}>Your coach noticed something</div>
+            <div style={{ fontSize:12, color:T.sub, lineHeight:1.4 }}>You have {uniqueLoggedDays} days of data — get your first weekly brief free.</div>
+          </div>
+          <div style={{ fontSize:14, color:T.gold, flexShrink:0 }}>→</div>
+        </button>
+      )}
+      <div data-tour="today-summary" style={{ margin:"6px 14px 16px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:"18px 20px", display:"flex", alignItems:"center", gap:18 }}>
+        <Ring pct={pct}/>
+        <div style={{ flex:1 }}>
+          <div style={{ fontFamily:T.serif, fontSize:20, color:T.text, marginBottom:4 }}>{pct === 100 && totalTrackables > 0 ? "Forged for today." : greeting}</div>
+          <div style={{ fontSize:13, color:T.muted }}>{ringSummary || " "}</div>
+          <button onClick={onXPInfo} style={{ marginTop:10, display:"inline-flex", alignItems:"center", gap:5, fontSize:11, fontWeight:500, padding:"3px 10px", borderRadius:12, background:"rgba(200,144,42,0.15)", color:T.gold, border:"none", cursor:"pointer" }}>
+            ⚡ {xp} xp · {level.label}
+          </button>
+        </div>
+      </div>
+      {(() => {
+        const sections = [
+          activeGoals.length > 0
+            ? <><SLabel>Goals</SLabel>{activeGoals.map(g => <TodayGoalCard key={g.id} goal={g} onOpenLog={onOpenGoalLog} onEdit={onEditGoal} onComplete={onCompleteGoal} onDelete={onDeleteGoal} onShareGoal={onShareGoal} onOpen={onOpenGoalDetail}/>)}</>
+            : habits.length > 0 && onOpenCoachMic && (
+              <div key="goal-cta">
+                <SLabel>Goals</SLabel>
+                <button type="button" onClick={onOpenCoachMic}
+                  style={{ display:"flex", alignItems:"center", gap:14, margin:"0 14px 10px", width:"calc(100% - 28px)", padding:"14px 16px", borderRadius:T.r, border:"0.5px dashed rgba(200,144,42,0.4)", background:"rgba(200,144,42,0.04)", cursor:"pointer", textAlign:"left" }}>
+                  <div style={{ width:38, height:38, borderRadius:11, background:"rgba(200,144,42,0.12)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>🎯</div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:14, fontWeight:500, color:T.text, marginBottom:2 }}>Set a goal with your coach</div>
+                    <div style={{ fontSize:12, color:T.muted, lineHeight:1.45 }}>Tell the AI what outcome you're working toward — it'll help you plan milestones and track progress.</div>
+                  </div>
+                  <div style={{ fontSize:16, color:T.gold, flexShrink:0 }}>→</div>
+                </button>
+              </div>
+            ),
+          daily.length   > 0 && <><SLabel>Daily</SLabel>          {daily.map(h   => <DailyCard  key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id}/>)}</>,
+          limit.length   > 0 && <><SLabel>Limits</SLabel>         {limit.map(h   => <LimitCard  key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id}/>)}</>,
+          weekly.length  > 0 && <><SLabel>Weekly targets</SLabel> {weekly.map(h  => <WeeklyCard key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id}/>)}</>,
+          project.length > 0 && <><SLabel>Build</SLabel>          {project.map(h => <ProjectCard key={h.id} habit={h} onOpenLog={onOpenLog} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id}/>)}</>,
+          logHabits.length > 0 && onSaveLogEntry && <><SLabel>Logs</SLabel>{logHabits.map(h => <LogCard key={h.id} habit={h} onSaveEntry={onSaveLogEntry} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit}/>)}</>,
+        ].filter(Boolean);
+        return sections.map((sec, i) =>
+          i === 0 ? <div key={i} data-tour="today-first-section">{sec}</div> : <div key={i}>{sec}</div>
+        );
+      })()}
+      <div style={{ height:16 }}/>
+      {!hideFloatingAdd && (trackHabits.length > 0 || activeGoals.length > 0 || logHabits.length > 0) && onAdd && (
+        <button type="button" onClick={onAdd} aria-label="Add habit or goal" title="Add habit or goal"
+          style={{ position:"fixed", bottom:276, right:18, height:52, padding:"0 18px 0 16px", borderRadius:26, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:700, lineHeight:1, cursor:"pointer", zIndex:99, boxShadow:"0 4px 16px rgba(192,57,43,0.35)", display:"flex", alignItems:"center", justifyContent:"center", gap:7, fontFamily:T.font }}>
+          <span style={{ fontSize:22, fontWeight:700, lineHeight:1, marginTop:1 }} aria-hidden>+</span>
+          <span>Add habit</span>
+        </button>
+      )}
+    </div>
+  );
+}
