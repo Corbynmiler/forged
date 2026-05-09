@@ -524,7 +524,7 @@ function JournalComposeSheet({ initialContent = "", date, onSave, onClose }) {
 }
 
 // ─── JOURNAL SCREEN ───────────────────────────────────────────────────────────
-export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, journalUserId, isPro, onUpgrade, journalEntries = [], onSaveJournalEntry, initialTab, onInitialComposeDone }) {
+export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, journalUserId, isPro, onUpgrade, journalEntries = [], onSaveJournalEntry, initialTab, onInitialComposeDone, userName = "" }) {
   // "activity" = habit/goal log history (existing), "journal" = pure journal entries
   const [mainTab, setMainTab]   = useState(initialTab === "journal" ? "journal" : "activity");
   const [composeDate, setComposeDate] = useState(initialTab === "journal" ? todayStr() : null); // null = closed, "YYYY-MM-DD" = open
@@ -547,6 +547,10 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
   const [openWeeks, setOpenWeeks] = useState(() => new Set([weekStartFor(todayStr())]));
   const [listFullyExpanded, setListFullyExpanded] = useState(false);
   const [journalCollapseNonce, setJournalCollapseNonce] = useState(0);
+  const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState("");
+  const [expandedJournalDates, setExpandedJournalDates] = useState(() => new Set());
+  const [journalSelectedDate, setJournalSelectedDate] = useState(null);
 
   useEffect(() => {
     setMissedMap(loadJournalMissedMap(journalUserId));
@@ -579,6 +583,60 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
       persistMissed(next);
       return next;
     });
+  }
+
+  function tryParseEntry(content) {
+    if (!content) return null;
+    const KEYWORDS = ["Wins:", "Missed:", "Why:", "Pattern:", "Tomorrow:"];
+    if (!KEYWORDS.some(k => content.includes(k))) return null;
+    const lines = content.split("\n").map(l => l.trim()).filter(Boolean);
+    if (lines.length < 3) return null;
+    const title = lines[0];
+    let i = 1;
+    const narrativeLines = [];
+    while (i < lines.length && !KEYWORDS.some(k => lines[i].startsWith(k))) {
+      narrativeLines.push(lines[i]);
+      i++;
+    }
+    const sections = {};
+    while (i < lines.length) {
+      for (const kw of KEYWORDS) {
+        if (lines[i].startsWith(kw)) {
+          sections[kw.slice(0, -1).toLowerCase()] = lines[i].slice(kw.length).trim();
+          break;
+        }
+      }
+      i++;
+    }
+    if (!narrativeLines.length && !Object.keys(sections).length) return null;
+    return { title, narrative: narrativeLines.join(" "), ...sections };
+  }
+
+  async function generateEntry(date) {
+    const targetDate = date || tStr;
+    if (generating) return;
+    setGenerating(true);
+    setGenerateError("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("Not signed in.");
+      const res = await fetch("/api/journal-generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ date: targetDate, habits, goals, name: userName }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || "Generation failed.");
+      }
+      const { entry } = await res.json();
+      if (entry) onSaveJournalEntry?.(entry.date, entry.content);
+    } catch (err) {
+      setGenerateError(err.message || "Something went wrong.");
+    } finally {
+      setGenerating(false);
+    }
   }
 
   const allByDate = {};
@@ -763,12 +821,7 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
               </button>
             ))}
           </div>
-        ) : (
-          <button type="button" onClick={() => setComposeDate(tStr)}
-            style={{ padding:"8px 14px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:13, fontWeight:600, cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
-            ✏️ Write
-          </button>
-        )}
+        ) : null}
       </div>
 
       {/* Tab bar */}
@@ -787,52 +840,200 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
 
       {/* ── JOURNAL TAB ── */}
       {mainTab === "journal" && (
-        <div style={{ padding:"0 16px 32px" }}>
-          {/* Today's entry card or prompt */}
-          {!todayJournalEntry ? (
-            <button type="button" onClick={() => setComposeDate(tStr)}
-              style={{ width:"100%", padding:"20px 18px", borderRadius:T.r, border:`1.5px dashed ${T.border}`, background:"none", cursor:"pointer", textAlign:"left", marginBottom:16, display:"flex", alignItems:"center", gap:14 }}>
-              <span style={{ fontSize:28 }}>📓</span>
-              <div>
-                <div style={{ fontSize:14, fontWeight:500, color:T.text }}>Write today's entry</div>
-                <div style={{ fontSize:12, color:T.muted, marginTop:3 }}>What happened today? How are you feeling? Anything on your mind.</div>
+        <div style={{ paddingBottom:32 }}>
+
+          {/* ── Mini month calendar ── */}
+          <div style={{ padding:"0 14px 20px" }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+              <button type="button" onClick={() => { setMonthOffset(o => o + 1); setJournalSelectedDate(null); }}
+                style={{ background:"none", border:"none", color:T.muted, cursor:"pointer", fontSize:20, padding:"4px 10px" }}>‹</button>
+              <div style={{ fontFamily:T.serif, fontSize:16, color:T.text }}>{monthLabel}</div>
+              <button type="button" onClick={() => { setMonthOffset(o => Math.max(0, o - 1)); setJournalSelectedDate(null); }}
+                disabled={monthOffset === 0}
+                style={{ background:"none", border:"none", color:monthOffset === 0 ? T.hint : T.muted, cursor:monthOffset === 0 ? "default" : "pointer", fontSize:20, padding:"4px 10px" }}>›</button>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:3, marginBottom:4 }}>
+              {["M","T","W","T","F","S","S"].map((d, i) => (
+                <div key={i} style={{ textAlign:"center", fontSize:9, color:T.hint, fontWeight:500 }}>{d}</div>
+              ))}
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:3 }}>
+              {Array.from({ length:startPad }, (_, i) => <div key={`jpad-${i}`} />)}
+              {Array.from({ length:daysInMonth }, (_, i) => {
+                const day = i + 1;
+                const ds = dayStr(day);
+                const hasJournal = !!journalEntries.find(e => e.date === ds);
+                const isToday = ds === tStr;
+                const isMissed = Object.prototype.hasOwnProperty.call(missedMap, ds);
+                const isSelected = journalSelectedDate === ds;
+                return (
+                  <button key={day} type="button"
+                    onClick={() => {
+                      const next = isSelected ? null : ds;
+                      setJournalSelectedDate(next);
+                      if (next && hasJournal && next !== tStr) {
+                        setExpandedJournalDates(prev => { const n = new Set(prev); n.add(next); return n; });
+                      }
+                    }}
+                    style={{
+                      aspectRatio:"1", borderRadius:7,
+                      border:`1px solid ${isSelected ? T.accent : isToday ? T.borderMid : T.border}`,
+                      background:isSelected ? T.accent + "22" : isToday ? T.surface : T.raised,
+                      cursor:"pointer",
+                      display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:1,
+                      padding:1, transition:"all 0.12s",
+                    }}>
+                    <span style={{ fontSize:10, color:isToday ? T.accent : hasJournal ? T.text : isMissed ? T.amber : T.hint, fontWeight:isToday ? 600 : hasJournal ? 500 : 400 }}>{day}</span>
+                    {hasJournal ? (
+                      <div style={{ width:4, height:4, borderRadius:"50%", background:T.accent }} />
+                    ) : isMissed ? (
+                      <div style={{ fontSize:7, fontWeight:700, color:T.amber }}>✕</div>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ── Today's entry ── */}
+          <div style={{ padding:"0 16px 24px" }}>
+            <div style={{ fontSize:11, fontWeight:600, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:10 }}>Today</div>
+            {todayJournalEntry ? (() => {
+              const parsed = tryParseEntry(todayJournalEntry.content);
+              return (
+                <div style={{ borderRadius:T.r, border:`0.5px solid ${T.border}`, background:T.surface, overflow:"hidden" }}>
+                  <div style={{ padding:"16px 18px 14px" }}>
+                    {parsed ? (
+                      <>
+                        <div style={{ fontFamily:T.serif, fontSize:20, color:T.text, marginBottom:10, lineHeight:1.3 }}>{parsed.title}</div>
+                        <div style={{ fontSize:14, color:T.text, lineHeight:1.75, marginBottom:14 }}>{parsed.narrative}</div>
+                        {[
+                          parsed.wins    && { icon:"✓", label:"Wins",    text:parsed.wins,    color:"#27ae60" },
+                          parsed.missed  && parsed.missed.toLowerCase() !== "none" && { icon:"✗", label:"Missed",  text:parsed.missed,  color:T.amber },
+                          parsed.why     && { icon:"→", label:"Why",     text:parsed.why,     color:T.muted },
+                          parsed.pattern && { icon:"◎", label:"Pattern", text:parsed.pattern, color:T.accent },
+                          parsed.tomorrow && { icon:"↑", label:"Tomorrow", text:parsed.tomorrow, color:T.hint },
+                        ].filter(Boolean).map(row => (
+                          <div key={row.label} style={{ display:"flex", gap:8, marginBottom:6, alignItems:"flex-start" }}>
+                            <span style={{ fontSize:12, color:row.color, fontWeight:700, minWidth:14, marginTop:2 }}>{row.icon}</span>
+                            <div style={{ fontSize:13, color:T.text, lineHeight:1.5 }}>
+                              <span style={{ color:T.muted, marginRight:4 }}>{row.label}:</span>
+                              {row.text}
+                            </div>
+                          </div>
+                        ))}
+                      </>
+                    ) : (
+                      <div style={{ fontSize:14, color:T.text, lineHeight:1.75, whiteSpace:"pre-wrap", wordBreak:"break-word" }}>{todayJournalEntry.content}</div>
+                    )}
+                  </div>
+                  <div style={{ display:"flex", borderTop:`0.5px solid ${T.border}` }}>
+                    <button type="button" onClick={() => generateEntry(tStr)} disabled={generating}
+                      style={{ flex:1, padding:"10px 0", background:"none", border:"none", fontSize:12, color:generating ? T.hint : T.accent, fontWeight:500, cursor:generating ? "not-allowed" : "pointer", borderRight:`0.5px solid ${T.border}` }}>
+                      {generating ? "Writing…" : "↺ Regenerate"}
+                    </button>
+                    <button type="button" onClick={() => setComposeDate(tStr)}
+                      style={{ flex:1, padding:"10px 0", background:"none", border:"none", fontSize:12, color:T.muted, cursor:"pointer" }}>
+                      ✎ Edit manually
+                    </button>
+                  </div>
+                  {generateError && (
+                    <div style={{ padding:"8px 18px", fontSize:12, color:"#e74c3c", borderTop:`0.5px solid ${T.border}` }}>{generateError}</div>
+                  )}
+                </div>
+              );
+            })() : (
+              <div style={{ padding:"20px 18px", borderRadius:T.r, border:`1.5px dashed ${T.border}`, background:T.raised }}>
+                <div style={{ fontSize:13, color:T.muted, lineHeight:1.7, marginBottom:16 }}>
+                  Talk to Forged during the day — log habits, add notes, tell it what's going on. Then tap below and your coach writes up the day.
+                </div>
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                  <button type="button" onClick={() => generateEntry(tStr)} disabled={generating}
+                    style={{ padding:"10px 18px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:13, fontWeight:600, cursor:generating ? "not-allowed" : "pointer", opacity:generating ? 0.65 : 1 }}>
+                    {generating ? "Writing…" : "Write today's entry"}
+                  </button>
+                  <button type="button" onClick={() => setComposeDate(tStr)}
+                    style={{ padding:"10px 14px", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:"none", color:T.muted, fontSize:13, cursor:"pointer" }}>
+                    Write manually
+                  </button>
+                </div>
+                {generateError && <div style={{ marginTop:10, fontSize:12, color:"#e74c3c" }}>{generateError}</div>}
               </div>
-            </button>
-          ) : (
-            <div style={{ marginBottom:16 }}>
-              <div style={{ fontSize:11, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:8 }}>Today</div>
-              <div style={{ padding:"14px 16px", background:T.surface, borderRadius:T.r, border:`0.5px solid ${T.border}`, position:"relative" }}>
-                <div style={{ fontSize:14, color:T.text, lineHeight:1.7, whiteSpace:"pre-wrap", wordBreak:"break-word" }}>{todayJournalEntry.content}</div>
-                <button type="button" onClick={() => setComposeDate(tStr)}
-                  style={{ marginTop:12, fontSize:12, color:T.accent, background:"none", border:"none", cursor:"pointer", padding:0, fontWeight:500 }}>
-                  + Add more →
-                </button>
-              </div>
+            )}
+          </div>
+
+          {/* ── Past entries ── */}
+          {sortedJournalEntries.filter(e => e.date !== tStr).length > 0 && (
+            <div style={{ padding:"0 16px" }}>
+              <div style={{ fontSize:11, fontWeight:600, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:10 }}>Past entries</div>
+              {sortedJournalEntries.filter(e => e.date !== tStr).map(entry => {
+                const isExpanded = expandedJournalDates.has(entry.date) || journalSelectedDate === entry.date;
+                const parsed = tryParseEntry(entry.content);
+                const d = parseLocal(entry.date);
+                const label = `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+                const previewTitle = parsed?.title || entry.content.split("\n")[0].slice(0, 55);
+                return (
+                  <div key={entry.id || entry.date} style={{ marginBottom:8 }}>
+                    <button type="button"
+                      onClick={() => setExpandedJournalDates(prev => {
+                        const n = new Set(prev);
+                        if (n.has(entry.date)) n.delete(entry.date); else n.add(entry.date);
+                        return n;
+                      })}
+                      style={{
+                        width:"100%", padding:"11px 16px",
+                        borderRadius:isExpanded ? `${T.r} ${T.r} 0 0` : T.r,
+                        border:`0.5px solid ${isExpanded ? T.accent + "66" : T.border}`,
+                        background:T.surface, cursor:"pointer",
+                        display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, textAlign:"left",
+                        transition:"border-color 0.15s",
+                      }}>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontSize:11, color:T.hint, marginBottom:2 }}>{label}</div>
+                        <div style={{ fontSize:14, color:T.text, fontWeight:500, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{previewTitle}</div>
+                      </div>
+                      <div style={{ color:T.muted, fontSize:16, flexShrink:0, transform:isExpanded ? "rotate(90deg)" : "none", transition:"transform 0.15s" }}>›</div>
+                    </button>
+                    {isExpanded && (
+                      <div style={{ padding:"14px 18px 16px", background:T.raised, borderRadius:`0 0 ${T.r} ${T.r}`, border:`0.5px solid ${T.accent + "66"}`, borderTop:"none" }}>
+                        {parsed ? (
+                          <>
+                            <div style={{ fontFamily:T.serif, fontSize:18, color:T.text, marginBottom:10, lineHeight:1.3 }}>{parsed.title}</div>
+                            <div style={{ fontSize:14, color:T.text, lineHeight:1.75, marginBottom:12 }}>{parsed.narrative}</div>
+                            {[
+                              parsed.wins    && { icon:"✓", label:"Wins",    text:parsed.wins,    color:"#27ae60" },
+                              parsed.missed  && parsed.missed.toLowerCase() !== "none" && { icon:"✗", label:"Missed",  text:parsed.missed,  color:T.amber },
+                              parsed.why     && { icon:"→", label:"Why",     text:parsed.why,     color:T.muted },
+                              parsed.pattern && { icon:"◎", label:"Pattern", text:parsed.pattern, color:T.accent },
+                              parsed.tomorrow && { icon:"↑", label:"Tomorrow", text:parsed.tomorrow, color:T.hint },
+                            ].filter(Boolean).map(row => (
+                              <div key={row.label} style={{ display:"flex", gap:8, marginBottom:6, alignItems:"flex-start" }}>
+                                <span style={{ fontSize:12, color:row.color, fontWeight:700, minWidth:14, marginTop:2 }}>{row.icon}</span>
+                                <div style={{ fontSize:13, color:T.text, lineHeight:1.5 }}>
+                                  <span style={{ color:T.muted, marginRight:4 }}>{row.label}:</span>
+                                  {row.text}
+                                </div>
+                              </div>
+                            ))}
+                          </>
+                        ) : (
+                          <div style={{ fontSize:14, color:T.text, lineHeight:1.75, whiteSpace:"pre-wrap", wordBreak:"break-word" }}>{entry.content}</div>
+                        )}
+                        <button type="button" onClick={() => setComposeDate(entry.date)}
+                          style={{ marginTop:12, fontSize:12, color:T.muted, background:"none", border:"none", cursor:"pointer", padding:0 }}>Edit →</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
 
-          {/* Past entries */}
-          {sortedJournalEntries.filter(e => e.date !== tStr).length === 0 && !todayJournalEntry && (
-            <div style={{ padding:"32px 0", textAlign:"center", color:T.muted, fontSize:13 }}>
-              No entries yet. Write your first one above.
+          {sortedJournalEntries.length === 0 && (
+            <div style={{ padding:"32px 24px 0", textAlign:"center", color:T.muted, fontSize:13, lineHeight:1.7 }}>
+              No entries yet. Talk to Forged today and tap "Write today's entry".
             </div>
           )}
-          {sortedJournalEntries.filter(e => e.date !== tStr).map(entry => {
-            const d = parseLocal(entry.date);
-            const label = `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
-            return (
-              <div key={entry.id || entry.date} style={{ marginBottom:14 }}>
-                <div style={{ fontSize:11, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>{label}</div>
-                <div style={{ padding:"14px 16px", background:T.surface, borderRadius:T.r, border:`0.5px solid ${T.border}` }}>
-                  <div style={{ fontSize:14, color:T.text, lineHeight:1.7, whiteSpace:"pre-wrap", wordBreak:"break-word" }}>{entry.content}</div>
-                  <button type="button" onClick={() => setComposeDate(entry.date)}
-                    style={{ marginTop:10, fontSize:12, color:T.muted, background:"none", border:"none", cursor:"pointer", padding:0 }}>
-                    Edit →
-                  </button>
-                </div>
-              </div>
-            );
-          })}
         </div>
       )}
 

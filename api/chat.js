@@ -189,8 +189,8 @@ function buildActionReceipt(outcomes) {
       lines.push(`✓ Logged ${n}${suffix}`);
     } else if (o.tool === "log_journal") {
       lines.push(
-        o.mode === "appended"
-          ? "✓ Journal — added to today's page"
+        o.mode === "replaced" || o.mode === "appended"
+          ? "✓ Journal — saved to today's page"
           : `✓ Journal — saved (${o.date})`,
       );
     } else if (o.tool === "create_habit") {
@@ -455,15 +455,12 @@ async function executeLogJournal(input, userId, db, clientDate) {
     .maybeSingle();
 
   if (existing) {
-    const merged = existing.content
-      ? `${existing.content}\n\n${content}`
-      : content;
     const { error } = await db
       .from("journal_entries")
-      .update({ content: merged, updated_at: new Date().toISOString() })
+      .update({ content, updated_at: new Date().toISOString() })
       .eq("id", existing.id);
     if (error) throw new Error(`Journal save failed: ${error.message}`);
-    return { date, mode: "appended", id: existing.id };
+    return { date, mode: "replaced", id: existing.id };
   } else {
     const { data: row, error } = await db
       .from("journal_entries")
