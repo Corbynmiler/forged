@@ -41,15 +41,13 @@ const COACH_TOOLS = [
         emoji:         { type: "string", description: "Single emoji." },
         habit_type: {
           type: "string",
-          enum: ["daily", "weekly", "project", "limit", "goal"],
-          description: "daily=checkbox; weekly=X/week(needs weekly_target); project=time tracking; limit=stay under budget; goal=numeric target.",
+          enum: ["daily", "weekly", "project", "limit"],
+          description: "daily=checkbox; weekly=X/week(needs weekly_target); project=time tracking; limit=stay under budget. Goals are not created by this tool.",
         },
         weekly_target: { type: "integer", description: "Sessions/week for weekly habits." },
         daily_budget:  { type: "number",  description: "Daily cap for limit habits." },
         unit:          { type: "string",  description: "e.g. km, mins, calories, pouches, L" },
-        start_value:   { type: "number",  description: "Starting value for goals (default 0)." },
-        target_value:  { type: "number",  description: "Target to reach for goals." },
-        target_date:   { type: "string",  description: "Deadline YYYY-MM-DD for goals." },
+        target_date:   { type: "string",  description: "Optional deadline YYYY-MM-DD." },
         color:         { type: "string",  description: "#C0392B red, #27AE60 green, #2980B9 blue, #E67E22 orange, #8E44AD purple." },
       },
       required: ["name", "habit_type"],
@@ -60,6 +58,8 @@ const COACH_TOOLS = [
     description:
       "Updates fields on an existing habit or goal. Only pass fields that are changing. " +
       "Use habit_id from the [id:...] in the habits list. " +
+      "IMPORTANT: Do NOT change a goal target_value unless the user explicitly asks to change/update/set the goal target AND has confirmed that important edit. " +
+      "Never infer target_value from food, calories, weight chatter, vague numbers, or voice transcription. " +
       "If this tool returns success:false, tell the user it failed.",
     input_schema: {
       type: "object",
@@ -84,7 +84,7 @@ const COACH_TOOLS = [
       "Logs an entry for an existing habit today. Format depends on type: " +
       "PROJECT: pass minutes (e.g. 60=1hr) + optional win/hard_part. " +
       "LIMIT: pass amount (number used today). " +
-      "GOAL: pass amount (new current progress value). " +
+      "GOAL: pass amount only when the user clearly gives a current progress/check-in value for that goal. Do not log goal progress from food/calorie mentions, vague numbers, or unclear voice transcription. " +
       "DAILY/WEEKLY: set rest_day true to mark today as a rest day (skip — protects daily streak / counts toward Today ring for weekly without adding a session). Otherwise logs a normal done/session. " +
       "Can be called multiple times in one turn to log several habits at once. " +
       "If this tool returns success:false, tell the user it failed.",
@@ -218,10 +218,102 @@ function buildActionReceipt(outcomes) {
   return lines.join("\n");
 }
 
+function textFromMessageContent(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map(part => {
+      if (typeof part === "string") return part;
+      if (part?.type === "text") return part.text || "";
+      if (part?.type === "tool_result") return part.content || "";
+      return "";
+    })
+    .join(" ");
+}
+
+function latestUserText(messages = []) {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === "user") return textFromMessageContent(messages[i].content);
+  }
+  return "";
+}
+
+function previousAssistantTextBeforeLatestUser(messages = []) {
+  let seenLatestUser = false;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (!seenLatestUser && messages[i]?.role === "user") {
+      seenLatestUser = true;
+      continue;
+    }
+    if (seenLatestUser && messages[i]?.role === "assistant") {
+      return textFromMessageContent(messages[i].content);
+    }
+  }
+  return "";
+}
+
+function normText(text) {
+  return String(text || "").toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
+}
+
+const FOOD_OR_CALORIE_RE = /\b(ate|eat|eaten|food|meal|breakfast|lunch|dinner|snack|calorie|calories|cals|curry|sandwich|sausage|slice|egg|caramel|chicken|thai)\b/i;
+const MISSING_LOGS_RE = /\b(what|which).{0,40}\b(haven't|have not|haven’t|not|missing|left|else).{0,40}\blog|\bwhat else.{0,40}\blog|\bhaven't i logged\b/i;
+const GOAL_TARGET_UPDATE_RE = /\b(change|update|set|adjust|edit|bump|move)\b.{0,80}\b(goal target|target weight|target|weight goal)\b|\b(goal target|target weight)\b.{0,80}\b(to|at)\b/i;
+const HARD_CONFIRM_RE = /\b(confirm|confirmed)\b/i;
+const YES_CONFIRM_RE = /\b(yes|yep|yeah|do it|go ahead|please do|that's right|that is right)\b/i;
+const TARGET_CONFIRMATION_PROMPT_RE = /\b(confirm|update your target weight|change.{0,40}target|target.{0,40}important edit)\b/i;
+const WEIGHT_PROGRESS_RE = /\b(weigh|weighed|weight|kg|kgs|kilogram|kilograms|lb|lbs|pound|pounds)\b/i;
+const PROGRESS_LOG_RE = /\b(log|logged|check in|check-in|current|progress|today|now|at)\b/i;
+
+function buildActionSafety(messages = []) {
+  const userText = latestUserText(messages);
+  const previousAssistantText = previousAssistantTextBeforeLatestUser(messages);
+  const previousAskedForTargetConfirmation = TARGET_CONFIRMATION_PROMPT_RE.test(previousAssistantText);
+  return {
+    latestUserText: userText,
+    normalizedUserText: normText(userText),
+    asksMissingLogs: MISSING_LOGS_RE.test(userText),
+    explicitGoalTargetUpdate: GOAL_TARGET_UPDATE_RE.test(userText),
+    confirmedImportantEdit: HARD_CONFIRM_RE.test(userText) || (previousAskedForTargetConfirmation && YES_CONFIRM_RE.test(userText)),
+  };
+}
+
+function significantGoalTokens(name) {
+  return normText(name)
+    .split(" ")
+    .filter(w => w.length >= 4 && !["goal", "habit", "track", "daily", "weekly"].includes(w));
+}
+
+function isClearGoalProgressLog(input, goalRow, safety) {
+  const text = safety.latestUserText || "";
+  const normalized = safety.normalizedUserText || "";
+  if (!normalized || safety.asksMissingLogs) return false;
+
+  const unit = normText(goalRow?.unit || "");
+  const tokens = significantGoalTokens(goalRow?.name || input.habit_name || "");
+  const mentionsGoal = tokens.some(token => normalized.includes(token));
+  const mentionsUnit = unit && normalized.includes(unit);
+  const weightSignal = WEIGHT_PROGRESS_RE.test(text);
+  const progressSignal = PROGRESS_LOG_RE.test(text);
+
+  if (FOOD_OR_CALORIE_RE.test(text) && !weightSignal && !mentionsGoal) return false;
+  return progressSignal && (mentionsGoal || mentionsUnit || weightSignal);
+}
+
+function goalTargetUpdateError(input, safety) {
+  if (safety.explicitGoalTargetUpdate && !safety.confirmedImportantEdit) {
+    return `Changing ${input.habit_name || "that goal"}'s target is an important edit. Please confirm the new target before I update it.`;
+  }
+  return "Do you want me to update your target weight, or just log today's food/progress?";
+}
+
 // ── Executors ──────────────────────────────────────────────────────────────────
 
 async function executeCreateHabit(input, userId, db) {
   const isGoal = input.habit_type === "goal";
+  if (isGoal) {
+    throw new Error("Goal creation needs the goal confirmation card. I won't create or change a goal directly from a chat tool call.");
+  }
   const row = {
     user_id:              userId,
     name:                 input.name,
@@ -234,8 +326,8 @@ async function executeCreateHabit(input, userId, db) {
     reflection:           !isGoal,
     reflection_prompt:    "",
     weekly_target:        input.weekly_target ?? null,
-    start_value:          input.start_value   ?? (isGoal ? 0 : null),
-    target_value:         input.target_value  ?? null,
+    start_value:          null,
+    target_value:         null,
     unit:                 input.unit          ?? null,
     daily_budget:         input.daily_budget  ?? null,
     tap_increment:        1,
@@ -249,16 +341,29 @@ async function executeCreateHabit(input, userId, db) {
   return data;
 }
 
-async function executeEditHabit(input, userId, db) {
+async function executeEditHabit(input, userId, db, safety = buildActionSafety()) {
   const updates = { updated_at: new Date().toISOString() };
   if (input.name          != null) updates.name           = input.name;
   if (input.emoji         != null) updates.emoji          = input.emoji;
-  if (input.target_value  != null) updates.target_value   = input.target_value;
   if (input.daily_budget  != null) updates.daily_budget   = input.daily_budget;
   if (input.weekly_target != null) updates.weekly_target  = input.weekly_target;
   if (input.unit          != null) updates.unit           = input.unit;
   if (input.target_date   != null) updates.target_date    = input.target_date;
   if (input.color         != null) updates.color          = input.color;
+
+  if (input.target_value != null) {
+    const { data: current, error: currentErr } = await db
+      .from("habits")
+      .select("habit_type, name")
+      .eq("id", input.habit_id)
+      .eq("user_id", userId)
+      .single();
+    if (currentErr || !current) throw new Error("Habit not found or permission denied");
+    if (current.habit_type === "goal" && !(safety.explicitGoalTargetUpdate && safety.confirmedImportantEdit)) {
+      throw new Error(goalTargetUpdateError({ ...input, habit_name: input.habit_name || current.name }, safety));
+    }
+    updates.target_value = input.target_value;
+  }
 
   const { data, error } = await db
     .from("habits").update(updates)
@@ -269,9 +374,9 @@ async function executeEditHabit(input, userId, db) {
   return { habit_id: input.habit_id, habit_name: input.habit_name, updates, updatedRow: data };
 }
 
-async function executeLogHabit(input, userId, db, clientDate) {
+async function executeLogHabit(input, userId, db, clientDate, safety = buildActionSafety()) {
   const { data: row, error } = await db
-    .from("habits").select("logs, habit_type")
+    .from("habits").select("name, logs, habit_type, unit")
     .eq("id", input.habit_id).eq("user_id", userId).single();
   if (error || !row) throw new Error(`Habit not found (id: ${input.habit_id})`);
 
@@ -293,6 +398,9 @@ async function executeLogHabit(input, userId, db, clientDate) {
     logValue = input.amount;
   } else if (htype === "goal") {
     if (input.amount == null) throw new Error("Goal logging needs 'amount' — the new current progress value.");
+    if (!isClearGoalProgressLog(input, row, safety)) {
+      throw new Error("I'm not confident that number is goal progress. Do you want me to update your target weight, or just log today's food/progress?");
+    }
     logValue = input.amount;
   } else if (htype === "daily" || htype === "weekly") {
     logValue = input.rest_day === true ? "skip" : true;
@@ -453,6 +561,7 @@ async function handler(req, res) {
 
   // Cost control: cap history at last 12 messages (6 turns)
   const trimmedMessages = messages.slice(-12);
+  const actionSafety = buildActionSafety(trimmedMessages);
 
   try {
     // ── First call — detect tool_use ─────────────────────────────────────────
@@ -498,7 +607,7 @@ async function handler(req, res) {
     if (firstResp.stop_reason === "tool_use") {
       const toolBlocks = firstToolBlocks;
       const toolResults = [];
-      const actions = { created: null, edited: [], logged: [], journaled: [] };
+      const actions = { created: [], edited: [], logged: [], journaled: [] };
       /** @type {Array<{ tool: string, success: boolean, error?: string, habit_name?: string, habit_type?: string, name?: string, value_saved?: unknown, date?: string, mode?: string }>} */
       const outcomes = [];
 
@@ -510,16 +619,16 @@ async function handler(req, res) {
         try {
           if (tb.name === "create_habit") {
             const row = await executeCreateHabit(tb.input, userId, db);
-            actions.created = row;
+            actions.created.push(row);
             result = { success: true, id: row.id, name: row.name, habit_type: row.habit_type };
             outcomes.push({ tool: "create_habit", success: true, name: row.name, habit_type: row.habit_type });
           } else if (tb.name === "edit_habit") {
-            const r = await executeEditHabit(tb.input, userId, db);
+            const r = await executeEditHabit(tb.input, userId, db, actionSafety);
             actions.edited.push(r);
             result = { success: true, habit_name: r.habit_name, fields_updated: Object.keys(r.updates).filter(k => k !== "updated_at") };
             outcomes.push({ tool: "edit_habit", success: true, habit_name: r.habit_name });
           } else if (tb.name === "log_habit") {
-            const r = await executeLogHabit(tb.input, userId, db, clientDate);
+            const r = await executeLogHabit(tb.input, userId, db, clientDate, actionSafety);
             actions.logged.push(r);
             result = { success: true, habit_name: r.habit_name, habit_type: r.habit_type, date: r.date, value_saved: r.logValue };
             outcomes.push({
@@ -564,7 +673,7 @@ async function handler(req, res) {
 
       console.log("[chat] tool summary", {
         userId,
-        created: actions.created ? 1 : 0,
+        created: actions.created.length,
         edited: actions.edited.length,
         logged: actions.logged.length,
         failures: toolResults.filter(r => {
@@ -600,7 +709,7 @@ async function handler(req, res) {
 
       sse(res, {
         done:     true,
-        created:  actions.created,
+        created:  actions.created.length ? actions.created : null,
         edited:   actions.edited.length    ? actions.edited    : null,
         logged:   actions.logged.length    ? actions.logged    : null,
         journaled:actions.journaled.length ? actions.journaled : null,
