@@ -1,8 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
 
+export const SUPABASE_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFwZG12YnpmanV2eHdvcmplcHplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MzU4MzAsImV4cCI6MjA5MDIxMTgzMH0.s3O-0m7eN9dLTmCagjezHP4Wwn8fdtlCyXITkI82bPU";
+
 export const supabase = createClient(
   "https://apdmvbzfjuvxworjepze.supabase.co",
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFwZG12YnpmanV2eHdvcmplcHplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MzU4MzAsImV4cCI6MjA5MDIxMTgzMH0.s3O-0m7eN9dLTmCagjezHP4Wwn8fdtlCyXITkI82bPU",
+  SUPABASE_ANON_KEY,
   {
     auth: {
       persistSession: true,
@@ -20,8 +23,9 @@ function normalizeId(rawId) {
 // ─── Shape converters ──────────────────────────────────────────────────────────
 // Convert an in-app habit object → a DB row
 export function habitToRow(habit, userId) {
+  const id = normalizeId(habit?.id);
   return {
-    id:                normalizeId(habit.id),
+    ...(id ? { id } : {}),
     user_id:           userId,
     name:              habit.name,
     emoji:             habit.emoji ?? "",
@@ -82,8 +86,9 @@ export function rowToGoal(row) {
 
 // Convert an in-app goal object → a DB row
 export function goalToRow(goal, userId) {
+  const id = normalizeId(goal?.id);
   return {
-    id:                normalizeId(goal.id),
+    ...(id ? { id } : {}),
     user_id:           userId,
     name:              goal.name,
     emoji:             goal.emoji ?? "",
