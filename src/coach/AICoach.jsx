@@ -20,7 +20,6 @@ import {
 import { Modal, GBtn, PBtn, FG, lbl, inp } from "../components/ui.jsx";
 import { useSpeechInput, MicBtn, mergeDictationIntoText, polishInterimDisplay } from "../hooks/useSpeechInput.jsx";
 import { useScrollLock } from "../hooks/useScrollLock.js";
-import { buildDemoHabits } from "../screens/OnboardingScreen.jsx";
 
 export function CoachBar({ coachName, coachIcon, habitColor, onOpenMic, onOpenText, coachEverOpened, isListening = false, listeningInterim = "" }) {
   const coachLabelRaw = (coachName ?? "").trim() || "Coach";
