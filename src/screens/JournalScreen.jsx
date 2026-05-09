@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { T, MONTHS } from "../theme.js";
-import { supabase } from "../supabase.js";
+import { supabase, SUPABASE_ANON_KEY } from "../supabase.js";
 import {
   todayStr, daysAgo, parseLocal, fmtDate, fmtEntryDate,
   weekStartFor, getStreak, isSatisfiedForTodayRing,
@@ -16,16 +16,39 @@ export function BetaModal({ onClose }) {
   const [email, setEmail] = useState("");
   const [msg, setMsg] = useState("");
   const [sent, setSent] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
 
-  function handleSubmit() {
-    if (!email.trim()) return;
-    // mailto fallback — works immediately, no backend needed
-    const subject = encodeURIComponent("Forged early supporter — beta interest");
-    const body = encodeURIComponent(
-      `Email: ${email.trim()}\n\n${msg.trim() ? `Message: ${msg.trim()}` : "(No message)"}`
-    );
-    window.open(`mailto:hello@forged.app?subject=${subject}&body=${body}`, "_blank");
-    setSent(true);
+  async function handleSubmit() {
+    if (!email.trim() || submitting) return;
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token ?? SUPABASE_ANON_KEY;
+      const res = await fetch("/api/beta-interest", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ email: email.trim(), message: msg.trim() }),
+      });
+      if (!res.ok) {
+        let errText = "Something went wrong. Try again.";
+        try {
+          const j = await res.json();
+          if (j?.error && typeof j.error === "string") errText = j.error;
+        } catch { /* use default */ }
+        setSubmitError(errText);
+        return;
+      }
+      setSent(true);
+    } catch {
+      setSubmitError("Network error. Check your connection and try again.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   if (sent) return (
@@ -50,17 +73,20 @@ export function BetaModal({ onClose }) {
         Leave your email and I'll reach out directly. Early users shape what gets built next.
       </div>
       <FG label="Your email">
-        <input style={inp} type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} autoFocus/>
+        <input style={inp} type="email" placeholder="you@example.com" value={email} onChange={e => { setEmail(e.target.value); if (submitError) setSubmitError(""); }} autoFocus/>
       </FG>
       <FG label="Anything you'd love to see? (optional)" mb={0}>
         <textarea style={{ ...inp, resize:"none", lineHeight:1.6 }} rows={3}
           placeholder="Features, questions, feedback — anything goes"
-          value={msg} onChange={e => setMsg(e.target.value)}/>
+          value={msg} onChange={e => { setMsg(e.target.value); if (submitError) setSubmitError(""); }}/>
       </FG>
-      <PBtn onClick={handleSubmit} style={{ marginTop:16 }}>I'm interested →</PBtn>
+      {submitError ? (
+        <div style={{ fontSize:12, color:"#e05c5c", marginTop:14, lineHeight:1.5 }}>{submitError}</div>
+      ) : null}
+      <PBtn onClick={() => { if (!submitting) handleSubmit(); }} style={{ marginTop:16 }}>{submitting ? "Sending…" : "I'm interested →"}</PBtn>
       <GBtn onClick={onClose}>Maybe later</GBtn>
       <div style={{ fontSize:11, color:T.hint, marginTop:10, textAlign:"center", lineHeight:1.6 }}>
-        This opens your email app with your details pre-filled. No spam, ever.
+        Your details are sent securely. No spam, ever.
       </div>
     </Modal>
   );

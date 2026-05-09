@@ -141,6 +141,7 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
   const FIRST_STEP = ONBOARD_STEPS.length + 1;   // virtual: log first habit
   const HOME_STEP  = ONBOARD_STEPS.length + 2;   // virtual: add to home screen
   const NOTIF_STEP = ONBOARD_STEPS.length + 3;   // virtual: enable notifications
+  const COACH_INTRO_STEP = ONBOARD_STEPS.length + 4; // templated coach message before final screen
 
   const isVirtual = step >= ONBOARD_STEPS.length;
 
@@ -152,6 +153,7 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
     if (s === INTER_STEP) return 4;   // Focus' number — interstitial is a transition
     if (s === NOTIF_STEP) return 5;
     if (s === FIRST_STEP) return 5;
+    if (s === COACH_INTRO_STEP) return 5;
     return Math.min(s + 1, 4);        // standard steps 0..3 → 1..4
   }
   const progressNumber = displayStepNumber(step);
@@ -538,15 +540,59 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
             onClick={() => {
               if (needsValue && !firstLogValue) return;
               setFirstLogDone(true);
-              setShowingFinal(true);
+              setStep(COACH_INTRO_STEP);
             }}
             style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:(needsValue&&!firstLogValue)?T.surface:firstHabit.color, color:(needsValue&&!firstLogValue)?T.muted:"#fff", fontSize:16, fontWeight:500, cursor:"pointer", transition:"all 0.2s" }}
           >
             Log your first entry →
           </button>
-          <button onClick={() => { setShowingFinal(true); }}
+          <button onClick={() => { setStep(COACH_INTRO_STEP); }}
             style={{ width:"100%", padding:12, background:"none", border:"none", color:T.hint, fontSize:13, cursor:"pointer", marginTop:6 }}>
             Skip this step
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Virtual step: coach intro (templated) after first log, before final ────
+  if (step === COACH_INTRO_STEP && builtHabits.length > 0) {
+    const firstHabit = pickFirstHabit(builtHabits);
+    const ht = firstHabit.habitType === "progress" ? "goal" : firstHabit.habitType;
+    const habitTypePhrase =
+      ht === "project" ? "build" :
+      ht === "log" ? "log" :
+      ht === "goal" ? "goal" :
+      ht === "daily" ? "daily" :
+      ht === "weekly" ? "weekly" :
+      ht === "limit" ? "limit" :
+      (HABIT_TYPES[firstHabit.habitType]?.label || "habit").toLowerCase().replace(/\s+\/.*$/, "").trim() || "habit";
+    const coachIntroBody =
+      `You've got ${firstHabit.name} set up. Most people who track ${habitTypePhrase} habits find the first two weeks are the hardest — not because of willpower, but because the habit hasn't been tied to anything. Once you've got a few logs in, I can show you exactly where things tend to slip. Ask me anything.`;
+
+    return (
+      <div style={wrap}>
+        <ProgressHeader currentNum={progressNumber} />
+
+        <div style={{ flex:1, padding:"28px 24px 16px", overflowY:"auto", display:"flex", flexDirection:"column", justifyContent:"center" }}>
+          <div style={{ background:"rgba(200,144,42,0.07)", border:`0.5px solid rgba(200,144,42,0.2)`, borderRadius:T.r, padding:"20px 20px 16px" }}>
+            <div style={{ display:"flex", gap:12, alignItems:"center", marginBottom:14 }}>
+              <div style={{ width:40, height:40, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>🤖</div>
+              <div style={{ fontSize:13, fontWeight:500, color:T.text }}>{coachNameInput.trim() || "Coach"}</div>
+            </div>
+            <div style={{ background:T.surface, borderRadius:"12px 12px 12px 3px", padding:"12px 16px", fontSize:14, color:T.text, lineHeight:1.7, borderLeft:`2px solid rgba(200,144,42,0.35)` }}>
+              {coachIntroBody}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
+          <button
+            type="button"
+            onClick={() => setShowingFinal(true)}
+            style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:500, cursor:"pointer" }}
+          >
+            Start logging →
           </button>
         </div>
       </div>
@@ -698,24 +744,6 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
             onKeyDown={e => e.key === "Enter" && handleContinue()}
             autoFocus
           />
-        )}
-
-        {step === 2 && (
-          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-            {[
-              { icon:"🔒", title:"Your habits are yours", desc:"No ads, no data selling. Ever. Your logs and reflections are private to you." },
-              { icon:"🛡️", title:"Stored securely", desc:"All data is encrypted in transit and at rest on Supabase's infrastructure." },
-              { icon:"📤", title:"Export anytime", desc:"You can download everything as JSON from your profile at any time." },
-            ].map((item, i) => (
-              <div key={i} style={{ display:"flex", gap:14, alignItems:"flex-start", background:T.raised, borderRadius:T.rsm, padding:"14px 16px" }}>
-                <div style={{ fontSize:22, flexShrink:0, marginTop:1 }}>{item.icon}</div>
-                <div>
-                  <div style={{ fontSize:14, fontWeight:500, color:T.text, marginBottom:3 }}>{item.title}</div>
-                  <div style={{ fontSize:13, color:T.muted, lineHeight:1.6 }}>{item.desc}</div>
-                </div>
-              </div>
-            ))}
-          </div>
         )}
 
         {step === COACH_STEP && (
