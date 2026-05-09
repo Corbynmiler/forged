@@ -79,7 +79,7 @@ export const WEEKLY_SUMMARY_TTL_MS  = 24 * 60 * 60 * 1000; // generated summary 
 
 // ─── AI COACH ─────────────────────────────────────────────────────────────────
 export const CREATOR_ID = "5e9b4ba7-bf15-4e94-ab05-fe3306496973";
-export const FREE_DAILY_LIMIT = 10;
+export const FREE_DAILY_LIMIT = 3;
 
 // ─── COACH PAGE NUDGES ────────────────────────────────────────────────────────
 export const COACH_PAGE_NUDGES = {

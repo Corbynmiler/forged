@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { T, COLORS, HABIT_TYPES } from "../theme.js";
-import { supabase } from "../supabase.js";
+import { supabase, SUPABASE_ANON_KEY } from "../supabase.js";
 import { todayStr, daysAgo, isLegacyProgressType, inferProgressDirection, getStreak, isSatisfiedForTodayRing } from "../utils.js";
 import { Modal, GBtn, PBtn, Ring } from "../components/ui.jsx";
 
@@ -129,6 +129,8 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
   // profiles.weekly_updates_email_opt_in (+ _at) and localStorage (same key as
   // ProThankYouModal so both surfaces stay aligned).
   const [emailUpdatesOptIn, setEmailUpdatesOptIn] = useState(true);
+  const [coachIntroMsg,     setCoachIntroMsg]     = useState(null);
+  const [coachIntroLoading, setCoachIntroLoading] = useState(false);
 
   const current   = ONBOARD_STEPS[step];
   const isLast    = step === ONBOARD_STEPS.length - 1;
@@ -142,6 +144,31 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
   const HOME_STEP  = ONBOARD_STEPS.length + 2;   // virtual: add to home screen
   const NOTIF_STEP = ONBOARD_STEPS.length + 3;   // virtual: enable notifications
   const COACH_INTRO_STEP = ONBOARD_STEPS.length + 4; // templated coach message before final screen
+
+  useEffect(() => {
+    if (step !== COACH_INTRO_STEP || builtHabits.length === 0 || coachIntroMsg) return;
+    const firstHabit = pickFirstHabit(builtHabits);
+    setCoachIntroLoading(true);
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token ?? SUPABASE_ANON_KEY;
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), 4000);
+        const res = await fetch("/api/coach-intro", {
+          method: "POST", signal: ctrl.signal,
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+          body: JSON.stringify({ name: name.trim() || "there", habitName: firstHabit.name, habitType: firstHabit.habitType }),
+        });
+        clearTimeout(tid);
+        if (res.ok) {
+          const j = await res.json();
+          if (j.message) setCoachIntroMsg(j.message);
+        }
+      } catch { /* fall through to static text */ }
+      setCoachIntroLoading(false);
+    })();
+  }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isVirtual = step >= ONBOARD_STEPS.length;
 
@@ -580,8 +607,8 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
               <div style={{ width:40, height:40, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>🤖</div>
               <div style={{ fontSize:13, fontWeight:500, color:T.text }}>{coachNameInput.trim() || "Coach"}</div>
             </div>
-            <div style={{ background:T.surface, borderRadius:"12px 12px 12px 3px", padding:"12px 16px", fontSize:14, color:T.text, lineHeight:1.7, borderLeft:`2px solid rgba(200,144,42,0.35)` }}>
-              {coachIntroBody}
+            <div style={{ background:T.surface, borderRadius:"12px 12px 12px 3px", padding:"12px 16px", fontSize:14, color:T.text, lineHeight:1.7, borderLeft:`2px solid rgba(200,144,42,0.35)`, opacity:coachIntroLoading ? 0.45 : 1, transition:"opacity 0.4s" }}>
+              {coachIntroMsg || coachIntroBody}
             </div>
           </div>
         </div>

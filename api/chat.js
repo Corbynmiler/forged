@@ -481,8 +481,8 @@ function sse(res, data) {
 }
 
 // ── Free-tier server-side rate limit ───────────────────────────────────────────
-// Keep in sync with client-side FREE_DAILY_LIMIT in src/App.jsx.
-const FREE_DAILY_LIMIT = 10;
+// Keep in sync with client-side FREE_DAILY_LIMIT in src/theme.js.
+const FREE_DAILY_LIMIT = 3;
 
 // ── Handler ────────────────────────────────────────────────────────────────────
 async function handler(req, res) {

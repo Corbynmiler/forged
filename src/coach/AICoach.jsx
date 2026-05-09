@@ -3109,7 +3109,7 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
 
         {/* Input bar — mic left (voice entry), field, send right (standard chat hierarchy) */}
         <div id="coach-input-bar" style={{ padding:"10px 14px 10px", borderTop:`0.5px solid ${T.border}`, flexShrink:0 }}>
-          {!isPro && !atFreeCap && freeCoachMsgsToday >= 3 && freeCoachMsgsToday < FREE_DAILY_LIMIT && (
+          {!isPro && !atFreeCap && freeCoachMsgsToday >= 1 && freeCoachMsgsToday < FREE_DAILY_LIMIT && (
             <div style={{ fontSize:11, color:T.muted, padding:"2px 2px 8px", lineHeight:1.5 }}>
               {FREE_DAILY_LIMIT - freeCoachMsgsToday} message{FREE_DAILY_LIMIT - freeCoachMsgsToday === 1 ? "" : "s"} left today —{" "}
               <button

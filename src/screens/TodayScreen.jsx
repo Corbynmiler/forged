@@ -14,6 +14,38 @@ function coachGreetingDaysLeft(targetYmd) {
   return Math.round((new Date(targetYmd + "T12:00:00") - new Date(t + "T12:00:00")) / 86400000);
 }
 
+function toYmd(d) {
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
+
+// Returns a coach line if a daily habit has a clear skip-day pattern in the last 28 days.
+function findSkippedDayPattern(habits) {
+  const today = todayStr();
+  const DAY_NAMES = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  for (const h of habits) {
+    if (h.habitType !== "daily") continue;
+    const logs = (h.logs || []).filter(l => l.value !== "skip" && l.value !== "quicknote");
+    if (logs.length < 5) continue;
+    const oldestLog = logs.map(l => l.date).sort()[0];
+    const daysSince = Math.round((Date.parse(today + "T12:00:00Z") - Date.parse(oldestLog + "T12:00:00Z")) / 86400000);
+    if (daysSince < 7) continue;
+    const loggedSet = new Set(logs.map(l => l.date));
+    const dayCounts = [0,0,0,0,0,0,0];
+    let totalMissed = 0;
+    for (let i = 1; i <= 28; i++) {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      if (!loggedSet.has(toYmd(d))) { dayCounts[d.getDay()]++; totalMissed++; }
+    }
+    if (totalMissed < 4) continue;
+    const maxMissed = Math.max(...dayCounts);
+    if (maxMissed / totalMissed >= 0.55 && maxMissed >= 3) {
+      const dayName = DAY_NAMES[dayCounts.indexOf(maxMissed)];
+      return `${String(h.name || "").slice(0, 18)} — you often skip ${dayName}s. Want to talk about it?`;
+    }
+  }
+  return null;
+}
+
 function buildCoachGreetingLine({ habits, goals }) {
   const hr  = new Date().getHours();
   const tod = hr < 12 ? "morning" : hr < 17 ? "afternoon" : "evening";
@@ -44,6 +76,9 @@ function buildCoachGreetingLine({ habits, goals }) {
     if (s >= 5 && s > topS) { topS = s; topH = h; }
   }
   if (topH) return `${String(topH.name || "Habit").slice(0, 18)} — ${topS}-day streak. Keep it?`;
+
+  const skipPattern = findSkippedDayPattern(trackHabits);
+  if (skipPattern) return skipPattern;
 
   if (all)  return tod === "morning" ? "All habits in — you're ahead today." : tod === "afternoon" ? "Full sweep already — nice." : "Everything logged — how was the day?";
   if (some) return tod === "morning" ? "Good start — clear the rest when ready." : tod === "afternoon" ? "Halfway through — log what's left?" : "Solid progress — finish the set tonight?";

@@ -251,34 +251,6 @@ export function AuthScreen({ onSent, checkoutPending, onCoachSignupIntent }) {
         onKeyDown={e => e.key === "Enter" && handleSubmit()}
         style={authInp}
       />
-      {/* Cosmetic only — Supabase already persists sessions (persistSession: true). */}
-      <label style={{
-        display:"flex", alignItems:"flex-start", gap:10,
-        marginTop:2, marginBottom:14,
-        padding:"10px 12px",
-        borderRadius:T.rsm,
-        border:`0.5px solid ${T.border}`,
-        background:"rgba(255,255,255,0.03)",
-        cursor:"pointer",
-      }}>
-        <input
-          type="checkbox"
-          checked
-          readOnly
-          style={{
-            marginTop:3,
-            width:15,
-            height:15,
-            accentColor:T.gold,
-            flexShrink:0,
-            cursor:"pointer",
-          }}
-        />
-        <span style={{ fontSize:12, color:T.sub, lineHeight:1.55 }}>
-          <span style={{ color:T.text, fontWeight:600 }}>Remember me</span>
-          <span style={{ color:T.muted }}> — stay signed in on this device</span>
-        </span>
-      </label>
       {error && <div style={{ fontSize:14, color:"#e74c3c", background:"rgba(231,76,60,0.1)", border:"1px solid rgba(231,76,60,0.3)", borderRadius:T.rsm, padding:"10px 14px", marginBottom:12 }}>{error}</div>}
       <button onClick={handleSubmit}
         style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:!loading?T.accent:T.surface, color:!loading?"#fff":T.muted, fontSize:16, fontWeight:500, cursor:!loading?"pointer":"default", transition:"all 0.2s" }}>
