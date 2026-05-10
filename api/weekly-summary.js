@@ -172,6 +172,7 @@ async function handler(req, res) {
 
   let userId = null;
   let isPro = false;
+  let isAdmin = false;
   let db = null;
   try {
     const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -184,6 +185,7 @@ async function handler(req, res) {
     db = createClient(SUPABASE_URL, serviceRoleKey);
     const { data: prof } = await db.from("profiles").select("is_pro, is_admin").eq("id", userId).maybeSingle();
     isPro = !!(prof?.is_pro || prof?.is_admin);
+    isAdmin = !!prof?.is_admin;
   } catch {
     return res.status(401).json({ error: "Invalid token" });
   }
@@ -288,7 +290,7 @@ async function handler(req, res) {
       });
     }
 
-    if (used >= WEEKLY_BRIEF_GEN_LIMIT) {
+    if (!isAdmin && used >= WEEKLY_BRIEF_GEN_LIMIT) {
       return res.status(429).json({
         error: `You’ve used all ${WEEKLY_BRIEF_GEN_LIMIT} weekly brief generations for this week. They reset next Monday.`,
         limit: WEEKLY_BRIEF_GEN_LIMIT,
