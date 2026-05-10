@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { T, COACH_ICON_OPTIONS, PROFILE_DISPLAY_NAME_MAX, PROFILE_COACH_NAME_MAX, clampProfileDisplayName, clampProfileCoachName } from "../theme.js";
+import { T, COACH_ICON_OPTIONS, PROFILE_DISPLAY_NAME_MAX, PROFILE_COACH_NAME_MAX, FREE_DAILY_LIMIT, clampProfileDisplayName, clampProfileCoachName, FREE_DAILY_LIMIT } from "../theme.js";
 import { supabase } from "../supabase.js";
 import {
   getLevel, nextLevel, getStreak, getBestStreak,
@@ -140,7 +140,7 @@ export function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
 
   const features = [
     { icon:"∞",  label:"Unlimited habits",    free:"Up to 5",      pro:"No limit",               live:true },
-    { icon:"🤖", label:"AI coach messages",    free:"10 per day",   pro:"Unlimited",              live:true },
+    { icon:"🤖", label:"AI coach messages",    free:`${FREE_DAILY_LIMIT} per day`,   pro:"Unlimited",              live:true },
     { icon:"🎙️", label:"Voice logging",         free:"—",            pro:"Talk to log & reflect",  live:true },
     { icon:"💪", label:"Nudge a friend",       free:"—",            pro:"Keep each other honest", live:true },
     { icon:"📜", label:"Full history",         free:"Last 7 days",  pro:"Every entry, forever",   live:true },

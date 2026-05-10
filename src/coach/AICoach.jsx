@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { T, COACH_ICON_OPTIONS, WEEKLY_SUMMARY_TTL_MS, CREATOR_ID, HABIT_TYPES, XP_LEVELS, COLORS, DAYS, MONTHS } from "../theme.js";
+import { T, COACH_ICON_OPTIONS, WEEKLY_SUMMARY_TTL_MS, CREATOR_ID, FREE_DAILY_LIMIT, HABIT_TYPES, XP_LEVELS, COLORS, DAYS, MONTHS, FREE_DAILY_LIMIT } from "../theme.js";
 import { supabase } from "../supabase.js";
 import {
   todayStr, daysAgo, parseLocal, fmtDate, fmtEntryDate, fmtWeekRange,
@@ -1758,7 +1758,6 @@ Data above is authoritative. Logged today: true means it's already done — don'
 
 const COACH_LS_RESET = "coach_reset_date";
 const COACH_LS_MSGS = "coach_msgs_today";
-const FREE_DAILY_LIMIT = 10;
 
 function syncCoachMsgCountFromStorage() {
   try {
