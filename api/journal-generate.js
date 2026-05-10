@@ -159,15 +159,24 @@ async function handler(req, res) {
   // Fetch any existing journal content for today (AI notes from conversation)
   const { data: existing } = await db
     .from("journal_entries")
-    .select("id, content, is_ai_generated")
+    .select("id, content, is_ai_generated, daily_context, manually_edited")
     .eq("user_id", userId)
     .eq("date", date)
     .maybeSingle();
 
-  // If there's existing content that was manually written (not AI generated), preserve it as context
-  const existingNotes = (existing && existing.is_ai_generated === false && existing.content)
+  // Build generation context from two sources:
+  // 1. daily_context notes accumulated via chat's add_daily_note tool
+  // 2. Manually written content (preserved as context, not replaced)
+  const contextNotes = Array.isArray(existing?.daily_context)
+    ? existing.daily_context.filter(Boolean)
+    : [];
+  const manualContent = (existing?.manually_edited && existing?.content)
     ? existing.content
-    : (existing?.content || "");
+    : null;
+  const existingNotes = [
+    ...contextNotes,
+    ...(manualContent ? [`User's manual note: ${manualContent}`] : []),
+  ].join("\n");
 
   const prompt = buildGenerationPrompt({ date, habits, goals, name, existingNotes });
 
@@ -202,23 +211,23 @@ async function handler(req, res) {
   const loggedCount = habitsWithLogs.filter(h =>
     h.todayLogs.some(l => l.value !== null && l.value !== undefined && l.value !== false)
   ).length;
-  const notesCount = existingNotes ? 1 : 0;
-
   const generationSources = {
     generated_at: new Date().toISOString(),
     habit_count: loggedCount,
     goal_count: (goals || []).filter(g => g.status !== "completed").length,
-    context_notes_count: notesCount,
+    context_notes_count: contextNotes.length,
     model: "claude-haiku-4-5",
   };
 
-  // Upsert — replace any existing content entirely
+  // Upsert — replace content entirely with the new AI entry.
+  // manually_edited is reset to false since this is now AI-generated.
   const upsertPayload = {
     user_id: userId,
     date,
     content: generatedText,
     updated_at: new Date().toISOString(),
     is_ai_generated: true,
+    manually_edited: false,
     generation_sources: generationSources,
   };
 
