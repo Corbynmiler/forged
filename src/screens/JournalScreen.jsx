@@ -887,7 +887,7 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
             const coachLabel = coachName && coachName !== "Coach" ? coachName : "your AI coach";
             return (
               <div style={{ padding:"0 18px 18px" }}>
-                <div style={{ fontSize:12, color:T.hint, lineHeight:1.65 }}>
+                <div style={{ fontSize:13, color:T.sub, lineHeight:1.65 }}>
                   You don't have to write this. Log habits, chat to {coachLabel}, add notes — your coach turns the day into a daily entry.
                 </div>
               </div>
@@ -896,7 +896,7 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
 
           {/* ── Today's entry ── */}
           <div style={{ padding:"0 16px 24px" }}>
-            <div style={{ fontSize:11, fontWeight:600, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:10 }}>Today</div>
+            <div style={{ fontSize:11, fontWeight:600, color:T.sub, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:10 }}>Today</div>
             {todayJournalEntry ? (() => {
               const parsed = tryParseEntry(todayJournalEntry.content);
               return (
@@ -911,7 +911,7 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
                           parsed.missed  && parsed.missed.toLowerCase() !== "none" && { icon:"✗", label:"Missed",  text:parsed.missed,  color:T.amber },
                           parsed.why     && { icon:"→", label:"Why",     text:parsed.why,     color:T.muted },
                           parsed.pattern && { icon:"◎", label:"Pattern", text:parsed.pattern, color:T.accent },
-                          parsed.tomorrow && { icon:"↑", label:"Tomorrow", text:parsed.tomorrow, color:T.hint },
+                          parsed.tomorrow && { icon:"↑", label:"Tomorrow", text:parsed.tomorrow, color:T.muted },
                         ].filter(Boolean).map(row => (
                           <div key={row.label} style={{ display:"flex", gap:8, marginBottom:6, alignItems:"flex-start" }}>
                             <span style={{ fontSize:12, color:row.color, fontWeight:700, minWidth:14, marginTop:2 }}>{row.icon}</span>
@@ -989,7 +989,7 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
           {/* ── Past entries ── */}
           {sortedJournalEntries.filter(e => e.date !== tStr).length > 0 && (
             <div style={{ padding:"0 16px" }}>
-              <div style={{ fontSize:11, fontWeight:600, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:10 }}>Past entries</div>
+              <div style={{ fontSize:11, fontWeight:600, color:T.sub, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:10 }}>Past entries</div>
               {sortedJournalEntries.filter(e => e.date !== tStr).map(entry => {
                 const isExpanded = expandedJournalDates.has(entry.date) || journalSelectedDate === entry.date;
                 const parsed = tryParseEntry(entry.content);
@@ -1019,7 +1019,7 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
                         transition:"border-color 0.15s",
                       }}>
                       <div style={{ flex:1, minWidth:0 }}>
-                        <div style={{ fontSize:11, color:T.hint, marginBottom:2 }}>{label}</div>
+                        <div style={{ fontSize:11, color:T.muted, marginBottom:2 }}>{label}</div>
                         <div style={{ fontSize:14, color:T.text, fontWeight:500, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{previewTitle}</div>
                         {previewLine && !isExpanded && (
                           <div style={{ fontSize:12, color:T.muted, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", marginTop:2 }}>{previewLine}</div>
@@ -1038,7 +1038,7 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
                               parsed.missed  && parsed.missed.toLowerCase() !== "none" && { icon:"✗", label:"Missed",  text:parsed.missed,  color:T.amber },
                               parsed.why     && { icon:"→", label:"Why",     text:parsed.why,     color:T.muted },
                               parsed.pattern && { icon:"◎", label:"Pattern", text:parsed.pattern, color:T.accent },
-                              parsed.tomorrow && { icon:"↑", label:"Tomorrow", text:parsed.tomorrow, color:T.hint },
+                              parsed.tomorrow && { icon:"↑", label:"Tomorrow", text:parsed.tomorrow, color:T.muted },
                             ].filter(Boolean).map(row => (
                               <div key={row.label} style={{ display:"flex", gap:8, marginBottom:6, alignItems:"flex-start" }}>
                                 <span style={{ fontSize:12, color:row.color, fontWeight:700, minWidth:14, marginTop:2 }}>{row.icon}</span>
