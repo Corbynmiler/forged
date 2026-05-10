@@ -106,7 +106,7 @@ const COACH_TOOLS = [
   {
     name: "add_daily_note",
     description:
-Saves a short personal note to today's journal context — feelings, stress, story, relationships, or anything the user wants remembered when their daily journal gets written. Use when user says 'remember this for today', 'add this to my journal', 'note this', or shares personal/emotional context that isn't a structured habit/goal log. In a mixed message (structured facts + personal story), call log_habit for the facts AND add_daily_note for the human context in the SAME turn. Do NOT write a full journal entry — just capture the key thought in the user's own words (1–3 sentences). The Forged journal is generated later from these notes plus the day's habit logs. If this tool returns success:false in the tool result, say honestly that the note did not save.
+      "Saves a short personal note to today's journal context — feelings, stress, story, relationships, or anything the user wants remembered when their daily journal gets written. Use when user says 'remember this for today', 'add this to my journal', 'note this', or shares personal/emotional context that isn't a structured habit/goal log. In a mixed message (structured facts + personal story), call log_habit for the facts AND add_daily_note for the human context in the SAME turn. Do NOT write a full journal entry — just capture the key thought in the user's own words (1–3 sentences). The Forged journal is generated later from these notes plus the day's habit logs. If this tool returns success:false in the tool result, say honestly that the note did not save.",
     input_schema: {
       type: "object",
       properties: {
