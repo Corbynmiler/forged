@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { T, MONTHS, WEEKLY_SUMMARY_TTL_MS } from "../theme.js";
+import { T, MONTHS } from "../theme.js";
 import { supabase } from "../supabase.js";
 import {
   todayStr, daysAgo, weekStartFor, getStreak, getBestStreak,
@@ -9,6 +9,7 @@ import {
   fmtWeekRange, fmtEntryDate, getWrittenCorpus, hashCorpusSignature,
   readDeepInsightsCache, writeDeepInsightsCache, get12WeekGrid, getProjectStats,
   goalBarFillWidthPct, getGoalStatusText, truncateText, formatWithUnit,
+  getISOWeek, fmtNextMondayShort,
 } from "../utils.js";
 import { GBtn, PBtn, ActivityDots, CompletionBar, Stat } from "../components/ui.jsx";
 import { HabitGrid } from "../components/habitCards.jsx";
@@ -46,67 +47,83 @@ function weeklyBriefBlocks(text) {
 }
 
 export function InsightsScreen({ habits, goals = [], journalEntries = [], onShowHistory, onShare, isPro = false, onUpgrade, userId = null, userName = "" }) {
-  // ── Weekly summary state ───────────────────────────────────────────────────
-  const [weeklySummary,   setWeeklySummary]   = useState(null);
-  const [summaryLoading,  setSummaryLoading]  = useState(false);
-  const [summaryError,    setSummaryError]    = useState(null);
-  const [briefQuota,      setBriefQuota]      = useState(null);
+  // ── Weekly brief state ─────────────────────────────────────────────────────
+  // The brief is now persisted in `weekly_brief_generation_usage` (brief_text +
+  // brief_generated_at) and fetched once on mount via GET /api/weekly-summary.
+  // We separate `isFetching` (loading existing brief from DB) from
+  // `isGenerating` (calling the AI to write a new one) — only the generation
+  // path shows a spinner.
+  const [weeklySummary,    setWeeklySummary]    = useState(null);
+  const [briefGeneratedAt, setBriefGeneratedAt] = useState(null);
+  const [isFetching,       setIsFetching]       = useState(true);
+  const [isGenerating,     setIsGenerating]     = useState(false);
+  const [summaryError,     setSummaryError]     = useState(null);
+  const [briefQuota,       setBriefQuota]       = useState(null);
   // null = still checking, true = free trial available, false = already used
-  const [freeBrief,       setFreeBrief]       = useState(null);
+  const [freeBrief,        setFreeBrief]        = useState(null);
+  // When the user clicks Refresh while at the weekly cap, we surface a small
+  // inline note ("Next refresh available [next Monday]") instead of an error.
+  const [showQuotaNote,    setShowQuotaNote]    = useState(false);
   const [activityExpanded, setActivityExpanded] = useState(false);
   const [patternsMoreExpanded, setPatternsMoreExpanded] = useState(false);
 
   const thisWeekStart = weekStartFor(todayStr());
+  const thisISOWeek   = getISOWeek(todayStr());
 
-  async function refreshBriefQuota() {
-    if (!userId) return;
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      if (!token) return;
-      const res = await fetch(`/api/weekly-summary?client_date=${encodeURIComponent(todayStr())}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) return;
-      const j = await res.json();
-      if (j.free_trial) {
-        setFreeBrief(!j.free_trial_used);
-      } else {
-        setBriefQuota({
-          used: j.used,
-          limit: j.limit,
-          week_start: j.week_start,
-          can_generate: j.can_generate,
-        });
-      }
-    } catch { /* ignore */ }
-  }
+  // A brief is stale if it was generated in a previous ISO calendar week.
+  // With the brief keyed by week_start in the DB this should rarely fire, but
+  // it's our defensive boundary for week rollovers and clock skew.
+  const briefIsStale = !!(weeklySummary && briefGeneratedAt && getISOWeek(briefGeneratedAt) !== thisISOWeek);
+  const hasFreshBrief = !!weeklySummary && !briefIsStale;
 
-  // Load cached brief + server quota on mount / when userId changes
+  // Single fetch on mount: pulls existing brief + quota in one round trip.
   useEffect(() => {
     if (!userId) return;
-    try {
-      const raw = localStorage.getItem(`forged_weekly_summary:${userId}`);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        const { text, ts, week_start: cachedWeek } = parsed;
-        const weekOk = cachedWeek === thisWeekStart;
-        if (text && weekOk && Date.now() - ts < WEEKLY_SUMMARY_TTL_MS) {
-          setWeeklySummary(text);
+    let cancelled = false;
+    setIsFetching(true);
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        if (!token) return;
+        const res = await fetch(`/api/weekly-summary?client_date=${encodeURIComponent(todayStr())}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const j = await res.json();
+        if (cancelled) return;
+
+        // Only adopt a stored brief if its generated_at falls in this ISO week.
+        if (j.text && j.generated_at && getISOWeek(j.generated_at) === thisISOWeek) {
+          setWeeklySummary(j.text);
+          setBriefGeneratedAt(j.generated_at);
         } else {
-          try { localStorage.removeItem(`forged_weekly_summary:${userId}`); } catch { /* ignore */ }
           setWeeklySummary(null);
+          setBriefGeneratedAt(null);
         }
-      } else {
-        setWeeklySummary(null);
+
+        if (j.free_trial) {
+          setFreeBrief(!j.free_trial_used);
+        } else {
+          setBriefQuota({
+            used: j.used,
+            limit: j.limit,
+            week_start: j.week_start,
+            can_generate: j.can_generate,
+          });
+        }
+      } catch { /* ignore — empty state is fine */ }
+      finally {
+        if (!cancelled) setIsFetching(false);
       }
-    } catch { /* ignore */ }
-    refreshBriefQuota();
-  }, [userId, isPro, thisWeekStart]);
+    })();
+    return () => { cancelled = true; };
+  }, [userId, isPro, thisISOWeek]);
 
   async function generateWeeklySummary() {
-    setSummaryLoading(true);
+    setIsGenerating(true);
     setSummaryError(null);
+    setShowQuotaNote(false);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
@@ -131,14 +148,17 @@ export function InsightsScreen({ habits, goals = [], journalEntries = [], onShow
             week_start: payload.week_start,
             can_generate: false,
           });
+          setShowQuotaNote(true);
+          return;
         }
         if (res.status === 403 && payload?.free_trial_used) {
           setFreeBrief(false);
         }
         throw new Error(payload.error || `Error ${res.status}`);
       }
-      const { text, used, limit, week_start, free_trial } = payload;
+      const { text, generated_at, used, limit, week_start, free_trial } = payload;
       setWeeklySummary(text);
+      setBriefGeneratedAt(generated_at || new Date().toISOString());
       if (free_trial) {
         setFreeBrief(false);
       } else if (typeof used === "number" && typeof limit === "number") {
@@ -148,20 +168,22 @@ export function InsightsScreen({ habits, goals = [], journalEntries = [], onShow
           week_start: week_start || thisWeekStart,
           can_generate: used < limit,
         });
-      } else {
-        refreshBriefQuota();
       }
-      try {
-        localStorage.setItem(
-          `forged_weekly_summary:${userId}`,
-          JSON.stringify({ text, ts: Date.now(), week_start: week_start || thisWeekStart }),
-        );
-      } catch { /* quota */ }
     } catch (err) {
       setSummaryError(err.message || "Generation failed");
     } finally {
-      setSummaryLoading(false);
+      setIsGenerating(false);
     }
+  }
+
+  // Refresh button click handler — if we're already at the weekly cap, surface
+  // the inline "next refresh available" note instead of calling the API.
+  function handleRefreshClick() {
+    if (briefQuota && !briefQuota.can_generate) {
+      setShowQuotaNote(true);
+      return;
+    }
+    generateWeeklySummary();
   }
   function IC({ title, children, action, dataTour, subtitle, flush }) {
     return (
@@ -323,21 +345,9 @@ export function InsightsScreen({ habits, goals = [], journalEntries = [], onShow
         </button>
       </div>
 
-      {/* Summary stats row */}
-      <div data-tour="insights-stats" style={{ margin:"0 14px 8px", display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8 }}>
-        <Stat label="tracked" value={totalTracked}/>
-        <Stat label="days logged" value={totalDaysLogged} color={T.text}/>
-        <Stat label="best streak" value={longestBestStreak > 0 ? `🔥${longestBestStreak}` : "—"} color={T.gold}/>
-        <Stat label="total logs" value={totalLogsEver}/>
-      </div>
-      <div style={{ margin:"0 18px 18px", fontSize:11, color:T.muted, lineHeight:1.55, maxWidth:400 }}>
-        <span style={{ color:T.hint, fontWeight:700, fontSize:10, letterSpacing:"0.08em", textTransform:"uppercase", marginRight:8 }}>At a glance</span>
-        What you track, how many different days you&apos;ve logged, your best streak, and total logging days.
-      </div>
-
-      {/* ══ Weekly brief — headline feature ═══════════════════════════════════ */}
+      {/* ══ Weekly brief — headline feature, top of page above stats ════════ */}
       <div style={{
-        margin:"0 14px 22px",
+        margin:"0 14px 18px",
         background:`linear-gradient(165deg, rgba(200,144,42,0.18) 0%, rgba(26,26,22,0.94) 38%, ${T.raised} 100%)`,
         borderRadius:T.r,
         border:`1px solid rgba(200,144,42,0.42)`,
@@ -346,19 +356,39 @@ export function InsightsScreen({ habits, goals = [], journalEntries = [], onShow
         overflow:"hidden",
         boxShadow:"0 2px 24px rgba(0,0,0,0.35), 0 1px 0 rgba(200,144,42,0.14)",
       }}>
-        {!isPro && freeBrief !== true && !weeklySummary && (
+        {!isPro && freeBrief !== true && !hasFreshBrief && (
           <div style={{ position:"absolute", top:14, right:14 }}>
             <span style={{ fontSize:9, fontWeight:800, color:"#0F0F0D", background:T.gold, padding:"2px 7px", borderRadius:5, letterSpacing:"0.08em" }}>PRO</span>
           </div>
         )}
-        <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.14em", marginBottom:10 }}>YOUR WEEKLY BRIEF</div>
+
+        {/* Header row: label + (Pro-only) subtle refresh icon when a fresh brief is on screen */}
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10, gap:10 }}>
+          <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.14em" }}>YOUR WEEKLY BRIEF</div>
+          {isPro && hasFreshBrief && !isGenerating && (
+            <button
+              type="button"
+              aria-label="Refresh weekly brief"
+              title={briefQuota && !briefQuota.can_generate ? "Limit reached — refreshes next Monday" : "Generate a new brief"}
+              onClick={handleRefreshClick}
+              style={{
+                width:28, height:28, display:"flex", alignItems:"center", justifyContent:"center",
+                borderRadius:"50%", border:`0.5px solid ${T.border}`,
+                background:"rgba(255,255,255,0.04)", cursor:"pointer", color:T.gold,
+                fontSize:14, padding:0, fontFamily:T.font, lineHeight:1,
+              }}
+            >
+              ↻
+            </button>
+          )}
+        </div>
         <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, letterSpacing:"-0.03em", lineHeight:1.15, marginBottom:10, maxWidth:320 }}>
           What actually moved this week
         </div>
         <div style={{ fontSize:12, color:T.muted, lineHeight:1.6, marginBottom:14, maxWidth:360, fontWeight:450 }}>
           Plain-language read on what held, what slipped, and what deserves attention. <strong style={{ color:T.sub, fontWeight:600 }}>Uses AI</strong> — capped so it stays sustainable.
         </div>
-        {isPro && briefQuota && (
+        {isPro && briefQuota && hasFreshBrief && (
           <div style={{
             fontSize:11, color: briefQuota.can_generate ? T.sub : T.amber, marginBottom:14,
             padding:"8px 11px", borderRadius:8, background:"rgba(0,0,0,0.22)", border:`0.5px solid ${T.border}`,
@@ -369,114 +399,88 @@ export function InsightsScreen({ habits, goals = [], journalEntries = [], onShow
           </div>
         )}
 
-        {!isPro && !weeklySummary ? (
-          <>
-            {freeBrief === true ? (
-              <>
-                {summaryError && (
-                  <div style={{ fontSize:12, color:T.amber, marginBottom:10, lineHeight:1.5 }}>{summaryError}</div>
-                )}
-                <button
-                  type="button"
-                  onClick={generateWeeklySummary}
-                  disabled={summaryLoading}
-                  style={{
-                    padding:"12px 22px", borderRadius:T.rsm, border:`1px solid rgba(200,144,42,0.55)`,
-                    background: summaryLoading ? "rgba(200,144,42,0.08)" : T.gold,
-                    color: summaryLoading ? T.hint : "#0F0F0D",
-                    fontSize:13, fontWeight:800, cursor: summaryLoading ? "default" : "pointer", letterSpacing:"0.02em",
-                  }}
-                >
-                  {summaryLoading ? "Writing your brief…" : "Generate your first brief — free ✨"}
+        {/* Body — separate isFetching (DB load) from isGenerating (AI call). */}
+        {isFetching ? null
+          : isGenerating ? (
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"center", padding:"28px 0", color:T.gold, fontSize:13, fontWeight:600, letterSpacing:"0.02em" }}>
+              Writing your brief…
+            </div>
+          ) : hasFreshBrief ? (
+            <>
+              <div style={{ marginBottom: (!isPro && onUpgrade) || showQuotaNote ? 16 : 0 }}>
+                {(() => {
+                  const blocks = weeklyBriefBlocks(weeklySummary);
+                  return blocks.map((block, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        fontSize:14, color:T.text, lineHeight:1.72, fontWeight:450,
+                        marginBottom: i < blocks.length - 1 ? 14 : 0,
+                        paddingBottom: i < blocks.length - 1 ? 14 : 0,
+                        borderBottom: i < blocks.length - 1 ? `0.5px solid rgba(255,255,255,0.06)` : "none",
+                      }}
+                    >
+                      {block}
+                    </div>
+                  ));
+                })()}
+              </div>
+              {!isPro && onUpgrade && (
+                <button type="button" onClick={onUpgrade} style={{ padding:"11px 18px", borderRadius:T.rsm, border:`1px solid rgba(200,144,42,0.5)`, background:"rgba(200,144,42,0.18)", color:T.gold, fontSize:13, fontWeight:700, cursor:"pointer", letterSpacing:"0.02em" }}>
+                  Get Pro for weekly briefs →
                 </button>
-                <div style={{ fontSize:11, color:T.hint, marginTop:9, lineHeight:1.5 }}>
-                  One on us. Upgrade to Pro for a fresh brief every week.
+              )}
+              {showQuotaNote && (
+                <div style={{ marginTop: !isPro && onUpgrade ? 12 : 0, fontSize:11, color:T.muted, lineHeight:1.55 }}>
+                  Next refresh available <span style={{ color:T.sub, fontWeight:600 }}>{fmtNextMondayShort(todayStr())}</span>.
                 </div>
-              </>
-            ) : (
-              <>
-                {onUpgrade && (
-                  <button type="button" onClick={onUpgrade} style={{ padding:"11px 18px", borderRadius:T.rsm, border:`1px solid rgba(200,144,42,0.5)`, background:"rgba(200,144,42,0.18)", color:T.gold, fontSize:13, fontWeight:700, cursor:"pointer", letterSpacing:"0.02em" }}>
-                    Unlock with Pro →
-                  </button>
-                )}
-              </>
-            )}
-          </>
-        ) : !isPro && weeklySummary ? (
-          <>
-            <div style={{ marginBottom:16 }}>
-              {(() => {
-                const blocks = weeklyBriefBlocks(weeklySummary);
-                return blocks.map((block, i) => (
-                  <div key={i} style={{ fontSize:14, color:T.text, lineHeight:1.72, fontWeight:450, marginBottom: i < blocks.length - 1 ? 14 : 0, paddingBottom: i < blocks.length - 1 ? 14 : 0, borderBottom: i < blocks.length - 1 ? `0.5px solid rgba(255,255,255,0.06)` : "none" }}>
-                    {block}
-                  </div>
-                ));
-              })()}
-            </div>
-            {onUpgrade && (
-              <button type="button" onClick={onUpgrade} style={{ padding:"11px 18px", borderRadius:T.rsm, border:`1px solid rgba(200,144,42,0.5)`, background:"rgba(200,144,42,0.18)", color:T.gold, fontSize:13, fontWeight:700, cursor:"pointer", letterSpacing:"0.02em" }}>
-                Get Pro for weekly briefs →
-              </button>
-            )}
-          </>
-        ) : weeklySummary ? (
-          <>
-            <div style={{ marginBottom:16 }}>
-              {(() => {
-                const blocks = weeklyBriefBlocks(weeklySummary);
-                return blocks.map((block, i) => (
-                <div
-                  key={i}
-                  style={{
-                    fontSize:14,
-                    color:T.text,
-                    lineHeight:1.72,
-                    fontWeight:450,
-                    marginBottom: i < blocks.length - 1 ? 14 : 0,
-                    paddingBottom: i < blocks.length - 1 ? 14 : 0,
-                    borderBottom: i < blocks.length - 1 ? `0.5px solid rgba(255,255,255,0.06)` : "none",
-                  }}
-                >
-                  {block}
-                </div>
-                ));
-              })()}
-            </div>
-            <div style={{ display:"flex", flexWrap:"wrap", alignItems:"center", gap:12 }}>
+              )}
+            </>
+          ) : !isPro && freeBrief === false ? (
+            // Free trial used + no brief — keep upgrade prompt
+            <>
+              {onUpgrade && (
+                <button type="button" onClick={onUpgrade} style={{ padding:"11px 18px", borderRadius:T.rsm, border:`1px solid rgba(200,144,42,0.5)`, background:"rgba(200,144,42,0.18)", color:T.gold, fontSize:13, fontWeight:700, cursor:"pointer", letterSpacing:"0.02em" }}>
+                  Unlock with Pro →
+                </button>
+              )}
+            </>
+          ) : (
+            // No brief for this week — single centered Generate button, no other content.
+            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:10, padding:"6px 0 4px" }}>
+              {summaryError && (
+                <div style={{ fontSize:12, color:T.amber, textAlign:"center", lineHeight:1.5 }}>{summaryError}</div>
+              )}
               <button
                 type="button"
-                onClick={() => { setWeeklySummary(null); try { localStorage.removeItem(`forged_weekly_summary:${userId}`); } catch { /* ignore */ } }}
-                style={{ fontSize:12, color:T.gold, background:"none", border:"none", cursor:"pointer", padding:0, fontWeight:700 }}
+                onClick={generateWeeklySummary}
+                style={{
+                  padding:"12px 22px", borderRadius:T.rsm, border:`1px solid rgba(200,144,42,0.55)`,
+                  background: T.gold, color:"#0F0F0D",
+                  fontSize:13, fontWeight:800, cursor:"pointer", letterSpacing:"0.02em",
+                }}
               >
-                ↻ New brief
+                {!isPro && freeBrief === true ? "Generate your first brief — free ✨" : "Generate this week’s brief"}
               </button>
-              {briefQuota && !briefQuota.can_generate && (
-                <span style={{ fontSize:11, color:T.amber }}>No generations left this week.</span>
+              {!isPro && freeBrief === true && (
+                <div style={{ fontSize:11, color:T.hint, textAlign:"center", lineHeight:1.5, maxWidth:280 }}>
+                  One on us. Upgrade to Pro for a fresh brief every week.
+                </div>
               )}
             </div>
-          </>
-        ) : (
-          <>
-            {summaryError && (
-              <div style={{ fontSize:12, color:T.amber, marginBottom:10, lineHeight:1.5 }}>{summaryError}</div>
-            )}
-            <button
-              type="button"
-              onClick={generateWeeklySummary}
-              disabled={summaryLoading || (briefQuota && !briefQuota.can_generate)}
-              style={{
-                padding:"12px 22px", borderRadius:T.rsm, border:`1px solid rgba(200,144,42,0.55)`,
-                background: summaryLoading || (briefQuota && !briefQuota.can_generate) ? "rgba(200,144,42,0.08)" : T.gold,
-                color: summaryLoading || (briefQuota && !briefQuota.can_generate) ? T.hint : "#0F0F0D",
-                fontSize:13, fontWeight:800, cursor: summaryLoading || (briefQuota && !briefQuota.can_generate) ? "default" : "pointer", letterSpacing:"0.02em",
-              }}
-            >
-              {summaryLoading ? "Writing your brief…" : briefQuota && !briefQuota.can_generate ? "Limit reached this week" : "Generate my weekly brief"}
-            </button>
-          </>
-        )}
+          )}
+      </div>
+
+      {/* Summary stats row */}
+      <div data-tour="insights-stats" style={{ margin:"0 14px 8px", display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8 }}>
+        <Stat label="tracked" value={totalTracked}/>
+        <Stat label="days logged" value={totalDaysLogged} color={T.text}/>
+        <Stat label="best streak" value={longestBestStreak > 0 ? `🔥${longestBestStreak}` : "—"} color={T.gold}/>
+        <Stat label="total logs" value={totalLogsEver}/>
+      </div>
+      <div style={{ margin:"0 18px 18px", fontSize:11, color:T.muted, lineHeight:1.55, maxWidth:400 }}>
+        <span style={{ color:T.hint, fontWeight:700, fontSize:10, letterSpacing:"0.08em", textTransform:"uppercase", marginRight:8 }}>At a glance</span>
+        What you track, how many different days you&apos;ve logged, your best streak, and total logging days.
       </div>
 
       {/* ══ Activity ══════════════════════════════════════════════════════════ */}

@@ -157,6 +157,13 @@ async function handler(req, res) {
     const freeTrialUsed = totalEver >= 1;
 
     if (req.method === "GET") {
+      // Return this week's stored brief if any (matches Pro path shape).
+      const { data: thisWeekRow } = await db
+        .from("weekly_brief_generation_usage")
+        .select("brief_text, brief_generated_at")
+        .eq("user_id", userId)
+        .eq("week_start", weekStart)
+        .maybeSingle();
       return res.json({
         free_trial: true,
         free_trial_used: freeTrialUsed,
@@ -164,6 +171,8 @@ async function handler(req, res) {
         used: freeTrialUsed ? 1 : 0,
         week_start: weekStart,
         can_generate: !freeTrialUsed,
+        text: thisWeekRow?.brief_text || null,
+        generated_at: thisWeekRow?.brief_generated_at || null,
       });
     }
 
@@ -176,12 +185,12 @@ async function handler(req, res) {
     // Free trial available — fall through to generation with used=0
   }
 
-  // Pro: read this week’s quota
+  // Pro: read this week’s quota + stored brief
   let used = 0;
   if (isPro) {
     const { data: usageRow, error: usageReadErr } = await db
       .from("weekly_brief_generation_usage")
-      .select("generation_count")
+      .select("generation_count, brief_text, brief_generated_at")
       .eq("user_id", userId)
       .eq("week_start", weekStart)
       .maybeSingle();
@@ -200,6 +209,8 @@ async function handler(req, res) {
         used,
         week_start: weekStart,
         can_generate: used < WEEKLY_BRIEF_GEN_LIMIT,
+        text: usageRow?.brief_text || null,
+        generated_at: usageRow?.brief_generated_at || null,
       });
     }
 
@@ -231,12 +242,15 @@ async function handler(req, res) {
     if (!text) return res.status(500).json({ error: "Empty response from AI" });
 
     const nextCount = used + 1;
+    const generatedAt = new Date().toISOString();
     const { error: upsertErr } = await db.from("weekly_brief_generation_usage").upsert(
       {
         user_id: userId,
         week_start: weekStart,
         generation_count: nextCount,
-        updated_at: new Date().toISOString(),
+        brief_text: text,
+        brief_generated_at: generatedAt,
+        updated_at: generatedAt,
       },
       { onConflict: "user_id,week_start" },
     );
@@ -248,6 +262,7 @@ async function handler(req, res) {
     console.log(JSON.stringify({ level: "info", msg: "weekly-summary generated", userId, words: text.split(/\s+/).length, weekStart, genCount: nextCount, isPro }));
     return res.json({
       text,
+      generated_at: generatedAt,
       limit: isPro ? WEEKLY_BRIEF_GEN_LIMIT : 1,
       used: nextCount,
       week_start: weekStart,
