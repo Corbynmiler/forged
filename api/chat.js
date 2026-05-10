@@ -263,6 +263,9 @@ const HARD_CONFIRM_RE = /\b(confirm|confirmed)\b/i;
 const YES_CONFIRM_RE = /\b(yes|yep|yeah|do it|go ahead|please do|that's right|that is right)\b/i;
 const TARGET_CONFIRMATION_PROMPT_RE = /\b(confirm|update your target weight|change.{0,40}target|target.{0,40}important edit)\b/i;
 const WEIGHT_PROGRESS_RE = /\b(weigh|weighed|weight|kg|kgs|kilogram|kilograms|lb|lbs|pound|pounds)\b/i;
+/** Explicit current body-weight check-in (bypasses PROGRESS_LOG_RE-only phrasing like "I am 67kg"). */
+const EXPLICIT_CURRENT_WEIGHT_RE =
+  /\b(i\s+(?:am|weigh|weight)|i'?m|currently|right\s+now|today|this\s+morning)\s+\d+\s*(kg|lbs|pounds|kilos)\b/i;
 const PROGRESS_LOG_RE = /\b(log|logged|check in|check-in|current|progress|today|now|at)\b/i;
 
 function buildActionSafety(messages = []) {
@@ -288,6 +291,10 @@ function isClearGoalProgressLog(input, goalRow, safety) {
   const text = safety.latestUserText || "";
   const normalized = safety.normalizedUserText || "";
   if (!normalized || safety.asksMissingLogs) return false;
+
+  // Clear "I am / I weigh / currently X kg" check-in — even if they also say "don't change my target"
+  // (GOAL_TARGET_UPDATE_RE); target edits remain gated on edit_habit, not here.
+  if (EXPLICIT_CURRENT_WEIGHT_RE.test(text)) return true;
 
   const unit = normText(goalRow?.unit || "");
   const tokens = significantGoalTokens(goalRow?.name || input.habit_name || "");

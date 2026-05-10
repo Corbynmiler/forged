@@ -7,6 +7,9 @@ import {
 import { Modal, GBtn, PBtn, FG, lbl, inp } from "../components/ui.jsx";
 import { useScrollLock } from "../hooks/useScrollLock.js";
 
+/** Must match /api/nudge-friend.js — max nudges per friend per sender-local calendar day. */
+const NUDGE_DAILY_LIMIT = 3;
+
 export function LogGoalModal({ goal, onClose, onLog }) {
   const [val,  setVal]  = useState("");
   const [note, setNote] = useState("");
@@ -400,12 +403,12 @@ export function SocialScreen({ user, xp, habits, friends, friendRequests, sentRe
   const [addError,           setAddError]           = useState("");
   const [addLoading,         setAddLoading]         = useState(false);
   const [addDone,            setAddDone]            = useState(false);
-  // --- Nudge cooldown persistence ----------------------------------------
-  // Stored per-day in localStorage so the "nudged ✓" state survives
-  // reloads / tab switches. Old keys for previous days are purged on mount.
+  // --- Nudge counts persistence (per friend, per sender-local calendar day) ---
+  // Stored in localStorage so UI matches daily limits across reloads. Purge stale day keys on mount.
   const NUDGED_KEY_PREFIX = "forged_nudged_today_";
   function nudgedStorageKey(dayStr) { return `${NUDGED_KEY_PREFIX}${dayStr}`; }
-  function loadNudgedToday() {
+  /** @returns {Record<string, number>} friendId -> nudges sent today (capped) */
+  function loadNudgeCountsToday() {
     try {
       const t = todayStr();
       const toRemove = [];
@@ -417,17 +420,37 @@ export function SocialScreen({ user, xp, habits, friends, friendRequests, sentRe
       }
       toRemove.forEach(k => { try { localStorage.removeItem(k); } catch {} });
       const raw = localStorage.getItem(nudgedStorageKey(t));
-      if (!raw) return new Set();
-      const arr = JSON.parse(raw);
-      return new Set(Array.isArray(arr) ? arr : []);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const out = {};
+        for (const [id, v] of Object.entries(parsed)) {
+          const n = Number(v);
+          if (Number.isFinite(n) && n > 0) out[id] = Math.min(NUDGE_DAILY_LIMIT, n);
+        }
+        return out;
+      }
+      // Legacy: array of friend ids (treated as one nudge each)
+      if (Array.isArray(parsed)) {
+        const out = {};
+        for (const id of parsed) {
+          if (typeof id === "string") out[id] = Math.min(NUDGE_DAILY_LIMIT, (out[id] || 0) + 1);
+        }
+        return out;
+      }
+      return {};
     } catch {
-      return new Set();
+      return {};
     }
   }
-  function persistNudgedToday(set) {
+  function persistNudgeCountsToday(map) {
     try {
-      localStorage.setItem(nudgedStorageKey(todayStr()), JSON.stringify([...set]));
+      localStorage.setItem(nudgedStorageKey(todayStr()), JSON.stringify(map));
     } catch {}
+  }
+  function nudgeCountForFriend(map, userId) {
+    const n = Number(map[userId]);
+    return Number.isFinite(n) && n > 0 ? Math.min(NUDGE_DAILY_LIMIT, n) : 0;
   }
 
   // Per-goal all-time best group streak. Reads from localStorage and bumps the
@@ -460,14 +483,19 @@ export function SocialScreen({ user, xp, habits, friends, friendRequests, sentRe
   // the Add friend form. Keeps the main Social page focused on leaderboard
   // and accountability while preserving every friend flow.
   const [showFriendsSheet,   setShowFriendsSheet]   = useState(false);
-  const [nudgedToday,        setNudgedToday]        = useState(loadNudgedToday);
-  // Marks a userId as nudged for today in both React state and localStorage,
-  // so the "nudged ✓" pill persists across tab switches and reloads.
-  function markNudged(userId) {
-    setNudgedToday(prev => {
-      if (prev.has(userId)) return prev;
-      const next = new Set([...prev, userId]);
-      persistNudgedToday(next);
+  const [nudgeCountsToday, setNudgeCountsToday] = useState(loadNudgeCountsToday);
+  function bumpNudgeCount(userId) {
+    setNudgeCountsToday(prev => {
+      const next = { ...prev, [userId]: Math.min(NUDGE_DAILY_LIMIT, (prev[userId] || 0) + 1) };
+      persistNudgeCountsToday(next);
+      return next;
+    });
+  }
+  /** When the server returns 429, align local counts so the UI stays in sync. */
+  function setNudgeCountToLimit(userId) {
+    setNudgeCountsToday(prev => {
+      const next = { ...prev, [userId]: NUDGE_DAILY_LIMIT };
+      persistNudgeCountsToday(next);
       return next;
     });
   }
@@ -1294,13 +1322,14 @@ export function SocialScreen({ user, xp, habits, friends, friendRequests, sentRe
                       : (g.habitType === "goal" && todayGoalNums.length)
                         ? `● ${todayGoalNums[todayGoalNums.length - 1]}`
                         : mLoggedToday ? "✓ done" : "— not yet";
-                    const alreadyNudged = nudgedToday.has(m.userId);
+                    const nudgeCount = nudgeCountForFriend(nudgeCountsToday, m.userId);
+                    const atNudgeLimit = nudgeCount >= NUDGE_DAILY_LIMIT;
                     // Free users see the nudge affordance but tapping it routes
                     // to the upgrade modal — accountability/nudges are a Pro
                     // feature (see landing "Accountability + nudge features").
-                    const canShowNudge = !m.isMe && !mOnTrack && !alreadyNudged && onNudgeFriend;
+                    const canShowNudge = !m.isMe && !mOnTrack && !atNudgeLimit && onNudgeFriend;
                     const canNudge = canShowNudge && isPro;
-                    const nudgeLocked = canShowNudge && !isPro;
+                    const nudgeLocked = !m.isMe && !mOnTrack && !atNudgeLimit && onNudgeFriend && !isPro;
                     const isLeader = leaderId && m.userId === leaderId;
                     return (
                       <div key={m.userId} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
@@ -1345,8 +1374,13 @@ export function SocialScreen({ user, xp, habits, friends, friendRequests, sentRe
                             <span style={{ fontSize:8, fontWeight:800, color:"#0F0F0D", background:T.gold, padding:"1px 4px", borderRadius:4, letterSpacing:"0.04em" }}>PRO</span>
                           </button>
                         )}
-                        {!m.isMe && alreadyNudged && !mOnTrack && (
-                          <span style={{ fontSize: 10, color: T.muted, flexShrink: 0, marginLeft: 4 }}>nudged ✓</span>
+                        {!m.isMe && atNudgeLimit && !mOnTrack && (
+                          <span style={{ fontSize: 10, color: T.muted, flexShrink: 0, marginLeft: 4 }} title="Daily nudge limit reached">
+                            3/3 today
+                          </span>
+                        )}
+                        {!m.isMe && nudgeCount > 0 && nudgeCount < NUDGE_DAILY_LIMIT && !mOnTrack && (
+                          <span style={{ fontSize: 10, color: T.muted, flexShrink: 0, marginLeft: 4 }}>{nudgeCount}/3 today</span>
                         )}
                       </div>
                     );
@@ -1722,10 +1756,11 @@ export function SocialScreen({ user, xp, habits, friends, friendRequests, sentRe
         const sharedWithFriend = sharedGoals.filter(g =>
           g.members.some(m => m.userId === f.id) && g.members.some(m => m.isMe)
         );
-        const alreadyNudged = nudgedToday.has(f.id);
+        const friendNudgeCount = nudgeCountForFriend(nudgeCountsToday, f.id);
+        const friendAtNudgeLimit = friendNudgeCount >= NUDGE_DAILY_LIMIT;
 
         function handleNudge() {
-          if (!onNudgeFriend || alreadyNudged) return;
+          if (!onNudgeFriend || friendAtNudgeLimit) return;
           setNudgeTarget({ userId: f.id, name: f.name || "Friend" });
           setNudgeMessage("");
         }
@@ -1810,17 +1845,27 @@ export function SocialScreen({ user, xp, habits, friends, friendRequests, sentRe
               {isPro ? (
                 <button
                   onClick={handleNudge}
-                  disabled={alreadyNudged}
+                  disabled={friendAtNudgeLimit}
                   style={{
                     width: "100%", padding: "13px 0", borderRadius: T.rsm, border: "none",
-                    background: alreadyNudged ? T.surface : T.gold,
-                    color: alreadyNudged ? T.muted : "#0F0F0D",
-                    fontSize: 15, fontWeight: 700, cursor: alreadyNudged ? "default" : "pointer",
+                    background: friendAtNudgeLimit ? T.surface : T.gold,
+                    color: friendAtNudgeLimit ? T.muted : "#0F0F0D",
+                    fontSize: 15, fontWeight: 700, cursor: friendAtNudgeLimit ? "default" : "pointer",
                     transition: "all 0.2s",
                   }}>
-                  {alreadyNudged ? "💪 Nudged today" : "💪 Nudge"}
+                  {friendAtNudgeLimit
+                    ? "💪 3/3 nudges today"
+                    : friendNudgeCount > 0
+                      ? `💪 Nudge again (${friendNudgeCount}/${NUDGE_DAILY_LIMIT} today)`
+                      : "💪 Nudge"}
                 </button>
-              ) : (
+              ) : null}
+              {isPro && friendAtNudgeLimit && (
+                <div style={{ fontSize: 12, color: T.muted, textAlign: "center", marginTop: 10, lineHeight: 1.45, padding: "0 8px" }}>
+                  You’ve nudged them {NUDGE_DAILY_LIMIT} times today. Give them a bit of breathing room and try again tomorrow.
+                </div>
+              )}
+              {isPro ? null : (
                 <button
                   onClick={() => { onUpgrade?.(); setSelectedFriend(null); }}
                   style={{
@@ -1882,13 +1927,19 @@ export function SocialScreen({ user, xp, habits, friends, friendRequests, sentRe
                 setNudgeSending(false);
                 if (res?.error) {
                   onToast?.(`Couldn't send nudge — ${res.error}`);
-                  if (String(res.error).toLowerCase().includes("already nudged")) {
-                    markNudged(nudgeTarget.userId);
+                  const errLow = String(res.error).toLowerCase();
+                  if (
+                    errLow.includes("already nudged") ||
+                    errLow.includes("3 times today") ||
+                    errLow.includes("breathing room") ||
+                    res.limit != null
+                  ) {
+                    setNudgeCountToLimit(nudgeTarget.userId);
                   }
                   return;
                 }
                 onToast?.("💪 Nudge sent!");
-                markNudged(nudgeTarget.userId);
+                bumpNudgeCount(nudgeTarget.userId);
                 setNudgeTarget(null);
                 setNudgeMessage("");
               }}

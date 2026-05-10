@@ -392,7 +392,29 @@ export function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHa
   const unitSuffix = habit.unit && habit.unit !== "logged" ? ` ${habit.unit}` : "";
   const limitMetaColor = logged ? (over ? T.accent : T.green) : T.hint;
   const [habitMenuOpen, setHabitMenuOpen] = useState(false);
+  /** 0 idle, 1 snap green, 2 fade to normal (Option A counter flash) */
+  const [countFlashPhase, setCountFlashPhase] = useState(0);
+  const countFlashSeqRef = useRef(0);
   const longPeek = useTodayHabitLongPeekHandlers(setHabitMenuOpen, !!(onEditHabit && onDeleteHabit));
+
+  function handleLimitPlusTap(e) {
+    const seq = ++countFlashSeqRef.current;
+    setCountFlashPhase(1);
+    onTap(habit.id, e);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (countFlashSeqRef.current !== seq) return;
+        setCountFlashPhase(2);
+        window.setTimeout(() => {
+          if (countFlashSeqRef.current !== seq) return;
+          setCountFlashPhase(0);
+        }, 600);
+      });
+    });
+  }
+
+  const countColor = countFlashPhase === 1 ? T.green : limitMetaColor;
+  const countTransition = countFlashPhase === 1 ? "none" : "color 0.6s ease";
   return (
     <div className="rc" style={{ ...cardStyle(false, habit), borderColor:over?T.accent+"66":T.border, background:over?`${T.accent}0A`:T.raised }} {...longPeek}>
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
@@ -401,7 +423,7 @@ export function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHa
           <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{habit.name}</div>
           <div style={{ fontSize:12, marginTop:2, lineHeight:1.4 }}>
             {logged ? (
-              <span style={{ color:limitMetaColor, fontWeight:500 }}>{used}/{budget} today{unitSuffix}</span>
+              <span style={{ color:countColor, fontWeight:500, transition:countTransition }}>{used}/{budget} today{unitSuffix}</span>
             ) : (
               <span style={{ color:T.hint }}>Limit <span style={{ color:T.muted, fontWeight:500 }}>{budget}{unitSuffix}</span><span style={{ color:T.hint }}> · not logged yet</span></span>
             )}
@@ -411,14 +433,14 @@ export function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHa
         {onEditHabit && onDeleteHabit && <TodayOverflowDotsBtn expanded={habitMenuOpen} onToggle={() => setHabitMenuOpen(p => !p)} />}
         <div style={{ display:"flex", gap:6, flexShrink:0 }}>
           {logged && <button className="tap" onClick={() => onUndo(habit.id)} style={{ width:40, height:40, borderRadius:"50%", border:`1.5px solid ${T.borderMid}`, background:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, color:T.muted, transition:"all 0.18s" }}>−</button>}
-          <button className="tap" onClick={e => onTap(habit.id, e)} style={{ width:44, height:44, borderRadius:"50%", border:`2px solid ${habit.color+"66"}`, background:"transparent", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, color:habit.color, fontWeight:300, transition:"all 0.18s" }}>+</button>
+          <button className="tap" onClick={handleLimitPlusTap} style={{ width:44, height:44, borderRadius:"50%", border:`2px solid ${habit.color+"66"}`, background:"transparent", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, color:habit.color, fontWeight:300, transition:"all 0.18s" }}>+</button>
         </div>
       </div>
       {onEditHabit && onDeleteHabit && <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} onShareHabit={onShareHabit} shareSaving={!!sharingThisHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} />}
       {logged ? (
         <div style={{ padding:"0 15px 14px" }}>
           <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:T.muted, marginBottom:5 }}>
-            <span>{used}/{budget} {habit.unit || "logged"}</span>
+            <span style={{ color:countColor, transition:countTransition }}>{used}/{budget} {habit.unit || "logged"}</span>
             <span style={{ color:barColor, fontWeight:500 }}>{over ? `${used - budget} over limit` : `${budget - used} remaining`}</span>
           </div>
           <div style={{ height:6, background:T.surface, borderRadius:3, overflow:"hidden" }}>

@@ -182,6 +182,8 @@ export default function App() {
   const [showCoachTeaser, setShowCoachTeaser] = useState(false);
   /** Message recorded via page-level mic, auto-sent when AICoach mounts. Cleared after use. */
   const [coachPendingMsg, setCoachPendingMsg] = useState(null);
+  /** Pre-fills the coach text input on open (not auto-sent). Cleared on close. */
+  const [coachDraftInput, setCoachDraftInput] = useState(null);
   // Accumulates finals + stop-time interim flush across Web Speech segments. Same session
   // as in-chat dictation: browsers end recognition after pauses unless we auto-restart.
   const pageDictationAccumulatorRef = useRef("");
@@ -208,6 +210,7 @@ export default function App() {
       pageDictationAccumulatorRef.current = "";
       if (msg) {
         if (import.meta.env.DEV) console.log("[pageSpeech] handoff", msg.length, "chars");
+        setCoachDraftInput(null);
         setCoachPendingMsg(msg);
         try { localStorage.setItem("forged_coach_opened", "1"); } catch { /* ignore */ }
         setCoachEverOpened(true);
@@ -967,10 +970,22 @@ export default function App() {
       const res = await fetch("/api/nudge-friend", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ recipientId, type: "nudge", message: message || undefined }),
+        body: JSON.stringify({
+          recipientId,
+          type: "nudge",
+          message: message || undefined,
+          client_date: todayStr(),
+        }),
       });
       const json = await res.json().catch(() => ({}));
-      if (res.status === 429) return { error: json.error || "Already nudged today" };
+      if (res.status === 429) {
+        return {
+          error:
+            json.error ||
+            "You've nudged them 3 times today. Give them a bit of breathing room and try again tomorrow.",
+          limit: json.limit,
+        };
+      }
       if (!res.ok) return { error: json.error || "Couldn't send nudge" };
       return { success: true, ...json };
     } catch(e) {
@@ -2968,7 +2983,17 @@ export default function App() {
   function openCoachWithMode(mode) {
     try { localStorage.setItem("forged_coach_opened", "1"); } catch { /* ignore */ }
     setCoachEverOpened(true);
+    setCoachDraftInput(null);
     setCoachOpenMode(mode);
+    setShowCoach(true);
+  }
+
+  function openCoachWithDraft(text) {
+    try { localStorage.setItem("forged_coach_opened", "1"); } catch { /* ignore */ }
+    setCoachEverOpened(true);
+    setCoachPendingMsg(null);
+    setCoachDraftInput(String(text ?? "").trim());
+    setCoachOpenMode("text");
     setShowCoach(true);
   }
 
@@ -3295,7 +3320,7 @@ export default function App() {
             >×</button>
           </div>
         )}
-        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} coachEverOpened={coachEverOpened} onOpenCoachMic={() => openCoachWithMode("mic")} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} hideFloatingAdd onOpenGoalDetail={id => setOpenGoalId(id)}/>}
+        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} coachEverOpened={coachEverOpened} onOpenCoachMic={() => openCoachWithMode("mic")} onOpenCoachWithDraft={openCoachWithDraft} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} hideFloatingAdd onOpenGoalDetail={id => setOpenGoalId(id)}/>}
         {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} journalEntries={journalEntries} onSaveJournalEntry={handleSaveJournalEntry} initialTab={showJournalCompose ? "journal" : undefined} onInitialComposeDone={() => setShowJournalCompose(false)} userName={user.name || ""}/>}
         {screen === "insights" && <InsightsScreen habits={habits} goals={goals} journalEntries={journalEntries} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} userId={sessionUserId} userName={user.name || ""}/>}
         {screen === "social"   && <SocialScreen
@@ -3627,8 +3652,9 @@ export default function App() {
       {logId && logHabit?.habitType === "project"  && <LogProjectModal   habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
       {showCoach   && <AICoach key={sessionUserId || "anon"} openInputMode={coachOpenMode}
           pendingMessage={coachPendingMsg}
+          draftInput={coachDraftInput}
           habits={habits} goals={goals} user={user} isPro={isPro}
-          onClose={() => { setShowCoach(false); setCoachOpenMode(null); setCoachPendingMsg(null); }}
+          onClose={() => { setShowCoach(false); setCoachOpenMode(null); setCoachPendingMsg(null); setCoachDraftInput(null); }}
           onUpgrade={() => setShowUpgrade(true)} coachName={coachName}
           coachIcon={coachIcon}
           coachAccentColor={habits.find(h => h.habitType !== "log")?.color || T.accent}

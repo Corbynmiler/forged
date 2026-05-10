@@ -14,6 +14,9 @@ const anonKey =
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
   PUBLIC_ANON_FALLBACK;
 
+/** Max friend nudges one user may send to the same recipient per sender-local calendar day. */
+const NUDGES_PER_FRIEND_PER_DAY = 3;
+
 const vapidPublic = process.env.VAPID_PUBLIC_KEY;
 const vapidPrivate = process.env.VAPID_PRIVATE_KEY;
 const hasVapid = !!(vapidPublic && vapidPrivate);
@@ -203,35 +206,55 @@ async function handler(req, res) {
     return res.status(200).json({ ...push, saved: false });
   }
 
-  // The nudges row's sent_at is a UTC timestamp written by Postgres (`now()`).
-  // Replace the old "since UTC midnight" filter with a strict 24h window so
-  // the cooldown is timezone-independent and doesn't roll over awkwardly at
-  // UTC midnight for users east of UTC. clientDate is reserved for future
-  // local-day-aligned cooldowns when we add a TZ offset to the request.
-  void clientDate;
-  const oneDayAgoIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const { data: existing } = await userSupabase
+  // Per-friend daily cap on the sender's local calendar day (client_date), not a rolling 24h window.
+  const utcFallback = new Date().toISOString().slice(0, 10);
+  const dayKey = clientDate || utcFallback;
+
+  const { count: nudgeCount, error: countErr } = await userSupabase
     .from("nudges")
-    .select("id")
+    .select("id", { count: "exact", head: true })
     .eq("sender_id", senderId)
     .eq("recipient_id", recipientId)
-    .gte("sent_at", oneDayAgoIso)
-    .maybeSingle();
+    .eq("sender_client_date", dayKey);
 
-  if (existing) return res.status(429).json({ error: "Already nudged this friend today" });
+  if (countErr) {
+    console.error("[nudge-friend] count:", countErr);
+    if (countErr.code === "42703" || /sender_client_date/i.test(countErr.message || "")) {
+      return res.status(503).json({
+        error: "Nudges column missing — run Supabase migration 20260510120000_nudges_sender_client_date.sql",
+      });
+    }
+    return res.status(500).json({ error: countErr.message || "Could not verify nudge limit" });
+  }
 
-  const { error: insertErr } = await userSupabase.from("nudges").insert({
+  const nudgeLimitMessage = `You've nudged them ${NUDGES_PER_FRIEND_PER_DAY} times today. Give them a bit of breathing room and try again tomorrow.`;
+
+  if ((nudgeCount ?? 0) >= NUDGES_PER_FRIEND_PER_DAY) {
+    return res.status(429).json({ error: nudgeLimitMessage, limit: NUDGES_PER_FRIEND_PER_DAY });
+  }
+
+  const insertPayload = {
     sender_id: senderId,
     recipient_id: recipientId,
     sender_name: senderName,
     message: message?.trim() || null,
-  });
+    sender_client_date: dayKey,
+  };
+
+  const { error: insertErr } = await userSupabase.from("nudges").insert(insertPayload);
 
   if (insertErr) {
-    if (insertErr.code === "23505") return res.status(429).json({ error: "Already nudged today" });
+    if (insertErr.code === "23505") {
+      return res.status(429).json({ error: nudgeLimitMessage, limit: NUDGES_PER_FRIEND_PER_DAY });
+    }
     if (insertErr.code === "42P01" || /relation.*nudges does not exist/i.test(insertErr.message || "")) {
       return res.status(503).json({
         error: "Nudges table missing — run Supabase migration 20260418000000_nudges_table_realtime.sql",
+      });
+    }
+    if (insertErr.code === "42703" || /sender_client_date/i.test(insertErr.message || "")) {
+      return res.status(503).json({
+        error: "Nudges column missing — run Supabase migration 20260510120000_nudges_sender_client_date.sql",
       });
     }
     console.error("[nudge-friend] insert:", insertErr);

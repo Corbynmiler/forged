@@ -49,7 +49,6 @@ const IDS = {
   junk: "b1e00001-0001-4001-8001-000000000005",
   study: "b1e00001-0001-4001-8001-000000000006",
   weight: "b1e00001-0001-4001-8001-000000000007",
-  moodLog: "b1e00001-0001-4001-8001-000000000008",
 };
 
 function toYmd(d) {
@@ -88,7 +87,6 @@ function baseHabitRow(overrides) {
     shared_goal_id: null,
     goal_status: null,
     target_date: null,
-    direction: null,
     updated_at: now,
     ...overrides,
   };
@@ -218,13 +216,6 @@ function buildDemoPayload(userId, dayStrs) {
     { date: d(13), value: 215.7, note: "scale bounced 216 yesterday, whatever" },
   ];
 
-  const moodLogs = [
-    { date: d(1), value: "log", note: "kinda down but trying not to spiral" },
-    { date: d(4), value: "log", note: "better mood after the walk. not magic but better" },
-    { date: d(8), value: "log", note: "irritable until i drank water lol" },
-    { date: d(12), value: "log", note: "small win: didnt order delivery tonight" },
-  ];
-
   const end = new Date();
   end.setHours(12, 0, 0, 0);
   end.setDate(end.getDate() + 52);
@@ -320,20 +311,7 @@ function buildDemoPayload(userId, dayStrs) {
       unit: "lbs",
       target_date: weightTargetDate,
       goal_status: "active",
-      direction: "decreasing",
       logs: weightLogs,
-      streak: 0,
-      best_streak: 0,
-      reflection: false,
-    }),
-    baseHabitRow({
-      id: IDS.moodLog,
-      user_id: userId,
-      name: "Quick mood",
-      emoji: "📝",
-      habit_type: "log",
-      color: "#95A5A6",
-      logs: moodLogs,
       streak: 0,
       best_streak: 0,
       reflection: false,
@@ -342,14 +320,26 @@ function buildDemoPayload(userId, dayStrs) {
 
   const journalRows = [
     {
+      date: d(1),
+      content: "kinda down but trying not to spiral",
+    },
+    {
       date: d(2),
       content:
         "Rough Tuesday. Didn't sleep enough and everything felt harder — snapped at my roommate over dishes like a loser. I still logged stuff though. That's new for me.",
     },
     {
+      date: d(4),
+      content: "better mood after the walk. not magic but better",
+    },
+    {
       date: d(6),
       content:
         "Weirdly good day? Walked, studied, and I wasn't as hungry for garbage food. I think the sleep thing is the real boss fight. When I'm tired I reach for everything.",
+    },
+    {
+      date: d(8),
+      content: "irritable until i drank water lol",
     },
     {
       date: d(9),
@@ -360,6 +350,10 @@ function buildDemoPayload(userId, dayStrs) {
       date: d(11),
       content:
         "Two weeks of this app and I'm not 'fixed' — but I'm paying attention more. The weight number moved a tiny bit. I'll take it.",
+    },
+    {
+      date: d(12),
+      content: "small win: didnt order delivery tonight",
     },
     {
       date: d(13),
@@ -385,6 +379,13 @@ function emitPostgresSql({ habitRows, journalRows, dayStrs }) {
   lines.push("-- Demo seed: Client Test account");
   lines.push("-- Resolves user_id from auth.users by email; safe to re-run.");
   lines.push("begin;");
+  lines.push("");
+  lines.push(`do $guard$
+begin
+  if not exists (select 1 from auth.users where lower(email) = lower(${emailLit})) then
+    raise exception 'No auth.users row for email %', ${emailLit};
+  end if;
+end $guard$;`);
   lines.push("");
   lines.push(`with demo_user as (
   select id as user_id from auth.users where lower(email) = lower(${emailLit}) limit 1
@@ -421,7 +422,6 @@ where p.id = u.user_id;`);
     "shared_goal_id",
     "goal_status",
     "target_date",
-    "direction",
     "updated_at",
   ];
 
@@ -448,7 +448,6 @@ where p.id = u.user_id;`);
       "null",
       row.goal_status == null ? "null" : sqlLiteral(row.goal_status),
       row.target_date == null ? "null" : sqlLiteral(row.target_date),
-      row.direction == null ? "null" : sqlLiteral(row.direction),
       "now()",
     ];
     lines.push(`with demo_user as (
@@ -477,7 +476,6 @@ on conflict (id) do update set
   shared_goal_id = excluded.shared_goal_id,
   goal_status = excluded.goal_status,
   target_date = excluded.target_date,
-  direction = excluded.direction,
   updated_at = excluded.updated_at;`);
     lines.push("");
   }
