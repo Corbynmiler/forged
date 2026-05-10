@@ -80,7 +80,7 @@ function buildCoachGreetingLine({ habits, goals }) {
   const skipPattern = findSkippedDayPattern(trackHabits);
   if (skipPattern) return skipPattern;
 
-  if (all)  return tod === "morning" ? "All habits in — you're ahead today." : tod === "afternoon" ? "Full sweep already — nice." : "Everything logged — how was the day?";
+  if (all)  return "Clean day.";
   if (some) return tod === "morning" ? "Good start — clear the rest when ready." : tod === "afternoon" ? "Halfway through — log what's left?" : "Solid progress — finish the set tonight?";
   if (none) return tod === "morning" ? "Morning — tap a habit when you're ready." : tod === "afternoon" ? "Still time to log something today." : "Evening — log what you got done?";
   return tod === "morning" ? "How's the morning going?" : tod === "evening" ? "How did today go?" : "How's the day going?";
@@ -144,11 +144,11 @@ export function TodayScreen({
         <div style={{ fontSize:14, color:T.muted, lineHeight:1.75, marginBottom:28 }}>
           Add a habit to track daily, or tell the coach what outcome you're working toward — it will help you build a plan.
         </div>
-        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-          <button onClick={onAdd} style={{ padding:"13px 24px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer" }}>Add a habit</button>
+        <div style={{ display:"flex", flexDirection:"column", gap:12, alignItems:"center" }}>
+          <button onClick={onAdd} style={{ padding:"13px 24px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer" }}>Add your first habit</button>
           {onOpenCoachMic && (
-            <button onClick={onOpenCoachMic} style={{ padding:"13px 24px", borderRadius:T.rsm, border:"0.5px solid rgba(200,144,42,0.5)", background:"rgba(200,144,42,0.08)", color:T.gold, fontSize:14, fontWeight:600, cursor:"pointer" }}>
-              ✨ Plan a goal with my coach
+            <button onClick={onOpenCoachMic} style={{ background:"none", border:"none", cursor:"pointer", color:T.muted, fontSize:13, textDecoration:"underline", textUnderlineOffset:3, padding:"2px 0", fontFamily:T.font }}>
+              Not sure what to track? Ask your coach
             </button>
           )}
         </div>

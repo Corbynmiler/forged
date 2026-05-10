@@ -392,7 +392,13 @@ export function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHa
   const unitSuffix = habit.unit && habit.unit !== "logged" ? ` ${habit.unit}` : "";
   const limitMetaColor = logged ? (over ? T.accent : T.green) : T.hint;
   const [habitMenuOpen, setHabitMenuOpen] = useState(false);
+  const [tapFlash, setTapFlash] = useState(false);
   const longPeek = useTodayHabitLongPeekHandlers(setHabitMenuOpen, !!(onEditHabit && onDeleteHabit));
+  function handleLimitTap(e) {
+    onTap(habit.id, e);
+    setTapFlash(true);
+    setTimeout(() => setTapFlash(false), 600);
+  }
   return (
     <div className="rc" style={{ ...cardStyle(false, habit), borderColor:over?T.accent+"66":T.border, background:over?`${T.accent}0A`:T.raised }} {...longPeek}>
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
@@ -401,7 +407,7 @@ export function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHa
           <div style={{ fontSize:15, fontWeight:500, color:T.text }}>{habit.name}</div>
           <div style={{ fontSize:12, marginTop:2, lineHeight:1.4 }}>
             {logged ? (
-              <span style={{ color:limitMetaColor, fontWeight:500 }}>{used}/{budget} today{unitSuffix}</span>
+              <span style={{ color: tapFlash ? T.green : limitMetaColor, fontWeight:500, transition:"color 0.15s ease" }}>{used}/{budget} today{unitSuffix}</span>
             ) : (
               <span style={{ color:T.hint }}>Limit <span style={{ color:T.muted, fontWeight:500 }}>{budget}{unitSuffix}</span><span style={{ color:T.hint }}> · not logged yet</span></span>
             )}
@@ -411,7 +417,7 @@ export function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHa
         {onEditHabit && onDeleteHabit && <TodayOverflowDotsBtn expanded={habitMenuOpen} onToggle={() => setHabitMenuOpen(p => !p)} />}
         <div style={{ display:"flex", gap:6, flexShrink:0 }}>
           {logged && <button className="tap" onClick={() => onUndo(habit.id)} style={{ width:40, height:40, borderRadius:"50%", border:`1.5px solid ${T.borderMid}`, background:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, color:T.muted, transition:"all 0.18s" }}>−</button>}
-          <button className="tap" onClick={e => onTap(habit.id, e)} style={{ width:44, height:44, borderRadius:"50%", border:`2px solid ${habit.color+"66"}`, background:"transparent", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, color:habit.color, fontWeight:300, transition:"all 0.18s" }}>+</button>
+          <button className="tap" onClick={handleLimitTap} style={{ width:44, height:44, borderRadius:"50%", border:`2px solid ${tapFlash ? T.green : habit.color+"66"}`, background: tapFlash ? `${T.green}18` : "transparent", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, color: tapFlash ? T.green : habit.color, fontWeight:300, transition:"all 0.15s ease" }}>+</button>
         </div>
       </div>
       {onEditHabit && onDeleteHabit && <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} onShareHabit={onShareHabit} shareSaving={!!sharingThisHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} />}
