@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { T, COACH_ICON_OPTIONS, PROFILE_DISPLAY_NAME_MAX, PROFILE_COACH_NAME_MAX, FREE_DAILY_LIMIT, clampProfileDisplayName, clampProfileCoachName, FREE_DAILY_LIMIT } from "../theme.js";
+import { T, COACH_ICON_OPTIONS, PROFILE_DISPLAY_NAME_MAX, PROFILE_COACH_NAME_MAX, clampProfileDisplayName, clampProfileCoachName, FREE_DAILY_LIMIT } from "../theme.js";
 import { supabase } from "../supabase.js";
 import {
   getLevel, nextLevel, getStreak, getBestStreak,
