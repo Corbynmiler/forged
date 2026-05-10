@@ -1883,7 +1883,7 @@ function CoachReceiptChips({ receiptText, onNavigateTo, onClose }) {
     <div style={{ display:"flex", flexWrap:"wrap", gap:5 }}>
       {lines.map((line, i) => {
         const isError  = line.trimStart().startsWith("✗");
-        const isJournal = line.includes("Journal");
+        const isJournal = /journal/i.test(line);
         const label = line.replace(/^[✓✗]\s*/, "").trim();
         const navTarget = isJournal ? "journal" : "today";
         const canNav = !isError && !!onNavigateTo;

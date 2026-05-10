@@ -156,18 +156,19 @@ async function handler(req, res) {
 
   const date = DATE_RE.test(rawDate) ? rawDate : new Date().toISOString().slice(0, 10);
 
-  // Fetch any existing journal content for today (AI notes from conversation)
+  // Fetch any existing journal entry for today
   const { data: existing } = await db
     .from("journal_entries")
-    .select("id, content, is_ai_generated")
+    .select("id, content, context_notes, is_ai_generated")
     .eq("user_id", userId)
     .eq("date", date)
     .maybeSingle();
 
-  // If there's existing content that was manually written (not AI generated), preserve it as context
-  const existingNotes = (existing && existing.is_ai_generated === false && existing.content)
-    ? existing.content
-    : (existing?.content || "");
+  // Prefer context_notes (chat-captured source material). Fall back to content
+  // only if it was manually written (not AI-generated), for backwards compat.
+  const existingNotes = existing?.context_notes ||
+    (existing && existing.is_ai_generated === false ? existing.content : "") ||
+    "";
 
   const prompt = buildGenerationPrompt({ date, habits, goals, name, existingNotes });
 

@@ -106,13 +106,15 @@ const COACH_TOOLS = [
   {
     name: "log_journal",
     description:
-      "Saves to the Journal tab (freeform daily page) — personal thoughts, feelings, relationships, stress, life story, " +
-      "anything emotional or narrative that is NOT just numbers/sessions to log on a habit. " +
-      "If the user sends ONE message that mixes Forged/build/gym/calories (structured) WITH personal/life/emotional content, " +
-      "you MUST call log_habit for each structured fact AND log_journal for the human story in the SAME turn when both exist. " +
-      "Do not omit log_journal to save tokens — the user expects the personal part in Journal. " +
+      "Captures personal context, feelings, reflections, and life narrative for the day — NOT habits or numbers. " +
+      "This saves the user's words as SOURCE MATERIAL for today's daily journal, NOT as the polished journal entry itself. " +
+      "The polished journal is generated separately (via the Regenerate button on the Journal tab) using this context. " +
+      "If the user sends ONE message that mixes structured habit data WITH personal/emotional content, " +
+      "you MUST call log_habit for each structured fact AND log_journal for the human story in the SAME turn. " +
+      "Do not omit log_journal to save tokens — the user expects personal content to be preserved. " +
       "Put structured facts in habits; put feelings, context, and narrative in log_journal (first person, their words). " +
-      "Appends to today's page if an entry already exists. " +
+      "IMPORTANT: After saving with this tool, tell the user their context was saved and will be folded into today's journal — " +
+      "do NOT say 'journal saved' or imply the polished journal entry was written. " +
       "If this tool returns success:false in the tool result, you did NOT save — say so honestly.",
     input_schema: {
       type: "object",
@@ -188,11 +190,7 @@ function buildActionReceipt(outcomes) {
       }
       lines.push(`✓ Logged ${n}${suffix}`);
     } else if (o.tool === "log_journal") {
-      lines.push(
-        o.mode === "replaced" || o.mode === "appended"
-          ? "✓ Journal — saved to today's page"
-          : `✓ Journal — saved (${o.date})`,
-      );
+      lines.push(`✓ Context saved for today's journal`);
     } else if (o.tool === "create_habit") {
       lines.push(`✓ Created ${o.name} (${o.habit_type})`);
     } else if (o.tool === "edit_habit") {
@@ -441,34 +439,36 @@ async function executeLogHabit(input, userId, db, clientDate, safety = buildActi
 
 async function executeLogJournal(input, userId, db, clientDate) {
   const date = clientDate || new Date().toISOString().slice(0, 10);
-  const content = (input.content || "").trim();
-  if (!content) throw new Error("Journal content cannot be empty.");
+  const newNote = (input.content || "").trim();
+  if (!newNote) throw new Error("Journal content cannot be empty.");
 
-  // Upsert: one entry per user per day. If an entry already exists, append the
-  // new content with a blank-line separator so multiple AI turns in a session
-  // don't clobber each other.
+  // Save as context_notes (source material), never touching the polished content column.
+  // Multiple notes in a day are appended with a separator.
   const { data: existing } = await db
     .from("journal_entries")
-    .select("id, content")
+    .select("id, context_notes")
     .eq("user_id", userId)
     .eq("date", date)
     .maybeSingle();
 
   if (existing) {
+    const combined = existing.context_notes
+      ? `${existing.context_notes}\n\n---\n\n${newNote}`
+      : newNote;
     const { error } = await db
       .from("journal_entries")
-      .update({ content, updated_at: new Date().toISOString() })
+      .update({ context_notes: combined, updated_at: new Date().toISOString() })
       .eq("id", existing.id);
-    if (error) throw new Error(`Journal save failed: ${error.message}`);
-    return { date, mode: "replaced", id: existing.id };
+    if (error) throw new Error(`Context save failed: ${error.message}`);
+    return { date, mode: "context_saved", id: existing.id };
   } else {
     const { data: row, error } = await db
       .from("journal_entries")
-      .insert({ user_id: userId, date, content })
+      .insert({ user_id: userId, date, context_notes: newNote })
       .select()
       .single();
-    if (error) throw new Error(`Journal save failed: ${error.message}`);
-    return { date, mode: "created", id: row.id };
+    if (error) throw new Error(`Context save failed: ${error.message}`);
+    return { date, mode: "context_saved", id: row.id };
   }
 }
 
