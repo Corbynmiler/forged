@@ -882,6 +882,13 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
       {mainTab === "journal" && (
         <div style={{ paddingBottom:32 }}>
 
+          {/* ── Explanation microcopy ── */}
+          <div style={{ padding:"0 18px 18px" }}>
+            <div style={{ fontSize:12, color:T.hint, lineHeight:1.65 }}>
+              You don't have to write this. Log habits, add notes, tell Forged what's going on — your coach turns the day into a daily entry.
+            </div>
+          </div>
+
           {/* ── Today's entry ── */}
           <div style={{ padding:"0 16px 24px" }}>
             <div style={{ fontSize:11, fontWeight:600, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:10 }}>Today</div>
@@ -957,12 +964,12 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
             })() : (
               <div style={{ padding:"20px 18px", borderRadius:T.r, border:`1.5px dashed ${T.border}`, background:T.raised }}>
                 <div style={{ fontSize:13, color:T.muted, lineHeight:1.7, marginBottom:16 }}>
-                  Talk to Forged during the day — log habits, add notes, tell it what's going on. Then tap below and your coach writes up the day.
+                  Log habits, chat to Forged, add notes — then tap below and your coach writes up the day.
                 </div>
                 <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
                   <button type="button" onClick={() => generateEntry(tStr)} disabled={generating}
                     style={{ padding:"10px 18px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:13, fontWeight:600, cursor:generating ? "not-allowed" : "pointer", opacity:generating ? 0.65 : 1 }}>
-                    {generating ? "Writing…" : "Write today's entry"}
+                    {generating ? "Writing…" : "Generate today's entry"}
                   </button>
                   <button type="button" onClick={() => setComposeDate(tStr)}
                     style={{ padding:"10px 14px", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:"none", color:T.muted, fontSize:13, cursor:"pointer" }}>
