@@ -1,6 +1,7 @@
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
+import { useMemo } from "react";
 import { T, COACH_ICON_OPTIONS } from "../theme.js";
-import { todayStr, isSatisfiedForTodayRing, getLevel, getStreak } from "../utils.js";
+import { todayStr, daysAgo, isSatisfiedForTodayRing, getLevel, getStreak, analyzeDeepInsights } from "../utils.js";
 import { Ring, SLabel } from "../components/ui.jsx";
 import {
   DailyCard, WeeklyCard, ProjectCard, LimitCard, LogCard,
@@ -73,12 +74,24 @@ function buildCoachGreetingLine({ habits, goals }) {
   let topH = null, topS = 0;
   for (const h of trackHabits) {
     const s = getStreak(h);
-    if (s >= 5 && s > topS) { topS = s; topH = h; }
+    if (s >= 3 && s > topS) { topS = s; topH = h; }
   }
   if (topH) return `${String(topH.name || "Habit").slice(0, 18)} — ${topS}-day streak. Keep it?`;
 
   const skipPattern = findSkippedDayPattern(trackHabits);
   if (skipPattern) return skipPattern;
+
+  if (none && hr >= 14) {
+    const yesterday = daysAgo(1);
+    const loggedYesterday = trackHabits.some(h =>
+      (h.logs || []).some(l => l.date === yesterday && l.value !== "skip" && l.value !== "quicknote")
+    );
+    if (loggedYesterday) {
+      const pending = trackHabits.filter(h => !isSatisfiedForTodayRing(h));
+      if (pending.length === 1) return `${String(pending[0].name || "").slice(0, 18)} — you logged yesterday but not today yet.`;
+      if (pending.length > 1) return `${pending.length} habits left — you were on it yesterday.`;
+    }
+  }
 
   if (all)  return tod === "morning" ? "All habits in — you're ahead today." : tod === "afternoon" ? "Full sweep already — nice." : "Everything logged — how was the day?";
   if (some) return tod === "morning" ? "Good start — clear the rest when ready." : tod === "afternoon" ? "Halfway through — log what's left?" : "Solid progress — finish the set tonight?";
@@ -156,6 +169,14 @@ export function TodayScreen({
     </div>
   );
 
+  // Pattern insight — first cross-habit theme from written logs, shown once enough data exists
+  const patternInsight = useMemo(() => {
+    if (habits.length === 0) return null;
+    const deep = analyzeDeepInsights(habits, goals);
+    if (deep.needsMoreData || !deep.crossHabitLinks?.length) return null;
+    return deep.crossHabitLinks[0];
+  }, [habits, goals]);
+
   // Show a brief-prompt card once the user has 7+ logged days and hasn't used their free brief
   const uniqueLoggedDays = (() => {
     const days = new Set();
@@ -186,6 +207,19 @@ export function TodayScreen({
           <div style={{ flex:1, minWidth:0 }}>
             <div style={{ fontSize:13, fontWeight:600, color:T.gold, marginBottom:2 }}>Your coach noticed something</div>
             <div style={{ fontSize:12, color:T.sub, lineHeight:1.4 }}>You have {uniqueLoggedDays} days of data — get your first weekly brief free.</div>
+          </div>
+          <div style={{ fontSize:14, color:T.gold, flexShrink:0 }}>→</div>
+        </button>
+      )}
+      {patternInsight && !!onOpenBrief && (
+        <button type="button" onClick={onOpenBrief}
+          style={{ display:"flex", alignItems:"center", gap:12, width:"calc(100% - 28px)", margin:"8px 14px 0", padding:"12px 14px", background:"linear-gradient(90deg, rgba(200,144,42,0.08), rgba(200,144,42,0.02))", border:"0.5px solid rgba(200,144,42,0.3)", borderRadius:T.rsm, cursor:"pointer", textAlign:"left", fontFamily:T.font, boxSizing:"border-box" }}>
+          <div style={{ fontSize:18, flexShrink:0, lineHeight:1 }}>🔗</div>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:13, fontWeight:600, color:T.gold, marginBottom:2 }}>Pattern spotted in your writing</div>
+            <div style={{ fontSize:12, color:T.sub, lineHeight:1.4 }}>
+              "{patternInsight.term}" keeps showing up across {patternInsight.habitLabels.slice(0,2).join(" and ")} — see what it means.
+            </div>
           </div>
           <div style={{ fontSize:14, color:T.gold, flexShrink:0 }}>→</div>
         </button>
