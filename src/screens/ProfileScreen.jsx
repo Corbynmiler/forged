@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { T, COACH_ICON_OPTIONS, PROFILE_DISPLAY_NAME_MAX, PROFILE_COACH_NAME_MAX, clampProfileDisplayName, clampProfileCoachName } from "../theme.js";
+import { T, COACH_ICON_OPTIONS, PROFILE_DISPLAY_NAME_MAX, PROFILE_COACH_NAME_MAX, clampProfileDisplayName, clampProfileCoachName, FREE_DAILY_LIMIT } from "../theme.js";
 import { supabase } from "../supabase.js";
 import {
   getLevel, nextLevel, getStreak, getBestStreak,
@@ -140,13 +140,13 @@ export function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
 
   const features = [
     { icon:"∞",  label:"Unlimited habits",    free:"Up to 5",      pro:"No limit",               live:true },
-    { icon:"🤖", label:"AI coach messages",    free:"10 per day",   pro:"Unlimited",              live:true },
+    { icon:"🤖", label:"AI coach messages",    free:`${FREE_DAILY_LIMIT} per day`,   pro:"Unlimited",              live:true },
     { icon:"🎙️", label:"Voice logging",         free:"—",            pro:"Talk to log & reflect",  live:true },
     { icon:"💪", label:"Nudge a friend",       free:"—",            pro:"Keep each other honest", live:true },
     { icon:"📜", label:"Full history",         free:"Last 7 days",  pro:"Every entry, forever",   live:true },
     { icon:"📅", label:"Monthly calendar",     free:"—",            pro:"Spot gaps at a glance",  live:true },
-    { icon:"🔔", label:"Smart reminders",      free:"—",            pro:"Daily push nudges",      live:false },
-    { icon:"📊", label:"Pattern detection",    free:"Streaks + 28d", pro:"AI pattern analysis",    live:false },
+    { icon:"🔔", label:"Smart reminders",      free:"—",            pro:"Daily push nudges",      live:true },
+    { icon:"📊", label:"Pattern detection",    free:"Streaks + 28d", pro:"AI pattern analysis",    live:true },
   ];
 
   return (
@@ -740,8 +740,8 @@ export function ProfileScreen({ user, xp, habits, isPro, isCoach, stripeCustomer
                   { label:"Voice logging",               status:"pro" },
                   { label:"Nudge friends to stay on track", status:"pro" },
                   { label:"Full history & monthly calendar", status:"pro" },
-                  { label:"AI pattern detection",        status:"soon" },
-                  { label:"Push notification reminders", status:"soon" },
+                  { label:"AI pattern detection",        status:"pro" },
+                  { label:"Push notification reminders", status:"pro" },
                 ].map((f, i) => (
                   <div key={i} style={{ display:"flex", alignItems:"center", gap:8 }}>
                     <div style={{ width:18, height:18, borderRadius:"50%", background:f.status==="soon"?T.surface:"rgba(200,144,42,0.15)", border:`1px solid ${f.status==="soon"?T.border:"rgba(200,144,42,0.4)"}`, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>

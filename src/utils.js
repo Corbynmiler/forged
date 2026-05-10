@@ -51,6 +51,41 @@ export function weekStartFor(dateStr) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
 export function currentWeekStart() { return weekStartFor(todayStr()); }
+/**
+ * ISO-8601 week key, e.g. "2026-W19". Two dates land in the same ISO week iff
+ * their getISOWeek() strings match — used by InsightsScreen to detect a stale
+ * weekly brief (generated in a previous calendar week).
+ *
+ * Accepts a Date, a YYYY-MM-DD string, or any value `new Date()` understands
+ * (e.g. ISO timestamps from Postgres). Returns "" for unparseable input.
+ */
+export function getISOWeek(date) {
+  if (!date) return "";
+  let d;
+  if (date instanceof Date) {
+    d = new Date(date.getTime());
+  } else if (typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    d = parseLocal(date);
+  } else {
+    d = new Date(date);
+  }
+  if (isNaN(d.getTime())) return "";
+  d.setHours(0, 0, 0, 0);
+  // ISO week-numbering year: shift to nearest Thursday in the week.
+  d.setDate(d.getDate() + 4 - (d.getDay() || 7));
+  const yearStart = new Date(d.getFullYear(), 0, 1);
+  const weekNum = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+  return `${d.getFullYear()}-W${String(weekNum).padStart(2, "0")}`;
+}
+/** Display string for "next Monday from today" — e.g. "Mon, May 18". */
+export function fmtNextMondayShort(fromStr = todayStr()) {
+  const d = parseLocal(fromStr);
+  const day = d.getDay();
+  // Days until next Monday (always strictly in the future).
+  const delta = day === 1 ? 7 : ((8 - day) % 7) || 7;
+  d.setDate(d.getDate() + delta);
+  return `${DAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}`;
+}
 export function minsToHrs(m) { return (m / 60).toFixed(1); }
 export function fmtEntryDate(dateStr) {
   if (dateStr === todayStr()) return "Today";

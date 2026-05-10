@@ -104,27 +104,18 @@ const COACH_TOOLS = [
     },
   },
   {
-    name: "log_journal",
+    name: "add_daily_note",
     description:
-      "Captures personal context, feelings, reflections, and life narrative for the day — NOT habits or numbers. " +
-      "This saves the user's words as SOURCE MATERIAL for today's daily journal, NOT as the polished journal entry itself. " +
-      "The polished journal is generated separately (via the Regenerate button on the Journal tab) using this context. " +
-      "If the user sends ONE message that mixes structured habit data WITH personal/emotional content, " +
-      "you MUST call log_habit for each structured fact AND log_journal for the human story in the SAME turn. " +
-      "Do not omit log_journal to save tokens — the user expects personal content to be preserved. " +
-      "Put structured facts in habits; put feelings, context, and narrative in log_journal (first person, their words). " +
-      "IMPORTANT: After saving with this tool, tell the user their context was saved and will be folded into today's journal — " +
-      "do NOT say 'journal saved' or imply the polished journal entry was written. " +
-      "If this tool returns success:false in the tool result, you did NOT save — say so honestly.",
+Saves a short personal note to today's journal context — feelings, stress, story, relationships, or anything the user wants remembered when their daily journal gets written. Use when user says 'remember this for today', 'add this to my journal', 'note this', or shares personal/emotional context that isn't a structured habit/goal log. In a mixed message (structured facts + personal story), call log_habit for the facts AND add_daily_note for the human context in the SAME turn. Do NOT write a full journal entry — just capture the key thought in the user's own words (1–3 sentences). The Forged journal is generated later from these notes plus the day's habit logs. If this tool returns success:false in the tool result, say honestly that the note did not save.
     input_schema: {
       type: "object",
       properties: {
-        content: {
+        note: {
           type: "string",
-          description: "The journal entry text. First person, user's own words. Can be multi-paragraph.",
+          description: "Short note in the user's own voice (1–3 sentences). First person. No bullet points.",
         },
       },
-      required: ["content"],
+      required: ["note"],
     },
     // Prompt caching: marking the LAST tool with cache_control caches the
     // entire tools array (~700+ tokens of stable JSON) for ~5 minutes. Repeat
@@ -189,8 +180,8 @@ function buildActionReceipt(outcomes) {
         suffix = " · rest day";
       }
       lines.push(`✓ Logged ${n}${suffix}`);
-    } else if (o.tool === "log_journal") {
-      lines.push(`✓ Context saved for today's journal`);
+    } else if (o.tool === "add_daily_note") {
+      lines.push("✓ Note saved for today's journal");
     } else if (o.tool === "create_habit") {
       lines.push(`✓ Created ${o.name} (${o.habit_type})`);
     } else if (o.tool === "edit_habit") {
@@ -200,8 +191,8 @@ function buildActionReceipt(outcomes) {
   for (const o of outcomes) {
     if (o.success) continue;
     hasLine = true;
-    if (o.tool === "log_journal") {
-      lines.push(`✗ Journal — ${o.error || "couldn't save"}`);
+    if (o.tool === "add_daily_note") {
+      lines.push(`✗ Note — ${o.error || "couldn't save"}`);
     } else if (o.tool === "log_habit") {
       lines.push(`✗ ${o.habit_name || "Habit"} — ${o.error || "couldn't log"}`);
     } else if (o.tool === "create_habit") {
@@ -261,6 +252,9 @@ const HARD_CONFIRM_RE = /\b(confirm|confirmed)\b/i;
 const YES_CONFIRM_RE = /\b(yes|yep|yeah|do it|go ahead|please do|that's right|that is right)\b/i;
 const TARGET_CONFIRMATION_PROMPT_RE = /\b(confirm|update your target weight|change.{0,40}target|target.{0,40}important edit)\b/i;
 const WEIGHT_PROGRESS_RE = /\b(weigh|weighed|weight|kg|kgs|kilogram|kilograms|lb|lbs|pound|pounds)\b/i;
+/** Explicit current body-weight check-in (bypasses PROGRESS_LOG_RE-only phrasing like "I am 67kg"). */
+const EXPLICIT_CURRENT_WEIGHT_RE =
+  /\b(i\s+(?:am|weigh|weight)|i'?m|currently|right\s+now|today|this\s+morning)\s+\d+\s*(kg|lbs|pounds|kilos)\b/i;
 const PROGRESS_LOG_RE = /\b(log|logged|check in|check-in|current|progress|today|now|at)\b/i;
 
 function buildActionSafety(messages = []) {
@@ -286,6 +280,10 @@ function isClearGoalProgressLog(input, goalRow, safety) {
   const text = safety.latestUserText || "";
   const normalized = safety.normalizedUserText || "";
   if (!normalized || safety.asksMissingLogs) return false;
+
+  // Clear "I am / I weigh / currently X kg" check-in — even if they also say "don't change my target"
+  // (GOAL_TARGET_UPDATE_RE); target edits remain gated on edit_habit, not here.
+  if (EXPLICIT_CURRENT_WEIGHT_RE.test(text)) return true;
 
   const unit = normText(goalRow?.unit || "");
   const tokens = significantGoalTokens(goalRow?.name || input.habit_name || "");
@@ -437,38 +435,38 @@ async function executeLogHabit(input, userId, db, clientDate, safety = buildActi
   return { habit_id: input.habit_id, habit_name: input.habit_name, habit_type: htype, date: today, updatedLogs, logValue };
 }
 
-async function executeLogJournal(input, userId, db, clientDate) {
+async function executeAddDailyNote(input, userId, db, clientDate) {
   const date = clientDate || new Date().toISOString().slice(0, 10);
-  const newNote = (input.content || "").trim();
-  if (!newNote) throw new Error("Journal content cannot be empty.");
+  const note = (input.note || "").trim();
+  if (!note) throw new Error("Note cannot be empty.");
 
-  // Save as context_notes (source material), never touching the polished content column.
-  // Multiple notes in a day are appended with a separator.
+  // Fetch existing row for this date to append to daily_context array.
+  // We never overwrite `content` here — that belongs to journal-generate.js.
   const { data: existing } = await db
     .from("journal_entries")
-    .select("id, context_notes")
+    .select("id, daily_context")
     .eq("user_id", userId)
     .eq("date", date)
     .maybeSingle();
 
+  const prevContext = Array.isArray(existing?.daily_context) ? existing.daily_context : [];
+  const updatedContext = [...prevContext, note];
+
   if (existing) {
-    const combined = existing.context_notes
-      ? `${existing.context_notes}\n\n---\n\n${newNote}`
-      : newNote;
     const { error } = await db
       .from("journal_entries")
-      .update({ context_notes: combined, updated_at: new Date().toISOString() })
+      .update({ daily_context: updatedContext, updated_at: new Date().toISOString() })
       .eq("id", existing.id);
-    if (error) throw new Error(`Context save failed: ${error.message}`);
-    return { date, mode: "context_saved", id: existing.id };
+    if (error) throw new Error(`Note save failed: ${error.message}`);
+    return { date, mode: "appended", id: existing.id };
   } else {
     const { data: row, error } = await db
       .from("journal_entries")
-      .insert({ user_id: userId, date, context_notes: newNote })
+      .insert({ user_id: userId, date, content: "", daily_context: updatedContext })
       .select()
       .single();
-    if (error) throw new Error(`Context save failed: ${error.message}`);
-    return { date, mode: "context_saved", id: row.id };
+    if (error) throw new Error(`Note save failed: ${error.message}`);
+    return { date, mode: "created", id: row.id };
   }
 }
 
@@ -563,7 +561,7 @@ async function handler(req, res) {
   try {
     // ── First call — detect tool_use ─────────────────────────────────────────
     // max_tokens MUST be generous enough to fit ALL tool_use blocks the model
-    // wants to emit. Mixed dumps (many habits + log_journal) need headroom.
+    // wants to emit. Mixed dumps (many habits + add_daily_note) need headroom.
     const firstResp = await client.messages.create({
       model: "claude-haiku-4-5", max_tokens: 2048,
       system: cachedSystem(system), tools,
@@ -604,7 +602,7 @@ async function handler(req, res) {
     if (firstResp.stop_reason === "tool_use") {
       const toolBlocks = firstToolBlocks;
       const toolResults = [];
-      const actions = { created: [], edited: [], logged: [], journaled: [] };
+      const actions = { created: [], edited: [], logged: [], noted: [] };
       /** @type {Array<{ tool: string, success: boolean, error?: string, habit_name?: string, habit_type?: string, name?: string, value_saved?: unknown, date?: string, mode?: string }>} */
       const outcomes = [];
 
@@ -635,11 +633,11 @@ async function handler(req, res) {
               habit_type: r.habit_type,
               value_saved: r.logValue,
             });
-          } else if (tb.name === "log_journal") {
-            const r = await executeLogJournal(tb.input, userId, db, clientDate);
-            actions.journaled.push(r);
+          } else if (tb.name === "add_daily_note") {
+            const r = await executeAddDailyNote(tb.input, userId, db, clientDate);
+            actions.noted.push(r);
             result = { success: true, date: r.date, mode: r.mode };
-            outcomes.push({ tool: "log_journal", success: true, date: r.date, mode: r.mode });
+            outcomes.push({ tool: "add_daily_note", success: true, date: r.date, mode: r.mode });
           } else {
             result = { success: false, error: "Unknown tool — action was NOT performed." };
             outcomes.push({ tool: tb.name, success: false, error: result.error });
@@ -652,7 +650,7 @@ async function handler(req, res) {
             error: err.message,
             habit_name: tb.input?.habit_name,
           };
-          if (tb.name === "log_journal") delete fail.habit_name;
+          if (tb.name === "add_daily_note") delete fail.habit_name;
           if (tb.name === "create_habit") fail.name = tb.input?.name;
           outcomes.push(fail);
         }
@@ -707,9 +705,9 @@ async function handler(req, res) {
       sse(res, {
         done:     true,
         created:  actions.created.length ? actions.created : null,
-        edited:   actions.edited.length    ? actions.edited    : null,
-        logged:   actions.logged.length    ? actions.logged    : null,
-        journaled:actions.journaled.length ? actions.journaled : null,
+        edited:   actions.edited.length  ? actions.edited  : null,
+        logged:   actions.logged.length  ? actions.logged  : null,
+        noted:    actions.noted.length   ? actions.noted   : null,
         receipt:  receiptText || null,
         tool_failures: outcomes.some(o => !o.success) ? outcomes.filter(o => !o.success) : null,
       });

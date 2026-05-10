@@ -1,6 +1,7 @@
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
+import { useMemo } from "react";
 import { T, COACH_ICON_OPTIONS } from "../theme.js";
-import { todayStr, isSatisfiedForTodayRing, getLevel, getStreak } from "../utils.js";
+import { todayStr, daysAgo, isSatisfiedForTodayRing, getLevel, getStreak, analyzeDeepInsights } from "../utils.js";
 import { Ring, SLabel } from "../components/ui.jsx";
 import {
   DailyCard, WeeklyCard, ProjectCard, LimitCard, LogCard,
@@ -46,6 +47,8 @@ function findSkippedDayPattern(habits) {
   return null;
 }
 
+const COACH_FIRST_HABIT_DRAFT = "Help me pick my first habit to track";
+
 function buildCoachGreetingLine({ habits, goals }) {
   const hr  = new Date().getHours();
   const tod = hr < 12 ? "morning" : hr < 17 ? "afternoon" : "evening";
@@ -73,12 +76,24 @@ function buildCoachGreetingLine({ habits, goals }) {
   let topH = null, topS = 0;
   for (const h of trackHabits) {
     const s = getStreak(h);
-    if (s >= 5 && s > topS) { topS = s; topH = h; }
+    if (s >= 3 && s > topS) { topS = s; topH = h; }
   }
   if (topH) return `${String(topH.name || "Habit").slice(0, 18)} — ${topS}-day streak. Keep it?`;
 
   const skipPattern = findSkippedDayPattern(trackHabits);
   if (skipPattern) return skipPattern;
+
+  if (none && hr >= 14) {
+    const yesterday = daysAgo(1);
+    const loggedYesterday = trackHabits.some(h =>
+      (h.logs || []).some(l => l.date === yesterday && l.value !== "skip" && l.value !== "quicknote")
+    );
+    if (loggedYesterday) {
+      const pending = trackHabits.filter(h => !isSatisfiedForTodayRing(h));
+      if (pending.length === 1) return `${String(pending[0].name || "").slice(0, 18)} — you logged yesterday but not today yet.`;
+      if (pending.length > 1) return `${pending.length} habits left — you were on it yesterday.`;
+    }
+  }
 
   if (all)  return tod === "morning" ? "All habits in — you're ahead today." : tod === "afternoon" ? "Full sweep already — nice." : "Everything logged — how was the day?";
   if (some) return tod === "morning" ? "Good start — clear the rest when ready." : tod === "afternoon" ? "Halfway through — log what's left?" : "Solid progress — finish the set tonight?";
@@ -86,10 +101,21 @@ function buildCoachGreetingLine({ habits, goals }) {
   return tod === "morning" ? "How's the morning going?" : tod === "evening" ? "How did today go?" : "How's the day going?";
 }
 
-export function CoachGreeting({ coachName, coachIcon, habits, goals, habitAccent, onOpenMic }) {
-  const displayName = (coachName || "Coach").trim() || "Coach";
-  const body  = buildCoachGreetingLine({ habits, goals });
-  const line  = `${displayName}: ${body}`;
+export function CoachGreeting({ coachName, coachIcon, habits, goals, habitAccent, onOpenMic, habitCompletionPercentage, habitsLoggedTodayCount, totalTrackables }) {
+  const rawCoach = (coachName ?? "").trim();
+  const hasNamedCoach = rawCoach.length > 0;
+  const displayName = rawCoach || "Coach";
+  const ringComplete =
+    typeof habitCompletionPercentage === "number"
+    && typeof totalTrackables === "number"
+    && totalTrackables > 0
+    && habitCompletionPercentage === 100;
+  const body = ringComplete ? "" : buildCoachGreetingLine({ habits, goals });
+  const n = typeof habitsLoggedTodayCount === "number" ? habitsLoggedTodayCount : 0;
+  const habitPhrase = `${n} habit${n === 1 ? "" : "s"} logged`;
+  const line = ringComplete
+    ? (hasNamedCoach ? `${habitPhrase}. ${rawCoach}: Clean day.` : `${habitPhrase}. Clean day.`)
+    : `${displayName}: ${body}`;
   const initial = displayName.charAt(0).toUpperCase();
   const accent  = habitAccent || T.accent;
   return (
@@ -112,7 +138,7 @@ export function TodayScreen({
   onOpenGoalLog, onEditGoal, onCompleteGoal, onDeleteGoal, onShareGoal,
   onEditHabit, onDeleteHabit, onShareHabit, sharingHabitId,
   onXPInfo, onAdd, onSaveLogEntry, hideFloatingAdd,
-  coachEverOpened = true, onOpenCoachMic,
+  coachEverOpened = true, onOpenCoachMic, onOpenCoachWithDraft,
   coachName, coachIcon, coachHabitColor, onOpenGoalDetail,
   onOpenBrief = null,
 }) {
@@ -137,24 +163,49 @@ export function TodayScreen({
 
   if (habits.length === 0 && activeGoals.length === 0) return (
     <div>
-      {onOpenCoachMic && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic}/>}
+      {onOpenCoachMic && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic} habitCompletionPercentage={pct} habitsLoggedTodayCount={loggedCount} totalTrackables={totalTrackables}/>}
       <div style={{ padding:"40px 28px 32px", textAlign:"center" }}>
         <div style={{ fontSize:48, marginBottom:16 }}>⚒️</div>
         <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, marginBottom:10 }}>Nothing forged yet.</div>
         <div style={{ fontSize:14, color:T.muted, lineHeight:1.75, marginBottom:28 }}>
           Add a habit to track daily, or tell the coach what outcome you're working toward — it will help you build a plan.
         </div>
-        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-          <button onClick={onAdd} style={{ padding:"13px 24px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer" }}>Add a habit</button>
-          {onOpenCoachMic && (
-            <button onClick={onOpenCoachMic} style={{ padding:"13px 24px", borderRadius:T.rsm, border:"0.5px solid rgba(200,144,42,0.5)", background:"rgba(200,144,42,0.08)", color:T.gold, fontSize:14, fontWeight:600, cursor:"pointer" }}>
-              ✨ Plan a goal with my coach
+        <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:0 }}>
+          <button onClick={onAdd} style={{ padding:"13px 24px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer" }}>Add your first habit</button>
+          {onOpenCoachWithDraft && (
+            <button
+              type="button"
+              onClick={() => onOpenCoachWithDraft(COACH_FIRST_HABIT_DRAFT)}
+              style={{
+                marginTop:14,
+                padding:0,
+                border:"none",
+                background:"none",
+                cursor:"pointer",
+                fontFamily:T.font,
+                fontSize:12,
+                fontWeight:500,
+                color:T.muted,
+                textDecoration:"underline",
+                textUnderlineOffset:3,
+                textDecorationColor:"rgba(168,164,156,0.4)",
+              }}
+            >
+              Not sure what to track? Ask your coach
             </button>
           )}
         </div>
       </div>
     </div>
   );
+
+  // Pattern insight — first cross-habit theme from written logs, shown once enough data exists
+  const patternInsight = useMemo(() => {
+    if (habits.length === 0) return null;
+    const deep = analyzeDeepInsights(habits, goals);
+    if (deep.needsMoreData || !deep.crossHabitLinks?.length) return null;
+    return deep.crossHabitLinks[0];
+  }, [habits, goals]);
 
   // Show a brief-prompt card once the user has 7+ logged days and hasn't used their free brief
   const uniqueLoggedDays = (() => {
@@ -178,7 +229,7 @@ export function TodayScreen({
           </span>
         </button>
       )}
-      {onOpenCoachMic && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic}/>}
+      {onOpenCoachMic && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic} habitCompletionPercentage={pct} habitsLoggedTodayCount={loggedCount} totalTrackables={totalTrackables}/>}
       {showBriefHook && (
         <button type="button" onClick={onOpenBrief}
           style={{ display:"flex", alignItems:"center", gap:12, width:"calc(100% - 28px)", margin:"8px 14px 0", padding:"12px 14px", background:"linear-gradient(90deg, rgba(200,144,42,0.12), rgba(200,144,42,0.04))", border:"0.5px solid rgba(200,144,42,0.4)", borderRadius:T.rsm, cursor:"pointer", textAlign:"left", fontFamily:T.font, boxSizing:"border-box" }}>
@@ -186,6 +237,19 @@ export function TodayScreen({
           <div style={{ flex:1, minWidth:0 }}>
             <div style={{ fontSize:13, fontWeight:600, color:T.gold, marginBottom:2 }}>Your coach noticed something</div>
             <div style={{ fontSize:12, color:T.sub, lineHeight:1.4 }}>You have {uniqueLoggedDays} days of data — get your first weekly brief free.</div>
+          </div>
+          <div style={{ fontSize:14, color:T.gold, flexShrink:0 }}>→</div>
+        </button>
+      )}
+      {patternInsight && !!onOpenBrief && (
+        <button type="button" onClick={onOpenBrief}
+          style={{ display:"flex", alignItems:"center", gap:12, width:"calc(100% - 28px)", margin:"8px 14px 0", padding:"12px 14px", background:"linear-gradient(90deg, rgba(200,144,42,0.08), rgba(200,144,42,0.02))", border:"0.5px solid rgba(200,144,42,0.3)", borderRadius:T.rsm, cursor:"pointer", textAlign:"left", fontFamily:T.font, boxSizing:"border-box" }}>
+          <div style={{ fontSize:18, flexShrink:0, lineHeight:1 }}>🔗</div>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:13, fontWeight:600, color:T.gold, marginBottom:2 }}>Pattern spotted in your writing</div>
+            <div style={{ fontSize:12, color:T.sub, lineHeight:1.4 }}>
+              "{patternInsight.term}" keeps showing up across {patternInsight.habitLabels.slice(0,2).join(" and ")} — see what it means.
+            </div>
           </div>
           <div style={{ fontSize:14, color:T.gold, flexShrink:0 }}>→</div>
         </button>

@@ -22,6 +22,35 @@ function weekStartFromClientYmd(ymd) {
 
 const WEEKLY_BRIEF_GEN_LIMIT = 2;
 
+const SIGNALS_START = "SIGNALS_JSON";
+const SIGNALS_END = "END_SIGNALS_JSON";
+
+/** Strip structured signals from model output; return prose + validated [{ habit_name, signal }]. */
+function parseBriefAndSignals(raw) {
+  const full = String(raw || "").trim();
+  const start = full.indexOf(SIGNALS_START);
+  const end = full.indexOf(SIGNALS_END);
+  if (start === -1 || end === -1 || end <= start) {
+    return { prose: full, signals: [] };
+  }
+  const before = full.slice(0, start).trim();
+  const after = full.slice(end + SIGNALS_END.length).trim();
+  const prose = [before, after].filter(Boolean).join("\n\n").trim();
+  const jsonSlice = full.slice(start + SIGNALS_START.length, end).trim();
+  let signals = [];
+  try {
+    const parsed = JSON.parse(jsonSlice);
+    if (Array.isArray(parsed)) {
+      signals = parsed
+        .filter((x) => x && typeof x.habit_name === "string" && typeof x.signal === "string")
+        .map((x) => ({ habit_name: x.habit_name.trim(), signal: x.signal.trim() }));
+    }
+  } catch {
+    /* keep [] */
+  }
+  return { prose, signals };
+}
+
 function daysAgoStr(n) {
   const d = new Date();
   d.setDate(d.getDate() - n);
@@ -91,12 +120,22 @@ function buildContext({ habits = [], goals = [], journalEntries = [], name = "th
   return lines.join("\n");
 }
 
-function buildPrompt(context) {
+function buildPrompt(context, habitNamesForSignals) {
+  const namesBlock =
+    habitNamesForSignals.length > 0
+      ? `
+Active habits (use these EXACT habit_name strings in SIGNALS_JSON — one object per line below, same order):
+${habitNamesForSignals.map((n) => `- ${n}`).join("\n")}
+`
+      : `
+No active habits listed — output SIGNALS_JSON as an empty array: [] between the markers.
+`;
+
   return `You are reviewing a week of habit tracking data for someone using Forged.
 
 ${context}
 ---
-
+${namesBlock}
 Write them a 4–6 sentence weekly brief. Be specific to their actual data — names of habits, real numbers, what they actually wrote.
 
 Cover:
@@ -105,7 +144,18 @@ Cover:
 3. A pattern from what they wrote (from wins, notes, or struggles if any) — skip this if there's nothing to say
 4. One specific thing worth paying attention to or doing differently next week
 
-Tone: direct, grounded, a bit like a coach who's been watching. Not cheerleader energy. Not corporate wellness. Short sentences. No filler. Do not start with "This week".`;
+Tone: direct, grounded, a bit like a coach who's been watching. Not cheerleader energy. Not corporate wellness. Short sentences. No filler. Do not start with "This week".
+
+After the prose brief only (no extra commentary before or after the block), output momentum signals on separate lines exactly like this:
+
+SIGNALS_JSON
+[{"habit_name": "Running", "signal": "4 of 7 days — your best week this month"}]
+END_SIGNALS_JSON
+
+Rules for the JSON array:
+- One object per habit in the "Active habits" list (same order as listed). habit_name must match the list exactly.
+- Each "signal" is one short clause (under ~90 characters): momentum for THIS calendar week only — counts, streaks, or slips backed by the data.
+- Valid JSON only between SIGNALS_JSON and END_SIGNALS_JSON. No markdown fences.`;
 }
 
 async function handler(req, res) {
@@ -157,6 +207,24 @@ async function handler(req, res) {
     const freeTrialUsed = totalEver >= 1;
 
     if (req.method === "GET") {
+      // Return this week's stored brief if any (matches Pro path shape).
+      const { data: thisWeekRow } = await db
+        .from("weekly_brief_generation_usage")
+        .select("brief_text, brief_generated_at")
+        .eq("user_id", userId)
+        .eq("week_start", weekStart)
+        .maybeSingle();
+      const { data: momentumRow, error: momentumReadErr } = await db
+        .from("weekly_briefs")
+        .select("momentum_signals")
+        .eq("user_id", userId)
+        .eq("week_start", weekStart)
+        .maybeSingle();
+      if (momentumReadErr) {
+        console.warn("[weekly-summary] weekly_briefs read (free):", momentumReadErr.message);
+      }
+      const momentumOut =
+        !momentumReadErr && Array.isArray(momentumRow?.momentum_signals) ? momentumRow.momentum_signals : [];
       return res.json({
         free_trial: true,
         free_trial_used: freeTrialUsed,
@@ -164,6 +232,9 @@ async function handler(req, res) {
         used: freeTrialUsed ? 1 : 0,
         week_start: weekStart,
         can_generate: !freeTrialUsed,
+        text: thisWeekRow?.brief_text || null,
+        generated_at: thisWeekRow?.brief_generated_at || null,
+        momentum_signals: momentumOut,
       });
     }
 
@@ -176,12 +247,12 @@ async function handler(req, res) {
     // Free trial available — fall through to generation with used=0
   }
 
-  // Pro: read this week’s quota
+  // Pro: read this week’s quota + stored brief
   let used = 0;
   if (isPro) {
     const { data: usageRow, error: usageReadErr } = await db
       .from("weekly_brief_generation_usage")
-      .select("generation_count")
+      .select("generation_count, brief_text, brief_generated_at")
       .eq("user_id", userId)
       .eq("week_start", weekStart)
       .maybeSingle();
@@ -195,11 +266,25 @@ async function handler(req, res) {
     used = typeof usageRow?.generation_count === "number" ? usageRow.generation_count : 0;
 
     if (req.method === "GET") {
+      const { data: momentumRow, error: momentumReadErr } = await db
+        .from("weekly_briefs")
+        .select("momentum_signals")
+        .eq("user_id", userId)
+        .eq("week_start", weekStart)
+        .maybeSingle();
+      if (momentumReadErr) {
+        console.warn("[weekly-summary] weekly_briefs read (pro):", momentumReadErr.message);
+      }
+      const momentumOut =
+        !momentumReadErr && Array.isArray(momentumRow?.momentum_signals) ? momentumRow.momentum_signals : [];
       return res.json({
         limit: WEEKLY_BRIEF_GEN_LIMIT,
         used,
         week_start: weekStart,
         can_generate: used < WEEKLY_BRIEF_GEN_LIMIT,
+        text: usageRow?.brief_text || null,
+        generated_at: usageRow?.brief_generated_at || null,
+        momentum_signals: momentumOut,
       });
     }
 
@@ -216,27 +301,40 @@ async function handler(req, res) {
   const { habits, goals, journalEntries, name, client_date: bodyClientDate } = req.body || {};
 
   const context = buildContext({ habits, goals, journalEntries, name, clientDate: bodyClientDate || anchor });
-  const prompt  = buildPrompt(context);
+  const habitNamesForSignals = (habits || [])
+    .filter((h) => h && typeof h.name === "string" && h.name.trim())
+    .map((h) => h.name.trim());
+  const prompt = buildPrompt(context, habitNamesForSignals);
 
   const client = new Anthropic({ apiKey: apiKey.trim() });
 
   try {
     const resp = await client.messages.create({
       model: "claude-haiku-4-5",
-      max_tokens: 400,
+      max_tokens: 900,
       messages: [{ role: "user", content: prompt }],
     });
 
-    const text = (resp.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
-    if (!text) return res.status(500).json({ error: "Empty response from AI" });
+    const raw = (resp.content || []).filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+    if (!raw) return res.status(500).json({ error: "Empty response from AI" });
+
+    const { prose, signals } = parseBriefAndSignals(raw);
+    const proseOut =
+      prose ||
+      raw.replace(/\s*SIGNALS_JSON[\s\S]*/i, "").trim() ||
+      raw.trim();
+    if (!proseOut) return res.status(500).json({ error: "Empty prose after parsing brief" });
 
     const nextCount = used + 1;
+    const generatedAt = new Date().toISOString();
     const { error: upsertErr } = await db.from("weekly_brief_generation_usage").upsert(
       {
         user_id: userId,
         week_start: weekStart,
         generation_count: nextCount,
-        updated_at: new Date().toISOString(),
+        brief_text: proseOut,
+        brief_generated_at: generatedAt,
+        updated_at: generatedAt,
       },
       { onConflict: "user_id,week_start" },
     );
@@ -245,9 +343,34 @@ async function handler(req, res) {
       captureException(upsertErr, { route: "weekly-summary", userId, step: "quota-upsert" });
     }
 
-    console.log(JSON.stringify({ level: "info", msg: "weekly-summary generated", userId, words: text.split(/\s+/).length, weekStart, genCount: nextCount, isPro }));
+    const { error: momentumErr } = await db.from("weekly_briefs").upsert(
+      {
+        user_id: userId,
+        week_start: weekStart,
+        momentum_signals: signals,
+        updated_at: generatedAt,
+      },
+      { onConflict: "user_id,week_start" },
+    );
+    if (momentumErr) {
+      console.error("[weekly-summary] weekly_briefs upsert:", momentumErr.message);
+      captureException(momentumErr, { route: "weekly-summary", userId, step: "weekly_briefs-upsert" });
+    }
+
+    console.log(JSON.stringify({
+      level: "info",
+      msg: "weekly-summary generated",
+      userId,
+      words: proseOut.split(/\s+/).length,
+      weekStart,
+      genCount: nextCount,
+      isPro,
+      momentumCount: signals.length,
+    }));
     return res.json({
-      text,
+      text: proseOut,
+      momentum_signals: signals,
+      generated_at: generatedAt,
       limit: isPro ? WEEKLY_BRIEF_GEN_LIMIT : 1,
       used: nextCount,
       week_start: weekStart,
