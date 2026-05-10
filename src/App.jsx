@@ -1480,7 +1480,7 @@ export default function App() {
     if (!uid || !date || !content?.trim()) return;
     const { data, error } = await supabase
       .from("journal_entries")
-      .upsert({ user_id: uid, date, content: content.trim(), updated_at: new Date().toISOString() }, { onConflict: "user_id,date" })
+      .upsert({ user_id: uid, date, content: content.trim(), updated_at: new Date().toISOString(), manually_edited: true }, { onConflict: "user_id,date" })
       .select()
       .single();
     if (error) {
@@ -1488,12 +1488,20 @@ export default function App() {
       addToast("⚠️ Couldn't save journal entry");
       return;
     }
-    // Update local state (upsert by date)
+    // Update local state (upsert by date), preserving manually_edited flag
     setJournalEntries(prev => {
       const exists = prev.some(e => e.date === date);
-      if (exists) return prev.map(e => e.date === date ? { ...e, content, updated_at: data.updated_at } : e);
+      if (exists) return prev.map(e => e.date === date ? { ...e, content, updated_at: data.updated_at, manually_edited: true } : e);
       return [data, ...prev].sort((a, b) => b.date.localeCompare(a.date));
     });
+  }
+
+  async function handleJournalGenerated() {
+    const uid = userIdRef.current;
+    if (!uid) return;
+    supabase.from("journal_entries").select("id, date, content, is_ai_generated, manually_edited, created_at, updated_at")
+      .eq("user_id", uid).order("date", { ascending: false })
+      .then(({ data: jRows }) => { if (jRows) setJournalEntries(jRows); });
   }
 
   async function handleAvatarUpload(file) {
@@ -1548,7 +1556,7 @@ export default function App() {
         );
 
         // Load journal entries (non-fatal — failure doesn't block the app)
-        supabase.from("journal_entries").select("id, date, content, created_at, updated_at")
+        supabase.from("journal_entries").select("id, date, content, is_ai_generated, manually_edited, created_at, updated_at")
           .eq("user_id", uid).order("date", { ascending: false })
           .then(({ data: jRows }) => {
             if (jRows) setJournalEntries(jRows);
@@ -3321,7 +3329,7 @@ export default function App() {
           </div>
         )}
         {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} coachEverOpened={coachEverOpened} onOpenCoachMic={() => openCoachWithMode("mic")} onOpenCoachWithDraft={openCoachWithDraft} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} hideFloatingAdd onOpenGoalDetail={id => setOpenGoalId(id)}/>}
-        {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} journalEntries={journalEntries} onSaveJournalEntry={handleSaveJournalEntry} initialTab={showJournalCompose ? "journal" : undefined} onInitialComposeDone={() => setShowJournalCompose(false)} userName={user.name || ""}/>}
+        {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} journalEntries={journalEntries} onSaveJournalEntry={handleSaveJournalEntry} onJournalGenerated={handleJournalGenerated} initialTab={showJournalCompose ? "journal" : undefined} onInitialComposeDone={() => setShowJournalCompose(false)} userName={user.name || ""}/>}
         {screen === "insights" && <InsightsScreen habits={habits} goals={goals} journalEntries={journalEntries} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} userId={sessionUserId} userName={user.name || ""}/>}
         {screen === "social"   && <SocialScreen
           user={user} xp={xp} habits={habits}
@@ -3671,7 +3679,7 @@ export default function App() {
             // Re-fetch journal entries after AI writes so the Journal tab reflects it immediately
             const uid = userIdRef.current;
             if (uid) {
-              supabase.from("journal_entries").select("id, date, content, created_at, updated_at")
+              supabase.from("journal_entries").select("id, date, content, is_ai_generated, manually_edited, created_at, updated_at")
                 .eq("user_id", uid).order("date", { ascending: false })
                 .then(({ data: jRows }) => { if (jRows) setJournalEntries(jRows); });
             }

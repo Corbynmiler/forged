@@ -104,25 +104,26 @@ const COACH_TOOLS = [
     },
   },
   {
-    name: "log_journal",
+    name: "add_daily_note",
     description:
-      "Saves to the Journal tab (freeform daily page) — personal thoughts, feelings, relationships, stress, life story, " +
-      "anything emotional or narrative that is NOT just numbers/sessions to log on a habit. " +
-      "If the user sends ONE message that mixes Forged/build/gym/calories (structured) WITH personal/life/emotional content, " +
-      "you MUST call log_habit for each structured fact AND log_journal for the human story in the SAME turn when both exist. " +
-      "Do not omit log_journal to save tokens — the user expects the personal part in Journal. " +
-      "Put structured facts in habits; put feelings, context, and narrative in log_journal (first person, their words). " +
-      "Appends to today's page if an entry already exists. " +
-      "If this tool returns success:false in the tool result, you did NOT save — say so honestly.",
+      "Saves a short personal note to today's journal context — feelings, stress, story, relationships, " +
+      "or anything the user wants remembered when their daily journal gets written. " +
+      "Use when user says 'remember this for today', 'add this to my journal', 'note this', or shares " +
+      "personal/emotional context that isn't a structured habit/goal log. " +
+      "In a mixed message (structured facts + personal story), call log_habit for the facts AND " +
+      "add_daily_note for the human context in the SAME turn. " +
+      "Do NOT write a full journal entry — just capture the key thought in the user's own words (1–3 sentences). " +
+      "The Forged journal is generated later from these notes plus the day's habit logs. " +
+      "If this tool returns success:false in the tool result, say honestly that the note did not save.",
     input_schema: {
       type: "object",
       properties: {
-        content: {
+        note: {
           type: "string",
-          description: "The journal entry text. First person, user's own words. Can be multi-paragraph.",
+          description: "Short note in the user's own voice (1–3 sentences). First person. No bullet points.",
         },
       },
-      required: ["content"],
+      required: ["note"],
     },
     // Prompt caching: marking the LAST tool with cache_control caches the
     // entire tools array (~700+ tokens of stable JSON) for ~5 minutes. Repeat
@@ -187,12 +188,8 @@ function buildActionReceipt(outcomes) {
         suffix = " · rest day";
       }
       lines.push(`✓ Logged ${n}${suffix}`);
-    } else if (o.tool === "log_journal") {
-      lines.push(
-        o.mode === "replaced" || o.mode === "appended"
-          ? "✓ Journal — saved to today's page"
-          : `✓ Journal — saved (${o.date})`,
-      );
+    } else if (o.tool === "add_daily_note") {
+      lines.push("✓ Note saved for today's journal");
     } else if (o.tool === "create_habit") {
       lines.push(`✓ Created ${o.name} (${o.habit_type})`);
     } else if (o.tool === "edit_habit") {
@@ -202,8 +199,8 @@ function buildActionReceipt(outcomes) {
   for (const o of outcomes) {
     if (o.success) continue;
     hasLine = true;
-    if (o.tool === "log_journal") {
-      lines.push(`✗ Journal — ${o.error || "couldn't save"}`);
+    if (o.tool === "add_daily_note") {
+      lines.push(`✗ Note — ${o.error || "couldn't save"}`);
     } else if (o.tool === "log_habit") {
       lines.push(`✗ ${o.habit_name || "Habit"} — ${o.error || "couldn't log"}`);
     } else if (o.tool === "create_habit") {
@@ -446,35 +443,37 @@ async function executeLogHabit(input, userId, db, clientDate, safety = buildActi
   return { habit_id: input.habit_id, habit_name: input.habit_name, habit_type: htype, date: today, updatedLogs, logValue };
 }
 
-async function executeLogJournal(input, userId, db, clientDate) {
+async function executeAddDailyNote(input, userId, db, clientDate) {
   const date = clientDate || new Date().toISOString().slice(0, 10);
-  const content = (input.content || "").trim();
-  if (!content) throw new Error("Journal content cannot be empty.");
+  const note = (input.note || "").trim();
+  if (!note) throw new Error("Note cannot be empty.");
 
-  // Upsert: one entry per user per day. If an entry already exists, append the
-  // new content with a blank-line separator so multiple AI turns in a session
-  // don't clobber each other.
+  // Fetch existing row for this date to append to daily_context array.
+  // We never overwrite `content` here — that belongs to journal-generate.js.
   const { data: existing } = await db
     .from("journal_entries")
-    .select("id, content")
+    .select("id, daily_context")
     .eq("user_id", userId)
     .eq("date", date)
     .maybeSingle();
 
+  const prevContext = Array.isArray(existing?.daily_context) ? existing.daily_context : [];
+  const updatedContext = [...prevContext, note];
+
   if (existing) {
     const { error } = await db
       .from("journal_entries")
-      .update({ content, updated_at: new Date().toISOString() })
+      .update({ daily_context: updatedContext, updated_at: new Date().toISOString() })
       .eq("id", existing.id);
-    if (error) throw new Error(`Journal save failed: ${error.message}`);
-    return { date, mode: "replaced", id: existing.id };
+    if (error) throw new Error(`Note save failed: ${error.message}`);
+    return { date, mode: "appended", id: existing.id };
   } else {
     const { data: row, error } = await db
       .from("journal_entries")
-      .insert({ user_id: userId, date, content })
+      .insert({ user_id: userId, date, content: "", daily_context: updatedContext })
       .select()
       .single();
-    if (error) throw new Error(`Journal save failed: ${error.message}`);
+    if (error) throw new Error(`Note save failed: ${error.message}`);
     return { date, mode: "created", id: row.id };
   }
 }
@@ -570,7 +569,7 @@ async function handler(req, res) {
   try {
     // ── First call — detect tool_use ─────────────────────────────────────────
     // max_tokens MUST be generous enough to fit ALL tool_use blocks the model
-    // wants to emit. Mixed dumps (many habits + log_journal) need headroom.
+    // wants to emit. Mixed dumps (many habits + add_daily_note) need headroom.
     const firstResp = await client.messages.create({
       model: "claude-haiku-4-5", max_tokens: 2048,
       system: cachedSystem(system), tools,
@@ -611,7 +610,7 @@ async function handler(req, res) {
     if (firstResp.stop_reason === "tool_use") {
       const toolBlocks = firstToolBlocks;
       const toolResults = [];
-      const actions = { created: [], edited: [], logged: [], journaled: [] };
+      const actions = { created: [], edited: [], logged: [], noted: [] };
       /** @type {Array<{ tool: string, success: boolean, error?: string, habit_name?: string, habit_type?: string, name?: string, value_saved?: unknown, date?: string, mode?: string }>} */
       const outcomes = [];
 
@@ -642,11 +641,11 @@ async function handler(req, res) {
               habit_type: r.habit_type,
               value_saved: r.logValue,
             });
-          } else if (tb.name === "log_journal") {
-            const r = await executeLogJournal(tb.input, userId, db, clientDate);
-            actions.journaled.push(r);
+          } else if (tb.name === "add_daily_note") {
+            const r = await executeAddDailyNote(tb.input, userId, db, clientDate);
+            actions.noted.push(r);
             result = { success: true, date: r.date, mode: r.mode };
-            outcomes.push({ tool: "log_journal", success: true, date: r.date, mode: r.mode });
+            outcomes.push({ tool: "add_daily_note", success: true, date: r.date, mode: r.mode });
           } else {
             result = { success: false, error: "Unknown tool — action was NOT performed." };
             outcomes.push({ tool: tb.name, success: false, error: result.error });
@@ -659,7 +658,7 @@ async function handler(req, res) {
             error: err.message,
             habit_name: tb.input?.habit_name,
           };
-          if (tb.name === "log_journal") delete fail.habit_name;
+          if (tb.name === "add_daily_note") delete fail.habit_name;
           if (tb.name === "create_habit") fail.name = tb.input?.name;
           outcomes.push(fail);
         }
@@ -714,9 +713,9 @@ async function handler(req, res) {
       sse(res, {
         done:     true,
         created:  actions.created.length ? actions.created : null,
-        edited:   actions.edited.length    ? actions.edited    : null,
-        logged:   actions.logged.length    ? actions.logged    : null,
-        journaled:actions.journaled.length ? actions.journaled : null,
+        edited:   actions.edited.length  ? actions.edited  : null,
+        logged:   actions.logged.length  ? actions.logged  : null,
+        noted:    actions.noted.length   ? actions.noted   : null,
         receipt:  receiptText || null,
         tool_failures: outcomes.some(o => !o.success) ? outcomes.filter(o => !o.success) : null,
       });
