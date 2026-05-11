@@ -16,6 +16,7 @@ import { useScrollLock } from "../hooks/useScrollLock.js";
 
 // ─── NOTE STRIP ───────────────────────────────────────────────────────────────
 export function NoteStrip({ habitId, habit, onAddNote }) {
+  const [open, setOpen] = useState(false);
   const [val, setVal] = useState("");
   const [savedFlash, setSavedFlash] = useState(false);
 
@@ -37,19 +38,37 @@ export function NoteStrip({ habitId, habit, onAddNote }) {
     if (!ok) return;
     setVal("");
     setSavedFlash(true);
+    setOpen(false);
+  }
+
+  function handleCancel() {
+    if (speech.listening) speech.toggle();
+    setVal("");
+    setOpen(false);
   }
 
   const hasDraft = !!(val.trim() || speech.interim?.trim());
 
+  if (!open) {
+    return (
+      <div style={{ borderTop:`0.5px solid ${T.border}`, padding:"7px 15px 9px", display:"flex", alignItems:"center", gap:8 }}>
+        <button type="button" onClick={() => setOpen(true)}
+          style={{ fontSize:12, color:T.hint, background:"none", border:"none", cursor:"pointer", display:"flex", alignItems:"center", gap:5, padding:0, lineHeight:1 }}>
+          <span style={{ fontSize:13, opacity:0.7 }}>✏️</span> Add note
+        </button>
+        <MicBtn speech={speech} color={habit.color} size={22} onPointerDown={() => setOpen(true)}/>
+        {savedFlash && <span style={{ fontSize:12, color:T.green, fontWeight:500, marginLeft:"auto" }}>Note saved ✓</span>}
+      </div>
+    );
+  }
+
   return (
     <div style={{ borderTop:`0.5px solid ${T.border}`, padding:"10px 15px 12px", display:"flex", flexDirection:"column", gap:7 }}>
-      {savedFlash && (
-        <div style={{ fontSize:12, color:T.green, fontWeight:500 }}>Note saved</div>
-      )}
       <textarea
-        rows={4} maxLength={280}
-        style={{ width:"100%", border:"none", background:"none", fontSize:13, color:T.text, resize:"none", lineHeight:1.55, minHeight:74, outline:"none" }}
-        placeholder={speech.listening ? "Listening…" : "Quick note…"}
+        rows={3} maxLength={280}
+        autoFocus
+        style={{ width:"100%", border:"none", background:"none", fontSize:13, color:T.text, resize:"none", lineHeight:1.55, minHeight:58, outline:"none" }}
+        placeholder={speech.listening ? "Listening…" : "Quick note or reflection…"}
         value={val}
         onChange={e => setVal(e.target.value)}
       />
@@ -61,16 +80,15 @@ export function NoteStrip({ habitId, habit, onAddNote }) {
       {speech.speechError ? (
         <div style={{ fontSize:11, color:T.accent, lineHeight:1.5, whiteSpace:"pre-line" }}>{speech.speechError}</div>
       ) : null}
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
-        <div style={{ marginRight:"auto" }}/>
-        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+        <button type="button" onClick={handleCancel}
+          style={{ fontSize:12, color:T.hint, background:"none", border:"none", cursor:"pointer", padding:0 }}>Cancel</button>
+        <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:8 }}>
           <MicBtn speech={speech} color={habit.color} size={26}/>
-          {(hasDraft || speech.listening) && (
-            <button type="button" onClick={handleDone} disabled={!hasDraft}
-              style={{ fontSize:12, color:hasDraft?T.text:T.hint, background:hasDraft?habit.color+"22":"none", border:`0.5px solid ${hasDraft?habit.color+"55":T.border}`, borderRadius:T.rsm, padding:"4px 12px", cursor:hasDraft?"pointer":"not-allowed", fontWeight:500, transition:"all 0.15s", opacity:hasDraft?1:0.65 }}>
-              ✓ Done
-            </button>
-          )}
+          <button type="button" onClick={handleDone} disabled={!hasDraft}
+            style={{ fontSize:12, color:hasDraft?T.text:T.hint, background:hasDraft?habit.color+"22":"none", border:`0.5px solid ${hasDraft?habit.color+"55":T.border}`, borderRadius:T.rsm, padding:"4px 12px", cursor:hasDraft?"pointer":"not-allowed", fontWeight:500, transition:"all 0.15s", opacity:hasDraft?1:0.65 }}>
+            ✓ Save
+          </button>
         </div>
       </div>
     </div>
