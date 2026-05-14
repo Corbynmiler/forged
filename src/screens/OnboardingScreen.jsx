@@ -3,6 +3,9 @@ import { T, COLORS, HABIT_TYPES } from "../theme.js";
 import { supabase, SUPABASE_ANON_KEY } from "../supabase.js";
 import { todayStr, daysAgo, isLegacyProgressType, inferProgressDirection, getStreak, isSatisfiedForTodayRing } from "../utils.js";
 import { Modal, GBtn, PBtn, Ring } from "../components/ui.jsx";
+import { useSpeechInput, MicBtn } from "../hooks/useSpeechInput.jsx";
+
+const ONBOARD_STREAM_ID = "__ob_stream__";
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 function cssPadXSafe(basePx) {
@@ -139,10 +142,19 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
   const [coachIntroMsg,     setCoachIntroMsg]     = useState(null);
   const [coachIntroLoading, setCoachIntroLoading] = useState(false);
   // Onboarding chat state
-  const [onboardMsgs,   setOnboardMsgs]   = useState([]); // { role: "user"|"assistant", content: string }
-  const [onboardInput,  setOnboardInput]  = useState("");
-  const [onboardSending,setOnboardSending]= useState(false);
-  const chatEndRef = useRef(null);
+  const [onboardMsgs,        setOnboardMsgs]        = useState([]);
+  const [onboardInput,       setOnboardInput]        = useState("");
+  const [onboardSending,     setOnboardSending]      = useState(false);
+  const [habitCreatedInChat, setHabitCreatedInChat]  = useState(false);
+  const [skipConfirmVisible, setSkipConfirmVisible]  = useState(false);
+  const chatEndRef  = useRef(null);
+  const textareaRef = useRef(null);
+
+  const speech = useSpeechInput({
+    onTranscript: (text, isFinal) => {
+      if (isFinal) setOnboardInput(prev => (prev + " " + text).trim());
+    },
+  });
 
   const current   = ONBOARD_STEPS[step];
   const isLast    = step === ONBOARD_STEPS.length - 1;
@@ -317,13 +329,30 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
     }
   }
 
+  function buildOnboardingSystem(firstName, habitName, habitType, coachName) {
+    return `You are ${coachName || "Coach"}, the AI coach inside Forged — a personal habit tracking app. You are having your first conversation with ${firstName || "someone new"}.
+
+They've chosen to track: ${habitName || "a habit"} (${habitType || "daily"} type).
+
+Your goals in this short onboarding conversation:
+1. Have a real, specific conversation about THEIR situation with this habit — not generic advice
+2. Use your tools (create_habit, create_goal) to set up habits/goals the conversation reveals they need
+3. Keep every message under 70 words — direct, warm, specific
+4. Sound like a coach who knows this space, not a wellness chatbot
+
+After you've helped them set something up, let them know they can log habits from the Today screen and chat anytime.`;
+  }
+
   async function sendOnboardMessage() {
-    const txt = onboardInput.trim();
-    if (!txt || onboardSending || coachIntroLoading) return;
+    const inputText = onboardInput.trim();
+    if (!inputText || onboardSending) return;
+    if (speech.listening) speech.stopListening?.();
     setOnboardInput("");
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
 
     const firstHabit = builtHabits.length > 0 ? pickFirstHabit(builtHabits) : null;
-    const withUser = [...onboardMsgs, { role: "user", content: txt }];
+    const prev = onboardMsgs.filter(m => m.id !== ONBOARD_STREAM_ID);
+    const withUser = [...prev, { role: "user", content: inputText }];
     setOnboardMsgs(withUser);
     setOnboardSending(true);
 
@@ -331,35 +360,81 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token ?? SUPABASE_ANON_KEY;
 
-      // Build proper alternating API format: prepend the hidden opener trigger,
-      // then the full conversation (opener as assistant, user msgs, assistant replies).
-      const apiMessages = [
-        { role: "user", content: "." },
-        ...withUser,
-      ];
+      // Prepend the hidden opener trigger so the API sees a valid alternating sequence:
+      // user:"." → assistant:opener → user:msg1 → assistant:reply1 → user:msg2 …
+      const apiMessages = [{ role: "user", content: "." }, ...withUser];
 
-      const res = await fetch("/api/onboard-chat", {
+      const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
-          name: name.trim() || "there",
-          coachName: coachNameInput.trim() || "Coach",
-          habitName: firstHabit?.name || "",
-          habitType: firstHabit?.habitType || "daily",
+          system: buildOnboardingSystem(
+            name.trim() || "there",
+            firstHabit?.name || "",
+            firstHabit?.habitType || "daily",
+            coachNameInput.trim() || "Coach",
+          ),
           messages: apiMessages,
+          client_date: todayStr(),
         }),
       });
 
-      if (res.ok) {
-        const { reply } = await res.json();
-        if (reply) setOnboardMsgs([...withUser, { role: "assistant", content: reply }]);
+      if (!res.ok) throw new Error("Request failed");
+
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("text/event-stream")) {
+        const streamTs = Date.now();
+        setOnboardMsgs(p => [...p, { role: "assistant", content: "", id: ONBOARD_STREAM_ID, ts: streamTs }]);
+        setOnboardSending(false);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let fullText = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop();
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            try {
+              const evt = JSON.parse(line.slice(6));
+              if (evt.text) {
+                fullText += evt.text;
+                const snap = fullText;
+                setOnboardMsgs(p => p.map(m => m.id === ONBOARD_STREAM_ID ? { ...m, content: snap } : m));
+                chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+              }
+              if (evt.done) {
+                const receipt = evt.receipt && String(evt.receipt).trim()
+                  ? `\n\n${String(evt.receipt).trim()}` : "";
+                const final = (fullText.trim() || "") + receipt;
+                setOnboardMsgs(p => p.map(m =>
+                  m.id === ONBOARD_STREAM_ID ? { role: "assistant", content: final || fullText, ts: m.ts } : m
+                ));
+                if (evt.created || evt.edited?.length) setHabitCreatedInChat(true);
+              }
+            } catch { /* malformed line */ }
+          }
+        }
       } else {
-        setOnboardMsgs([...withUser, { role: "assistant", content: "Let's keep going — tap below when you're ready." }]);
+        const data = await res.json();
+        setOnboardSending(false);
+        setOnboardMsgs(p => [...p, { role: "assistant", content: data.reply || "" }]);
       }
     } catch {
-      setOnboardMsgs([...withUser, { role: "assistant", content: "Something went wrong on my end. Let's keep going." }]);
+      setOnboardSending(false);
+      setOnboardMsgs(p => [
+        ...p.filter(m => m.id !== ONBOARD_STREAM_ID),
+        { role: "assistant", content: "Something went wrong on my end. Let's keep going." },
+      ]);
     }
-    setOnboardSending(false);
   }
 
   function buildFirstLog(habit, rawVal) {
@@ -566,115 +641,171 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
 
   // ── Virtual step: onboarding chat — first real interaction with the coach ─────
   if ((step === FIRST_STEP || step === COACH_INTRO_STEP) && builtHabits.length > 0) {
-    const coachDisplay = coachNameInput.trim() || "Coach";
-    const hasExchange  = onboardMsgs.some(m => m.role === "user");
+    const coachDisplay  = coachNameInput.trim() || "Coach";
+    const isStreaming   = onboardMsgs.some(m => m.id === ONBOARD_STREAM_ID);
+    const canSend       = onboardInput.trim() && !onboardSending && !isStreaming;
 
     return (
-      <div style={{ ...wrap, overflow:"hidden" }}>
-        <style>{`
-          @keyframes obTyping {
-            0%,60%,100% { opacity:0.2; transform:translateY(0); }
-            30% { opacity:1; transform:translateY(-3px); }
-          }
-        `}</style>
+      // position:fixed + inset:0 prevents iOS from zooming/scrolling the page when the keyboard opens
+      <div style={{ position:"fixed", inset:0, background:T.bg, display:"flex", flexDirection:"column", fontFamily:T.font, maxWidth:430, margin:"0 auto" }}>
+        <style>{`@keyframes obDot{0%,60%,100%{opacity:.2;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}`}</style>
 
-        {/* Header — coach identity + step progress */}
-        <div style={{
-          flexShrink:0,
-          paddingTop:"max(16px, env(safe-area-inset-top, 16px))",
-          paddingBottom:12,
-          paddingLeft:20, paddingRight:20,
-          borderBottom:`0.5px solid ${T.border}`,
-          display:"flex", alignItems:"center", gap:12,
-        }}>
-          <div style={{ width:38, height:38, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>🤖</div>
-          <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ fontSize:14, fontWeight:600, color:T.text }}>{coachDisplay}</div>
-            <div style={{ fontSize:11, color:T.gold, marginTop:1 }}>Forged AI Coach</div>
+        {/* Skip confirmation modal */}
+        {skipConfirmVisible && (
+          <div
+            style={{ position:"absolute", inset:0, zIndex:200, background:"rgba(0,0,0,0.72)", display:"flex", alignItems:"center", justifyContent:"center", padding:24 }}
+            onClick={() => setSkipConfirmVisible(false)}
+          >
+            <div style={{ background:T.raised, borderRadius:T.r, padding:24, maxWidth:320, width:"100%", boxShadow:"0 8px 32px rgba(0,0,0,0.4)" }}
+              onClick={e => e.stopPropagation()}>
+              <div style={{ fontSize:17, fontWeight:700, color:T.text, marginBottom:10 }}>Skip this step?</div>
+              <div style={{ fontSize:13, color:T.sub, lineHeight:1.65, marginBottom:22 }}>
+                This is where you set up your first goal with your coach. Skipping means starting without any habits or goals — you can always add them later, but it's easier to do it now.
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                <button
+                  onClick={() => setSkipConfirmVisible(false)}
+                  style={{ padding:13, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer" }}
+                >
+                  Stay and set up my goal
+                </button>
+                <button
+                  onClick={() => { setSkipConfirmVisible(false); setShowingFinal(true); }}
+                  style={{ padding:13, borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:"none", color:T.muted, fontSize:13, cursor:"pointer" }}
+                >
+                  Skip anyway
+                </button>
+              </div>
+            </div>
           </div>
-          {/* Slim progress bar */}
+        )}
+
+        {/* Header */}
+        <div style={{ flexShrink:0, paddingTop:"max(16px, env(safe-area-inset-top, 16px))", paddingBottom:12, paddingLeft:20, paddingRight:20, borderBottom:`0.5px solid ${T.border}`, display:"flex", alignItems:"center", gap:12, background:T.bg }}>
+          <div style={{ width:40, height:40, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>🤖</div>
+          <div style={{ flex:1 }}>
+            <div style={{ fontSize:14, fontWeight:600, color:T.text }}>{coachDisplay}</div>
+            <div style={{ fontSize:11, color:T.gold, marginTop:1 }}>Forged AI Coach · Step 5 of 5</div>
+          </div>
           <div style={{ width:56, height:3, background:T.surface, borderRadius:2, overflow:"hidden", flexShrink:0 }}>
-            <div style={{ width:"100%", height:"100%", background:T.accent, borderRadius:2 }} />
+            <div style={{ width:"100%", height:"100%", background:T.accent, borderRadius:2 }}/>
           </div>
         </div>
 
         {/* Messages area */}
-        <div style={{ flex:1, overflowY:"auto", padding:"20px 16px 8px", display:"flex", flexDirection:"column", gap:14 }}>
+        <div style={{ flex:1, overflowY:"auto", padding:"20px 16px 8px", display:"flex", flexDirection:"column", gap:12 }}>
 
-          {/* Loading opener */}
+          {/* Opener loading */}
           {coachIntroLoading && onboardMsgs.length === 0 && (
             <div style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
               <div style={{ width:28, height:28, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, flexShrink:0 }}>🤖</div>
-              <div style={{ display:"flex", gap:5, padding:"12px 16px", background:"rgba(200,144,42,0.07)", border:`0.5px solid rgba(200,144,42,0.2)`, borderRadius:"14px 14px 14px 3px" }}>
-                {[0,1,2].map(i => (
-                  <div key={i} style={{ width:7, height:7, borderRadius:"50%", background:"rgba(200,144,42,0.55)", animation:`obTyping 1.2s ease-in-out ${i*0.18}s infinite` }} />
-                ))}
+              <div style={{ padding:"10px 16px", background:T.surface, borderRadius:"14px 14px 14px 3px", display:"flex", gap:5, alignItems:"center" }}>
+                {[0,1,2].map(i => <div key={i} style={{ width:6, height:6, borderRadius:"50%", background:T.muted, animation:`obDot 1.2s ease-in-out ${i*0.2}s infinite` }}/>)}
               </div>
             </div>
           )}
 
-          {/* Rendered messages */}
+          {/* All messages */}
           {onboardMsgs.map((msg, i) =>
             msg.role === "assistant" ? (
               <div key={i} style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
                 <div style={{ width:28, height:28, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, flexShrink:0 }}>🤖</div>
-                <div style={{ background:"rgba(200,144,42,0.07)", border:`0.5px solid rgba(200,144,42,0.2)`, borderLeft:`2px solid rgba(200,144,42,0.4)`, borderRadius:"14px 14px 14px 3px", padding:"12px 16px", fontSize:14, color:T.text, lineHeight:1.7, maxWidth:"85%" }}>
-                  {msg.content}
+                <div style={{ background:T.surface, borderRadius:"14px 14px 14px 3px", padding:"10px 16px", fontSize:15, color:T.text, lineHeight:1.65, maxWidth:"82%" }}>
+                  {msg.content || (msg.id === ONBOARD_STREAM_ID
+                    ? <div style={{ display:"flex", gap:5 }}>{[0,1,2].map(i => <div key={i} style={{ width:6, height:6, borderRadius:"50%", background:T.muted, animation:`obDot 1.2s ease-in-out ${i*0.2}s infinite` }}/>)}</div>
+                    : null
+                  )}
                 </div>
               </div>
             ) : (
               <div key={i} style={{ display:"flex", justifyContent:"flex-end" }}>
-                <div style={{ background:T.accent, borderRadius:"14px 14px 3px 14px", padding:"10px 16px", fontSize:14, color:"#fff", lineHeight:1.6, maxWidth:"80%" }}>
+                <div style={{ background:T.accent, borderRadius:"14px 14px 3px 14px", padding:"10px 16px", fontSize:15, color:"#fff", lineHeight:1.65, maxWidth:"82%" }}>
                   {msg.content}
                 </div>
               </div>
             )
           )}
 
-          {/* Typing indicator while coach replies */}
-          {onboardSending && (
+          {/* Typing indicator (waiting for stream to start) */}
+          {onboardSending && !isStreaming && (
             <div style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
               <div style={{ width:28, height:28, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, flexShrink:0 }}>🤖</div>
-              <div style={{ display:"flex", gap:5, padding:"12px 16px", background:"rgba(200,144,42,0.07)", border:`0.5px solid rgba(200,144,42,0.2)`, borderRadius:"14px 14px 14px 3px" }}>
-                {[0,1,2].map(i => (
-                  <div key={i} style={{ width:7, height:7, borderRadius:"50%", background:"rgba(200,144,42,0.55)", animation:`obTyping 1.2s ease-in-out ${i*0.18}s infinite` }} />
-                ))}
+              <div style={{ padding:"10px 16px", background:T.surface, borderRadius:"14px 14px 14px 3px", display:"flex", gap:5, alignItems:"center" }}>
+                {[0,1,2].map(i => <div key={i} style={{ width:6, height:6, borderRadius:"50%", background:T.muted, animation:`obDot 1.2s ease-in-out ${i*0.2}s infinite` }}/>)}
               </div>
             </div>
           )}
 
-          <div ref={chatEndRef} />
+          <div ref={chatEndRef}/>
         </div>
 
-        {/* Input bar */}
-        <div style={{ flexShrink:0, borderTop:`0.5px solid ${T.border}`, padding:"10px 14px", display:"flex", gap:10, alignItems:"center" }}>
-          <input
-            style={{ flex:1, background:T.surface, border:`0.5px solid ${T.borderStrong}`, borderRadius:24, padding:"10px 16px", fontSize:14, color:T.text, outline:"none", fontFamily:T.font }}
-            placeholder={coachIntroLoading ? "Coach is typing…" : "Reply to your coach…"}
-            value={onboardInput}
-            onChange={e => setOnboardInput(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendOnboardMessage(); } }}
-            disabled={onboardSending || coachIntroLoading}
-            autoFocus={!coachIntroLoading}
-          />
-          <button
-            onClick={sendOnboardMessage}
-            disabled={!onboardInput.trim() || onboardSending || coachIntroLoading}
-            style={{ width:40, height:40, borderRadius:"50%", border:"none", background:onboardInput.trim()&&!onboardSending?T.accent:T.surface, color:onboardInput.trim()&&!onboardSending?"#fff":T.muted, fontSize:17, cursor:onboardInput.trim()?"pointer":"default", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, transition:"all 0.15s" }}
-          >
-            ↑
-          </button>
+        {/* Input bar — matches AICoach layout: mic · textarea · send */}
+        <div style={{ flexShrink:0, borderTop:`0.5px solid ${T.border}`, padding:"10px 14px", background:T.bg }}>
+          <div style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
+            {speech.supported && (
+              <div style={{ flexShrink:0, alignSelf:"flex-end", marginBottom:1 }}>
+                <MicBtn speech={speech} color={T.gold} size={44} prominent/>
+              </div>
+            )}
+            <div style={{ flex:1, position:"relative" }}>
+              <textarea
+                ref={textareaRef}
+                value={onboardInput}
+                onChange={e => setOnboardInput(e.target.value)}
+                onInput={e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 88) + "px"; }}
+                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendOnboardMessage(); } }}
+                placeholder={coachIntroLoading ? "Coach is typing…" : "Tell your coach about yourself…"}
+                disabled={onboardSending || isStreaming}
+                style={{
+                  width:"100%", boxSizing:"border-box",
+                  background:T.surface, border:`0.5px solid ${T.borderStrong}`,
+                  borderRadius:T.rsm, padding:"10px 14px",
+                  // font-size 16px prevents iOS from zooming in when the field is focused
+                  fontSize:16, color:T.text, resize:"none",
+                  fontFamily:T.font, lineHeight:1.5, outline:"none",
+                  minHeight:"42px", maxHeight:"88px", overflowY:"auto", height:"auto",
+                }}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={sendOnboardMessage}
+              disabled={!canSend}
+              style={{
+                width:36, height:36, borderRadius:"50%", border:`0.5px solid ${T.border}`,
+                flexShrink:0, alignSelf:"flex-end",
+                background:canSend ? T.gold : T.surface,
+                cursor:canSend ? "pointer" : "default",
+                display:"flex", alignItems:"center", justifyContent:"center",
+                transition:"background 0.2s",
+              }}
+            >
+              <svg width="15" height="15" viewBox="0 0 18 18" fill="none">
+                <path d="M2 9h14M9 2l7 7-7 7" stroke={canSend ? "#1a1a16" : T.hint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+          </div>
         </div>
 
-        {/* CTA — becomes primary after first exchange */}
-        <div style={{ flexShrink:0, padding:"10px 16px", paddingBottom:"max(32px, env(safe-area-inset-bottom, 32px))" }}>
-          <button
-            type="button"
-            onClick={() => setShowingFinal(true)}
-            style={{ width:"100%", padding:15, borderRadius:T.rsm, border:"none", background:hasExchange?T.accent:"rgba(255,255,255,0.06)", color:hasExchange?"#fff":T.muted, fontSize:15, fontWeight:500, cursor:"pointer", transition:"all 0.3s" }}
-          >
-            {hasExchange ? "Start Forged →" : "Skip for now"}
-          </button>
+        {/* CTA — "Start Forged →" unlocks after coach creates something; otherwise show skip with confirmation */}
+        <div style={{ flexShrink:0, padding:"8px 16px", paddingBottom:"max(28px, env(safe-area-inset-bottom, 28px))", background:T.bg }}>
+          {habitCreatedInChat ? (
+            <button
+              type="button"
+              onClick={() => setShowingFinal(true)}
+              style={{ width:"100%", padding:15, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:600, cursor:"pointer" }}
+            >
+              Start Forged →
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setSkipConfirmVisible(true)}
+              style={{ width:"100%", padding:14, borderRadius:T.rsm, border:"none", background:"rgba(255,255,255,0.05)", color:T.muted, fontSize:14, cursor:"pointer" }}
+            >
+              Skip for now
+            </button>
+          )}
         </div>
       </div>
     );
