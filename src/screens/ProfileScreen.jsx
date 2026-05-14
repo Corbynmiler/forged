@@ -527,50 +527,19 @@ export function ProfileScreen({ user, xp, habits, isPro, isCoach, stripeCustomer
                 overflow:"hidden",
               }}
             >
-              {/* Daily reminders + time picker */}
+              {/* Daily reminders */}
               <NotifCategoryRow
                 emoji="⏰"
                 title="Daily reminders"
                 subtitle={
                   dailyRemindersEnabled
-                    ? "One per day. Sent within ~5 min of the time you choose."
+                    ? "Morning, midday, and evening — from your coach"
                     : "Off — your daily push is paused"
                 }
                 checked={dailyRemindersEnabled}
                 onChange={v => onNotifCategoryChange("daily_reminders_enabled", v)}
                 disabled={notifLoading}
               />
-              {dailyRemindersEnabled && (
-                <div
-                  style={{
-                    padding:"6px 14px 12px 50px",
-                    display:"flex", alignItems:"center", gap:10,
-                    borderBottom:`0.5px solid rgba(255,255,255,0.04)`,
-                  }}
-                >
-                  <input
-                    type="time"
-                    value={notifTime}
-                    step={300}
-                    onChange={e => onNotifTimeChange(e.target.value)}
-                    disabled={notifLoading}
-                    aria-label="Reminder time"
-                    style={{
-                      fontSize:14, color:T.text, fontWeight:500,
-                      background:T.surface,
-                      border:`0.5px solid ${T.border}`,
-                      borderRadius:8,
-                      padding:"6px 8px",
-                      cursor:notifLoading ? "not-allowed" : "pointer",
-                      opacity:notifLoading ? 0.5 : 1,
-                      fontFamily:"inherit",
-                      minWidth:96,
-                      colorScheme:"dark",
-                    }}
-                  />
-                  <span style={{ fontSize:11, color:T.hint }}>your local time</span>
-                </div>
-              )}
 
               {/* Friend nudges */}
               <NotifCategoryRow

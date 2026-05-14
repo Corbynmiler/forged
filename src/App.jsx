@@ -3441,14 +3441,12 @@ export default function App() {
             syncProfile({ coach_name: name, coach_icon: icon });
           }}
           notifEnabled={notifEnabled}
-          notifTime={notifTime}
           notifLoading={notifLoading}
           notifPermission={notifPermission}
           dailyRemindersEnabled={dailyRemindersEnabled}
           nudgesEnabled={nudgesEnabled}
           invitesEnabled={invitesEnabled}
           onNotifToggle={handleNotifToggle}
-          onNotifTimeChange={handleNotifTimeChange}
           onNotifCategoryChange={handleNotifCategoryChange}
         />}
 
