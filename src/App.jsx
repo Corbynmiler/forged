@@ -87,6 +87,7 @@ import {
   SetPasswordScreen,
   CheckEmailScreen,
   DemoBanner,
+  DemoCoachModal,
   BetaPaywallModal,
   WelcomeModal,
   ProThankYouModal,
@@ -316,6 +317,7 @@ export default function App() {
   const [showWelcome,    setShowWelcome]    = useState(false);
   const [showProFollowup, setShowProFollowup] = useState(false);
   const [demoMode,       setDemoMode]       = useState(false);
+  const [demoCoachOpen,  setDemoCoachOpen]  = useState(false);
   const shownDemoRef = useRef(false); // prevent demo re-showing after sign-out
   const [previewOnboarding, setPreviewOnboarding] = useState(false); // admin preview only — never touches DB
   const [refCode,     setRefCode]     = useState(null);
@@ -2600,32 +2602,52 @@ export default function App() {
 
   // Demo mode — show app with seed data before sign-up
   if (!loading && demoMode) {
+    const demoGetStarted = () => { setDemoMode(false); setHabits([]); shownDemoRef.current = true; setDemoCoachOpen(false); setAuthScreen(true); };
+    const DEMO_NAV = [
+      { id:"today",    label:"Today",    icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.5"/><path d="M10 6v4l2.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
+      { id:"journal",  label:"Journal",  icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="4" y="3" width="12" height="14" rx="2" stroke="currentColor" strokeWidth="1.5"/><path d="M7 7h6M7 10h6M7 13h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg> },
+      { id:"insights", label:"Insights", icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 15l4-5 3 3 4-6 3 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg> },
+      { id:"social",   label:"Social",   icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="7.5" cy="7" r="2.5" stroke="currentColor" strokeWidth="1.5"/><path d="M3 16.5c0-2.5 2-4.5 4.5-4.5s4.5 2 4.5 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><circle cx="14.5" cy="6.5" r="2" stroke="currentColor" strokeWidth="1.5"/><path d="M11 16.5c0-1.7 1.1-3.1 2.6-3.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
+      { id:"profile",  label:"Profile",  icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="7" r="3" stroke="currentColor" strokeWidth="1.5"/><path d="M4 17c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
+    ];
     return (
       <>
         <style>{CSS}</style>
         {toasts.map(t => <Toast key={t.id} msg={t.msg} onDone={() => setToasts(ts => ts.filter(x => x.id !== t.id))}/>)}
-        <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, paddingBottom:104 }}>
-          <DemoBanner onGetStarted={() => { setDemoMode(false); setHabits([]); shownDemoRef.current = true; setAuthScreen(true); }} />
+        {demoCoachOpen && <DemoCoachModal onClose={() => setDemoCoachOpen(false)} onGetStarted={demoGetStarted}/>}
+        <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, paddingBottom:172 }}>
+          <DemoBanner onGetStarted={demoGetStarted}/>
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", paddingTop:16, paddingBottom:8, ...cssPadXSafe(18) }}>
             <div>
               <div style={{ fontFamily:T.serif, fontSize:30, color:T.text, letterSpacing:"-0.01em" }}>Forged</div>
-              <div style={{ fontSize:11, color:T.muted, marginTop:1 }}>{fmtDate()}</div>
+              <div style={{ fontSize:12, color:T.muted, marginTop:1 }}>{fmtDateLong()}</div>
             </div>
-            <button onClick={() => { setDemoMode(false); setHabits([]); shownDemoRef.current = true; setAuthScreen(true); }}
+            <button onClick={demoGetStarted}
               style={{ display:"flex", alignItems:"center", gap:6, background:"rgba(200,144,42,0.12)", borderRadius:20, padding:"6px 13px", fontSize:13, fontWeight:500, color:T.gold, border:"none", cursor:"pointer" }}>
-              ⚡ 0 xp
+              ⚡ 420 xp
             </button>
           </div>
-          <TodayScreen habits={habits} goals={goals} xp={0} onTap={handleTap} onUndo={() => {}} onSkip={() => {}} onAddNote={() => demoBounce()} onLogZero={() => demoBounce()} onOpenLog={() => demoBounce()} onOpenGoalLog={() => demoBounce()} onEditGoal={openEditGoal} onCompleteGoal={() => demoBounce()} onDeleteGoal={() => demoBounce()} onShareGoal={() => {}} onEditHabit={openEditHabit} onDeleteHabit={() => demoBounce()} onShareHabit={() => {}} sharingHabitId={null} onXPInfo={() => {}} onAdd={() => demoBounce()} onSaveLogEntry={async () => { demoBounce(); return false; }} hideFloatingAdd/>
+          <TodayScreen habits={habits} goals={goals} xp={0} onTap={handleTap} onUndo={() => {}} onSkip={() => {}} onAddNote={() => demoBounce()} onLogZero={() => demoBounce()} onOpenLog={() => demoBounce()} onOpenGoalLog={() => demoBounce()} onEditGoal={openEditGoal} onCompleteGoal={() => demoBounce()} onDeleteGoal={() => demoBounce()} onShareGoal={() => {}} onEditHabit={openEditHabit} onDeleteHabit={() => demoBounce()} onShareHabit={() => {}} sharingHabitId={null} onXPInfo={() => {}} onAdd={() => demoBounce()} onSaveLogEntry={async () => { demoBounce(); return false; }} hideFloatingAdd coachEverOpened={false} onOpenCoachMic={() => setDemoCoachOpen(true)} coachName="Dr. No Excuses" coachIcon="🧘" coachHabitColor={T.accent}/>
+          {/* CoachBar — visible, tapping opens demo preview modal (no API calls) */}
+          <div style={{ position:"fixed", left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:430, bottom:60, zIndex:101, padding:"0 10px", boxSizing:"border-box" }}>
+            <CoachBar
+              coachName="Dr. No Excuses"
+              coachIcon="🧘"
+              habitColor={T.accent}
+              onOpenMic={() => setDemoCoachOpen(true)}
+              onOpenText={() => setDemoCoachOpen(true)}
+              coachEverOpened={false}
+            />
+          </div>
           <nav style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:430, maxWidth:"100vw", background:"linear-gradient(180deg, rgba(38,38,34,0.98) 0%, rgba(22,22,19,0.99) 100%)", backdropFilter:"blur(20px)", WebkitBackdropFilter:"blur(20px)", borderTop:`1px solid rgba(200,144,42,0.2)`, boxShadow:"0 -6px 32px rgba(0,0,0,0.5)", display:"flex", zIndex:100, paddingTop:8, paddingBottom:"max(11px, env(safe-area-inset-bottom, 0px))" }}>
-            {[{id:"today",label:"Today"},{id:"journal",label:"Journal"},{id:"insights",label:"Insights"},{id:"social",label:"Social"},{id:"profile",label:"Profile"}].map(n => (
-              <button key={n.id} onClick={() => demoBounce()} style={{ flex:1, padding:"9px 4px 6px", border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3, fontSize:10, fontWeight:600, color:n.id==="today"?T.accent:T.muted, letterSpacing:"0.02em" }}>
-                {n.label}
+            {DEMO_NAV.map(n => (
+              <button key={n.id} onClick={() => n.id === "today" ? null : demoBounce()} style={{ flex:1, padding:"9px 4px 6px", border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3, fontSize:10, fontWeight:600, color:n.id==="today"?T.accent:T.muted, letterSpacing:"0.02em" }}>
+                {n.icon}{n.label}
               </button>
             ))}
           </nav>
         </div>
-        {/* Same edit modals as signed-in shell — demo branch previously omitted them, so Edit appeared to do nothing. */}
+        {/* Edit modals */}
         {editGoalId    && (() => { const g = resolveGoalForModal(editGoalId, goals, habits); return g ? <EditGoalModal goal={g} onClose={() => setEditGoalId(null)} onSave={handleEditGoalSave}/> : null; })()}
         {editId && !editGoalId && editHabit && !isGoalLikeHabitType(editHabit) && <EditModal habit={editHabit} onClose={() => setEditId(null)} onSave={handleEditSave}/>}
       </>

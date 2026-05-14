@@ -354,6 +354,86 @@ export function DemoBanner({ onGetStarted }) {
   );
 }
 
+// ─── DEMO COACH MODAL ─────────────────────────────────────────────────────────
+// Static preview conversation. Zero API calls. Zero DB writes.
+export function DemoCoachModal({ onClose, onGetStarted }) {
+  useScrollLock(true);
+  const avatar = (
+    <div style={{
+      width:28, height:28, borderRadius:"50%",
+      background:"rgba(192,57,43,0.1)", border:"1px solid rgba(192,57,43,0.28)",
+      display:"flex", alignItems:"center", justifyContent:"center",
+      fontSize:14, flexShrink:0, marginTop:2,
+    }}>🧘</div>
+  );
+  const userMsg = (text) => (
+    <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:12 }}>
+      <div style={{
+        background:"rgba(192,57,43,0.13)", border:"0.5px solid rgba(192,57,43,0.22)",
+        borderRadius:"16px 16px 4px 16px", padding:"10px 14px", maxWidth:"82%",
+        fontSize:13, color:T.text, lineHeight:1.55,
+      }}>{text}</div>
+    </div>
+  );
+  const coachMsg = (text) => (
+    <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+      {avatar}
+      <div style={{
+        background:T.raised, border:`0.5px solid ${T.border}`,
+        borderRadius:"4px 16px 16px 16px", padding:"10px 14px", maxWidth:"82%",
+        fontSize:13, color:T.text, lineHeight:1.6,
+      }}>{text}</div>
+    </div>
+  );
+  return (
+    <div
+      style={{ position:"fixed", inset:0, zIndex:500, background:"rgba(0,0,0,0.75)", display:"flex", flexDirection:"column", justifyContent:"flex-end" }}
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div style={{
+        background:T.surface, borderRadius:"20px 20px 0 0",
+        padding:"20px 18px 32px", maxHeight:"78vh", overflowY:"auto",
+        fontFamily:T.font, WebkitOverflowScrolling:"touch",
+      }}>
+        {/* Header */}
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <div style={{
+              width:34, height:34, borderRadius:"50%",
+              background:"rgba(192,57,43,0.12)", border:"1px solid rgba(192,57,43,0.35)",
+              display:"flex", alignItems:"center", justifyContent:"center", fontSize:17, flexShrink:0,
+            }}>🧘</div>
+            <div>
+              <div style={{ fontSize:14, fontWeight:600, color:T.text }}>Dr. No Excuses</div>
+              <div style={{ fontSize:10, color:T.accent, marginTop:2 }}>● Active — knows your habits &amp; goals</div>
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background:"none", border:"none", color:T.muted, fontSize:22, cursor:"pointer", lineHeight:1, padding:"4px 8px" }} aria-label="Close">×</button>
+        </div>
+        {/* Preview badge */}
+        <div style={{
+          background:"rgba(200,144,42,0.07)", border:"0.5px solid rgba(200,144,42,0.18)",
+          borderRadius:8, padding:"6px 12px", marginBottom:18,
+          fontSize:10, color:T.gold, fontFamily:T.mono, letterSpacing:"0.1em",
+          textTransform:"uppercase", textAlign:"center",
+        }}>Preview — create an account to start your own conversation</div>
+        {/* Fake conversation */}
+        {userMsg("I skipped gym yesterday but still hit water and reading.")}
+        {coachMsg("Logged. That's not a failed day — that's a mixed one. You protected the easy habits when the big one felt heavy. I'll track the pattern once you've got a few real logs in.")}
+        {userMsg("Yeah, it was a long day at work.")}
+        {coachMsg("Work hours keep showing up in your notes. That's the pattern worth watching — not the missed gym session.")}
+        {/* CTA */}
+        <button onClick={onGetStarted} style={{
+          width:"100%", padding:"14px 20px", marginTop:10,
+          background:"#C0392B", borderRadius:10, border:"none",
+          color:"#fff", fontSize:15, fontWeight:600, cursor:"pointer", letterSpacing:"-0.01em",
+        }}>Create a free account to start for real →</button>
+        <div style={{ marginTop:10, textAlign:"center", fontSize:11, color:T.muted }}>No card required · Free during beta</div>
+      </div>
+    </div>
+  );
+}
+
 // ─── BETA PAYWALL MODAL ───────────────────────────────────────────────────────
 // Shown inline when a free user hits a gated feature. Never blocks the whole app.
 export function BetaPaywallModal({ onClose }) {
