@@ -15,6 +15,10 @@ function formatDate(ymd) {
   });
 }
 
+// Signals in context notes that indicate the day was intentionally untracked
+// (rest, recovery, sick, social, time off) rather than a genuine miss.
+const REST_DAY_NOTE_RE = /\b(rest day|rest_day|recovery|day off|took the day off|sick|ill|not feeling well|under the weather|rough day|rough physically|tired|exhausted|burnt out|burned out|injury|injured|wrist|back pain|social day|family day|travel day|planned rest|no gym|off day)\b/i;
+
 function buildGenerationPrompt({ date, habits, goals, name, existingNotes }) {
   const displayDate = formatDate(date);
   const lines = [];
@@ -33,11 +37,25 @@ function buildGenerationPrompt({ date, habits, goals, name, existingNotes }) {
     l => l.value !== null && l.value !== undefined && l.value !== false && l.value !== "skip"
   ));
   const skipped = habitsWithLogs.filter(h => h.todayLogs.some(l => l.value === "skip"));
-  const missed = habitsWithLogs.filter(h =>
+  const notLogged = habitsWithLogs.filter(h =>
     h.todayLogs.length === 0 &&
     !logged.find(x => x.id === h.id) &&
     !skipped.find(x => x.id === h.id)
   );
+
+  // Detect whether context notes suggest a rest/recovery/sick day
+  const notesText = existingNotes?.trim() || "";
+  const hasRestSignal = REST_DAY_NOTE_RE.test(notesText);
+  const hasAnyLogs = logged.length > 0 || skipped.length > 0;
+
+  // Surface day-type hint so the journal AI interprets unlogged habits correctly
+  if (!hasAnyLogs && hasRestSignal) {
+    lines.push("Day type: Rest / recovery / time off — context notes indicate this was intentional.");
+    lines.push("");
+  } else if (!hasAnyLogs && !notesText) {
+    lines.push("Day type: No logs recorded and no context notes — day went untracked.");
+    lines.push("");
+  }
 
   if (logged.length > 0) {
     lines.push("Completed today:");
@@ -46,7 +64,11 @@ function buildGenerationPrompt({ date, habits, goals, name, existingNotes }) {
         l => l.value !== null && l.value !== undefined && l.value !== false && l.value !== "skip"
       );
       let entry = `- ${h.emoji || ""} ${h.name}`.trim();
-      if (typeof log?.value === "number") entry += ` (${log.value}${h.unit || ""})`;
+      if (h.habit_type === "project" && typeof log?.value === "object" && log.value?.minutes) {
+        entry += ` (${log.value.minutes} min)`;
+      } else if (typeof log?.value === "number") {
+        entry += ` (${log.value}${h.unit || ""})`;
+      }
       const notes = [log?.note, log?.reflection, log?.value?.win, log?.value?.hardPart]
         .filter(Boolean).join(" / ");
       if (notes) entry += ` — "${notes}"`;
@@ -56,7 +78,7 @@ function buildGenerationPrompt({ date, habits, goals, name, existingNotes }) {
   }
 
   if (skipped.length > 0) {
-    lines.push("Rest days / skipped:");
+    lines.push("Rest days / recorded skips:");
     for (const h of skipped) {
       const log = h.todayLogs.find(l => l.value === "skip");
       let entry = `- ${h.emoji || ""} ${h.name}`.trim();
@@ -66,9 +88,9 @@ function buildGenerationPrompt({ date, habits, goals, name, existingNotes }) {
     lines.push("");
   }
 
-  if (missed.length > 0) {
-    lines.push("Not logged today:");
-    lines.push(missed.map(h => `- ${h.emoji || ""} ${h.name}`.trim()).join("\n"));
+  if (notLogged.length > 0) {
+    lines.push("No entry recorded today (may be missed, may be intentionally untracked):");
+    lines.push(notLogged.map(h => `- ${h.emoji || ""} ${h.name}`.trim()).join("\n"));
     lines.push("");
   }
 
@@ -84,9 +106,9 @@ function buildGenerationPrompt({ date, habits, goals, name, existingNotes }) {
     lines.push("");
   }
 
-  if (existingNotes?.trim()) {
+  if (notesText) {
     lines.push("Context / notes from today's conversations:");
-    lines.push(existingNotes.trim());
+    lines.push(notesText);
     lines.push("");
   }
 
@@ -101,23 +123,42 @@ ${dataBlock}
 
 Write a daily journal entry in this exact format — nothing more, nothing less:
 
-[Title: a short (2–5 word) label for the day — e.g. "Recovery & Reset", "Solid execution", "Rough but honest"]
+[Title: a short (2–5 word) label for the day — e.g. "Recovery & Reset", "Solid execution", "Gym missed, build moved"]
 
-[2–3 sentence narrative — what kind of day this was, the mood and shape of it. Be specific to the actual data. First person, as if they wrote it.]
+[2–3 sentence narrative — what kind of day this was, the mood and shape of it. Be specific to the actual data and context notes. First person, as if they wrote it.]
 
-Wins: [comma-separated list, or "none" if nothing was completed]
-Missed: [comma-separated list of unlogged habits, or "none"]
-Why: [1 sentence on context or reason if there are notes — skip this line if there's no context]
-Pattern: [1 sentence if something stands out — skip this line if there's nothing to note]
-Tomorrow: [1 specific, actionable suggestion based on today]
+Wins: [comma-separated list of things completed, or "none"]
+Missed: [see rules below]
+Why: [1 sentence on context or reason if there are notes that explain it — skip this line entirely if there's nothing real to say]
+Pattern: [see rules below]
+Tomorrow: [1 specific, forward-looking suggestion — see rules below]
 
 Rules:
 - First person throughout ("I", "my")
-- Specific and grounded — name real habits and real numbers
+- Specific and grounded — name real habits, real numbers, real context from the notes
 - Tone: direct, honest, human. Like a clear-eyed friend recapping the day, not a wellness app
 - No corporate language. No "great job". No filler. No "it's important to remember"
 - If not much happened, say so plainly — a short honest entry is better than a padded one
-- Skip "Why:" and "Pattern:" lines entirely if there's nothing real to say for them
+
+MISSED field rules:
+- Only label a habit as "Missed" if the data and context suggest the user genuinely intended to do it but didn't
+- If "Day type: Rest / recovery / time off" appears above, OR the context notes indicate rest/sick/recovery/time off: list unlogged habits as "Not tracked (rest day)" or simply omit them from Missed — do not frame them as failures
+- If "Day type: No logs recorded and no context notes" appears above: write "Not tracked" rather than a list of "Missed" habits — the day went untracked, not necessarily failed
+- If some habits were completed and others weren't, list the genuinely unattended ones as Missed normally
+- "Rest days / recorded skips" above = explicitly not missed — do not list them under Missed
+
+PATTERN field rules:
+- Only write a Pattern line if something genuinely stands out in the actual data or notes — a streak, a recurring miss, a strong day relative to recent history, a clear recovery pattern
+- If there is nothing meaningful to observe, skip this line entirely
+- NEVER invent a pattern to fill space. "When nothing gets logged it usually means nothing intentional happened" is an assumption — do not write that unless the data clearly supports it
+
+TOMORROW field rules:
+- One practical, forward-looking sentence
+- If it was a rest/recovery day, suggest gently picking up specific habits again
+- If it was a productive day, suggest the next logical step
+- Not a guilt trip — just useful
+
+- Skip "Why:", "Pattern:", and "Tomorrow:" lines entirely if there's nothing real to say for them
 - Max 200 words total
 - PLAIN TEXT ONLY. No markdown. No asterisks, no bold (**), no underscores, no backticks, no special formatting characters whatsoever. The title is plain text.`;
 }
@@ -187,6 +228,13 @@ async function handler(req, res) {
     const resp = await client.messages.create({
       model: "claude-haiku-4-5",
       max_tokens: 500,
+      system:
+        "You write concise, honest daily journal entries from habit-tracking data. " +
+        "Key rules you always follow: (1) Distinguish between habits that were genuinely missed versus habits that were simply untracked — untracked is not the same as failed. " +
+        "(2) If the data or context notes indicate a rest day, sick day, recovery day, or time off, frame the entry accordingly — do not label those unlogged habits as failures. " +
+        "(3) Never invent a Pattern observation without clear evidence in the data. If nothing stands out, skip the Pattern line entirely. " +
+        "(4) Keep the Tomorrow line constructive and practical, not guilt-inducing. " +
+        "(5) Plain text only — no markdown, no asterisks, no special characters.",
       messages: [{ role: "user", content: prompt }],
     });
     generatedText = (resp.content || [])
