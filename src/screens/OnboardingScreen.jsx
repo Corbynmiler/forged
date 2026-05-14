@@ -138,6 +138,11 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
   const [emailUpdatesOptIn, setEmailUpdatesOptIn] = useState(true);
   const [coachIntroMsg,     setCoachIntroMsg]     = useState(null);
   const [coachIntroLoading, setCoachIntroLoading] = useState(false);
+  // Onboarding chat state
+  const [onboardMsgs,   setOnboardMsgs]   = useState([]); // { role: "user"|"assistant", content: string }
+  const [onboardInput,  setOnboardInput]  = useState("");
+  const [onboardSending,setOnboardSending]= useState(false);
+  const chatEndRef = useRef(null);
 
   const current   = ONBOARD_STEPS[step];
   const isLast    = step === ONBOARD_STEPS.length - 1;
@@ -152,10 +157,9 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
   const NOTIF_STEP = ONBOARD_STEPS.length + 3;   // virtual: enable notifications
   const COACH_INTRO_STEP = ONBOARD_STEPS.length + 4; // templated coach message before final screen
 
-  // Kick off the AI coach intro message as soon as we hit the interstitial —
-  // that gives the API time to respond while the user reads the notif screen.
+  // Fetch the onboarding chat opener when the chat screen first appears.
   useEffect(() => {
-    if ((step !== INTER_STEP && step !== COACH_INTRO_STEP) || builtHabits.length === 0 || coachIntroMsg) return;
+    if (step !== COACH_INTRO_STEP || builtHabits.length === 0 || onboardMsgs.length > 0) return;
     const firstHabit = pickFirstHabit(builtHabits);
     setCoachIntroLoading(true);
     (async () => {
@@ -163,21 +167,32 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
         const { data: { session } } = await supabase.auth.getSession();
         const token = session?.access_token ?? SUPABASE_ANON_KEY;
         const ctrl = new AbortController();
-        const tid = setTimeout(() => ctrl.abort(), 4000);
-        const res = await fetch("/api/coach-intro", {
+        const tid = setTimeout(() => ctrl.abort(), 6000);
+        const res = await fetch("/api/onboard-chat", {
           method: "POST", signal: ctrl.signal,
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-          body: JSON.stringify({ name: name.trim() || "there", habitName: firstHabit.name, habitType: firstHabit.habitType }),
+          body: JSON.stringify({
+            name: name.trim() || "there",
+            coachName: coachNameInput.trim() || "Coach",
+            habitName: firstHabit.name,
+            habitType: firstHabit.habitType,
+            messages: [],
+          }),
         });
         clearTimeout(tid);
         if (res.ok) {
           const j = await res.json();
-          if (j.message) setCoachIntroMsg(j.message);
+          if (j.reply) setOnboardMsgs([{ role: "assistant", content: j.reply }]);
         }
-      } catch { /* fall through to static text */ }
+      } catch { /* fall through — chat just stays empty until user types */ }
       setCoachIntroLoading(false);
     })();
   }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [onboardMsgs, onboardSending]);
 
   const isVirtual = step >= ONBOARD_STEPS.length;
 
@@ -300,6 +315,51 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
       setCheckoutError(err.message || "Something went wrong. Try again.");
       setCheckoutLoading(false);
     }
+  }
+
+  async function sendOnboardMessage() {
+    const txt = onboardInput.trim();
+    if (!txt || onboardSending || coachIntroLoading) return;
+    setOnboardInput("");
+
+    const firstHabit = builtHabits.length > 0 ? pickFirstHabit(builtHabits) : null;
+    const withUser = [...onboardMsgs, { role: "user", content: txt }];
+    setOnboardMsgs(withUser);
+    setOnboardSending(true);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token ?? SUPABASE_ANON_KEY;
+
+      // Build proper alternating API format: prepend the hidden opener trigger,
+      // then the full conversation (opener as assistant, user msgs, assistant replies).
+      const apiMessages = [
+        { role: "user", content: "." },
+        ...withUser,
+      ];
+
+      const res = await fetch("/api/onboard-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({
+          name: name.trim() || "there",
+          coachName: coachNameInput.trim() || "Coach",
+          habitName: firstHabit?.name || "",
+          habitType: firstHabit?.habitType || "daily",
+          messages: apiMessages,
+        }),
+      });
+
+      if (res.ok) {
+        const { reply } = await res.json();
+        if (reply) setOnboardMsgs([...withUser, { role: "assistant", content: reply }]);
+      } else {
+        setOnboardMsgs([...withUser, { role: "assistant", content: "Let's keep going — tap below when you're ready." }]);
+      }
+    } catch {
+      setOnboardMsgs([...withUser, { role: "assistant", content: "Something went wrong on my end. Let's keep going." }]);
+    }
+    setOnboardSending(false);
   }
 
   function buildFirstLog(habit, rawVal) {
@@ -504,158 +564,116 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
     );
   }
 
-  // ── Virtual step: merged coach intro + first log ─────────────────────────────
-  // FIRST_STEP is no longer a separate screen — we go straight from NOTIF_STEP
-  // to COACH_INTRO_STEP, which now handles both the coach welcome and first log.
+  // ── Virtual step: onboarding chat — first real interaction with the coach ─────
   if ((step === FIRST_STEP || step === COACH_INTRO_STEP) && builtHabits.length > 0) {
-    const firstHabit = pickFirstHabit(builtHabits);
-    const ht = firstHabit.habitType === "progress" ? "goal" : firstHabit.habitType;
-    const habitTypePhrase =
-      ht === "project" ? "build" : ht === "goal" ? "goal" :
-      ht === "daily" ? "daily" : ht === "weekly" ? "weekly" :
-      ht === "limit" ? "limit" : "habit";
-    const coachIntroBody =
-      `You've got ${firstHabit.name} set up. Most people who track ${habitTypePhrase} habits find the first two weeks are the hardest — not because of willpower, but because the habit hasn't been tied to anything. Once you've got a few logs in, I can show you exactly where things tend to slip. Ask me anything.`;
-
-    const isProject = firstHabit.habitType === "project";
-    const isLimit   = firstHabit.habitType === "limit";
-    const isGoal    = isLegacyProgressType(firstHabit.habitType);
-    const isSimple  = !isProject && !isLimit && !isGoal; // daily / weekly
-
-    // Limit habit preset buttons: None / half / full
-    const limitHalf = Math.round((firstHabit.dailyBudget || 60) / 2);
-    const limitFull = firstHabit.dailyBudget || 60;
-    const limitUnit = firstHabit.unit || "min";
-    const limitPresets = [
-      { label: "None yet", value: "0" },
-      { label: `${limitHalf} ${limitUnit}`, value: String(limitHalf) },
-      { label: `${limitFull} ${limitUnit}`, value: String(limitFull) },
-    ];
-
-    // Project needs a time selection before logging; others don't require a value
-    const projectReady = isProject && !!firstLogValue;
-    const canLog = !isProject || projectReady;
-
-    function doLog() {
-      if (!canLog) return;
-      setFirstLogDone(true);
-      setShowingFinal(true);
-    }
+    const coachDisplay = coachNameInput.trim() || "Coach";
+    const hasExchange  = onboardMsgs.some(m => m.role === "user");
 
     return (
-      <div style={wrap}>
-        <ProgressHeader currentNum={progressNumber} />
+      <div style={{ ...wrap, overflow:"hidden" }}>
+        <style>{`
+          @keyframes obTyping {
+            0%,60%,100% { opacity:0.2; transform:translateY(0); }
+            30% { opacity:1; transform:translateY(-3px); }
+          }
+        `}</style>
 
-        <div style={{ flex:1, padding:"28px 24px 16px", overflowY:"auto", display:"flex", flexDirection:"column", gap:20 }}>
-
-          {/* Coach bubble */}
-          <div style={{ background:"rgba(200,144,42,0.07)", border:`0.5px solid rgba(200,144,42,0.2)`, borderRadius:T.r, padding:"20px 20px 16px" }}>
-            <div style={{ display:"flex", gap:12, alignItems:"center", marginBottom:14 }}>
-              <div style={{ width:40, height:40, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>🤖</div>
-              <div style={{ fontSize:13, fontWeight:500, color:T.text }}>{coachNameInput.trim() || "Coach"}</div>
-            </div>
-            <div style={{ background:T.surface, borderRadius:"12px 12px 12px 3px", padding:"12px 16px", fontSize:14, color:T.text, lineHeight:1.7, borderLeft:`2px solid rgba(200,144,42,0.35)`, opacity:coachIntroLoading ? 0.45 : 1, transition:"opacity 0.4s" }}>
-              {coachIntroMsg || coachIntroBody}
-            </div>
+        {/* Header — coach identity + step progress */}
+        <div style={{
+          flexShrink:0,
+          paddingTop:"max(16px, env(safe-area-inset-top, 16px))",
+          paddingBottom:12,
+          paddingLeft:20, paddingRight:20,
+          borderBottom:`0.5px solid ${T.border}`,
+          display:"flex", alignItems:"center", gap:12,
+        }}>
+          <div style={{ width:38, height:38, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>🤖</div>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:14, fontWeight:600, color:T.text }}>{coachDisplay}</div>
+            <div style={{ fontSize:11, color:T.gold, marginTop:1 }}>Forged AI Coach</div>
           </div>
-
-          {/* First log section */}
-          <div>
-            <div style={{ fontSize:10, fontWeight:600, color:T.muted, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:14 }}>
-              Log your first entry
-            </div>
-
-            {/* Habit pill */}
-            <div style={{ display:"flex", alignItems:"center", gap:10, background:T.raised, borderRadius:T.rsm, padding:"12px 14px", border:`0.5px solid ${T.border}`, marginBottom:16 }}>
-              <div style={{ width:36, height:36, borderRadius:10, background:firstHabit.color+"22", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>{firstHabit.emoji}</div>
-              <div>
-                <div style={{ fontSize:14, fontWeight:500, color:T.text }}>{firstHabit.name}</div>
-                <div style={{ fontSize:11, color:T.muted }}>{HABIT_TYPES[firstHabit.habitType]?.label}</div>
-              </div>
-            </div>
-
-            {/* Daily / weekly — no input needed, just confirm */}
-            {isSimple && (
-              <div style={{ fontSize:13, color:T.sub, lineHeight:1.6 }}>
-                Tap below to mark today as done — you'll log it the same way every day from the Today screen.
-              </div>
-            )}
-
-            {/* Project — time buttons */}
-            {isProject && (
-              <>
-                <div style={{ fontSize:13, color:T.sub, marginBottom:12, lineHeight:1.6 }}>
-                  How long did you work on it today?
-                </div>
-                <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-                  {[15,30,45,60,90].map(m => (
-                    <button key={m} onClick={() => setFirstLogValue(String(m))}
-                      style={{ padding:"9px 16px", borderRadius:20, border:`1px solid ${firstLogValue===String(m)?firstHabit.color:T.borderStrong}`, background:firstLogValue===String(m)?firstHabit.color+"22":"none", color:firstLogValue===String(m)?firstHabit.color:T.sub, fontSize:13, cursor:"pointer", transition:"all 0.15s" }}>
-                      {m}m
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-
-            {/* Limit — clear preset buttons + custom input */}
-            {isLimit && (
-              <>
-                <div style={{ fontSize:13, color:T.sub, marginBottom:12, lineHeight:1.6 }}>
-                  How much have you used so far today? Your daily limit is {limitFull} {limitUnit}.
-                </div>
-                <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:10 }}>
-                  {limitPresets.map(p => (
-                    <button key={p.label} onClick={() => setFirstLogValue(p.value)}
-                      style={{ padding:"9px 16px", borderRadius:20, border:`1px solid ${firstLogValue===p.value?firstHabit.color:T.borderStrong}`, background:firstLogValue===p.value?firstHabit.color+"22":"none", color:firstLogValue===p.value?firstHabit.color:T.sub, fontSize:13, cursor:"pointer", transition:"all 0.15s" }}>
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-                <input
-                  type="number"
-                  placeholder={`Custom (${limitUnit})`}
-                  value={firstLogValue}
-                  onChange={e => setFirstLogValue(e.target.value)}
-                  style={{ ...styleInp, fontSize:15 }}
-                />
-              </>
-            )}
-
-            {/* Progress / goal — number input */}
-            {isGoal && (
-              <>
-                <div style={{ fontSize:13, color:T.sub, marginBottom:10, lineHeight:1.6 }}>
-                  What's your current {firstHabit.unit || "value"}?
-                </div>
-                <input
-                  type="number" step="0.1"
-                  placeholder={`e.g. ${firstHabit.startValue || 70}`}
-                  value={firstLogValue}
-                  onChange={e => setFirstLogValue(e.target.value)}
-                  style={{ ...styleInp, fontSize:15 }}
-                  autoFocus
-                />
-              </>
-            )}
+          {/* Slim progress bar */}
+          <div style={{ width:56, height:3, background:T.surface, borderRadius:2, overflow:"hidden", flexShrink:0 }}>
+            <div style={{ width:"100%", height:"100%", background:T.accent, borderRadius:2 }} />
           </div>
         </div>
 
-        <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
+        {/* Messages area */}
+        <div style={{ flex:1, overflowY:"auto", padding:"20px 16px 8px", display:"flex", flexDirection:"column", gap:14 }}>
+
+          {/* Loading opener */}
+          {coachIntroLoading && onboardMsgs.length === 0 && (
+            <div style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
+              <div style={{ width:28, height:28, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, flexShrink:0 }}>🤖</div>
+              <div style={{ display:"flex", gap:5, padding:"12px 16px", background:"rgba(200,144,42,0.07)", border:`0.5px solid rgba(200,144,42,0.2)`, borderRadius:"14px 14px 14px 3px" }}>
+                {[0,1,2].map(i => (
+                  <div key={i} style={{ width:7, height:7, borderRadius:"50%", background:"rgba(200,144,42,0.55)", animation:`obTyping 1.2s ease-in-out ${i*0.18}s infinite` }} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Rendered messages */}
+          {onboardMsgs.map((msg, i) =>
+            msg.role === "assistant" ? (
+              <div key={i} style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
+                <div style={{ width:28, height:28, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, flexShrink:0 }}>🤖</div>
+                <div style={{ background:"rgba(200,144,42,0.07)", border:`0.5px solid rgba(200,144,42,0.2)`, borderLeft:`2px solid rgba(200,144,42,0.4)`, borderRadius:"14px 14px 14px 3px", padding:"12px 16px", fontSize:14, color:T.text, lineHeight:1.7, maxWidth:"85%" }}>
+                  {msg.content}
+                </div>
+              </div>
+            ) : (
+              <div key={i} style={{ display:"flex", justifyContent:"flex-end" }}>
+                <div style={{ background:T.accent, borderRadius:"14px 14px 3px 14px", padding:"10px 16px", fontSize:14, color:"#fff", lineHeight:1.6, maxWidth:"80%" }}>
+                  {msg.content}
+                </div>
+              </div>
+            )
+          )}
+
+          {/* Typing indicator while coach replies */}
+          {onboardSending && (
+            <div style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
+              <div style={{ width:28, height:28, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, flexShrink:0 }}>🤖</div>
+              <div style={{ display:"flex", gap:5, padding:"12px 16px", background:"rgba(200,144,42,0.07)", border:`0.5px solid rgba(200,144,42,0.2)`, borderRadius:"14px 14px 14px 3px" }}>
+                {[0,1,2].map(i => (
+                  <div key={i} style={{ width:7, height:7, borderRadius:"50%", background:"rgba(200,144,42,0.55)", animation:`obTyping 1.2s ease-in-out ${i*0.18}s infinite` }} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div ref={chatEndRef} />
+        </div>
+
+        {/* Input bar */}
+        <div style={{ flexShrink:0, borderTop:`0.5px solid ${T.border}`, padding:"10px 14px", display:"flex", gap:10, alignItems:"center" }}>
+          <input
+            style={{ flex:1, background:T.surface, border:`0.5px solid ${T.borderStrong}`, borderRadius:24, padding:"10px 16px", fontSize:14, color:T.text, outline:"none", fontFamily:T.font }}
+            placeholder={coachIntroLoading ? "Coach is typing…" : "Reply to your coach…"}
+            value={onboardInput}
+            onChange={e => setOnboardInput(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendOnboardMessage(); } }}
+            disabled={onboardSending || coachIntroLoading}
+            autoFocus={!coachIntroLoading}
+          />
           <button
-            type="button"
-            onClick={doLog}
-            disabled={!canLog}
-            style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:canLog?T.accent:T.surface, color:canLog?"#fff":T.muted, fontSize:16, fontWeight:500, cursor:canLog?"pointer":"default", transition:"all 0.2s" }}
+            onClick={sendOnboardMessage}
+            disabled={!onboardInput.trim() || onboardSending || coachIntroLoading}
+            style={{ width:40, height:40, borderRadius:"50%", border:"none", background:onboardInput.trim()&&!onboardSending?T.accent:T.surface, color:onboardInput.trim()&&!onboardSending?"#fff":T.muted, fontSize:17, cursor:onboardInput.trim()?"pointer":"default", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, transition:"all 0.15s" }}
           >
-            {isSimple ? "Done today ✓  Start logging →" : "Log it & start →"}
+            ↑
           </button>
+        </div>
+
+        {/* CTA — becomes primary after first exchange */}
+        <div style={{ flexShrink:0, padding:"10px 16px", paddingBottom:"max(32px, env(safe-area-inset-bottom, 32px))" }}>
           <button
             type="button"
             onClick={() => setShowingFinal(true)}
-            style={{ width:"100%", padding:12, background:"none", border:"none", color:T.hint, fontSize:13, cursor:"pointer", marginTop:6 }}
+            style={{ width:"100%", padding:15, borderRadius:T.rsm, border:"none", background:hasExchange?T.accent:"rgba(255,255,255,0.06)", color:hasExchange?"#fff":T.muted, fontSize:15, fontWeight:500, cursor:"pointer", transition:"all 0.3s" }}
           >
-            Skip for now
+            {hasExchange ? "Start Forged →" : "Skip for now"}
           </button>
         </div>
       </div>
