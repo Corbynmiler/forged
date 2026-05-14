@@ -12,7 +12,7 @@
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/sw.js", "destination": "/sw.js" },
     { "source": "/manifest.json", "destination": "/manifest.json" },
-    { "source": "/((?!api/|sw\\.js|manifest\\.json).*)", "destination": "/index.html" }
+    { "source": "/((?!api/|sw\\.js|manifest\\.json|landing\\.html|screenshots/).*)", "destination": "/index.html" }
   ],
   "headers": [
     {
