@@ -609,6 +609,12 @@ async function handler(req, res) {
       // Sequential execution: AI sometimes calls create_habit followed by
       // log_habit on that same new habit in a single turn. Running them in
       // parallel causes log_habit to race — the habit row may not exist yet.
+      //
+      // loggedHabitIds deduplicates same-habit log_habit calls within one turn.
+      // The model occasionally emits duplicate tool blocks for the same habit
+      // (e.g. Drink Water logged twice). The second call is silently skipped so
+      // the DB entry isn't double-written and the receipt shows one pill.
+      const loggedHabitIds = new Set();
       for (const tb of toolBlocks) {
         let result;
         try {
@@ -623,16 +629,25 @@ async function handler(req, res) {
             result = { success: true, habit_name: r.habit_name, fields_updated: Object.keys(r.updates).filter(k => k !== "updated_at") };
             outcomes.push({ tool: "edit_habit", success: true, habit_name: r.habit_name });
           } else if (tb.name === "log_habit") {
-            const r = await executeLogHabit(tb.input, userId, db, clientDate, actionSafety);
-            actions.logged.push(r);
-            result = { success: true, habit_name: r.habit_name, habit_type: r.habit_type, date: r.date, value_saved: r.logValue };
-            outcomes.push({
-              tool: "log_habit",
-              success: true,
-              habit_name: r.habit_name,
-              habit_type: r.habit_type,
-              value_saved: r.logValue,
-            });
+            const habitId = tb.input?.habit_id;
+            if (habitId && loggedHabitIds.has(habitId)) {
+              // Duplicate call for the same habit in this turn — skip execution,
+              // return success so the model doesn't get confused, add no pill.
+              console.log("[chat] duplicate log_habit skipped", { userId, habit_id: habitId, habit_name: tb.input?.habit_name });
+              result = { success: true, skipped: true, reason: "already_logged_this_turn", habit_name: tb.input?.habit_name };
+            } else {
+              if (habitId) loggedHabitIds.add(habitId);
+              const r = await executeLogHabit(tb.input, userId, db, clientDate, actionSafety);
+              actions.logged.push(r);
+              result = { success: true, habit_name: r.habit_name, habit_type: r.habit_type, date: r.date, value_saved: r.logValue };
+              outcomes.push({
+                tool: "log_habit",
+                success: true,
+                habit_name: r.habit_name,
+                habit_type: r.habit_type,
+                value_saved: r.logValue,
+              });
+            }
           } else if (tb.name === "add_daily_note") {
             const r = await executeAddDailyNote(tb.input, userId, db, clientDate);
             actions.noted.push(r);
