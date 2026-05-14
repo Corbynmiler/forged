@@ -152,8 +152,10 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
   const NOTIF_STEP = ONBOARD_STEPS.length + 3;   // virtual: enable notifications
   const COACH_INTRO_STEP = ONBOARD_STEPS.length + 4; // templated coach message before final screen
 
+  // Kick off the AI coach intro message as soon as we hit the interstitial —
+  // that gives the API time to respond while the user reads the notif screen.
   useEffect(() => {
-    if (step !== COACH_INTRO_STEP || builtHabits.length === 0 || coachIntroMsg) return;
+    if ((step !== INTER_STEP && step !== COACH_INTRO_STEP) || builtHabits.length === 0 || coachIntroMsg) return;
     const firstHabit = pickFirstHabit(builtHabits);
     setCoachIntroLoading(true);
     (async () => {
@@ -185,9 +187,9 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
   const DISPLAY_TOTAL = 5;
   function displayStepNumber(s) {
     if (s === INTER_STEP) return 4;   // Focus' number — interstitial is a transition
-    if (s === NOTIF_STEP) return 5;
-    if (s === FIRST_STEP) return 5;
-    if (s === COACH_INTRO_STEP) return 5;
+    if (s === NOTIF_STEP) return 4;   // notifications is still part of setup
+    if (s === FIRST_STEP) return 5;   // (kept for safety, not shown in normal flow)
+    if (s === COACH_INTRO_STEP) return 5; // merged coach+first-log is the finale
     return Math.min(s + 1, 4);        // standard steps 0..3 → 1..4
   }
   const progressNumber = displayStepNumber(step);
@@ -502,113 +504,51 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
     );
   }
 
-  // ── Virtual step 8: log your first habit — now the last onboarding action ───
-  if (step === FIRST_STEP && builtHabits.length > 0) {
-    const firstHabit = pickFirstHabit(builtHabits);
-    const annotation = HABIT_ANNOTATIONS[firstHabit.habitType] || HABIT_ANNOTATIONS.daily;
-    const needsValue = isLegacyProgressType(firstHabit.habitType) || firstHabit.habitType === "project" || firstHabit.habitType === "limit";
-
-    return (
-      <div style={wrap}>
-        <ProgressHeader currentNum={progressNumber} />
-
-        <div style={{ flex:1, padding:"28px 24px 16px", overflowY:"auto" }}>
-          <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, lineHeight:1.2, marginBottom:6 }}>Your first habit.</div>
-          <div style={{ fontSize:13, color:T.muted, marginBottom:24, lineHeight:1.5 }}>Log your first entry to see how it works.</div>
-
-          {/* Habit card */}
-          <div style={{ background:T.raised, borderRadius:T.r, padding:"18px 20px", marginBottom:16, border:`0.5px solid ${T.border}`, display:"flex", alignItems:"center", gap:14 }}>
-            <div style={{ width:48, height:48, borderRadius:14, background:firstHabit.color+"22", display:"flex", alignItems:"center", justifyContent:"center", fontSize:26, flexShrink:0 }}>
-              {firstHabit.emoji}
-            </div>
-            <div style={{ flex:1 }}>
-              <div style={{ fontSize:16, fontWeight:600, color:T.text, marginBottom:2 }}>{firstHabit.name}</div>
-              <div style={{ fontSize:12, color:T.muted }}>{HABIT_TYPES[firstHabit.habitType]?.label}</div>
-              {firstHabit.habitType === "weekly" && <div style={{ fontSize:12, color:T.sub, marginTop:2 }}>Target: {firstHabit.weeklyTarget}× per week</div>}
-              {isLegacyProgressType(firstHabit.habitType) && <div style={{ fontSize:12, color:T.sub, marginTop:2 }}>{firstHabit.startValue}{firstHabit.unit} → {firstHabit.targetValue}{firstHabit.unit}</div>}
-              {firstHabit.habitType === "limit" && <div style={{ fontSize:12, color:T.sub, marginTop:2 }}>Budget: {firstHabit.dailyBudget}{firstHabit.unit}/day</div>}
-            </div>
-          </div>
-
-          {/* Coach annotation */}
-          <div style={{ background:"rgba(200,144,42,0.07)", border:`0.5px solid rgba(200,144,42,0.2)`, borderRadius:T.r, padding:"14px 16px", marginBottom:24 }}>
-            <div style={{ display:"flex", gap:10, alignItems:"flex-start" }}>
-              <div style={{ fontSize:18, flexShrink:0, marginTop:1 }}>🤖</div>
-              <div style={{ fontSize:13, color:T.sub, lineHeight:1.65 }}>{annotation}</div>
-            </div>
-          </div>
-
-          {/* Simplified log input */}
-          {needsValue && (
-            <div style={{ marginBottom:16 }}>
-              <div style={{ fontSize:12, color:T.hint, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:8 }}>
-                {isLegacyProgressType(firstHabit.habitType) ? `Today's ${firstHabit.unit || "value"}` :
-                 firstHabit.habitType === "project"  ? "Minutes worked" :
-                 firstHabit.habitType === "limit"    ? `Units used (budget: ${firstHabit.dailyBudget})` : "Value"}
-              </div>
-              {firstHabit.habitType === "project" ? (
-                <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-                  {[15,30,45,60,90].map(m => (
-                    <button key={m} onClick={() => setFirstLogValue(String(m))}
-                      style={{ padding:"8px 14px", borderRadius:20, border:`1px solid ${firstLogValue===String(m)?firstHabit.color:T.borderStrong}`, background:firstLogValue===String(m)?firstHabit.color+"22":"none", color:firstLogValue===String(m)?firstHabit.color:T.muted, fontSize:13, cursor:"pointer" }}>
-                      {m}m
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <input
-                  style={{ ...styleInp, fontSize:18, padding:"12px 14px" }}
-                  type="number" step="0.1"
-                  placeholder={isLegacyProgressType(firstHabit.habitType) ? `e.g. ${firstHabit.startValue || 70}` : "0"}
-                  value={firstLogValue}
-                  onChange={e => setFirstLogValue(e.target.value)}
-                  autoFocus
-                />
-              )}
-            </div>
-          )}
-        </div>
-
-        <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
-          <button
-            onClick={() => {
-              if (needsValue && !firstLogValue) return;
-              setFirstLogDone(true);
-              setStep(COACH_INTRO_STEP);
-            }}
-            style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:(needsValue&&!firstLogValue)?T.surface:firstHabit.color, color:(needsValue&&!firstLogValue)?T.muted:"#fff", fontSize:16, fontWeight:500, cursor:"pointer", transition:"all 0.2s" }}
-          >
-            Log your first entry →
-          </button>
-          <button onClick={() => { setStep(COACH_INTRO_STEP); }}
-            style={{ width:"100%", padding:12, background:"none", border:"none", color:T.hint, fontSize:13, cursor:"pointer", marginTop:6 }}>
-            Skip this step
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Virtual step: coach intro (templated) after first log, before final ────
-  if (step === COACH_INTRO_STEP && builtHabits.length > 0) {
+  // ── Virtual step: merged coach intro + first log ─────────────────────────────
+  // FIRST_STEP is no longer a separate screen — we go straight from NOTIF_STEP
+  // to COACH_INTRO_STEP, which now handles both the coach welcome and first log.
+  if ((step === FIRST_STEP || step === COACH_INTRO_STEP) && builtHabits.length > 0) {
     const firstHabit = pickFirstHabit(builtHabits);
     const ht = firstHabit.habitType === "progress" ? "goal" : firstHabit.habitType;
     const habitTypePhrase =
-      ht === "project" ? "build" :
-      ht === "log" ? "log" :
-      ht === "goal" ? "goal" :
-      ht === "daily" ? "daily" :
-      ht === "weekly" ? "weekly" :
-      ht === "limit" ? "limit" :
-      (HABIT_TYPES[firstHabit.habitType]?.label || "habit").toLowerCase().replace(/\s+\/.*$/, "").trim() || "habit";
+      ht === "project" ? "build" : ht === "goal" ? "goal" :
+      ht === "daily" ? "daily" : ht === "weekly" ? "weekly" :
+      ht === "limit" ? "limit" : "habit";
     const coachIntroBody =
       `You've got ${firstHabit.name} set up. Most people who track ${habitTypePhrase} habits find the first two weeks are the hardest — not because of willpower, but because the habit hasn't been tied to anything. Once you've got a few logs in, I can show you exactly where things tend to slip. Ask me anything.`;
+
+    const isProject = firstHabit.habitType === "project";
+    const isLimit   = firstHabit.habitType === "limit";
+    const isGoal    = isLegacyProgressType(firstHabit.habitType);
+    const isSimple  = !isProject && !isLimit && !isGoal; // daily / weekly
+
+    // Limit habit preset buttons: None / half / full
+    const limitHalf = Math.round((firstHabit.dailyBudget || 60) / 2);
+    const limitFull = firstHabit.dailyBudget || 60;
+    const limitUnit = firstHabit.unit || "min";
+    const limitPresets = [
+      { label: "None yet", value: "0" },
+      { label: `${limitHalf} ${limitUnit}`, value: String(limitHalf) },
+      { label: `${limitFull} ${limitUnit}`, value: String(limitFull) },
+    ];
+
+    // Project needs a time selection before logging; others don't require a value
+    const projectReady = isProject && !!firstLogValue;
+    const canLog = !isProject || projectReady;
+
+    function doLog() {
+      if (!canLog) return;
+      setFirstLogDone(true);
+      setShowingFinal(true);
+    }
 
     return (
       <div style={wrap}>
         <ProgressHeader currentNum={progressNumber} />
 
-        <div style={{ flex:1, padding:"28px 24px 16px", overflowY:"auto", display:"flex", flexDirection:"column", justifyContent:"center" }}>
+        <div style={{ flex:1, padding:"28px 24px 16px", overflowY:"auto", display:"flex", flexDirection:"column", gap:20 }}>
+
+          {/* Coach bubble */}
           <div style={{ background:"rgba(200,144,42,0.07)", border:`0.5px solid rgba(200,144,42,0.2)`, borderRadius:T.r, padding:"20px 20px 16px" }}>
             <div style={{ display:"flex", gap:12, alignItems:"center", marginBottom:14 }}>
               <div style={{ width:40, height:40, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>🤖</div>
@@ -618,15 +558,104 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
               {coachIntroMsg || coachIntroBody}
             </div>
           </div>
+
+          {/* First log section */}
+          <div>
+            <div style={{ fontSize:10, fontWeight:600, color:T.muted, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:14 }}>
+              Log your first entry
+            </div>
+
+            {/* Habit pill */}
+            <div style={{ display:"flex", alignItems:"center", gap:10, background:T.raised, borderRadius:T.rsm, padding:"12px 14px", border:`0.5px solid ${T.border}`, marginBottom:16 }}>
+              <div style={{ width:36, height:36, borderRadius:10, background:firstHabit.color+"22", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>{firstHabit.emoji}</div>
+              <div>
+                <div style={{ fontSize:14, fontWeight:500, color:T.text }}>{firstHabit.name}</div>
+                <div style={{ fontSize:11, color:T.muted }}>{HABIT_TYPES[firstHabit.habitType]?.label}</div>
+              </div>
+            </div>
+
+            {/* Daily / weekly — no input needed, just confirm */}
+            {isSimple && (
+              <div style={{ fontSize:13, color:T.sub, lineHeight:1.6 }}>
+                Tap below to mark today as done — you'll log it the same way every day from the Today screen.
+              </div>
+            )}
+
+            {/* Project — time buttons */}
+            {isProject && (
+              <>
+                <div style={{ fontSize:13, color:T.sub, marginBottom:12, lineHeight:1.6 }}>
+                  How long did you work on it today?
+                </div>
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                  {[15,30,45,60,90].map(m => (
+                    <button key={m} onClick={() => setFirstLogValue(String(m))}
+                      style={{ padding:"9px 16px", borderRadius:20, border:`1px solid ${firstLogValue===String(m)?firstHabit.color:T.borderStrong}`, background:firstLogValue===String(m)?firstHabit.color+"22":"none", color:firstLogValue===String(m)?firstHabit.color:T.sub, fontSize:13, cursor:"pointer", transition:"all 0.15s" }}>
+                      {m}m
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {/* Limit — clear preset buttons + custom input */}
+            {isLimit && (
+              <>
+                <div style={{ fontSize:13, color:T.sub, marginBottom:12, lineHeight:1.6 }}>
+                  How much have you used so far today? Your daily limit is {limitFull} {limitUnit}.
+                </div>
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:10 }}>
+                  {limitPresets.map(p => (
+                    <button key={p.label} onClick={() => setFirstLogValue(p.value)}
+                      style={{ padding:"9px 16px", borderRadius:20, border:`1px solid ${firstLogValue===p.value?firstHabit.color:T.borderStrong}`, background:firstLogValue===p.value?firstHabit.color+"22":"none", color:firstLogValue===p.value?firstHabit.color:T.sub, fontSize:13, cursor:"pointer", transition:"all 0.15s" }}>
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="number"
+                  placeholder={`Custom (${limitUnit})`}
+                  value={firstLogValue}
+                  onChange={e => setFirstLogValue(e.target.value)}
+                  style={{ ...styleInp, fontSize:15 }}
+                />
+              </>
+            )}
+
+            {/* Progress / goal — number input */}
+            {isGoal && (
+              <>
+                <div style={{ fontSize:13, color:T.sub, marginBottom:10, lineHeight:1.6 }}>
+                  What's your current {firstHabit.unit || "value"}?
+                </div>
+                <input
+                  type="number" step="0.1"
+                  placeholder={`e.g. ${firstHabit.startValue || 70}`}
+                  value={firstLogValue}
+                  onChange={e => setFirstLogValue(e.target.value)}
+                  style={{ ...styleInp, fontSize:15 }}
+                  autoFocus
+                />
+              </>
+            )}
+          </div>
         </div>
 
         <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
           <button
             type="button"
-            onClick={() => setShowingFinal(true)}
-            style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:500, cursor:"pointer" }}
+            onClick={doLog}
+            disabled={!canLog}
+            style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:canLog?T.accent:T.surface, color:canLog?"#fff":T.muted, fontSize:16, fontWeight:500, cursor:canLog?"pointer":"default", transition:"all 0.2s" }}
           >
-            Start logging →
+            {isSimple ? "Done today ✓  Start logging →" : "Log it & start →"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowingFinal(true)}
+            style={{ width:"100%", padding:12, background:"none", border:"none", color:T.hint, fontSize:13, cursor:"pointer", marginTop:6 }}
+          >
+            Skip for now
           </button>
         </div>
       </div>
@@ -684,7 +713,7 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
         <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
           {already ? (
             <button
-              onClick={() => builtHabits.length > 0 ? setStep(FIRST_STEP) : setShowingFinal(true)}
+              onClick={() => builtHabits.length > 0 ? setStep(COACH_INTRO_STEP) : setShowingFinal(true)}
               style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:600, cursor:"pointer", marginBottom:10 }}
             >
               Reminders on — let's go ✓
@@ -693,7 +722,7 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
             <button
               onClick={async () => {
                 if (onNotifToggle) await onNotifToggle();
-                if (builtHabits.length > 0) setStep(FIRST_STEP); else setShowingFinal(true);
+                if (builtHabits.length > 0) setStep(COACH_INTRO_STEP); else setShowingFinal(true);
               }}
               disabled={notifLoading || blocked}
               style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:blocked?T.surface:T.gold, color:blocked?T.muted:"#0F0F0D", fontSize:16, fontWeight:600, cursor:blocked?"not-allowed":"pointer", opacity:(notifLoading||blocked)?0.7:1, marginBottom:10, transition:"opacity 0.15s" }}
@@ -702,7 +731,7 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
             </button>
           )}
           <button
-            onClick={() => builtHabits.length > 0 ? setStep(FIRST_STEP) : setShowingFinal(true)}
+            onClick={() => builtHabits.length > 0 ? setStep(COACH_INTRO_STEP) : setShowingFinal(true)}
             style={{ width:"100%", padding:12, background:"none", border:"none", color:T.hint, fontSize:13, cursor:"pointer" }}
           >
             Skip notifications
