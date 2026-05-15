@@ -510,7 +510,9 @@ export function useSpeechInput(onFinal, opts = {}) {
         if (row.isFinal) {
           const t = pickBestTranscriptFromResult(row);
           const polished = polishSpeechSegment(t);
-          if (polished) onFinalRef.current(polished);
+          if (polished) {
+            try { onFinalRef.current(polished); } catch (e) { console.warn("[speech] onFinal:", e); }
+          }
           pendingInterimRef.current = "";
           setInterim("");
         } else {
@@ -559,6 +561,14 @@ export function useSpeechInput(onFinal, opts = {}) {
         sessionStartRef.current &&
         Date.now() - sessionStartRef.current < SESSION_MAX_MS
       ) {
+        // Flush any pending interim before restarting — same as stopAll() does.
+        // Without this, words spoken right at the utterance boundary are silently
+        // dropped because the browser delivers them as interim-only and fires onend
+        // before they can be finalized.
+        const tail = polishSpeechSegment(pendingInterimRef.current || "");
+        if (tail) {
+          try { onFinalRef.current(tail); } catch (e) { console.warn("[speech] restart flush:", e); }
+        }
         setInterim("");
         pendingInterimRef.current = "";
         if (R.current.recog === recog) R.current.recog = null;

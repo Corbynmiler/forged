@@ -150,11 +150,9 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
   const chatEndRef  = useRef(null);
   const textareaRef = useRef(null);
 
-  const speech = useSpeechInput({
-    onTranscript: (text, isFinal) => {
-      if (isFinal) setOnboardInput(prev => (prev + " " + text).trim());
-    },
-  });
+  const speech = useSpeechInput(
+    (text) => setOnboardInput(prev => (prev + " " + text).trim()),
+  );
 
   const current   = ONBOARD_STEPS[step];
   const isLast    = step === ONBOARD_STEPS.length - 1;
@@ -349,7 +347,7 @@ After creating, tell them they can log from Today and chat with you anytime.`;
   async function sendOnboardMessage() {
     const inputText = onboardInput.trim();
     if (!inputText || onboardSending) return;
-    if (speech.listening) speech.stopListening?.();
+    if (speech.listening) speech.toggle();
     setOnboardInput("");
     if (textareaRef.current) textareaRef.current.style.height = "auto";
 
