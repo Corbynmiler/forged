@@ -2345,10 +2345,10 @@ function CoachRecordingBar({ speech }) {
         display:"flex", alignItems:"center", gap:10,
         padding:"8px 10px 8px 12px",
         background:T.surface,
-        border:`0.5px solid ${T.gold}55`,
+        border:"0.5px solid #E74C3C55",
         borderRadius:T.rsm,
         animation:"recBarSlide 0.18s ease-out both",
-        boxShadow:`0 0 0 3px ${T.gold}10`,
+        boxShadow:"0 0 0 3px rgba(231,76,60,0.08)",
       }}
     >
       {/* Cancel: discards interim, keeps any pre-typed input */}
@@ -2374,7 +2374,7 @@ function CoachRecordingBar({ speech }) {
         <span
           aria-hidden="true"
           style={{
-            width:8, height:8, borderRadius:"50%", background:T.accent,
+            width:8, height:8, borderRadius:"50%", background:"#E74C3C",
             animation:"recDotPulse 1.1s ease-in-out infinite",
             flexShrink:0,
           }}
@@ -2387,7 +2387,7 @@ function CoachRecordingBar({ speech }) {
               aria-hidden="true"
               style={{
                 width:3, height:18, borderRadius:2,
-                background:T.gold,
+                background:"#E74C3C",
                 display:"inline-block",
                 transformOrigin:"center",
                 // CSS keyframe animation is the fallback when the parallel
@@ -2415,10 +2415,10 @@ function CoachRecordingBar({ speech }) {
         style={{
           width:36, height:36, borderRadius:"50%",
           border:"none",
-          background:T.gold, color:"#1a1a16",
+          background:"#E74C3C", color:"#fff",
           display:"flex", alignItems:"center", justifyContent:"center",
           cursor:"pointer", flexShrink:0,
-          boxShadow:`0 0 0 3px ${T.gold}22`,
+          boxShadow:"0 0 0 3px rgba(231,76,60,0.2)",
         }}
       >
         <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
