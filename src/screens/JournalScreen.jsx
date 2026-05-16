@@ -299,10 +299,9 @@ function HabitDayCard({ habit, logs, onReflect, onDeleteLogEntry }) {
   const noteEntries = logs.filter(l => l.value !== "quicknote" && l.note?.trim());
   const uniqueNotes = [...new Set(noteEntries.map(l => l.note.trim()).filter(Boolean))];
 
-  // A single bare done-entry: value===true, no note, no reflection.
-  // When there are also quicknotes we still want to show those — but the "Done ✓" row
-  // itself is redundant (the header already says "logged ✓"). Collapse it in both cases.
-  const bareTrueEntry = nonNote.length === 1 && nonNote[0].value === true && !nonNote[0].note?.trim() && !nonNote[0].reflection
+  // A single value===true entry — "Done ✓" row is always redundant (header already says "logged ✓").
+  // Suppress it regardless of whether the AI added a note; the note shows in the NOTE section.
+  const bareTrueEntry = nonNote.length === 1 && nonNote[0].value === true
     ? nonNote[0] : null;
   // No quicknotes → collapse the whole ENTRIES block; header ✕ handles delete.
   const singleTrueEntry = !!bareTrueEntry && quicknoteEntries.length === 0;
