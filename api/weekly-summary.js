@@ -71,22 +71,42 @@ function buildContext({ habits = [], goals = [], journalEntries = [], name = "th
   if (habits.length > 0) {
     lines.push("Habits (last 14 days):");
     for (const h of habits) {
-      const recentLogs = (h.logs || [])
-        .filter(l => l.date >= day14 && l.value !== "skip" && l.value !== "quicknote");
-      const logCount = recentLogs.length;
-      const last7Count = recentLogs.filter(l => l.date >= day7).length;
+      // Real completions only — exclude skip, quicknote, false, null
+      const realLogs = (h.logs || [])
+        .filter(l => l.date >= day14 && l.value !== "skip" && l.value !== "quicknote" && l.value !== false && l.value != null);
+      const skipLogs = (h.logs || [])
+        .filter(l => l.date >= day14 && l.value === "skip");
 
-      let line = `- ${h.emoji || ""} ${h.name} (${h.habitType}): logged ${logCount} days in last 14 (${last7Count} this week)`;
+      const thisWeekReal = realLogs.filter(l => l.date >= day7);
+      const restThisWeek = skipLogs.filter(l => l.date >= day7).length;
+
+      let line;
+      if (h.habitType === "weekly") {
+        // Weekly: sessions can be multiple per day — count raw sessions vs target
+        const sessionsThisWeek = thisWeekReal.filter(l => l.value === true).length;
+        const sessionsLast14 = realLogs.filter(l => l.value === true).length;
+        const target = h.weeklyTarget || 3;
+        line = `- ${h.emoji || ""} ${h.name} (weekly, target ${target}x/wk): ${sessionsThisWeek}/${target} sessions this week` +
+          (restThisWeek > 0 ? `, ${restThisWeek} rest day(s) marked` : "") +
+          `, ${sessionsLast14} sessions in last 14 days`;
+      } else {
+        // Daily/project/limit/log: count unique days logged, not raw entry count
+        const uniqueDaysThisWeek = new Set(thisWeekReal.map(l => l.date)).size;
+        const uniqueDaysLast14 = new Set(realLogs.map(l => l.date)).size;
+        line = `- ${h.emoji || ""} ${h.name} (${h.habitType}): ${uniqueDaysThisWeek} of 7 days this week` +
+          (restThisWeek > 0 ? ` (${restThisWeek} intentional rest)` : "") +
+          `, ${uniqueDaysLast14} of 14 days in last 14`;
+      }
 
       // Collect meaningful writing from last 14 days
-      const writings = recentLogs.flatMap(l => {
+      const writings = realLogs.flatMap(l => {
         const pieces = [];
         if (l.reflection) pieces.push(`reflection: "${l.reflection}"`);
         if (l.note)       pieces.push(`note: "${l.note}"`);
         if (l.value?.win)       pieces.push(`win: "${l.value.win}"`);
         if (l.value?.hardPart)  pieces.push(`hard part: "${l.value.hardPart}"`);
         return pieces;
-      }).slice(0, 6); // cap per habit
+      }).slice(0, 6);
       if (writings.length > 0) line += "\n  " + writings.join("; ");
       lines.push(line);
     }
@@ -154,7 +174,11 @@ END_SIGNALS_JSON
 
 Rules for the JSON array:
 - One object per habit in the "Active habits" list (same order as listed). habit_name must match the list exactly.
-- Each "signal" is one short clause (under ~90 characters): momentum for THIS calendar week only — counts, streaks, or slips backed by the data.
+- Each "signal" is one short clause (under ~90 characters) grounded strictly in the numbers above.
+- For daily habits: lead with "X of 7 days" where X = days logged this week (rest days don't count as logged).
+- For weekly habits: lead with "X of Y sessions" where Y = the stated weekly target.
+- Only add a characterisation (e.g. "— best week yet", "— missed target", "— zero contact this week") when the data clearly supports it. Do NOT use subjective labels like "slipping" or "holding steady" unless comparing to a clear trend in the last 14 days.
+- Do not invent numbers. Every figure in the signal must come from the data provided.
 - Valid JSON only between SIGNALS_JSON and END_SIGNALS_JSON. No markdown fences.`;
 }
 

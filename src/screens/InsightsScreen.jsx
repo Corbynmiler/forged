@@ -423,9 +423,18 @@ export function InsightsScreen({ habits, goals = [], journalEntries = [], onShow
 
         {/* Body — week label grounds the brief; ↻ only when quota allows refresh. */}
         {isFetching ? (
-          <div style={{ fontSize:13, color:T.sub, fontWeight:600, letterSpacing:"0.02em", marginBottom:8 }}>
-            {weekRangeLabel}
-          </div>
+          <>
+            <div style={{ fontSize:13, color:T.sub, fontWeight:600, letterSpacing:"0.02em", marginBottom:14 }}>
+              {weekRangeLabel}
+            </div>
+            {[92, 78, 88, 55].map((w, i) => (
+              <div key={i} style={{
+                height: 13, borderRadius: 4, marginBottom: 10,
+                background: "rgba(255,255,255,0.07)",
+                width: `${w}%`,
+              }}/>
+            ))}
+          </>
         ) : (
           <>
             <div style={{
@@ -606,13 +615,12 @@ export function InsightsScreen({ habits, goals = [], journalEntries = [], onShow
                 const st = weekSquareState(h, dateStr, todayYmd);
                 const fill = st === "hit"
                   ? (h.color || T.green)
-                  : st === "skip"
-                    ? "rgba(230,126,34,0.38)"
-                    : st === "future"
-                      ? "rgba(255,255,255,0.04)"
-                      : "rgba(255,255,255,0.10)";
+                  : st === "future"
+                    ? "rgba(255,255,255,0.03)"
+                    : "rgba(255,255,255,0.07)";
+                // skip = dashed border (intentional rest, not completion); miss = solid dim border
                 const border = st === "skip"
-                  ? "1px solid rgba(230,126,34,0.55)"
+                  ? "1px dashed rgba(255,255,255,0.22)"
                   : `0.5px solid ${T.border}`;
                 const tip = st === "hit" ? `${fmtEntryDate(dateStr)} · logged`
                   : st === "skip" ? `${fmtEntryDate(dateStr)} · skipped`
@@ -649,25 +657,30 @@ export function InsightsScreen({ habits, goals = [], journalEntries = [], onShow
       )}
 
       {showMomentumBlock && (
-        <div style={{ margin:"0 14px 18px", display:"flex", flexDirection:"column", gap:14 }}>
-          {momentumSignals.map((row, i) => {
-            const habit = habits.find((h) => h.name === row.habit_name);
-            const emoji = habit?.emoji || "•";
-            return (
-              <div
-                key={`${row.habit_name}-${i}`}
-                style={{
-                  display:"flex", flexWrap:"wrap", alignItems:"baseline", columnGap:10, rowGap:4,
-                }}
-              >
-                <span style={{ fontSize:15, lineHeight:1 }}>{emoji}</span>
-                <span style={{ fontSize:12, fontWeight:600, color:T.text }}>{row.habit_name}</span>
-                <span style={{ fontSize:12, color:T.muted, lineHeight:1.55, flex:"1 1 180px", minWidth:0 }}>
-                  {row.signal}
-                </span>
-              </div>
-            );
-          })}
+        <div style={{ margin:"0 14px 18px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:"14px 14px 12px" }}>
+          <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:12 }}>This week&apos;s habits</div>
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            {momentumSignals.map((row, i) => {
+              const habit = habits.find((h) => h.name === row.habit_name);
+              const emoji = habit?.emoji || "•";
+              return (
+                <div
+                  key={`${row.habit_name}-${i}`}
+                  style={{
+                    display:"flex", flexWrap:"wrap", alignItems:"baseline", columnGap:8, rowGap:3,
+                    paddingBottom: i < momentumSignals.length - 1 ? 12 : 0,
+                    borderBottom: i < momentumSignals.length - 1 ? `0.5px solid ${T.border}` : "none",
+                  }}
+                >
+                  <span style={{ fontSize:14, lineHeight:1 }}>{emoji}</span>
+                  <span style={{ fontSize:12, fontWeight:600, color:T.text }}>{row.habit_name}</span>
+                  <span style={{ fontSize:12, color:T.muted, lineHeight:1.55, flex:"1 1 180px", minWidth:0 }}>
+                    {row.signal}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
