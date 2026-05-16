@@ -1385,7 +1385,7 @@ export const GLOBAL_TOUR = [
   {
     target: "[data-tour='nav']",
     title: "Five screens, one app",
-    body: "Today logs habits. Journal stores reflections. Insights shows patterns. Social is where Forge Pro crew features will live. Profile tracks your XP and account.",
+    body: "Today logs habits. Journal starts with Activity — what you actually logged — then the Journal tab for your daily story. Insights shows patterns. Social is where Forge Pro crew features will live. Profile tracks your XP and account.",
     pad: 4, radius: 16, callout: "top",
   },
 ];
@@ -1402,7 +1402,7 @@ export const PAGE_TOURS = {
   journal: [
     { target:"[data-tour='journal-viewmode']", title:"Switch your view", body:"Day view lists every entry in order. Week groups them by week. Month shows a calendar grid so you can spot gaps at a glance.", pad:6 },
     { target:"[data-tour='journal-filters']", title:"Filter by habit", body:"Tap a habit name to see only its logs and reflections. Useful when you want to review one habit's history without the noise.", pad:6 },
-    { target:"[data-tour='journal-list']", title:"Your reflections", body:"Every note and reflection you write while logging a habit appears here automatically. Tap any entry to read or edit it.", pad:6 },
+    { target:"[data-tour='journal-list']", title:"Your activity trail", body:"Everything you logged shows up here — notes, reflections, and goal updates. When you're ready for the written summary, switch to the Journal tab.", pad:6 },
   ],
   insights: [
     { target:"[data-tour='insights-stats']", title:"Your snapshot", body:"Total habits tracked, how many days you've logged at least one habit, your longest streak ever, and your total log count.", pad:8 },

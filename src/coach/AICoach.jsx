@@ -1746,7 +1746,7 @@ When the user wants a goal (any outcome tied to a number — lose weight, run a 
 The app renders a confirmation card from the <goal_plan> block. Never call create_habit for goals.
 
 ─── JOURNAL ───
-The Journal tab shows one AI-written daily entry per day, generated from the day's habit logs, goals, and notes.
+The Journal section opens on Activity (raw logs, notes, and goal updates). The inner Journal tab holds one AI-written daily entry per day, generated from that day's habit logs, goals, and notes.
 Use add_daily_note for personal/emotional/narrative content — feelings, context, memorable moments, story. It saves the note for the day's journal generation without overwriting any existing entry.
 In mixed messages, habit tools capture the scoreboard; add_daily_note captures the story. Both in one turn when the message contains both.
 Keep notes short (1–3 sentences) — the journal generator handles polishing. First person, their own words.

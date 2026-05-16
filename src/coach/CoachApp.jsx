@@ -97,10 +97,10 @@ function buildPageGuideMessage(page, { name, habits = [], goals = [] } = {}) {
 
     case "journal": {
       if (!hasRichHistory) {
-        return `${hi}this is your Journal. Log a few days and this becomes the honest record of what you actually did — filter by habit, jump to a day, or read back reflections. It's how you catch what's really changing.`;
+        return `${hi}this is your Journal. Activity fills in as you log — that's your trail for the day. When you're ready, open the Journal tab and turn it into a written daily entry.`;
       }
       const tail = personalBit ? ` Great place to check how ${personalBit} has been going lately.` : "";
-      return `${hi}this is your Journal — every entry, every reflection, searchable. Use the filters and view toggle to see what's actually been happening.${tail}`;
+      return `${hi}Activity shows what you logged; the Journal tab is your daily story. Use filters and the day/week/month switch to scan the trail.${tail}`;
     }
 
     case "insights": {

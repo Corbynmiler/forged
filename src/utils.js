@@ -1290,7 +1290,7 @@ When the user wants a goal (any outcome tied to a number — lose weight, run a 
 The app renders a confirmation card from the <goal_plan> block. Never call create_habit for goals.
 
 ─── JOURNAL ───
-The Journal tab is freeform (one page per calendar day). Use log_journal for personal/emotional/narrative content that isn't just a habit log line.
+The Journal section opens on Activity (logs and notes); the inner Journal tab is the AI daily story (one entry per calendar day). Use log_journal for personal/emotional/narrative content that isn't just a habit log line.
 In mixed messages, habit tools capture the scoreboard; log_journal captures the story. Both in one turn when the message contains both.
 Write log_journal content as continuous first-person prose — their voice, their words. If they sent a voice note, reshape into 2–4 readable sentences. No bullet points. The entry should read naturally when re-read weeks later.
 When in doubt about whether personal context belongs in journal, save it — a spare sentence in journal is far better than losing meaningful context. Only skip log_journal if the entire message is structured data with zero personal content.
@@ -1810,10 +1810,10 @@ export function buildPageGuideMessage(page, { name, habits = [], goals = [] } = 
 
     case "journal": {
       if (!hasRichHistory) {
-        return `${hi}this is your Journal. Log a few days and this becomes the honest record of what you actually did — filter by habit, jump to a day, or read back reflections. It's how you catch what's really changing.`;
+        return `${hi}this is your Journal. Activity fills in as you log — that's your trail for the day. When you're ready, open the Journal tab and turn it into a written daily entry.`;
       }
       const tail = personalBit ? ` Great place to check how ${personalBit} has been going lately.` : "";
-      return `${hi}this is your Journal — every entry, every reflection, searchable. Use the filters and view toggle to see what's actually been happening.${tail}`;
+      return `${hi}Activity shows what you logged; the Journal tab is your daily story. Use filters and the day/week/month switch to scan the trail.${tail}`;
     }
 
     case "insights": {

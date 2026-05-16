@@ -526,7 +526,7 @@ function JournalComposeSheet({ initialContent = "", date, onSave, onClose }) {
 // ─── JOURNAL SCREEN ───────────────────────────────────────────────────────────
 export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, journalUserId, isPro, onUpgrade, journalEntries = [], onSaveJournalEntry, onJournalGenerated, initialTab, onInitialComposeDone, userName = "", coachName = "" }) {
   // "activity" = habit/goal log history (existing), "journal" = pure journal entries
-  const [mainTab, setMainTab]   = useState(initialTab === "activity" ? "activity" : "journal");
+  const [mainTab, setMainTab]   = useState(initialTab === "journal" ? "journal" : "activity");
   const [composeDate, setComposeDate] = useState(initialTab === "journal" ? todayStr() : null); // null = closed, "YYYY-MM-DD" = open
 
   // When navigating here from AddActionSheet "Write in journal", auto-open compose.
@@ -866,7 +866,7 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
 
       {/* Tab bar */}
       <div style={{ display:"flex", gap:0, padding:"0 18px 14px" }}>
-        {[["journal","Journal"],["activity","Activity"]].map(([tab, label]) => (
+        {[["activity","Activity"],["journal","Journal"]].map(([tab, label]) => (
           <button key={tab} type="button" onClick={() => setMainTab(tab)}
             style={{ padding:"6px 16px", borderRadius:0, border:"none", cursor:"pointer", fontSize:12, fontWeight:500,
               background: mainTab === tab ? T.accent + "22" : "none",
@@ -1064,7 +1064,7 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
 
           {sortedJournalEntries.length === 0 && (
             <div style={{ padding:"32px 24px 0", textAlign:"center", color:T.muted, fontSize:13, lineHeight:1.7 }}>
-              No entries yet. Talk to Forged today and tap "Write today's entry".
+              No entries yet. Log something on Today first, then tap Generate today&apos;s entry below.
             </div>
           )}
 
@@ -1458,6 +1458,12 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
           </div>
         </div>
       )}
+      <div style={{ padding:"16px 16px 8px", textAlign:"center" }}>
+        <button type="button" onClick={() => setMainTab("journal")}
+          style={{ background:"none", border:`0.5px solid ${T.border}`, borderRadius:T.rsm, padding:"8px 18px", fontSize:12, color:T.muted, cursor:"pointer" }}>
+          Daily journal →
+        </button>
+      </div>
       </>
       )}
 
