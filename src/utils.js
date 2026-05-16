@@ -645,7 +645,19 @@ export function getCompletionRate(h) {
   return Math.min(100, Math.round((doneDays / 28) * 100));
 }
 export function get7DayActivity(h) {
-  return Array.from({length:7}, (_, i) => h.logs.some(l => l.date === daysAgo(6 - i)) ? 1 : 0);
+  return Array.from({length:7}, (_, i) => {
+    const dateStr = daysAgo(6 - i);
+    return h.logs.some(l => l.date === dateStr && isRealCompletion(l.value)) ? 1 : 0;
+  });
+}
+
+/** Returns true if the log value represents a genuine completion (not skip, quicknote, false, or null). */
+export function isRealCompletion(v) {
+  if (v === "skip" || v === "quicknote" || v === false || v == null) return false;
+  if (v === true || v === "log") return true;
+  if (typeof v === "number" && v > 0) return true;
+  if (typeof v === "object" && v !== null && typeof v.minutes === "number" && v.minutes > 0) return true;
+  return false;
 }
 
 /**
@@ -1056,7 +1068,7 @@ export function get12WeekGrid(h) {
   return Array.from({length:12}, (_, w) =>
     Array.from({length:7}, (_, d) => {
       const dateStr = daysAgo((11 - w) * 7 + (6 - d));
-      return { date: dateStr, logged: h.logs.some(l => l.date === dateStr) };
+      return { date: dateStr, logged: h.logs.some(l => l.date === dateStr && isRealCompletion(l.value)) };
     })
   );
 }

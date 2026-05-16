@@ -259,9 +259,10 @@ function renderJournalLogContent(habit, log) {
   }
 
   if (log.value === true) {
-    return <>{`Done ✓${noteSuffix}`}</>;
+    // Note shown in the NOTE section below — don't also inline it here
+    return <>Done ✓</>;
   }
-  if (typeof log.value === "number") return <>{`${formatWithUnit(log.value, habit.unit)}${noteSuffix}`}</>;
+  if (typeof log.value === "number") return <>{formatWithUnit(log.value, habit.unit)}</>;
   if (log.reflection) return <>{`Reflection · ${truncateText(log.reflection, 72)}${noteSuffix}`}</>;
   if (log.value && typeof log.value === "object") {
     if (log.value.win) return <>{`Win · ${truncateText(log.value.win, 56)}`}</>;
@@ -292,8 +293,23 @@ function HabitDayCard({ habit, logs, onReflect, onDeleteLogEntry }) {
   const [deleting, setDeleting] = useState(false);
   const [showLimitTaps, setShowLimitTaps] = useState(false);
   const nonNote = logs.filter(l => l.value !== "quicknote");
-  const notes   = logs.filter(l => l.value === "quicknote" || (l.note && l.note.trim()));
-  const uniqueNotes = [...new Set(notes.map(l => l.note).filter(Boolean))];
+  const quicknoteEntries = logs.filter(l => l.value === "quicknote");
+  // Notes for the NOTE section: only from non-quicknote entries that have a real note.
+  // Quicknote texts are already shown as their entry row content — do not repeat them here.
+  const noteEntries = logs.filter(l => l.value !== "quicknote" && l.note?.trim());
+  const uniqueNotes = [...new Set(noteEntries.map(l => l.note.trim()).filter(Boolean))];
+
+  // A single bare done-entry: value===true, no note, no reflection.
+  // When there are also quicknotes we still want to show those — but the "Done ✓" row
+  // itself is redundant (the header already says "logged ✓"). Collapse it in both cases.
+  const bareTrueEntry = nonNote.length === 1 && nonNote[0].value === true && !nonNote[0].note?.trim() && !nonNote[0].reflection
+    ? nonNote[0] : null;
+  // No quicknotes → collapse the whole ENTRIES block; header ✕ handles delete.
+  const singleTrueEntry = !!bareTrueEntry && quicknoteEntries.length === 0;
+  // Has quicknotes → keep ENTRIES block but skip the "Done ✓" row; header ✕ handles delete.
+  const collapsedTrueWithNotes = !!bareTrueEntry && quicknoteEntries.length > 0;
+  // Entries to render: omit the bare true entry when quicknotes cover the context.
+  const entriesToShow = collapsedTrueWithNotes ? logs.filter(l => l !== bareTrueEntry) : logs;
   const isLimit = habit.habitType === "limit";
   const limitTapCount = isLimit ? nonNote.filter(l => typeof l.value === "number").length : 0;
   const limitMergedNotes = isLimit ? limitJournalMergedNotes(logs) : [];
@@ -350,6 +366,15 @@ function HabitDayCard({ habit, logs, onReflect, onDeleteLogEntry }) {
         <div style={{ width:24, height:24, borderRadius:6, background:habit.color+"22", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13 }}>{habit.emoji}</div>
         <span style={{ fontSize:13, fontWeight:500, color:habit.color }}>{habit.name}</span>
         <span style={{ marginLeft:"auto", fontSize:11, color:T.hint }}>{summaryLine()}</span>
+        {(singleTrueEntry || collapsedTrueWithNotes) && onDeleteLogEntry ? (
+          <button
+            type="button"
+            aria-label="Remove this log"
+            disabled={deleting}
+            onClick={() => setPendingDelete(bareTrueEntry)}
+            style={{ flexShrink:0, width:28, height:28, marginRight:-4, border:"none", borderRadius:6, cursor:deleting?"default":"pointer", background:"transparent", color:T.hint, fontSize:18, lineHeight:1, display:"flex", alignItems:"center", justifyContent:"center" }}
+          >×</button>
+        ) : null}
       </div>
 
       {/* Limit habits: one daily summary; expand for per-tap delete */}
@@ -380,8 +405,9 @@ function HabitDayCard({ habit, logs, onReflect, onDeleteLogEntry }) {
         </div>
       ) : null}
 
-      {/* Per-entry rows (Journal) — delete removes one log; XP is not adjusted */}
-      {logs.length > 0 && onDeleteLogEntry && (!isLimit || showLimitTaps) ? (
+      {/* Per-entry rows (Journal) — delete removes one log; XP is not adjusted.
+          Hidden for a single bare done-entry (no context) — the header ✕ handles delete. */}
+      {entriesToShow.length > 0 && onDeleteLogEntry && (!isLimit || showLimitTaps) && !singleTrueEntry ? (
         <div style={{ borderBottom:`0.5px solid ${T.border}` }}>
           <div style={{ padding:"8px 14px 4px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
             <span style={{ fontSize:10, fontWeight:600, color:T.hint, textTransform:"uppercase", letterSpacing:"0.06em" }}>{isLimit ? "Each tap" : "Entries"}</span>
@@ -389,7 +415,7 @@ function HabitDayCard({ habit, logs, onReflect, onDeleteLogEntry }) {
               <button type="button" onClick={() => setShowLimitTaps(false)} style={{ fontSize:11, color:T.muted, background:"none", border:"none", cursor:"pointer", padding:0 }}>Hide taps</button>
             ) : null}
           </div>
-          {logs.map((log, i) => (
+          {entriesToShow.map((log, i) => (
             <div
               key={`${log.date}-${i}-${typeof log.value === "object" ? JSON.stringify(log.value) : String(log.value)}`}
               style={{ display:"flex", alignItems:"flex-start", gap:8, padding:"8px 14px", borderTop:`0.5px solid ${T.border}` }}
