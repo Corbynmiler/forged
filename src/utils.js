@@ -1355,7 +1355,7 @@ export const COACH_DAY_MAX_MESSAGES = 24;
 export const COACH_API_MESSAGE_CAP  = 12;
 
 export function coachDayLocalKey(userId, dayYmd) {
-  return `forged_coach_day:v1:${userId}:${dayYmd}`;
+  return `forged_coach_day:v2:${userId}:${dayYmd}`;
 }
 
 export function loadCoachDayMessages(userId) {
