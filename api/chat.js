@@ -97,7 +97,7 @@ const COACH_TOOLS = [
         amount:     { type: "number",  description: "LIMIT: amount used. GOAL: new current value." },
         win:        { type: "string",  description: "PROJECT: win/achievement to record." },
         hard_part:  { type: "string",  description: "PROJECT: blocker or hard part today." },
-        note:       { type: "string",  description: "Short note or reflection." },
+        note:       { type: "string",  description: "Short useful note — ONLY when the user gives context beyond simply completing the habit (e.g. 'chest and triceps', 'had 10 pulls', 'felt tired'). Omit entirely for plain completions ('I did gym', 'logged water'). Never repeat the habit name or rephrase 'I did it'." },
         rest_day:   { type: "boolean", description: "DAILY or WEEKLY only: true = rest/skip for today (optional note). Does not add a weekly session." },
       },
       required: ["habit_id", "habit_name"],
