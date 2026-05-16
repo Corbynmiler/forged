@@ -563,7 +563,7 @@ export function SocialScreen({ user, xp, habits, friends, friendRequests, sentRe
     const res = await onSendRequest(addEmail.trim());
     setAddLoading(false);
     if (res?.error) { setAddError(res.error); }
-    else { setAddDone(true); setAddEmail(""); setTimeout(() => { setAddDone(false); setShowAddFriend(false); }, 2200); }
+    else { setAddDone(true); setAddEmail(""); }
   }
 
   function Avatar({ name, avatarUrl, size = 32 }) {
@@ -1623,7 +1623,7 @@ export function SocialScreen({ user, xp, habits, friends, friendRequests, sentRe
                   {showAddFriend ? "Close" : "+ Add"}
                 </button>
                 <button onClick={() => setShowFriendsSheet(false)}
-                  style={{ width: 30, height: 30, borderRadius: "50%", border: "none", background: T.surface, color: T.muted, fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  style={{ width: 34, height: 34, borderRadius: "50%", border: `0.5px solid ${T.borderStrong}`, background: T.raised, color: T.text, fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                   ×
                 </button>
               </div>
@@ -1634,27 +1634,45 @@ export function SocialScreen({ user, xp, habits, friends, friendRequests, sentRe
               {/* Add-friend form */}
               {showAddFriend && (
                 <div style={{ ...card, marginBottom: 14 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 6 }}>Add a friend</div>
-                  <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.55, marginBottom: 10 }}>
-                    Enter the <strong style={{ color: T.text }}>email they use for Forged</strong> or their <strong style={{ color: T.text }}>@username</strong> (set in Profile → Social). They’ll get a request — once accepted, you’ll see each other here.
-                  </div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <input
-                      type="text"
-                      placeholder="friend@email.com or @username"
-                      autoComplete="off"
-                      value={addEmail}
-                      onChange={e => { setAddEmail(e.target.value); setAddError(""); }}
-                      onKeyDown={e => e.key === "Enter" && handleSendRequest()}
-                      style={{ flex: 1, background: T.surface, border: `0.5px solid ${T.borderStrong}`, borderRadius: T.rsm, padding: "9px 12px", fontSize: 16, color: T.text, outline: "none" }}
-                    />
-                    <button type="button" onClick={handleSendRequest} disabled={addLoading || !addEmail.trim()}
-                      style={{ padding: "9px 14px", borderRadius: T.rsm, border: "none", background: T.accent, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: (!addEmail.trim() || addLoading) ? 0.6 : 1 }}>
-                      {addLoading ? "…" : addDone ? "✓ Sent!" : "Send"}
-                    </button>
-                  </div>
-                  {addError && <div style={{ fontSize: 12, color: "#e05c5c", marginTop: 6 }}>{addError}</div>}
-                  {addDone && !addError && <div style={{ fontSize: 12, color: T.green, marginTop: 6 }}>Request sent. They’ll see it under Friend requests.</div>}
+                  {addDone ? (
+                    <div style={{ textAlign: "center", padding: "12px 0 4px" }}>
+                      <div style={{ fontSize: 28, marginBottom: 8 }}>✓</div>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: T.text, marginBottom: 6 }}>Invite sent</div>
+                      <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.6, marginBottom: 16 }}>
+                        They’ll see it under Friend requests when they open Forged. You’ll both be notified when they accept.
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => { setAddDone(false); setShowAddFriend(false); }}
+                        style={{ padding: "10px 28px", borderRadius: 20, border: "none", background: T.accent, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+                      >
+                        Done
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 6 }}>Add a friend</div>
+                      <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.55, marginBottom: 10 }}>
+                        Enter the <strong style={{ color: T.text }}>email they use for Forged</strong> or their <strong style={{ color: T.text }}>@username</strong> (set in Profile → Social). They’ll get a request — once accepted, you’ll see each other here.
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <input
+                          type="text"
+                          placeholder="friend@email.com or @username"
+                          autoComplete="off"
+                          value={addEmail}
+                          onChange={e => { setAddEmail(e.target.value); setAddError(""); }}
+                          onKeyDown={e => e.key === "Enter" && handleSendRequest()}
+                          style={{ flex: 1, background: T.surface, border: `0.5px solid ${T.borderStrong}`, borderRadius: T.rsm, padding: "9px 12px", fontSize: 16, color: T.text, outline: "none" }}
+                        />
+                        <button type="button" onClick={handleSendRequest} disabled={addLoading || !addEmail.trim()}
+                          style={{ padding: "9px 14px", borderRadius: T.rsm, border: "none", background: T.accent, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: (!addEmail.trim() || addLoading) ? 0.6 : 1 }}>
+                          {addLoading ? "…" : "Send"}
+                        </button>
+                      </div>
+                      {addError && <div style={{ fontSize: 12, color: "#e05c5c", marginTop: 6 }}>{addError}</div>}
+                    </>
+                  )}
                 </div>
               )}
 
@@ -1709,15 +1727,31 @@ export function SocialScreen({ user, xp, habits, friends, friendRequests, sentRe
                 ) : friends.length === 0 ? (
                   <div style={{ ...card, padding: "22px 18px", textAlign: "center" }}>
                     <div style={{ fontSize: 26, marginBottom: 8 }}>👥</div>
-                    <div style={{ fontSize: 13.5, fontWeight: 600, color: T.text, marginBottom: 6 }}>No friends yet</div>
-                    <div style={{ fontSize: 12.5, color: T.muted, lineHeight: 1.6, marginBottom: 12 }}>
-                      Invite someone you actually want to stay consistent with. You'll see each other's daily logs and streaks.
-                    </div>
-                    <button type="button"
-                      onClick={() => { setShowAddFriend(true); setAddError(""); setAddEmail(""); setAddDone(false); }}
-                      style={{ padding: "8px 18px", borderRadius: 18, border: "none", background: T.accent, color: "#fff", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
-                      Add your first friend
-                    </button>
+                    {sentRequests.length > 0 ? (
+                      <>
+                        <div style={{ fontSize: 13.5, fontWeight: 600, color: T.text, marginBottom: 6 }}>Invite pending</div>
+                        <div style={{ fontSize: 12.5, color: T.muted, lineHeight: 1.6 }}>
+                          Your invite is on its way — they'll appear here once they accept. Want to invite someone else?
+                        </div>
+                        <button type="button"
+                          onClick={() => { setShowAddFriend(true); setAddError(""); setAddEmail(""); setAddDone(false); }}
+                          style={{ marginTop: 12, padding: "8px 18px", borderRadius: 18, border: `0.5px solid ${T.borderStrong}`, background: "none", color: T.gold, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
+                          + Add another
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: 13.5, fontWeight: 600, color: T.text, marginBottom: 6 }}>No friends yet</div>
+                        <div style={{ fontSize: 12.5, color: T.muted, lineHeight: 1.6, marginBottom: 12 }}>
+                          Invite someone you actually want to stay consistent with. You'll see each other's daily logs and streaks.
+                        </div>
+                        <button type="button"
+                          onClick={() => { setShowAddFriend(true); setAddError(""); setAddEmail(""); setAddDone(false); }}
+                          style={{ padding: "8px 18px", borderRadius: 18, border: "none", background: T.accent, color: "#fff", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
+                          Add a friend
+                        </button>
+                      </>
+                    )}
                   </div>
                 ) : (
                   friends.map((f, i) => {

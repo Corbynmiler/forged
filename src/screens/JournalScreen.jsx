@@ -55,7 +55,7 @@ export function BetaModal({ onClose }) {
     <Modal onClose={onClose}>
       <div style={{ textAlign:"center", padding:"10px 0 20px" }}>
         <div style={{ fontSize:36, marginBottom:14 }}>🙌</div>
-        <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:10 }}>You're on the list.</div>
+        <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:10 }}>You&apos;re on the list</div>
         <div style={{ fontSize:14, color:T.muted, lineHeight:1.75, marginBottom:24 }}>
           Thanks for being early. You'll hear from me directly as things come together — I genuinely appreciate it.
         </div>

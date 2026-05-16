@@ -33,7 +33,7 @@ const ONBOARD_STEPS = [
   },
   {
     id:"coach",
-    title:"Meet your AI coach.",
+    title:"Meet your AI coach",
     sub:"It reads your logs and reflections — then tells you what you can't see yourself.",
     body:null,
     cta:"Continue",
@@ -360,28 +360,21 @@ After creating, tell them they can log from Today and chat with you anytime.`;
     setOnboardSending(true);
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token ?? SUPABASE_ANON_KEY;
-
       // Prepend the hidden opener trigger so the API sees a valid alternating sequence:
       // user:"." → assistant:opener → user:msg1 → assistant:reply1 → user:msg2 …
       const apiMessages = [{ role: "user", content: "." }, ...withUser];
 
-      const res = await fetch("/api/chat", {
+      // Route onboarding chat through /api/onboard-chat (no auth/quota requirements)
+      // so it never burns the user's free daily coach limit during setup.
+      const res = await fetch("/api/onboard-chat", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          system: buildOnboardingSystem(
-            name.trim() || "there",
-            firstHabit?.name || "",
-            firstHabit?.habitType || "daily",
-            coachNameInput.trim() || "Coach",
-          ),
+          name: name.trim() || "there",
+          coachName: coachNameInput.trim() || "Coach",
+          habitName: firstHabit?.name || "",
+          habitType: firstHabit?.habitType || "daily",
           messages: apiMessages,
-          client_date: todayStr(),
         }),
       });
 
@@ -667,10 +660,13 @@ After creating, tell them they can log from Today and chat with you anytime.`;
               </div>
               <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
                 <button
-                  onClick={() => setSkipConfirmVisible(false)}
+                  onClick={() => {
+                    setSkipConfirmVisible(false);
+                    setTimeout(() => textareaRef.current?.focus(), 80);
+                  }}
                   style={{ padding:13, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer" }}
                 >
-                  Stay and set up my goal
+                  Let me chat with my coach
                 </button>
                 <button
                   onClick={() => { setSkipConfirmVisible(false); setShowingFinal(true); }}
@@ -829,7 +825,7 @@ After creating, tell them they can log from Today and chat with you anytime.`;
           <div style={{ textAlign:"center", marginBottom:28 }}>
             <div style={{ fontSize:52, marginBottom:14, lineHeight:1 }}>🔔</div>
             <div style={{ fontFamily:T.serif, fontSize:26, color:T.text, lineHeight:1.2, marginBottom:10 }}>
-              Stay on track.
+              Stay on track
             </div>
             <div style={{ fontSize:14, color:T.muted, lineHeight:1.6, maxWidth:300, margin:"0 auto" }}>
               One reminder a day. We send it when it matters most — at the end of the day, when you still have time to log.

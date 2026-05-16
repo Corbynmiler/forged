@@ -334,7 +334,7 @@ footer {
 <!-- NAV -->
 <nav>
   <a href="#" class="nav-logo">Forged</a>
-  <a href="https://forged-sage.vercel.app" class="nav-cta">Open Forged →</a>
+  <a href="https://forged-sage.vercel.app?signup" class="nav-cta">Get started →</a>
 </nav>
 
 <!-- BETA BANNER -->
@@ -350,7 +350,7 @@ footer {
   <p class="hero-sub">Log your day by typing or talking. Forged turns it into habits, a journal, and real patterns — so you finally understand why you keep slipping.</p>
 
   <div class="hero-actions">
-    <a href="https://forged-sage.vercel.app" class="btn-primary">Join the beta — no card needed →</a>
+    <a href="https://forged-sage.vercel.app?signup" class="btn-primary">Join the beta — no card needed →</a>
     <a href="#how" class="btn-ghost">See how it works ↓</a>
   </div>
   <p class="hero-note">No card required · Takes 60 seconds to set up</p>
@@ -359,7 +359,7 @@ footer {
 <!-- HOW IT WORKS -->
 <section class="how-section" id="how">
   <p class="section-label gold reveal">How it works</p>
-  <h2 class="section-head reveal">Sixty seconds a day.</h2>
+  <h2 class="section-head reveal">Sixty seconds a day</h2>
 
   <div class="how-cards">
 
@@ -414,7 +414,7 @@ footer {
 <!-- WHY DIFFERENT -->
 <section class="why-section">
   <p class="section-label reveal">Why it's different</p>
-  <h2 class="section-head reveal">Most apps track.<br/>Forged <em>explains.</em></h2>
+  <h2 class="section-head reveal">Most apps track.<br/>Forged <em>explains</em></h2>
 
   <div class="why-cols reveal">
     <div class="why-col">
@@ -448,26 +448,62 @@ footer {
         <div class="pwa-sub">Works like an app — no App Store needed</div>
       </div>
     </div>
-    <p class="pwa-body">Forged runs in your browser, but you can pin it to your home screen so it opens like any other app — full screen, its own icon, faster to reach.</p>
-    <div class="pwa-grid">
-      <div class="pwa-platform">
-        <div class="pwa-platform-title">iPhone · Safari</div>
+    <p class="pwa-body">Forged runs in your browser but opens like a native app — full screen, its own icon, faster to reach. Pin it once and it's always a tap away.</p>
+
+    <!-- Chrome/Android: one-tap install button (shown by JS when beforeinstallprompt fires) -->
+    <div id="pwa-install-wrap" style="display:none; margin-bottom:16px;">
+      <button id="pwa-install-btn" style="
+        display:inline-flex; align-items:center; gap:8px;
+        background:var(--accent); color:#fff;
+        font-family:var(--sans); font-size:14px; font-weight:600;
+        padding:12px 22px; border-radius:8px; border:none; cursor:pointer;
+        transition:opacity 0.2s;
+      ">
+        <span style="font-size:16px">📲</span> Install Forged
+      </button>
+      <p style="font-size:11px; color:var(--muted); margin-top:8px;">
+        One tap to add to your home screen — no App Store required.
+      </p>
+    </div>
+
+    <!-- iOS Safari: always show clear steps since iOS doesn't support beforeinstallprompt -->
+    <div id="pwa-ios-steps" style="display:none; margin-bottom:16px;">
+      <div class="pwa-platform" style="border:0.5px solid rgba(200,144,42,0.3); background:rgba(200,144,42,0.06);">
+        <div class="pwa-platform-title" style="color:var(--gold);">iPhone or iPad · Safari</div>
         <ul class="pwa-steps">
-          <li><span class="pwa-step-n">1</span>Open Forged in Safari</li>
-          <li><span class="pwa-step-n">2</span>Tap the Share button</li>
-          <li><span class="pwa-step-n">3</span>Tap <strong style="color:var(--text)">Add to Home Screen</strong></li>
+          <li><span class="pwa-step-n">1</span>Tap the <strong style="color:var(--text)">Share</strong> button at the bottom of Safari (the square with an arrow)</li>
+          <li><span class="pwa-step-n">2</span>Scroll down and tap <strong style="color:var(--text)">Add to Home Screen</strong></li>
+          <li><span class="pwa-step-n">3</span>Tap <strong style="color:var(--text)">Add</strong> — Forged appears on your home screen</li>
         </ul>
-      </div>
-      <div class="pwa-platform">
-        <div class="pwa-platform-title">Android · Chrome</div>
-        <ul class="pwa-steps">
-          <li><span class="pwa-step-n">1</span>Open Forged in Chrome</li>
-          <li><span class="pwa-step-n">2</span>Tap the three-dot menu</li>
-          <li><span class="pwa-step-n">3</span>Tap <strong style="color:var(--text)">Add to Home screen</strong></li>
-        </ul>
+        <p style="font-size:11px; color:var(--muted); margin-top:10px; line-height:1.5;">
+          Must be using Safari. Chrome on iPhone does not support home screen install.
+        </p>
       </div>
     </div>
-    <div class="pwa-perks">
+
+    <!-- Fallback manual steps (shown on desktop or when no prompt fires) -->
+    <div id="pwa-manual-steps">
+      <div class="pwa-grid">
+        <div class="pwa-platform">
+          <div class="pwa-platform-title">iPhone · Safari</div>
+          <ul class="pwa-steps">
+            <li><span class="pwa-step-n">1</span>Open Forged in Safari</li>
+            <li><span class="pwa-step-n">2</span>Tap the Share button</li>
+            <li><span class="pwa-step-n">3</span>Tap <strong style="color:var(--text)">Add to Home Screen</strong></li>
+          </ul>
+        </div>
+        <div class="pwa-platform">
+          <div class="pwa-platform-title">Android · Chrome</div>
+          <ul class="pwa-steps">
+            <li><span class="pwa-step-n">1</span>Open Forged in Chrome</li>
+            <li><span class="pwa-step-n">2</span>Tap the three-dot menu</li>
+            <li><span class="pwa-step-n">3</span>Tap <strong style="color:var(--text)">Add to Home screen</strong></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="pwa-perks" style="margin-top:16px;">
       <span class="pwa-perk">App icon on your home screen</span>
       <span class="pwa-perk">Opens full-screen</span>
       <span class="pwa-perk">Faster to reach, easier to log</span>
@@ -478,11 +514,11 @@ footer {
 <!-- BETA CTA -->
 <section class="cta-section">
   <p class="cta-eyebrow reveal">Early beta</p>
-  <h2 class="cta-head reveal">Free to start.<br/><em>Help shape it.</em></h2>
+  <h2 class="cta-head reveal">Free to start.<br/><em>Help shape it</em></h2>
   <p class="cta-sub reveal">Join a small group building Forged from the ground up. No card, no pressure.</p>
   <div class="cta-btns reveal">
-    <a href="https://forged-sage.vercel.app" class="btn-primary lg">Join the beta →</a>
-    <a href="https://forged-sage.vercel.app" class="btn-gold">Open Forged</a>
+    <a href="https://forged-sage.vercel.app?signup" class="btn-primary lg">Join the beta →</a>
+    <a href="https://forged-sage.vercel.app" class="btn-gold">Sign in</a>
   </div>
   <p class="cta-note reveal">No card required · Free during beta · Pro plan coming soon</p>
 </section>
@@ -513,6 +549,47 @@ window.addEventListener('scroll', () => {
   nav.style.transform = y > lastY && y > 60 ? 'translateY(-100%)' : 'translateY(0)';
   lastY = y;
 }, { passive: true });
+
+// ── Device-aware PWA install helper ──────────────────────────────────────────
+const ua = navigator.userAgent;
+const isIOS = /iPhone|iPad|iPod/.test(ua) && !/CriOS/.test(ua); // Safari on iOS only (not Chrome on iOS)
+const isStandalone = navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+
+const installWrap   = document.getElementById('pwa-install-wrap');
+const iosSteps      = document.getElementById('pwa-ios-steps');
+const manualSteps   = document.getElementById('pwa-manual-steps');
+
+if (!isStandalone) {
+  if (isIOS) {
+    // iOS/Safari: show prominent step-by-step (no API available)
+    iosSteps.style.display = 'block';
+    manualSteps.style.display = 'none';
+  }
+
+  // Chrome/Edge/Android: capture beforeinstallprompt and show one-tap button
+  let deferredPrompt = null;
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault();
+    deferredPrompt = e;
+    installWrap.style.display = 'block';
+    manualSteps.style.display = 'none'; // button replaces manual steps
+  });
+
+  document.getElementById('pwa-install-btn').addEventListener('click', async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      installWrap.style.display = 'none';
+    }
+    deferredPrompt = null;
+  });
+
+  // If already installed via browser, hide the whole card gracefully
+  window.addEventListener('appinstalled', () => {
+    installWrap.style.display = 'none';
+  });
+}
 </script>
 </body>
 </html>

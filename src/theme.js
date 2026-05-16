@@ -2,7 +2,7 @@
 export const T = {
   bg:"#0F0F0D", surface:"#1A1A16", raised:"#222220",
   border:"rgba(255,255,255,0.07)", borderMid:"rgba(255,255,255,0.12)", borderStrong:"rgba(255,255,255,0.16)",
-  text:"#F0EDE6", sub:"#A8A49C", muted:"#6A6860", hint:"#3E3E3A",
+  text:"#F0EDE6", sub:"#A8A49C", muted:"#82807A", hint:"#4E4E4A",
   accent:"#C0392B", gold:"#C8902A", goldBright:"#F5C842", green:"#27AE60", amber:"#E67E22",
   r:16, rsm:10,
   font:"'DM Sans',system-ui,sans-serif",

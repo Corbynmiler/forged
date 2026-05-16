@@ -78,7 +78,10 @@ export function SetPasswordScreen({ onDone }) {
 }
 
 export function AuthScreen({ onSent, checkoutPending, onCoachSignupIntent }) {
-  const [mode,       setMode]       = useState("signin"); // "signin" | "signup" | "forgot"
+  const [mode,       setMode]       = useState(() => {
+    try { return new URLSearchParams(window.location.search).has("signup") ? "signup" : "signin"; }
+    catch { return "signin"; }
+  }); // "signin" | "signup" | "forgot"
   const [email,      setEmail]      = useState("");
   const [password,   setPassword]   = useState("");
   const [loading,    setLoading]    = useState(false);
@@ -495,7 +498,7 @@ export function WelcomeModal({ onContinue }) {
       <div style={{ background:"#1C1C18", borderRadius:20, border:"0.5px solid rgba(200,144,42,0.35)", padding:"40px 28px 32px", maxWidth:340, width:"100%", textAlign:"center", animation:"paywallIn 0.45s cubic-bezier(0.22,1,0.36,1) both", touchAction:"auto", maxHeight:"min(90dvh, 90vh)", overflowY:"auto", WebkitOverflowScrolling:"touch", overscrollBehavior:"contain" }}>
         <div style={{ fontSize:48, marginBottom:20 }}>🔥</div>
         <div style={{ fontSize:11, fontWeight:600, color:"#C8902A", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:10 }}>Forged Pro unlocked</div>
-        <h2 style={{ fontFamily:"'DM Serif Display',Georgia,serif", fontSize:28, color:"#F0EDE6", margin:"0 0 14px", lineHeight:1.2 }}>You're in.</h2>
+        <h2 style={{ fontFamily:"'DM Serif Display',Georgia,serif", fontSize:28, color:"#F0EDE6", margin:"0 0 14px", lineHeight:1.2 }}>You&apos;re in</h2>
         <p style={{ fontSize:14, color:"#A8A49C", lineHeight:1.75, margin:"0 0 28px" }}>
           Forged Pro is fully unlocked — unlimited AI coaching, full history, friend nudges, and everything we ship next. Now go build the thing.
         </p>
@@ -553,7 +556,7 @@ export function ProThankYouModal({ userId, onClose, onPersistWeeklyEmailOptIn })
         onClick={e => e.stopPropagation()}
         style={{ background:"#1C1C18", borderRadius:20, border:"0.5px solid rgba(200,144,42,0.35)", padding:"32px 26px 28px", maxWidth:340, width:"100%", textAlign:"center", animation:"paywallIn 0.45s cubic-bezier(0.22,1,0.36,1) both", touchAction:"auto", maxHeight:"min(90dvh, 90vh)", overflowY:"auto", WebkitOverflowScrolling:"touch", overscrollBehavior:"contain" }}>
         <div style={{ fontSize:11, fontWeight:600, color:"#C8902A", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:10 }}>Thank you</div>
-        <h2 style={{ fontFamily:"'DM Serif Display',Georgia,serif", fontSize:22, color:"#F0EDE6", margin:"0 0 12px", lineHeight:1.25 }}>Thanks for backing the beta.</h2>
+        <h2 style={{ fontFamily:"'DM Serif Display',Georgia,serif", fontSize:22, color:"#F0EDE6", margin:"0 0 12px", lineHeight:1.25 }}>Thanks for backing the beta</h2>
         <p style={{ fontSize:14, color:"#A8A49C", lineHeight:1.7, margin:"0 0 10px", textAlign:"left" }}>
           Tell us what would make Forged genuinely more useful for you.
         </p>
