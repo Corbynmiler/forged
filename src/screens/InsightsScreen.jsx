@@ -73,6 +73,55 @@ function weeklyBriefBlocks(text) {
   return blocks.length ? blocks : [trimmed];
 }
 
+/** Per-habit weekly counts from local logs — no API. */
+function computeLocalMomentumSignals(habits, weekDates, todayYmd) {
+  return habits
+    .filter(h => h.habitType !== "log")
+    .map(h => {
+      const n = weekDates.filter(d => {
+        const st = weekSquareState(h, d, todayYmd);
+        return st === "hit" || st === "skip";
+      }).length;
+      return { habit_name: h.name, n };
+    })
+    .filter(r => r.n > 0)
+    .sort((a, b) => b.n - a.n)
+    .map(r => ({ habit_name: r.habit_name, signal: `${r.n} of 7 days this week` }));
+}
+
+function MomentumSignalsSection({ rows, habits }) {
+  if (!rows?.length) return null;
+  return (
+    <div style={{ marginBottom:16, paddingBottom:4, borderBottom:"0.5px solid rgba(255,255,255,0.08)" }}>
+      <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:12 }}>
+        Momentum signals
+      </div>
+      <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+        {rows.map((row, i) => {
+          const habit = habits.find(h => h.name === row.habit_name);
+          const emoji = habit?.emoji || "•";
+          return (
+            <div
+              key={`${row.habit_name}-${i}`}
+              style={{
+                display:"flex", flexWrap:"wrap", alignItems:"baseline", columnGap:8, rowGap:3,
+                paddingBottom: i < rows.length - 1 ? 12 : 0,
+                borderBottom: i < rows.length - 1 ? `0.5px solid ${T.border}` : "none",
+              }}
+            >
+              <span style={{ fontSize:14, lineHeight:1 }}>{emoji}</span>
+              <span style={{ fontSize:12, fontWeight:600, color:T.text }}>{row.habit_name}</span>
+              <span style={{ fontSize:12, color:T.muted, lineHeight:1.55, flex:"1 1 180px", minWidth:0 }}>
+                {row.signal}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function InsightsScreen({ habits, goals = [], journalEntries = [], onShowHistory, onShare, isPro = false, onUpgrade, userId = null, userName = "" }) {
   // ── Weekly brief state ─────────────────────────────────────────────────────
   // The brief is now persisted in `weekly_brief_generation_usage` (brief_text +
@@ -162,6 +211,11 @@ export function InsightsScreen({ habits, goals = [], journalEntries = [], onShow
       const st = weekSquareState(h, d, todayYmd);
       return st === "hit" || st === "skip";
     })),
+    [habits, weekDates, todayYmd],
+  );
+
+  const localMomentumSignals = useMemo(
+    () => computeLocalMomentumSignals(habits, weekDates, todayYmd),
     [habits, weekDates, todayYmd],
   );
 
@@ -337,6 +391,7 @@ export function InsightsScreen({ habits, goals = [], journalEntries = [], onShow
   const weekRangeLabel = fmtWeekRange(thisWeekStart);
   const showStatsCollapse = hasFreshBrief && anyHabitLoggedThisWeek;
   const showMomentumBlock = hasFreshBrief && momentumSignals.length > 0;
+  const showLocalMomentum = !hasFreshBrief && !isFetching && totalDaysLogged >= 7 && localMomentumSignals.length > 0;
   const showHabitGrid = anyHabitLoggedThisWeek;
   const gridHabits = habitGridExpanded || habits.length <= 6 ? habits : habits.slice(0, 6);
   const hiddenHabitGridCount = habits.length > 6 && !habitGridExpanded ? habits.length - 6 : 0;
@@ -419,6 +474,13 @@ export function InsightsScreen({ habits, goals = [], journalEntries = [], onShow
             <span style={{ fontWeight:700, color:T.text }}>{Math.max(0, briefQuota.limit - briefQuota.used)}</span> of {briefQuota.limit} fresh briefs left for the week of {fmtWeekRange(briefQuota.week_start || thisWeekStart)}.
             {!briefQuota.can_generate && " Resets next Monday."}
           </div>
+        )}
+
+        {showMomentumBlock && (
+          <MomentumSignalsSection rows={momentumSignals} habits={habits} />
+        )}
+        {showLocalMomentum && (
+          <MomentumSignalsSection rows={localMomentumSignals} habits={habits} />
         )}
 
         {/* Body — week label grounds the brief; ↻ only when quota allows refresh. */}
@@ -656,33 +718,6 @@ export function InsightsScreen({ habits, goals = [], journalEntries = [], onShow
       </div>
       )}
 
-      {showMomentumBlock && (
-        <div style={{ margin:"0 14px 18px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:"14px 14px 12px" }}>
-          <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:12 }}>This week&apos;s habits</div>
-          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-            {momentumSignals.map((row, i) => {
-              const habit = habits.find((h) => h.name === row.habit_name);
-              const emoji = habit?.emoji || "•";
-              return (
-                <div
-                  key={`${row.habit_name}-${i}`}
-                  style={{
-                    display:"flex", flexWrap:"wrap", alignItems:"baseline", columnGap:8, rowGap:3,
-                    paddingBottom: i < momentumSignals.length - 1 ? 12 : 0,
-                    borderBottom: i < momentumSignals.length - 1 ? `0.5px solid ${T.border}` : "none",
-                  }}
-                >
-                  <span style={{ fontSize:14, lineHeight:1 }}>{emoji}</span>
-                  <span style={{ fontSize:12, fontWeight:600, color:T.text }}>{row.habit_name}</span>
-                  <span style={{ fontSize:12, color:T.muted, lineHeight:1.55, flex:"1 1 180px", minWidth:0 }}>
-                    {row.signal}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* ══ Activity ══════════════════════════════════════════════════════════ */}
       <SectionTitle

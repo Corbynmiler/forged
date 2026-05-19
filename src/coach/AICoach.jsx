@@ -1793,6 +1793,17 @@ function bumpCoachMsgCountInStorage() {
   }
 }
 
+/** Sync client quota from server `remaining` (authoritative after each chat response). */
+function applyCoachRemainingFromServer(remaining) {
+  if (typeof remaining !== "number" || !Number.isFinite(remaining)) return null;
+  const used = Math.max(0, FREE_DAILY_LIMIT - remaining);
+  try {
+    localStorage.setItem(COACH_LS_RESET, todayStr());
+    localStorage.setItem(COACH_LS_MSGS, String(used));
+  } catch { /* ignore */ }
+  return used;
+}
+
 const COACH_STREAM_ID = "__streaming__";
 /** One rolling thread per user per local calendar day; trimmed for storage + display. Server still uses last 12 msgs only. */
 const COACH_DAY_MAX_MESSAGES = 24;
@@ -2737,10 +2748,11 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
       if (c >= FREE_DAILY_LIMIT) return;
     }
     let countedThisSend = false;
-    const bumpAfterSuccess = () => {
+    const bumpAfterSuccess = (serverRemaining) => {
       if (isPro || countedThisSend) return;
       countedThisSend = true;
-      setFreeCoachMsgsToday(bumpCoachMsgCountInStorage());
+      const used = applyCoachRemainingFromServer(serverRemaining);
+      setFreeCoachMsgsToday(used != null ? used : bumpCoachMsgCountInStorage());
     };
     setInput("");
     setError(null);
@@ -2782,6 +2794,16 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
+        if (res.status === 429 && !isPro) {
+          const used = applyCoachRemainingFromServer(
+            typeof data.remaining === "number" ? data.remaining : 0,
+          );
+          setFreeCoachMsgsToday(used != null ? used : FREE_DAILY_LIMIT);
+          setLoading(false);
+          setIsExecutingAction(false);
+          setMessages(prev => prev.filter(m => m.id !== COACH_STREAM_ID));
+          return;
+        }
         throw new Error(data?.error || "Something went wrong");
       }
 
@@ -2818,7 +2840,7 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
                 bottomRef.current?.scrollIntoView({ behavior: "smooth" });
               }
               if (evt.done) {
-                bumpAfterSuccess();
+                bumpAfterSuccess(evt.remaining);
                 const receiptBlock = evt.receipt && String(evt.receipt).trim()
                   ? `\n\n${String(evt.receipt).trim()}`
                   : "";
@@ -2930,16 +2952,6 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
               <div style={{ fontSize:11, color:T.muted }}>Active — knows your habits & goals</div>
             </div>
           </div>
-          {!isPro && !atFreeCap && freeCoachMsgsToday > 0 && coachMsgsRemaining != null && coachMsgsRemaining > 0 ? (
-            <div style={{
-              flexShrink:0, fontSize:11, fontWeight:500,
-              color: coachMsgsRemaining <= 3 ? T.gold : T.muted,
-              background:T.surface, border:`0.5px solid ${T.border}`, borderRadius:20,
-              padding:"4px 10px", lineHeight:1.2,
-            }}>
-              {coachMsgsRemaining} left
-            </div>
-          ) : null}
           <button onClick={onClose} style={{ background:"none", border:"none", color:T.muted, fontSize:24, cursor:"pointer", lineHeight:1 }}>×</button>
         </div>
 
@@ -3115,29 +3127,29 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
 
         {/* Input bar — mic left (voice entry), field, send right (standard chat hierarchy) */}
         <div id="coach-input-bar" style={{ padding:"10px 14px 10px", borderTop:`0.5px solid ${T.border}`, flexShrink:0 }}>
-          {!isPro && !atFreeCap && freeCoachMsgsToday >= 1 && freeCoachMsgsToday < FREE_DAILY_LIMIT && (
-            <div style={{ fontSize:11, color:T.muted, padding:"2px 2px 8px", lineHeight:1.5 }}>
-              {FREE_DAILY_LIMIT - freeCoachMsgsToday} message{FREE_DAILY_LIMIT - freeCoachMsgsToday === 1 ? "" : "s"} left today —{" "}
+          {atFreeCap ? (
+            <div style={{ padding:"4px 2px 6px" }}>
+              <div style={{ fontSize:13, color:T.sub, lineHeight:1.5 }}>
+                Daily limit reached — resets tomorrow
+              </div>
               <button
                 type="button"
                 onClick={onUpgrade}
                 style={{
-                  background:"none", border:"none", padding:0, cursor:"pointer",
-                  font:"inherit", color:T.gold, fontWeight:700,
-                  textDecoration:"underline", textUnderlineOffset:2,
+                  marginTop:8, background:"none", border:"none", padding:0, cursor:"pointer",
+                  fontSize:12, color:T.gold, fontWeight:600,
                 }}
               >
-                Pro
-              </button>{" "}
-              gets unlimited.
+                Upgrade for unlimited →
+              </button>
             </div>
-          )}
-          {speech.listening ? (
+          ) : speech.listening ? (
             <CoachRecordingBar speech={speech} />
           ) : (
+            <>
             <div style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
               {speech.supported ? (
-                <div style={{ opacity: atFreeCap ? 0.35 : 1, pointerEvents: atFreeCap ? "none" : "auto", flexShrink:0, alignSelf:"flex-end", marginBottom:1 }}>
+                <div style={{ flexShrink:0, alignSelf:"flex-end", marginBottom:1 }}>
                   <MicBtn
                     speech={speech}
                     color={T.gold}
@@ -3158,7 +3170,6 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
                     e.target.style.height = Math.min(e.target.scrollHeight, 88) + "px";
                   }}
                   onKeyDown={handleKey}
-                  disabled={atFreeCap}
                   placeholder="Ask anything about your habits…"
                   style={{
                     width:"100%", boxSizing:"border-box",
@@ -3167,39 +3178,46 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
                     fontSize:16, color:T.text, resize:"none",
                     fontFamily:T.font, lineHeight:1.5, outline:"none",
                     minHeight:"42px", maxHeight:"88px", overflowY:"auto", height:"auto",
-                    opacity: atFreeCap ? 0.55 : 1,
                   }}
                 />
               </div>
               <button
                 type="button"
-                aria-label={coachInputDisplayed().trim() && !loading && !atFreeCap ? "Send message" : "Send (disabled until you type)"}
+                aria-label={coachInputDisplayed().trim() && !loading ? "Send message" : "Send (disabled until you type)"}
                 onClick={() => { textareaRef.current?.blur(); send(coachInputDisplayed()); }}
-                disabled={!coachInputDisplayed().trim() || loading || atFreeCap}
+                disabled={!coachInputDisplayed().trim() || loading}
                 style={{
                   width:36, height:36, borderRadius:"50%", border:`0.5px solid ${T.border}`,
                   flexShrink:0,
-                  background: coachInputDisplayed().trim() && !loading && !atFreeCap ? T.gold : T.surface,
-                  cursor: coachInputDisplayed().trim() && !loading && !atFreeCap ? "pointer" : "default",
+                  background: coachInputDisplayed().trim() && !loading ? T.gold : T.surface,
+                  cursor: coachInputDisplayed().trim() && !loading ? "pointer" : "default",
                   display:"flex", alignItems:"center", justifyContent:"center",
                   transition:"background 0.2s, border-color 0.2s, opacity 0.2s",
-                  opacity: !input.trim() || loading || atFreeCap ? 0.85 : 1,
+                  opacity: !input.trim() || loading ? 0.85 : 1,
                 }}>
                 <svg width="15" height="15" viewBox="0 0 18 18" fill="none">
-                  <path d="M2 9h14M9 2l7 7-7 7" stroke={coachInputDisplayed().trim() && !loading && !atFreeCap ? "#1a1a16" : T.hint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M2 9h14M9 2l7 7-7 7" stroke={coachInputDisplayed().trim() && !loading ? "#1a1a16" : T.hint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
               </button>
             </div>
-          )}
-          {/* The old italic "Try: …" hint is now redundant — the empty-state has
-              labeled starter chips in the message area. Keeping only mic / rate
-              limit prompts below. */}
+            {!isPro && coachMsgsRemaining != null ? (
+              <div style={{
+                fontSize:11,
+                color: coachMsgsRemaining === 1 ? T.gold : T.muted,
+                marginTop:8,
+                padding:"0 2px",
+                lineHeight:1.45,
+                textAlign:"left",
+              }}>
+                {coachMsgsRemaining} coach message{coachMsgsRemaining === 1 ? "" : "s"} remaining today
+              </div>
+            ) : null}
           {speech.supported && speech.micBlocked ? (
             <div style={{ fontSize:11, color:T.muted, marginTop:8, padding:"0 2px", lineHeight:1.45 }}>
               Mic blocked. Enable it in your browser settings.
             </div>
           ) : null}
-          {!isPro && speech.supported && !atFreeCap && !speech.micBlocked && !speech.listening ? (
+          {!isPro && speech.supported && !speech.micBlocked && !speech.listening ? (
             <div style={{ fontSize:11, color:T.muted, marginTop:8, padding:"0 2px", lineHeight:1.45 }}>
               🎙️ Voice logging is a{" "}
               <button
@@ -3221,33 +3239,7 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
               {speech.speechError}
             </div>
           ) : null}
-          {atFreeCap && (
-            <div style={{
-              marginTop:12, padding:"12px 14px", borderRadius:T.rsm,
-              background:T.surface, border:`0.5px solid ${T.borderStrong}`,
-              display:"flex", flexDirection:"column", gap:6,
-            }}>
-              <div style={{ fontSize:13, fontWeight:600, color:T.text }}>
-                {`You've used your ${FREE_DAILY_LIMIT} free messages today`}
-              </div>
-              <div style={{ fontSize:12, color:T.muted, lineHeight:1.5 }}>
-                Forged Pro gives you unlimited coaching, plus full history, friend nudges, and voice logging.
-              </div>
-              <button
-                type="button"
-                onClick={onUpgrade}
-                style={{
-                  marginTop:4, padding:"8px 0", borderRadius:T.rsm,
-                  border:"none", background:T.gold, color:"#1a1a16",
-                  fontSize:13, fontWeight:700, cursor:"pointer", width:"100%",
-                }}
-              >
-                Upgrade to Pro
-              </button>
-              <div style={{ fontSize:11, color:T.hint, textAlign:"center" }}>
-                Resets at midnight
-              </div>
-            </div>
+            </>
           )}
         </div>
       </div>
