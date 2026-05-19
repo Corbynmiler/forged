@@ -131,6 +131,50 @@ export function CoachGreeting({ coachName, coachIcon, habits, goals, habitAccent
   );
 }
 
+// ── Yesterday callback card ────────────────────────────────────────────────
+function YesterdayReceiptCard({ entry }) {
+  const [dismissed, setDismissed] = useState(() => {
+    try { return localStorage.getItem("forged_yesterday_dismissed") === todayStr(); }
+    catch { return false; }
+  });
+
+  if (dismissed || !entry) return null;
+
+  const parsed = parseReceiptFields(entry.content);
+  // Only render when there's something genuinely useful to carry forward
+  if (!parsed || (!parsed.pattern && !parsed.tomorrow)) return null;
+
+  function dismiss() {
+    try { localStorage.setItem("forged_yesterday_dismissed", todayStr()); } catch (_) {}
+    setDismissed(true);
+  }
+
+  return (
+    <div style={{ position:"relative", margin:"8px 14px 0", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:T.surface, padding:"11px 40px 11px 14px" }}>
+      <button type="button" onClick={dismiss} aria-label="Dismiss yesterday card"
+        style={{ position:"absolute", top:8, right:10, background:"none", border:"none", cursor:"pointer", padding:4, color:T.hint, fontSize:13, lineHeight:1, fontFamily:T.font }}>
+        ✕
+      </button>
+      <div style={{ fontSize:10, fontWeight:700, color:T.hint, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:6 }}>Yesterday</div>
+      <div style={{ fontSize:13, fontWeight:500, color:T.sub, lineHeight:1.4, marginBottom:parsed.pattern||parsed.tomorrow?7:0 }}>{parsed.title}</div>
+      {parsed.pattern && (
+        <div style={{ display:"flex", gap:6, marginBottom:parsed.tomorrow?4:0, alignItems:"flex-start" }}>
+          <span style={{ fontSize:10, color:T.accent, fontWeight:700, marginTop:2, flexShrink:0 }}>◎</span>
+          <div style={{ fontSize:12, color:T.muted, lineHeight:1.5 }}>{parsed.pattern}</div>
+        </div>
+      )}
+      {parsed.tomorrow && (
+        <div style={{ display:"flex", gap:6, alignItems:"flex-start" }}>
+          <span style={{ fontSize:10, color:T.green, fontWeight:700, marginTop:2, flexShrink:0 }}>↑</span>
+          <div style={{ fontSize:12, color:T.muted, lineHeight:1.5 }}>
+            <span style={{ color:T.hint, marginRight:3 }}>Today's win:</span>{parsed.tomorrow}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Daily Receipt ──────────────────────────────────────────────────────────
 function parseReceiptFields(content) {
   if (!content) return null;
@@ -230,6 +274,7 @@ export function TodayScreen({
   onGenerateReceipt = null,
   generatingReceipt = false,
   onOpenJournal = null,
+  yesterdayJournalEntry = null,
 }) {
   const [briefPreview, setBriefPreview] = useState(null);
   useEffect(() => {
@@ -332,6 +377,7 @@ export function TodayScreen({
         </button>
       )}
       {onOpenCoachMic && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic} habitCompletionPercentage={pct} habitsLoggedTodayCount={loggedCount} totalTrackables={totalTrackables}/>}
+      <YesterdayReceiptCard entry={yesterdayJournalEntry} />
       {showBriefHook && (
         <button type="button" onClick={onOpenBrief}
           style={{ display:"flex", alignItems:"center", gap:12, width:"calc(100% - 28px)", margin:"8px 14px 0", padding:"12px 14px", background:"linear-gradient(90deg, rgba(200,144,42,0.12), rgba(200,144,42,0.04))", border:"0.5px solid rgba(200,144,42,0.4)", borderRadius:T.rsm, cursor:"pointer", textAlign:"left", fontFamily:T.font, boxSizing:"border-box" }}>
