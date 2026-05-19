@@ -131,6 +131,76 @@ export function CoachGreeting({ coachName, coachIcon, habits, goals, habitAccent
   );
 }
 
+// ── Daily Receipt ──────────────────────────────────────────────────────────
+function parseReceiptFields(content) {
+  if (!content) return null;
+  const lines = content.split("\n").map(l => l.trim()).filter(Boolean);
+  if (!lines.length) return null;
+  const title = lines[0];
+  let pattern = null, tomorrow = null;
+  for (const l of lines) {
+    if (!pattern  && l.startsWith("Pattern:"))  pattern  = l.slice("Pattern:".length).trim();
+    if (!tomorrow && l.startsWith("Tomorrow:")) tomorrow = l.slice("Tomorrow:".length).trim();
+  }
+  return { title, pattern, tomorrow };
+}
+
+function TodayReceiptCard({ entry, loggedCount, generating, onGenerate, onOpenJournal }) {
+  if (loggedCount === 0) return null;
+  if (entry) {
+    const parsed = parseReceiptFields(entry.content);
+    if (!parsed) return null;
+    return (
+      <div style={{ margin:"0 14px 10px", borderRadius:T.r, border:`0.5px solid ${T.border}`, background:T.raised, overflow:"hidden" }}>
+        <div style={{ padding:"14px 16px 12px" }}>
+          <div style={{ fontSize:10, fontWeight:700, color:T.hint, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:8 }}>Today's receipt</div>
+          <div style={{ fontSize:15, fontWeight:500, color:T.text, fontFamily:T.serif, marginBottom:parsed.pattern||parsed.tomorrow?10:0, lineHeight:1.35 }}>{parsed.title}</div>
+          {parsed.pattern && (
+            <div style={{ display:"flex", gap:6, marginBottom:6, alignItems:"flex-start" }}>
+              <span style={{ fontSize:11, color:T.accent, fontWeight:700, marginTop:2, flexShrink:0 }}>◎</span>
+              <div style={{ fontSize:13, color:T.sub, lineHeight:1.5 }}>
+                <span style={{ color:T.muted, marginRight:4 }}>Pattern:</span>{parsed.pattern}
+              </div>
+            </div>
+          )}
+          {parsed.tomorrow && (
+            <div style={{ display:"flex", gap:6, alignItems:"flex-start" }}>
+              <span style={{ fontSize:11, color:T.green, fontWeight:700, marginTop:2, flexShrink:0 }}>↑</span>
+              <div style={{ fontSize:13, color:T.sub, lineHeight:1.5 }}>
+                <span style={{ color:T.muted, marginRight:4 }}>Tomorrow:</span>{parsed.tomorrow}
+              </div>
+            </div>
+          )}
+        </div>
+        <div style={{ display:"flex", borderTop:`0.5px solid ${T.border}` }}>
+          <button type="button" onClick={onOpenJournal}
+            style={{ flex:1, padding:"10px 0", background:"none", border:"none", fontSize:12, color:T.accent, fontWeight:500, cursor:"pointer", borderRight:`0.5px solid ${T.border}`, fontFamily:T.font }}>
+            Full entry →
+          </button>
+          <button type="button" onClick={onGenerate} disabled={generating}
+            style={{ flex:1, padding:"10px 0", background:"none", border:"none", fontSize:12, color:generating?T.hint:T.muted, cursor:generating?"not-allowed":"pointer", fontFamily:T.font }}>
+            {generating ? "Writing…" : "↺ Regenerate"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={{ margin:"0 14px 10px" }}>
+      <button type="button" onClick={onGenerate} disabled={generating}
+        style={{ width:"100%", padding:"12px 16px", borderRadius:T.r, border:`0.5px dashed ${T.borderStrong}`, background:"none", cursor:generating?"not-allowed":"pointer", fontFamily:T.font, display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, boxSizing:"border-box" }}>
+        <div style={{ textAlign:"left" }}>
+          <div style={{ fontSize:13, fontWeight:500, color:generating?T.hint:T.text }}>
+            {generating ? "Writing today's receipt…" : "Wrap today"}
+          </div>
+          <div style={{ fontSize:11, color:T.muted, marginTop:2 }}>Your coach writes up the day from your logs and notes</div>
+        </div>
+        {!generating && <span style={{ fontSize:14, color:T.muted, flexShrink:0 }}>→</span>}
+      </button>
+    </div>
+  );
+}
+
 // ── TodayScreen ────────────────────────────────────────────────────────────
 export function TodayScreen({
   habits, goals = [], xp,
@@ -142,6 +212,10 @@ export function TodayScreen({
   coachName, coachIcon, coachHabitColor, onOpenGoalDetail,
   onOpenBrief = null,
   onOpenInsights = null,
+  todayJournalEntry = null,
+  onGenerateReceipt = null,
+  generatingReceipt = false,
+  onOpenJournal = null,
 }) {
   const [briefPreview, setBriefPreview] = useState(null);
   useEffect(() => {
@@ -328,6 +402,15 @@ export function TodayScreen({
           i === 0 ? <div key={i} data-tour="today-first-section">{sec}</div> : <div key={i}>{sec}</div>
         );
       })()}
+      {onGenerateReceipt && (
+        <TodayReceiptCard
+          entry={todayJournalEntry}
+          loggedCount={loggedCount}
+          generating={generatingReceipt}
+          onGenerate={onGenerateReceipt}
+          onOpenJournal={onOpenJournal}
+        />
+      )}
       <div style={{ height:16 }}/>
       {!hideFloatingAdd && (trackHabits.length > 0 || activeGoals.length > 0 || logHabits.length > 0) && onAdd && (
         <button type="button" onClick={onAdd} aria-label="Add habit or goal" title="Add habit or goal"
