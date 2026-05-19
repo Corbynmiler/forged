@@ -3,7 +3,7 @@ import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { T, COLORS, HABIT_TYPES, DAYS, MONTHS, XP_LEVELS } from "../theme.js";
 import {
   todayStr, daysAgo, parseLocal, weekStartFor,
-  isSatisfiedForTodayRing, isLoggedToday, todayLogs, latestTodayLog,
+  isSatisfiedForTodayRing, isLoggedToday, todayLogs, latestTodayLog, hasDailyCompletion,
   getWeeklyCount, getProjectStats, hasRestDay, qualifiesBuildDay, getBuildStreak,
   getStreak, getDailyStreak, getCompletionRate, get12WeekGrid,
   getLevel, nextLevel, formatWithUnit, truncateText,
@@ -196,6 +196,30 @@ export function TodayHabitMenuDropdown({ habit, onEdit, onDelete, onShareHabit, 
   );
 }
 
+function missedDaysBeforeToday(h) {
+  let gap = 0;
+  for (let d = 1; d <= 365; d++) {
+    const dateStr = daysAgo(d);
+    if (hasDailyCompletion(h, dateStr) || hasRestDay(h, dateStr)) break;
+    gap++;
+  }
+  return gap;
+}
+
+function dailyLogConfirmMessage(h) {
+  const today = todayStr();
+  const projected = {
+    ...h,
+    logs: [...h.logs.filter(l => l.date !== today), { date: today, value: true, note: "" }],
+  };
+  const currentStreak = getDailyStreak(projected);
+  if (currentStreak >= 3) return `${currentStreak} in a row.`;
+  const gap = missedDaysBeforeToday(h);
+  if (gap >= 2) return `Back after ${gap} days — counts.`;
+  if (!h.logs.some(l => l.value === true)) return "First one. Nice.";
+  return "Logged.";
+}
+
 // ─── DAILY CARD ───────────────────────────────────────────────────────────────
 export function DailyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit }) {
   const tLog  = latestTodayLog(habit);
@@ -204,8 +228,52 @@ export function DailyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDele
   const [restOpen, setRestOpen] = useState(false);
   const [restWhy, setRestWhy] = useState("");
   const [habitMenuOpen, setHabitMenuOpen] = useState(false);
+  const [confirmMsg, setConfirmMsg] = useState(null);
+  const [confirmFading, setConfirmFading] = useState(false);
+  const confirmTimersRef = useRef([]);
   const longPeek = useTodayHabitLongPeekHandlers(setHabitMenuOpen, !!(onEditHabit && onDeleteHabit));
   useEffect(() => { if (logged) { setRestOpen(false); setRestWhy(""); } }, [logged]);
+
+  function clearConfirmTimers() {
+    confirmTimersRef.current.forEach(clearTimeout);
+    confirmTimersRef.current = [];
+  }
+
+  function clearConfirmMessage() {
+    clearConfirmTimers();
+    setConfirmFading(false);
+    setConfirmMsg(null);
+  }
+
+  function showConfirmMessage(msg) {
+    clearConfirmTimers();
+    setConfirmFading(false);
+    setConfirmMsg(msg);
+    confirmTimersRef.current.push(
+      setTimeout(() => setConfirmFading(true), 2000),
+      setTimeout(() => {
+        setConfirmMsg(null);
+        setConfirmFading(false);
+        confirmTimersRef.current = [];
+      }, 2350),
+    );
+  }
+
+  useEffect(() => () => clearConfirmTimers(), []);
+
+  async function handleCheckTap(e) {
+    const today = todayStr();
+    const hasTrue = habit.logs.some(l => l.date === today && l.value === true);
+    if (hasTrue) {
+      clearConfirmMessage();
+      await onTap(habit.id, e);
+      return;
+    }
+    const msg = dailyLogConfirmMessage(habit);
+    await onTap(habit.id, e);
+    showConfirmMessage(msg);
+  }
+
   return (
     <div className="rc" style={cardStyle(logged && !isSkip, habit)} {...longPeek}>
       <div style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 15px" }}>
@@ -218,9 +286,14 @@ export function DailyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDele
         {isSkip
           ? <button className="tap" onClick={() => onTap(habit.id, { currentTarget:{ getBoundingClientRect:() => ({left:0,top:0,width:0,height:0}) } })}
               style={{ width:44, height:44, borderRadius:"50%", flexShrink:0, border:`2px solid ${T.muted}`, background:T.surface, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, transition:"all 0.18s" }}>🛡️</button>
-          : <CheckBtn logged={logged} habit={habit} onClick={e => onTap(habit.id, e)}/>
+          : <CheckBtn logged={logged} habit={habit} onClick={handleCheckTap}/>
         }
       </div>
+      {confirmMsg && (
+        <p style={{ fontSize:12, color:T.gold, margin:0, padding:"0 15px 10px", lineHeight:1.4, opacity:confirmFading?0:1, transition:"opacity 0.35s ease" }}>
+          {confirmMsg}
+        </p>
+      )}
       {onEditHabit && onDeleteHabit && <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} onShareHabit={onShareHabit} shareSaving={!!sharingThisHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} />}
       {isSkip && (
         <div style={{ margin:"0 15px 12px", background:"rgba(106,104,96,0.15)", borderRadius:T.rsm, padding:"8px 12px", display:"flex", flexDirection:"column", gap:6 }}>

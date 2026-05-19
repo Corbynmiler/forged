@@ -204,105 +204,130 @@ function normalUserSlot(hour) {
 // ── Normal-user message pools ─────────────────────────────────────────────────
 // Tone: coach-voiced, direct, warm — not a generic app notification.
 // Use {coach} where the coach name should appear — replaced at send time.
-// Pools are weekday / weekend × morning / noon / evening.
+// Evening pool splits on whether the user has logged anything today.
 const NORMAL_POOLS = {
   morning: {
     weekday: [
-      "Morning. Before the day gets loud — quick check-in. How are you feeling? — {coach}",
-      "New day. Let's make it count. Log when you're ready. — {coach}",
-      "Good morning. Small wins early set the tone for everything after. — {coach}",
-      "Hey — hope you slept well. Log your habits when you get a sec. — {coach}",
-      "Morning nudge. Don't let the day get away from you before you've checked in. — {coach}",
-      "Up and at it. Your habits are what separate a good day from a wasted one. — {coach}",
-      "Morning. Even 5 minutes of intentional work beats an unfocused hour. Log when you can. — {coach}",
-      "Hey — another chance to show up for yourself. Don't overthink it, just start. — {coach}",
-      "Good morning. The way you start the day usually sets the tone. Log when you're ready. — {coach}",
-      "Morning check-in. Whatever's on your plate today — your habits come first. — {coach}",
-      "Hey, it's a new day. Log early if you can — it makes everything easier later. — {coach}",
-      "Morning. You've built something worth protecting. Don't let today slip through. — {coach}",
+      "Morning. What's the one thing worth protecting today? — {coach}",
+      "New day. Don't over-plan it — pick the thing that matters and go. — {coach}",
+      "Morning. Before the noise starts — how are you feeling? — {coach}",
+      "Up and at it. Make today count for the things that actually matter. — {coach}",
+      "Morning. Yesterday's behind you — what are you building today? — {coach}",
+      "Good morning. One clear focus beats ten half-measures. — {coach}",
+      "Morning. Small move now beats a perfect plan later. — {coach}",
+      "Hey — hope you slept well. What's the priority today? — {coach}",
+      "Morning. You know what needs doing. Trust that and get started. — {coach}",
+      "New day ahead. Set the tone early — it carries through everything after. — {coach}",
+      "Morning. Even one good decision at the start shapes the whole day. — {coach}",
+      "Up. What matters most today? Lead with that. — {coach}",
+      "Morning. The day's yours to shape — start with intent. — {coach}",
+      "Hey — new day, clean slate. Make it yours. — {coach}",
+      "Morning. Quiet start beats a frantic one. What's the one thing? — {coach}",
     ],
     weekend: [
-      "Morning. No alarm, no pressure — but don't let the weekend slip by without checking in. — {coach}",
-      "Weekend morning. Slower pace is fine — same habits. Log when the coffee kicks in. — {coach}",
-      "Hey — hope the weekend's starting well. A quick log before the day takes off. — {coach}",
-      "Free day ahead. Do something you love and log it. — {coach}",
-      "Weekend nudge. The habits don't know it's Saturday — keep the streak going. — {coach}",
-      "Morning. Weekends are for recharging, not losing the thread. Log when you're ready. — {coach}",
-      "Hey — rest if you need it, move if you want to. Either way, check in before the day escapes. — {coach}",
-      "Hope the weekend's starting well. Quick habit log whenever you're up for it. — {coach}",
-      "Free day! Hope it's a good one — just don't let it slip by without logging. — {coach}",
-      "Weekend morning. Your future self will thank you for not skipping today. Log when you can. — {coach}",
+      "Morning. Free day — still worth making it count. — {coach}",
+      "Weekend morning. Slower pace is fine. Same standard. — {coach}",
+      "Morning. Rest if you need it, move if you want to — either's a good call. — {coach}",
+      "Hey — hope the weekend's off to a good start. What's the plan? — {coach}",
+      "Morning. One good thing today is enough. Go find it. — {coach}",
+      "Weekend morning. No alarm, no pressure — just make it a good one. — {coach}",
+      "Morning. Whatever the weekend holds — make it intentional. — {coach}",
+      "Hope the weekend's starting well. What are you doing with the day? — {coach}",
+      "Free day ahead. Do something worth remembering. — {coach}",
+      "Morning. Weekends are for recharging — do it properly. — {coach}",
     ],
   },
   noon: {
     weekday: [
-      "Midday. How's the morning been? Log your habits before the afternoon runs away. — {coach}",
-      "Lunchtime. Halfway through — you're doing great. Log when you can. — {coach}",
-      "Noon check-in. Take a breath, eat something decent, and log your habits. — {coach}",
-      "Hey — hope lunchtime finds you well. Quick log when you get a sec. — {coach}",
-      "Morning's behind you. The afternoon is still yours to make count — start by logging. — {coach}",
-      "Lunchtime. Habits don't log themselves. Two minutes, that's all it takes. — {coach}",
-      "Midday nudge — how's the day shaping up? Log your progress when you get a moment. — {coach}",
-      "Don't let the afternoon sneak past without ticking off your habits. — {coach}",
-      "Halfway there. Log your habits, take a breath, finish strong. — {coach}",
-      "Hey — quick midday check-in. A log now means you won't be scrambling at night. — {coach}",
-      "Midday. If the morning was rough, the afternoon can turn it around. Log and carry on. — {coach}",
-      "Noon. Take a moment for yourself today — habits included. — {coach}",
+      "Quick check-in. How's the day actually going? — {coach}",
+      "Halfway point. Anything worth logging before the afternoon takes over? — {coach}",
+      "Still on track, or has the day gone sideways? — {coach}",
+      "Midday. How's the energy holding up? — {coach}",
+      "Quick one — is the day going the way you planned? — {coach}",
+      "Lunchtime. A quick log now means you won't be scrambling tonight. — {coach}",
+      "Midday check-in. What's been the best part of the morning? — {coach}",
+      "Noon. Halfway through — how's it looking? — {coach}",
+      "Quick midday check. If the morning was rough, the afternoon can turn it around. — {coach}",
+      "Lunchtime. Take a breath, log what you've done, finish strong. — {coach}",
+      "Hey — how's the day shaping up? — {coach}",
+      "Midday. Log what's done, then get back to it. — {coach}",
+      "Quick check-in. Morning behind you, afternoon ahead. How are you doing? — {coach}",
     ],
     weekend: [
-      "Lunchtime. Hope the morning was a good one. Quick habit check before the afternoon slips away. — {coach}",
-      "Midday check-in. How's the weekend going? Log when you get a moment. — {coach}",
-      "Hope you're having a relaxed one. Quick log whenever it suits you. — {coach}",
-      "Lunchtime on a free day. Log your habits and enjoy the afternoon. — {coach}",
-      "Noon — weekend or not, your habits are what keep the good stuff compounding. — {coach}",
-      "Hey — whatever you've been up to this morning, log it and keep going. — {coach}",
-      "Lunchtime nudge. Eat well, log your habits, make the most of the afternoon. — {coach}",
-      "Midday. Hope the weekend's treating you well. Quick habit check when you get a sec. — {coach}",
-      "Halfway through a free day. Don't forget to log — even the easy days matter. — {coach}",
-      "Noon on a free day. Log your habits, enjoy the rest. That's the whole plan. — {coach}",
+      "Midday check-in. How's the weekend going so far? — {coach}",
+      "Lunchtime. What have you been up to this morning? — {coach}",
+      "Hope the weekend's treating you well. Quick log whenever it suits. — {coach}",
+      "Noon on a free day. How's the energy? — {coach}",
+      "Lunchtime. Log what you've got and enjoy the rest of the afternoon. — {coach}",
+      "Midday. Whatever you got up to this morning — worth logging. — {coach}",
+      "Quick midday check. Weekend's half gone — making it count? — {coach}",
+      "Hey — hope the morning was a good one. How's the day going? — {coach}",
     ],
   },
   evening: {
-    weekday: [
-      "How was today? Whatever it threw at you — you showed up. Log before you switch off. — {coach}",
-      "Evening. Take a moment to log the day and let it go. — {coach}",
-      "End of the day. Some days are hard, some are great — log it either way. — {coach}",
-      "You made it through another one. Log your habits and give yourself a moment. — {coach}",
-      "Hey — hope tonight finds you well. Quick log before you call it a day. — {coach}",
-      "Day's winding down. Log your habits before you switch off — takes about a minute. — {coach}",
-      "How'd today go? Log your habits and take a breath. — {coach}",
-      "Evening check-in — before the day closes out. Log and rest well. — {coach}",
-      "The day's behind you now. Log what you did, even the small stuff — it all adds up. — {coach}",
-      "Hope you're winding down nicely. Quick habit log before you call it a night. — {coach}",
-      "You showed up today. Make sure you log it before you forget. — {coach}",
-      "Whatever happened today — take a moment to reflect, log, and recharge. — {coach}",
-      "Day done. A quick log keeps the momentum alive for tomorrow. — {coach}",
-      "Evening check-in. Log your habits, be proud of what you did, and rest up. — {coach}",
-    ],
-    weekend: [
-      "Hope the weekend's been a good one. Log your habits before you call it a day. — {coach}",
-      "Evening. Whatever today looked like — adventurous, restful, or in between — log it. — {coach}",
-      "Weekend's winding down. Log your habits and soak up the rest of the evening. — {coach}",
-      "End of a free day. How was it? Log it before the memory fades. — {coach}",
-      "Whether you made the most of it or just needed the rest — both count. Log it. — {coach}",
-      "Weekend evening. The week starts again soon — log and finish on a good note. — {coach}",
-      "Hope tonight's been a good one. Quick log before you call it a night. — {coach}",
-      "Whatever you got up to today — log it and rest well. — {coach}",
-      "Don't let the weekend slip by without logging — even the easy days matter. — {coach}",
-      "Weekend's almost done. Log before you drift off — literally takes a minute. — {coach}",
-      "Log it, reflect on the weekend, and get ready to go again. — {coach}",
-      "How was the weekend? Log before you wind down — you'll be glad you did. — {coach}",
-    ],
+    // Used when the user has already logged something today — affirming, no push.
+    logged: {
+      weekday: [
+        "You showed up today. Rest well. — {coach}",
+        "Good work today. Whatever happened — you kept going. — {coach}",
+        "Day done. You logged it — that matters more than it feels like. — {coach}",
+        "You made it through another one. Get some rest. — {coach}",
+        "Solid day. Take the evening and let it settle. — {coach}",
+        "You put in the work. Now switch off properly. — {coach}",
+        "Day's behind you. You showed up — that's the whole thing. — {coach}",
+        "Good day of progress. Rest, recharge, go again. — {coach}",
+        "Everything logged. Rest well tonight. — {coach}",
+        "You stayed with it today. That's what it takes. — {coach}",
+      ],
+      weekend: [
+        "Good weekend day. Rest properly tonight. — {coach}",
+        "Weekend done well. Get some rest. — {coach}",
+        "You showed up even on a free day. That's the standard. — {coach}",
+        "Good work this weekend. Recharge properly — week starts again soon. — {coach}",
+        "Logged and done. Good weekend. — {coach}",
+        "Free day well spent. Rest up. — {coach}",
+        "You kept the thread going this weekend. Well done. — {coach}",
+        "Good one today. Rest well — you've earned it. — {coach}",
+      ],
+    },
+    // Used when the user hasn't logged anything today — warm nudge to capture the day.
+    unlogged: {
+      weekday: [
+        "Before the day disappears — drop it here. One minute is enough. — {coach}",
+        "Quick voice dump before bed? The day only happens once. — {coach}",
+        "You don't need a perfect log. Just tell me what happened and I'll sort it. — {coach}",
+        "Don't let today slip through unrecorded. Even a rough day is worth logging. — {coach}",
+        "Whatever happened today — write it down. Future you will want to know. — {coach}",
+        "Day's almost gone. Capture it before it fades. — {coach}",
+        "End of the day — how did it actually go? Log it before you switch off. — {coach}",
+        "Before you wind down — a quick dump of the day. It only takes a minute. — {coach}",
+        "One minute before bed. What happened today? Log it and let it go. — {coach}",
+        "The day only happens once. Capture it while it's fresh. — {coach}",
+        "Still time to log the day. Even a rough one is worth recording. — {coach}",
+        "Evening check-in. How did today actually go? — {coach}",
+      ],
+      weekend: [
+        "Before the weekend fades — drop what happened here. One minute is enough. — {coach}",
+        "Weekend evening. Log the day before the memory fades. — {coach}",
+        "How was it? Log it before you drift off — takes about a minute. — {coach}",
+        "Whatever the day held — rest day, adventure, or just life — log it. — {coach}",
+        "End of a free day. Capture it before it slips away. — {coach}",
+        "Quick log before bed? The weekend only happens once too. — {coach}",
+        "Log the weekend day before you wind down. You'll be glad you did. — {coach}",
+        "Evening. Whatever today was — log it and rest well. — {coach}",
+      ],
+    },
   },
 };
 
-// Shown when every habit is already logged for the day.
+// Shown when every habit is already logged for the day — short, affirming, no fanfare.
 const NORMAL_ALL_LOGGED = [
-  "Every habit logged today — that's how it's done. — {coach}",
-  "All habits in. You showed up and got it done. — {coach}",
-  "Full house today. Keep this up and nothing stops you. — {coach}",
-  "All done for the day. That's the stuff. — {coach}",
-  "Locked in. Every habit logged. — {coach}",
+  "Everything in today. Rest well. — {coach}",
+  "All logged. You did the work — now switch off properly. — {coach}",
+  "Clean day. That's how it's done. — {coach}",
+  "All habits in. Get some rest. — {coach}",
+  "Locked in today. Rest up. — {coach}",
+  "Everything logged. Good day. — {coach}",
 ];
 
 /**
@@ -315,8 +340,8 @@ function applyCoachName(body, coachName) {
 
 /**
  * Message picker for normal users — time-slot aware, weekday/weekend aware,
- * coach-name personalised. Data-driven shoutouts fire first (all-logged,
- * streak, urgent goal); pool message is the fallback.
+ * coach-name personalised. Evening slot branches on whether the user has
+ * logged anything today. Urgent goal deadlines surface as contextual copy.
  */
 function pickNormalMessage(habits, goals, todayYmd, localHour, coachName) {
   const TRACKABLE = ["daily", "weekly", "project", "limit"];
@@ -325,30 +350,19 @@ function pickNormalMessage(habits, goals, todayYmd, localHour, coachName) {
   );
 
   const resolve = body => applyCoachName(body, coachName);
+  const weekend = isWeekend(todayYmd);
+  const slot = normalUserSlot(localHour ?? 7);
+  const poolKey = weekend ? "weekend" : "weekday";
+  const dateSeed = parseInt(todayYmd.replace(/-/g, ""), 10);
+  const seed = dateSeed * 11 + (localHour ?? 0) * 7;
 
-  // All habits logged today — congratulate them.
+  // All habits logged today — short, affirming.
   if (trackableHabits.length > 0 && trackableHabits.every(h => forgedRingSatisfiedTodayRow(h, todayYmd))) {
-    const idx = parseInt(todayYmd.replace(/-/g, ""), 10) % NORMAL_ALL_LOGGED.length;
-    return { title: "Forged ✅", body: resolve(NORMAL_ALL_LOGGED[idx]) };
+    const idx = Math.abs(seed) % NORMAL_ALL_LOGGED.length;
+    return { title: "Forged", body: resolve(NORMAL_ALL_LOGGED[idx]) };
   }
 
-  // Streak shoutout — only for daily habits with a meaningful run.
-  let bestStreak = 0;
-  let bestStreakHabit = null;
-  for (const h of habits || []) {
-    if (h.habit_type !== "daily") continue;
-    const s = getDailyStreak(h, todayYmd);
-    if (s > bestStreak) { bestStreak = s; bestStreakHabit = h; }
-  }
-  if (bestStreakHabit && bestStreak >= 3) {
-    const e = bestStreakHabit.emoji || "🔥";
-    return {
-      title: "Forged 🔥",
-      body: resolve(`${e} ${bestStreak} days of ${bestStreakHabit.name} — don't break the streak now. — {coach}`),
-    };
-  }
-
-  // Urgent goal deadline within 7 days.
+  // Goal deadline within 7 days — contextual nudge.
   const urgentGoals = (goals || [])
     .filter(g => g.goal_status === "active" && g.target_date)
     .map(g => ({ ...g, daysLeft: daysBetween(todayYmd, g.target_date) }))
@@ -359,18 +373,23 @@ function pickNormalMessage(habits, goals, todayYmd, localHour, coachName) {
     const e = g.emoji || "🎯";
     const when = g.daysLeft === 0 ? "today" : g.daysLeft === 1 ? "tomorrow" : `in ${g.daysLeft} days`;
     return {
-      title: "Forged 🎯",
-      body: resolve(`${e} "${g.name}" is due ${when}. Log your progress and give it a push. — {coach}`),
+      title: "Forged",
+      body: resolve(`${e} "${g.name}" is due ${when}. Worth pushing on it today. — {coach}`),
     };
   }
 
-  // Pool-based fallback — deterministic so same slot picks same message within a day.
-  const weekend = isWeekend(todayYmd);
-  const slot = normalUserSlot(localHour ?? 7);
-  const poolKey = weekend ? "weekend" : "weekday";
+  // Evening: branch on whether the user has logged anything today.
+  if (slot === "evening") {
+    const anyLoggedToday = trackableHabits.some(h => hasAnyLogOnDate(h, todayYmd));
+    const eveningPool = anyLoggedToday
+      ? NORMAL_POOLS.evening.logged[poolKey]
+      : NORMAL_POOLS.evening.unlogged[poolKey];
+    const body = eveningPool[Math.abs(seed) % eveningPool.length];
+    return { title: "Forged", body: resolve(body) };
+  }
+
+  // Morning and noon — pool-based.
   const pool = (NORMAL_POOLS[slot] || NORMAL_POOLS.morning)[poolKey];
-  const dateSeed = parseInt(todayYmd.replace(/-/g, ""), 10);
-  const seed = dateSeed * 11 + (localHour ?? 0) * 7;
   const body = pool[Math.abs(seed) % pool.length];
   return { title: "Forged", body: resolve(body) };
 }
@@ -384,13 +403,12 @@ async function aiPickMessage(name, coachName, habits, goals, todayYmd, localHour
   const summaries = (habits || [])
     .filter(h => TRACKABLE.includes(h.habit_type) && h.habit_type !== "log")
     .map(h => {
-      const streak = h.habit_type === "daily" ? getDailyStreak(h, todayYmd) : 0;
       const doneToday = strictLoggedProgressToday(h, todayYmd);
       const recentLogs = (h.logs || [])
         .filter(l => l.date >= daysAgoFrom(todayYmd, 7))
         .sort((a, b) => b.date.localeCompare(a.date));
       const reflections = recentLogs.filter(l => l.reflection).slice(0, 2).map(l => l.reflection);
-      let line = `- ${h.emoji || ""} ${h.name} (streak: ${streak}d, logged today: ${doneToday})`;
+      let line = `- ${h.emoji || ""} ${h.name} (logged today: ${doneToday})`;
       if (reflections.length) line += `, recent notes: "${reflections.join("; ")}"`;
       return line;
     })
@@ -407,15 +425,23 @@ async function aiPickMessage(name, coachName, habits, goals, todayYmd, localHour
 
   const hour = localHour ?? 12;
   const timeLabel = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
-  const toneHint = hour >= 19
-    ? "It's evening — lean into a warm end-of-day check-in. Ask how they're doing, acknowledge the day, be supportive. Less command, more care."
+
+  const TRACKABLE_AI = ["daily", "weekly", "project", "limit"];
+  const anyLoggedToday = (habits || []).some(
+    h => TRACKABLE_AI.includes(h.habit_type) && h.habit_type !== "log" && hasAnyLogOnDate(h, todayYmd)
+  );
+
+  const toneHint = hour >= 19 && !anyLoggedToday
+    ? "It's evening and they haven't logged yet — warmly encourage them to capture the day before it slips away. Human and gentle, not pushy or guilt-trippy."
+    : hour >= 19
+    ? "It's evening and they've already logged — be warm and reflective. Acknowledge the day. No push to do more, just encouragement."
     : hour < 10
-    ? "It's morning — be upbeat and gently encouraging. Help set a positive tone for the day ahead."
-    : "It's midday — be friendly and motivating. Acknowledge they're in the thick of the day.";
+    ? "It's morning — be brief and upbeat. Help set a positive tone. No pressure to log."
+    : "It's midday — be friendly and human. A light check-in, not a logging reminder.";
 
   const signOff = `— ${coachName || "Forged"}`;
 
-  const prompt = `You are ${coachName || "a habit coach"}, sending ${name} a push notification for their Forged app.
+  const prompt = `You are ${coachName || "a habit coach"}, writing a push notification for ${name}'s Forged app.
 
 Time of day: ${timeLabel} (local hour: ${hour})
 Date: ${todayYmd}
@@ -424,16 +450,15 @@ Their habits:
 ${summaries || "No habits yet"}
 ${goalLine}
 
-Write ONE push notification body (max 110 chars). Start with "Hey ${name}," to feel personal and warm. Vary your tone — sometimes check how they're doing, sometimes gently celebrate what's going well, sometimes offer a light nudge. ${toneHint}
+Write ONE short push notification body. ${toneHint}
 
-No hashtags. No quotes around the message. Always end with "${signOff}" — no exceptions.
-
-Hard rules:
-- NEVER open with a command like "Log one habit right now" — be warmer and more natural than that.
-- NEVER claim they completed a habit today unless that habit's line explicitly shows logged today: true.
-- NEVER invent numbers, streaks, or events not present in the data above.
-- If every line shows logged today: false, gently nudge them to log — do not congratulate.
-- "log"-type habits are omitted; do not mention them.
+Rules:
+- Max 110 characters total
+- No hashtags. No quotes around the message.
+- Do NOT open with commands like "Log now" or "Check in" — be warmer and more natural
+- Do NOT mention streaks or habit counts
+- NEVER claim they completed something unless the data shows logged today: true
+- NEVER invent facts not in the data above
 - End with exactly: ${signOff}`;
 
   try {
@@ -444,7 +469,7 @@ Hard rules:
       messages: [{ role: "user", content: prompt }],
     });
     const text = resp.content?.[0]?.text?.trim();
-    if (text) return { title: "Forged 🔥", body: text };
+    if (text) return { title: "Forged", body: text };
   } catch (err) {
     console.error("[Forged cron] AI message failed:", err.message);
   }
@@ -615,7 +640,8 @@ async function handler(req, res) {
 
     let title;
     let body;
-    if (profile.is_pro && process.env.ANTHROPIC_API_KEY) {
+    // AI generation only for Pro users at the evening slot — morning/noon use curated templates.
+    if (profile.is_pro && process.env.ANTHROPIC_API_KEY && normalUserSlot(now.hour) === "evening") {
       const aiMsg = await aiPickMessage(profile.name || "there", coachName, habits, goals, todayYmd, now.hour);
       ({ title, body } = aiMsg || pickNormalMessage(habits, goals, todayYmd, now.hour, coachName));
     } else {

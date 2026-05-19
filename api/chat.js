@@ -548,6 +548,7 @@ async function handler(req, res) {
         error: `Daily free coach limit reached (${FREE_DAILY_LIMIT}/day). Upgrade to Pro for unlimited messages.`,
         limit: FREE_DAILY_LIMIT,
         used: usageCount,
+        remaining: 0,
       });
     }
   }
@@ -720,6 +721,7 @@ async function handler(req, res) {
 
       sse(res, {
         done:     true,
+        ...(!isPro ? { remaining: FREE_DAILY_LIMIT - (usageCount + 1) } : {}),
         created:  actions.created.length ? actions.created : null,
         edited:   actions.edited.length  ? actions.edited  : null,
         logged:   actions.logged.length  ? actions.logged  : null,
@@ -760,7 +762,7 @@ async function handler(req, res) {
       }
     }
 
-    sse(res, { done: true });
+    sse(res, { done: true, ...(!isPro ? { remaining: FREE_DAILY_LIMIT - (usageCount + 1) } : {}) });
     if (!isPro) {
       try {
         await db.from("chat_usage").upsert(
