@@ -1,5 +1,5 @@
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { T, COACH_ICON_OPTIONS } from "../theme.js";
 import { todayStr, daysAgo, isSatisfiedForTodayRing, getLevel, getStreak, analyzeDeepInsights } from "../utils.js";
 import { Ring, SLabel } from "../components/ui.jsx";
@@ -141,7 +141,21 @@ export function TodayScreen({
   coachEverOpened = true, onOpenCoachMic, onOpenCoachWithDraft,
   coachName, coachIcon, coachHabitColor, onOpenGoalDetail,
   onOpenBrief = null,
+  onOpenInsights = null,
 }) {
+  const [briefPreview, setBriefPreview] = useState(null);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("forged_brief_preview");
+      if (!raw) return;
+      const p = JSON.parse(raw);
+      if (!p?.text || !p?.week_start) return;
+      const todayISO = new Date().toISOString().slice(0, 10);
+      const weekEnd = new Date(new Date(p.week_start).getTime() + 6 * 864e5).toISOString().slice(0, 10);
+      if (todayISO >= p.week_start && todayISO <= weekEnd) setBriefPreview(p);
+    } catch (_) {}
+  }, []);
+
   const activeGoals    = goals.filter(g => g.status !== "completed");
   const trackHabits    = habits.filter(h => h.habitType !== "log");
   const logHabits      = habits.filter(h => h.habitType === "log");
@@ -252,6 +266,28 @@ export function TodayScreen({
             </div>
           </div>
           <div style={{ fontSize:14, color:T.gold, flexShrink:0 }}>→</div>
+        </button>
+      )}
+      {briefPreview && onOpenInsights && (
+        <button
+          type="button"
+          onClick={onOpenInsights}
+          style={{
+            display:"block", width:"calc(100% - 28px)", margin:"8px 14px 0", padding:"12px 14px",
+            background:"rgba(200,144,42,0.08)", border:"0.5px solid rgba(200,144,42,0.45)",
+            borderRadius:T.r, cursor:"pointer", textAlign:"left", fontFamily:T.font, boxSizing:"border-box",
+          }}
+        >
+          <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.12em", marginBottom:6 }}>
+            YOUR WEEKLY BRIEF IS READY
+          </div>
+          <div style={{ fontSize:13, color:T.sub, lineHeight:1.6, fontWeight:450 }}>
+            {briefPreview.signal || briefPreview.text.split(/\n/)[0].slice(0, 120)}
+            {!briefPreview.signal && briefPreview.text.length > 120 ? "…" : ""}
+          </div>
+          <div style={{ fontSize:11, color:T.gold, fontWeight:700, marginTop:8 }}>
+            Read full brief →
+          </div>
         </button>
       )}
       <div data-tour="today-summary" style={{ margin:"6px 14px 16px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:"18px 20px", display:"flex", alignItems:"center", gap:18 }}>

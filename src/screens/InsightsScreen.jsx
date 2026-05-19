@@ -130,6 +130,13 @@ export function InsightsScreen({ habits, goals = [], journalEntries = [], onShow
           setWeeklySummary(j.text);
           setBriefGeneratedAt(j.generated_at);
           setMomentumSignals(Array.isArray(j.momentum_signals) ? j.momentum_signals : []);
+          try {
+            localStorage.setItem("forged_brief_preview", JSON.stringify({
+              text: j.text,
+              week_start: j.week_start,
+              signal: Array.isArray(j.momentum_signals) && j.momentum_signals.length > 0 ? j.momentum_signals[0].signal : null,
+            }));
+          } catch (_) {}
         } else {
           setWeeklySummary(null);
           setBriefGeneratedAt(null);
@@ -224,6 +231,13 @@ export function InsightsScreen({ habits, goals = [], journalEntries = [], onShow
       setWeeklySummary(text);
       setBriefGeneratedAt(generated_at || new Date().toISOString());
       setMomentumSignals(Array.isArray(momentum_signals) ? momentum_signals : []);
+      try {
+        localStorage.setItem("forged_brief_preview", JSON.stringify({
+          text,
+          week_start: week_start || thisWeekStart,
+          signal: Array.isArray(momentum_signals) && momentum_signals.length > 0 ? momentum_signals[0].signal : null,
+        }));
+      } catch (_) {}
       if (free_trial) {
         setFreeBrief(false);
       } else if (typeof used === "number" && typeof limit === "number") {
@@ -535,6 +549,34 @@ export function InsightsScreen({ habits, goals = [], journalEntries = [], onShow
         )}
       </div>
 
+      {showMomentumBlock && (
+        <div style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:"14px 14px 12px" }}>
+          <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:12 }}>This week&apos;s habits</div>
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            {momentumSignals.map((row, i) => {
+              const habit = habits.find((h) => h.name === row.habit_name);
+              const emoji = habit?.emoji || "•";
+              return (
+                <div
+                  key={`${row.habit_name}-${i}`}
+                  style={{
+                    display:"flex", flexWrap:"wrap", alignItems:"baseline", columnGap:8, rowGap:3,
+                    paddingBottom: i < momentumSignals.length - 1 ? 12 : 0,
+                    borderBottom: i < momentumSignals.length - 1 ? `0.5px solid ${T.border}` : "none",
+                  }}
+                >
+                  <span style={{ fontSize:14, lineHeight:1 }}>{emoji}</span>
+                  <span style={{ fontSize:12, fontWeight:600, color:T.text }}>{row.habit_name}</span>
+                  <span style={{ fontSize:12, color:T.muted, lineHeight:1.55, flex:"1 1 180px", minWidth:0 }}>
+                    {row.signal}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Summary stats — only after a brief exists for this week */}
       {showStatsCollapse && (
       <div style={{ margin:"0 14px 10px" }}>
@@ -654,34 +696,6 @@ export function InsightsScreen({ habits, goals = [], journalEntries = [], onShow
           )}
         </div>
       </div>
-      )}
-
-      {showMomentumBlock && (
-        <div style={{ margin:"0 14px 18px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:"14px 14px 12px" }}>
-          <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:12 }}>This week&apos;s habits</div>
-          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-            {momentumSignals.map((row, i) => {
-              const habit = habits.find((h) => h.name === row.habit_name);
-              const emoji = habit?.emoji || "•";
-              return (
-                <div
-                  key={`${row.habit_name}-${i}`}
-                  style={{
-                    display:"flex", flexWrap:"wrap", alignItems:"baseline", columnGap:8, rowGap:3,
-                    paddingBottom: i < momentumSignals.length - 1 ? 12 : 0,
-                    borderBottom: i < momentumSignals.length - 1 ? `0.5px solid ${T.border}` : "none",
-                  }}
-                >
-                  <span style={{ fontSize:14, lineHeight:1 }}>{emoji}</span>
-                  <span style={{ fontSize:12, fontWeight:600, color:T.text }}>{row.habit_name}</span>
-                  <span style={{ fontSize:12, color:T.muted, lineHeight:1.55, flex:"1 1 180px", minWidth:0 }}>
-                    {row.signal}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
       )}
 
       {/* ══ Activity ══════════════════════════════════════════════════════════ */}
