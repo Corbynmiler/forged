@@ -125,7 +125,7 @@ Write a daily journal entry in this exact format — nothing more, nothing less:
 
 [Title: a short (2–5 word) label for the day — e.g. "Recovery & Reset", "Solid execution", "Gym missed, build moved"]
 
-[2–3 sentence narrative — what kind of day this was, the mood and shape of it. Be specific to the actual data and context notes. First person, as if they wrote it.]
+[2–3 sentence narrative — what kind of day this was, the mood and shape of it. Be specific to the actual data and context notes. First person, as if they wrote it. If habits were unlogged and no context notes explain why, do not speculate or editorialize — simply describe what did happen and leave the gaps neutral.]
 
 Wins: [comma-separated list of things completed, or "none"]
 Missed: [see rules below]
@@ -234,7 +234,8 @@ async function handler(req, res) {
         "(2) If the data or context notes indicate a rest day, sick day, recovery day, or time off, frame the entry accordingly — do not label those unlogged habits as failures. " +
         "(3) Never invent a Pattern observation without clear evidence in the data. If nothing stands out, skip the Pattern line entirely. " +
         "(4) Keep the Tomorrow line constructive and practical, not guilt-inducing. " +
-        "(5) Plain text only — no markdown, no asterisks, no special characters.",
+        "(5) Plain text only — no markdown, no asterisks, no special characters. " +
+        "(6) When habits are unlogged and there are no context notes explaining why, do not speculate about intent, willpower, or what might have happened — unlogged is just unlogged. Describe only what did happen, and leave the gaps neutral. Speculation without evidence makes the entry less accurate, not more.",
       messages: [{ role: "user", content: prompt }],
     });
     generatedText = (resp.content || [])

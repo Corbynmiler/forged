@@ -137,24 +137,31 @@ function parseReceiptFields(content) {
   const lines = content.split("\n").map(l => l.trim()).filter(Boolean);
   if (!lines.length) return null;
   const title = lines[0];
-  let pattern = null, tomorrow = null;
+  let pattern = null, tomorrow = null, missed = null;
   for (const l of lines) {
     if (!pattern  && l.startsWith("Pattern:"))  pattern  = l.slice("Pattern:".length).trim();
     if (!tomorrow && l.startsWith("Tomorrow:")) tomorrow = l.slice("Tomorrow:".length).trim();
+    if (!missed   && l.startsWith("Missed:"))   missed   = l.slice("Missed:".length).trim();
   }
-  return { title, pattern, tomorrow };
+  return { title, pattern, tomorrow, missed };
 }
 
-function TodayReceiptCard({ entry, loggedCount, generating, onGenerate, onOpenJournal }) {
+function TodayReceiptCard({ entry, loggedCount, generating, onGenerate, onOpenJournal, onOpenCoachWithDraft }) {
   if (loggedCount === 0) return null;
   if (entry) {
     const parsed = parseReceiptFields(entry.content);
     if (!parsed) return null;
+    // Show "add context" nudge when there are real missed habits (not "none", not "not tracked")
+    const missedStr = (parsed.missed || "").toLowerCase().trim();
+    const hasMissed = missedStr && missedStr !== "none" && !missedStr.startsWith("not tracked");
+    const contextDraft = hasMissed
+      ? `I want to add some context on today — ${parsed.missed} didn't make it in. Here's why:`
+      : null;
     return (
       <div style={{ margin:"0 14px 10px", borderRadius:T.r, border:`0.5px solid ${T.border}`, background:T.raised, overflow:"hidden" }}>
         <div style={{ padding:"14px 16px 12px" }}>
           <div style={{ fontSize:10, fontWeight:700, color:T.hint, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:8 }}>Today's receipt</div>
-          <div style={{ fontSize:15, fontWeight:500, color:T.text, fontFamily:T.serif, marginBottom:parsed.pattern||parsed.tomorrow?10:0, lineHeight:1.35 }}>{parsed.title}</div>
+          <div style={{ fontSize:15, fontWeight:500, color:T.text, fontFamily:T.serif, marginBottom:parsed.pattern||parsed.tomorrow||hasMissed?10:0, lineHeight:1.35 }}>{parsed.title}</div>
           {parsed.pattern && (
             <div style={{ display:"flex", gap:6, marginBottom:6, alignItems:"flex-start" }}>
               <span style={{ fontSize:11, color:T.accent, fontWeight:700, marginTop:2, flexShrink:0 }}>◎</span>
@@ -164,12 +171,19 @@ function TodayReceiptCard({ entry, loggedCount, generating, onGenerate, onOpenJo
             </div>
           )}
           {parsed.tomorrow && (
-            <div style={{ display:"flex", gap:6, alignItems:"flex-start" }}>
+            <div style={{ display:"flex", gap:6, marginBottom:hasMissed?8:0, alignItems:"flex-start" }}>
               <span style={{ fontSize:11, color:T.green, fontWeight:700, marginTop:2, flexShrink:0 }}>↑</span>
               <div style={{ fontSize:13, color:T.sub, lineHeight:1.5 }}>
                 <span style={{ color:T.muted, marginRight:4 }}>Tomorrow:</span>{parsed.tomorrow}
               </div>
             </div>
+          )}
+          {hasMissed && onOpenCoachWithDraft && (
+            <button type="button" onClick={() => onOpenCoachWithDraft(contextDraft)}
+              style={{ display:"block", width:"100%", padding:"7px 10px", marginTop:2, background:"rgba(255,255,255,0.04)", border:`0.5px solid ${T.border}`, borderRadius:T.rsm, cursor:"pointer", textAlign:"left", fontFamily:T.font }}>
+              <span style={{ fontSize:12, color:T.muted }}>Gaps with no context — </span>
+              <span style={{ fontSize:12, color:T.sub, fontWeight:500 }}>tell the coach why →</span>
+            </button>
           )}
         </div>
         <div style={{ display:"flex", borderTop:`0.5px solid ${T.border}` }}>
@@ -364,7 +378,7 @@ export function TodayScreen({
           </div>
         </button>
       )}
-      <div data-tour="today-summary" style={{ margin:"6px 14px 16px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:"18px 20px", display:"flex", alignItems:"center", gap:18 }}>
+      <div data-tour="today-summary" style={{ margin:"6px 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:"18px 20px", display:"flex", alignItems:"center", gap:18 }}>
         <Ring pct={pct}/>
         <div style={{ flex:1 }}>
           <div style={{ fontFamily:T.serif, fontSize:20, color:T.text, marginBottom:4 }}>{pct === 100 && totalTrackables > 0 ? "Forged for today" : greeting}</div>
@@ -374,6 +388,16 @@ export function TodayScreen({
           </button>
         </div>
       </div>
+      {onGenerateReceipt && (
+        <TodayReceiptCard
+          entry={todayJournalEntry}
+          loggedCount={loggedCount}
+          generating={generatingReceipt}
+          onGenerate={onGenerateReceipt}
+          onOpenJournal={onOpenJournal}
+          onOpenCoachWithDraft={onOpenCoachWithDraft}
+        />
+      )}
       {(() => {
         const sections = [
           activeGoals.length > 0
@@ -402,15 +426,6 @@ export function TodayScreen({
           i === 0 ? <div key={i} data-tour="today-first-section">{sec}</div> : <div key={i}>{sec}</div>
         );
       })()}
-      {onGenerateReceipt && (
-        <TodayReceiptCard
-          entry={todayJournalEntry}
-          loggedCount={loggedCount}
-          generating={generatingReceipt}
-          onGenerate={onGenerateReceipt}
-          onOpenJournal={onOpenJournal}
-        />
-      )}
       <div style={{ height:16 }}/>
       {!hideFloatingAdd && (trackHabits.length > 0 || activeGoals.length > 0 || logHabits.length > 0) && onAdd && (
         <button type="button" onClick={onAdd} aria-label="Add habit or goal" title="Add habit or goal"
