@@ -57,7 +57,7 @@ import {
   mergeDictationIntoText,
   polishInterimDisplay,
   isLikelyHomeScreenPwa,
-  openForgedInSafari,
+  copyForgedUrlToClipboard,
   MicBtn,
 } from "./hooks/useSpeechInput.jsx";
 import { useScrollLock } from "./hooks/useScrollLock.js";
@@ -206,7 +206,13 @@ export default function App() {
     },
     { autoRestart: true, meter: false },
   );
+  const [pageSpeechBarDismissed, setPageSpeechBarDismissed] = useState(false);
+  const [pageSpeechCopyConfirm, setPageSpeechCopyConfirm] = useState("");
+  const pageSpeechCopyConfirmTimerRef = useRef(null);
   const prevPageSpeechListeningRef = useRef(false);
+  useEffect(() => () => {
+    if (pageSpeechCopyConfirmTimerRef.current) clearTimeout(pageSpeechCopyConfirmTimerRef.current);
+  }, []);
   useEffect(() => {
     const was = prevPageSpeechListeningRef.current;
     const now = pageSpeech.listening;
@@ -3678,6 +3684,12 @@ export default function App() {
                     coachIcon={coachIcon}
                     habitColor={habitColor}
                     onOpenMic={() => {
+                      setPageSpeechBarDismissed(false);
+                      setPageSpeechCopyConfirm("");
+                      if (pageSpeechCopyConfirmTimerRef.current) {
+                        clearTimeout(pageSpeechCopyConfirmTimerRef.current);
+                        pageSpeechCopyConfirmTimerRef.current = null;
+                      }
                       // Non-Pro: fall through to AICoach which handles paywall
                       if (!isPro) { openCoachWithMode("mic"); return; }
                       // Page mic: record on current page; handoff when user stops (see pageSpeech effect)
@@ -3694,12 +3706,29 @@ export default function App() {
                     listeningInterim={pageSpeech.interim || ""}
                     speechError={pageSpeech.speechError || ""}
                     micBlocked={pageSpeech.micBlocked}
+                    errorDismissed={pageSpeechBarDismissed}
+                    onDismissError={() => setPageSpeechBarDismissed(true)}
                     onTryAgain={() => {
+                      setPageSpeechBarDismissed(false);
                       if (!pageSpeech.listening) pageDictationAccumulatorRef.current = "";
                       pageSpeech.toggle();
                     }}
-                    onOpenInSafari={isLikelyHomeScreenPwa() ? openForgedInSafari : undefined}
-                    onTypeInstead={() => openCoachWithMode("text")}
+                    onCopyLink={isLikelyHomeScreenPwa() ? async () => {
+                      const ok = await copyForgedUrlToClipboard();
+                      setPageSpeechCopyConfirm(ok
+                        ? "Link copied — open it in Safari."
+                        : "Could not copy. Open Forged manually in Safari.");
+                      if (pageSpeechCopyConfirmTimerRef.current) clearTimeout(pageSpeechCopyConfirmTimerRef.current);
+                      pageSpeechCopyConfirmTimerRef.current = setTimeout(() => {
+                        setPageSpeechCopyConfirm("");
+                        pageSpeechCopyConfirmTimerRef.current = null;
+                      }, 4500);
+                    } : undefined}
+                    copyLinkConfirm={pageSpeechCopyConfirm}
+                    onTypeInstead={() => {
+                      setPageSpeechBarDismissed(true);
+                      openCoachWithMode("text");
+                    }}
                   />
                 </div>
               ) : null}

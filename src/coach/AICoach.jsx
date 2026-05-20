@@ -20,7 +20,7 @@ import {
 import { Modal, GBtn, PBtn, FG, lbl, inp } from "../components/ui.jsx";
 import {
   useSpeechInput, MicBtn, mergeDictationIntoText, polishInterimDisplay,
-  speechUnsupportedHelpMessage, shouldDeferCoachMicAutoStart, openForgedInSafari,
+  speechUnsupportedHelpMessage, shouldDeferCoachMicAutoStart, copyForgedUrlToClipboard,
   isLikelyHomeScreenPwa,
 } from "../hooks/useSpeechInput.jsx";
 import { useScrollLock } from "../hooks/useScrollLock.js";
@@ -28,16 +28,21 @@ import { useScrollLock } from "../hooks/useScrollLock.js";
 export function CoachBar({
   coachName, coachIcon, habitColor, onOpenMic, onOpenText, coachEverOpened,
   isListening = false, listeningInterim = "",
-  speechError = "", micBlocked = false, onTryAgain, onOpenInSafari, onTypeInstead,
+  speechError = "", micBlocked = false, errorDismissed = false, onDismissError,
+  onTryAgain, onCopyLink, copyLinkConfirm = "", onTypeInstead,
 }) {
   const suppressClickRef = useRef(false);
   const coachLabelRaw = (coachName ?? "").trim() || "Coach";
   const micColor = habitColor || T.accent;
   const initial = coachLabelRaw.charAt(0).toUpperCase();
-  const showMicIssue = !!(speechError || micBlocked);
+  const hasMicIssue = !!(speechError || micBlocked);
+  const showMicIssue = hasMicIssue && !errorDismissed;
   const issueText = speechError
     || (micBlocked ? "Microphone blocked. Allow the mic for this site in Settings, then try again." : "");
-  const showFallbackActions = showMicIssue && (onTryAgain || onOpenInSafari || onTypeInstead);
+  const showFallbackActions = showMicIssue && (onTryAgain || onCopyLink || onTypeInstead);
+  const actionBtn = {
+    fontSize:10, fontWeight:600, borderRadius:7, padding:"5px 9px", cursor:"pointer", lineHeight:1.2,
+  };
 
   function handleMicActivate() {
     onOpenMic?.();
@@ -49,7 +54,7 @@ export function CoachBar({
   const micBorderColor = isListening ? "#E74C3Ccc" : `${micColor}88`;
   const micIconColor = isListening ? "#ff6b6b" : micColor;
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:6, fontFamily:T.font }}>
+    <div style={{ display:"flex", flexDirection:"column", gap:4, fontFamily:T.font }}>
     <div
       data-tour="coach-fab"
       style={{
@@ -191,33 +196,53 @@ export function CoachBar({
       <div
         role="alert"
         style={{
-          padding:"8px 12px 10px",
-          borderRadius:12,
-          background:"rgba(24,24,22,0.98)",
-          border:`0.5px solid ${T.accent}44`,
-          fontSize:11,
-          lineHeight:1.5,
+          padding:"6px 8px 7px",
+          borderRadius:10,
+          background:"rgba(24,24,22,0.96)",
+          border:`0.5px solid ${T.accent}33`,
+          fontSize:10.5,
+          lineHeight:1.4,
           color:T.sub,
         }}
       >
-        <div style={{ color:T.accent, marginBottom: showFallbackActions ? 8 : 0 }}>{issueText}</div>
+        <div style={{ display:"flex", alignItems:"flex-start", gap:6 }}>
+          <div style={{ flex:1, minWidth:0, color:T.accent, fontSize:10.5, lineHeight:1.4 }}>{issueText}</div>
+          {onDismissError ? (
+            <button
+              type="button"
+              onClick={onDismissError}
+              aria-label="Dismiss microphone message"
+              style={{
+                flexShrink:0, width:22, height:22, marginTop:-1,
+                border:"none", borderRadius:6, background:"transparent",
+                color:T.muted, fontSize:16, lineHeight:1, cursor:"pointer",
+                display:"flex", alignItems:"center", justifyContent:"center",
+              }}
+            >
+              ×
+            </button>
+          ) : null}
+        </div>
+        {copyLinkConfirm ? (
+          <div style={{ fontSize:10, color:T.gold, marginTop:5, lineHeight:1.35 }}>{copyLinkConfirm}</div>
+        ) : null}
         {showFallbackActions ? (
-          <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:6 }}>
             {onTryAgain ? (
               <button type="button" onClick={onTryAgain}
-                style={{ fontSize:11, fontWeight:600, color:T.text, background:T.raised, border:`0.5px solid ${T.borderStrong}`, borderRadius:8, padding:"6px 10px", cursor:"pointer" }}>
+                style={{ ...actionBtn, color:T.text, background:T.raised, border:`0.5px solid ${T.borderStrong}` }}>
                 Try again
               </button>
             ) : null}
-            {onOpenInSafari ? (
-              <button type="button" onClick={onOpenInSafari}
-                style={{ fontSize:11, fontWeight:600, color:T.gold, background:"rgba(200,144,42,0.12)", border:`0.5px solid ${T.gold}44`, borderRadius:8, padding:"6px 10px", cursor:"pointer" }}>
-                Open in Safari
+            {onCopyLink ? (
+              <button type="button" onClick={onCopyLink}
+                style={{ ...actionBtn, color:T.gold, background:"rgba(200,144,42,0.10)", border:`0.5px solid ${T.gold}44` }}>
+                Copy link
               </button>
             ) : null}
             {onTypeInstead ? (
               <button type="button" onClick={onTypeInstead}
-                style={{ fontSize:11, fontWeight:600, color:T.sub, background:"none", border:`0.5px solid ${T.border}`, borderRadius:8, padding:"6px 10px", cursor:"pointer" }}>
+                style={{ ...actionBtn, color:T.sub, background:"transparent", border:`0.5px solid ${T.border}` }}>
                 Type instead
               </button>
             ) : null}
@@ -3397,14 +3422,14 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
                 {speech.speechError}
               </div>
               {isLikelyHomeScreenPwa() && isPro ? (
-                <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginTop:8 }}>
+                <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:6 }}>
                   <button type="button" onClick={() => speech.toggle()}
-                    style={{ fontSize:11, fontWeight:600, color:T.text, background:T.raised, border:`0.5px solid ${T.borderStrong}`, borderRadius:8, padding:"6px 10px", cursor:"pointer" }}>
+                    style={{ fontSize:10, fontWeight:600, color:T.text, background:T.raised, border:`0.5px solid ${T.borderStrong}`, borderRadius:7, padding:"5px 9px", cursor:"pointer" }}>
                     Try again
                   </button>
-                  <button type="button" onClick={openForgedInSafari}
-                    style={{ fontSize:11, fontWeight:600, color:T.gold, background:"rgba(200,144,42,0.12)", border:`0.5px solid ${T.gold}44`, borderRadius:8, padding:"6px 10px", cursor:"pointer" }}>
-                    Open in Safari
+                  <button type="button" onClick={() => void copyForgedUrlToClipboard()}
+                    style={{ fontSize:10, fontWeight:600, color:T.gold, background:"rgba(200,144,42,0.10)", border:`0.5px solid ${T.gold}44`, borderRadius:7, padding:"5px 9px", cursor:"pointer" }}>
+                    Copy link
                   </button>
                 </div>
               ) : null}

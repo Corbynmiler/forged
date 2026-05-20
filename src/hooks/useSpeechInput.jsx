@@ -86,7 +86,7 @@ export function isLikelyHomeScreenPwa() {
 
 export function speechUnsupportedHelpMessage() {
   if (isAppleMobileDevice() && isLikelyHomeScreenPwa()) {
-    return "Voice input may not work in this mode. Try opening Forged in Safari, or type your entry instead.";
+    return "Voice input may not work in the installed app. Copy the link and open Forged in Safari, or type instead.";
   }
   return "Voice input isn't available in this browser. Type your entry instead.";
 }
@@ -104,7 +104,7 @@ export function speechServiceBlockedHelpMessage() {
 /** User-visible message when SpeechRecognition.start() or construction fails. */
 export function speechMicStartFailedMessage() {
   if (isAppleMobileDevice() && isLikelyHomeScreenPwa()) {
-    return "Microphone didn't start in the installed app. Try opening Forged in Safari, or type instead.";
+    return "Microphone didn't start in the installed app. Copy the link and open Forged in Safari, or type instead.";
   }
   return "Voice input didn't start. Allow the microphone for this site and try again, or type instead.";
 }
@@ -117,14 +117,35 @@ export function shouldDeferCoachMicAutoStart() {
   return isAppleMobileDevice() && isLikelyHomeScreenPwa();
 }
 
-/** Best-effort: open the current URL outside the standalone web app (often Safari on iOS). */
-export function openForgedInSafari() {
-  if (typeof window === "undefined") return;
-  const url = window.location.href;
+/** URL to open in Safari (no hash). */
+export function forgedShareUrl() {
+  if (typeof window === "undefined") return "";
+  return window.location.href.split("#")[0];
+}
+
+/** Copy the app URL for opening in Safari — reliable from iOS standalone PWA. */
+export async function copyForgedUrlToClipboard() {
+  const url = forgedShareUrl();
+  if (!url) return false;
   try {
-    window.open(url, "_blank", "noopener,noreferrer");
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(url);
+      return true;
+    }
+  } catch { /* fallback below */ }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = url;
+    ta.setAttribute("readonly", "");
+    ta.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return !!ok;
   } catch {
-    try { window.location.assign(url); } catch { /* ignore */ }
+    return false;
   }
 }
 
