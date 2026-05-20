@@ -68,6 +68,22 @@ function buildGenerationPrompt({ date, habits, goals, name, existingNotes }) {
         entry += ` (${log.value.minutes} min)`;
       } else if (typeof log?.value === "number") {
         entry += ` (${log.value}${h.unit || ""})`;
+        // For limit habits, add goal_aim context so the journal frames the day correctly
+        if (h.habit_type === "limit") {
+          const goalAim = h.goal_aim ?? "maintain";
+          const budget = h.daily_budget;
+          if (goalAim === "reduce") {
+            const originalBudget = h.original_budget ?? null;
+            const fromStr = originalBudget != null && originalBudget !== budget
+              ? `, originally ${originalBudget}${h.unit || ""}`
+              : "";
+            entry += ` [limit: ${budget}${h.unit || ""}${fromStr}, aim: reducing over time]`;
+          } else if (goalAim === "monitor") {
+            entry += ` [limit: ${budget}${h.unit || ""}, aim: monitoring only]`;
+          } else {
+            entry += ` [limit: ${budget}${h.unit || ""}]`;
+          }
+        }
       }
       const notes = [log?.note, log?.reflection, log?.value?.win, log?.value?.hardPart]
         .filter(Boolean).join(" / ");
@@ -160,7 +176,13 @@ TOMORROW field rules:
 
 - Skip "Why:", "Pattern:", and "Tomorrow:" lines entirely if there's nothing real to say for them
 - Max 200 words total
-- PLAIN TEXT ONLY. No markdown. No asterisks, no bold (**), no underscores, no backticks, no special formatting characters whatsoever. The title is plain text.`;
+- PLAIN TEXT ONLY. No markdown. No asterisks, no bold (**), no underscores, no backticks, no special formatting characters whatsoever. The title is plain text.
+
+LIMIT HABIT TONE rules (apply when a "[limit: ...]" tag appears in the data above):
+- "aim: reducing over time" → frame being under the limit as progress, not just compliance. Acknowledge the direction ("tracking down", "continuing to cut back"). If original limit appears, you may reference the gap ("down from X to Y"). Never frame a single day's number as a final verdict.
+- "aim: monitoring only" → treat numbers as awareness data, not performance. Do not frame under/over as success or failure. Do not suggest they should be doing better. Just note what was tracked.
+- No tag or "aim: [limit]" (maintain) → stay-under is the goal; staying under is a win, going over is worth noting factually, not shaming.
+- If a limit habit is unlogged and it's a reduce or monitor habit, write "Not tracked" — do not call it missed.`;
 }
 
 async function handler(req, res) {

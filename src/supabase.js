@@ -43,6 +43,9 @@ export function habitToRow(habit, userId) {
     best_streak:       habit.bestStreak    ?? 0,
     daily_target_minutes: habit.dailyTargetMinutes ?? 60,
     shared_goal_id:    habit.sharedGoalId ?? null,
+    // Limit-habit intent (null = DB default 'maintain'; only written when explicitly set)
+    goal_aim:          habit.goalAim       ?? null,
+    original_budget:   habit.originalBudget ?? null,
     logs:              habit.logs ?? [],
     updated_at:        new Date().toISOString(),
   };
@@ -140,11 +143,14 @@ export function rowToHabit(row) {
     targetValue,
     direction:        row.direction === "decreasing" || row.direction === "increasing" ? row.direction : inferredDirection,
     unit:             row.unit           ?? undefined,
-    dailyBudget:      row.daily_budget   ?? undefined,
-    tapIncrement:     row.tap_increment  ?? 1,
-    bestStreak:       row.best_streak    ?? 0,
+    dailyBudget:      row.daily_budget     ?? undefined,
+    tapIncrement:     row.tap_increment    ?? 1,
+    bestStreak:       row.best_streak      ?? 0,
     dailyTargetMinutes: row.daily_target_minutes ?? 60,
     sharedGoalId:       row.shared_goal_id ?? undefined,
+    // Limit-habit intent fields (null in DB = 'maintain' everywhere in app code)
+    goalAim:          row.goal_aim         ?? "maintain",
+    originalBudget:   row.original_budget  ?? undefined,
     logs:             row.logs ?? [],
   };
 }

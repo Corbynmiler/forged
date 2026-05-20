@@ -33,6 +33,8 @@ const COACH_TOOLS = [
       "NEVER use this for goals (habit_type='goal') — goals use the <goal_plan> flow described in the system prompt. " +
       "Call ONLY when user asks to add/create/track something NEW. " +
       "Ask one clarifying question first if type or key details are ambiguous. " +
+      "For LIMIT habits: before creating, ask what their aim is if they haven't made it clear — " +
+      "'stay under this limit' (maintain), 'gradually reduce over time' (reduce), or 'just keep track' (monitor). " +
       "If this tool returns success:false, tell the user it failed.",
     input_schema: {
       type: "object",
@@ -46,6 +48,11 @@ const COACH_TOOLS = [
         },
         weekly_target: { type: "integer", description: "Sessions/week for weekly habits." },
         daily_budget:  { type: "number",  description: "Daily cap for limit habits." },
+        goal_aim: {
+          type: "string",
+          enum: ["monitor", "maintain", "reduce"],
+          description: "LIMIT habits only. monitor=just tracking, no pressure; maintain=stay under the cap; reduce=gradually lower over time. Ask if unclear.",
+        },
         unit:          { type: "string",  description: "e.g. km, mins, calories, pouches, L" },
         target_date:   { type: "string",  description: "Optional deadline YYYY-MM-DD." },
         color:         { type: "string",  description: "#C0392B red, #27AE60 green, #2980B9 blue, #E67E22 orange, #8E44AD purple." },
@@ -74,6 +81,11 @@ const COACH_TOOLS = [
         unit:          { type: "string" },
         target_date:   { type: "string", description: "YYYY-MM-DD" },
         color:         { type: "string" },
+        goal_aim: {
+          type: "string",
+          enum: ["monitor", "maintain", "reduce"],
+          description: "LIMIT habits only. Update if the user explicitly changes their intent for the habit.",
+        },
       },
       required: ["habit_id", "habit_name"],
     },
@@ -311,6 +323,16 @@ async function executeCreateHabit(input, userId, db) {
   if (isGoal) {
     throw new Error("Goal creation needs the goal confirmation card. I won't create or change a goal directly from a chat tool call.");
   }
+  // For limit habits: resolve goal_aim (default 'maintain') and set
+  // original_budget once when goal_aim is 'reduce' so reduction progress
+  // can be tracked later. Neither field is written for non-limit types.
+  const isLimit = input.habit_type === "limit";
+  const goalAim = isLimit ? (input.goal_aim ?? "maintain") : null;
+  const originalBudget =
+    isLimit && goalAim === "reduce" && input.daily_budget != null
+      ? input.daily_budget
+      : null;
+
   const row = {
     user_id:              userId,
     name:                 input.name,
@@ -331,6 +353,8 @@ async function executeCreateHabit(input, userId, db) {
     daily_target_minutes: input.habit_type === "project" ? 60 : null,
     goal_status:          isGoal ? "active" : null,
     target_date:          input.target_date   ?? null,
+    goal_aim:             goalAim,
+    original_budget:      originalBudget,
     updated_at:           new Date().toISOString(),
   };
   const { data, error } = await db.from("habits").insert(row).select().single();
@@ -347,6 +371,7 @@ async function executeEditHabit(input, userId, db, safety = buildActionSafety())
   if (input.unit          != null) updates.unit           = input.unit;
   if (input.target_date   != null) updates.target_date    = input.target_date;
   if (input.color         != null) updates.color          = input.color;
+  if (input.goal_aim      != null) updates.goal_aim       = input.goal_aim;
 
   if (input.target_value != null) {
     const { data: current, error: currentErr } = await db

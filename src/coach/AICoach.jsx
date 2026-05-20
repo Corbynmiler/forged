@@ -1632,6 +1632,9 @@ function buildCoachSystemPrompt(user, habits, coachName, screen, goals = [], jou
       const budget = h.dailyBudget;
       const unit = h.unit || "";
       const todayTotal = getLimitDayTotal(h, today);
+      // goalAim: 'monitor' | 'maintain' | 'reduce' (null treated as 'maintain')
+      const goalAim = h.goalAim ?? "maintain";
+      const originalBudget = h.originalBudget ?? null;
 
       // Compute 7-day window stats (day 0 = today, day 6 = six days ago).
       // Only counting days with a real numeric log — unlogged days are not
@@ -1654,16 +1657,26 @@ function buildCoachSystemPrompt(user, habits, coachName, screen, goals = [], jou
       detail += `, daily limit: ${budget}${unit}`;
       if (todayTotal != null) detail += `, used today: ${todayTotal}${unit}`;
 
-      // Append 7-day context when there is enough data to say something meaningful.
+      // Goal aim line — shows intent and coaching framing instruction
+      if (goalAim === "reduce") {
+        const fromStr = originalBudget != null && originalBudget !== budget
+          ? ` (started at ${originalBudget}${unit})`
+          : "";
+        detail += `\n  Goal aim: reduce${fromStr} — frame progress as trend over time, not daily perfection`;
+      } else if (goalAim === "monitor") {
+        detail += `\n  Goal aim: monitor — this is awareness tracking only; avoid framing over/under as moral success or failure`;
+      } else {
+        // maintain (default)
+        detail += `\n  Goal aim: maintain — stay at or under ${budget}${unit}/day`;
+      }
+
+      // 7-day pattern when there is enough data to say something meaningful
       if (daysLogged >= 2) {
         detail += `\n  Last 7 days: ${daysLogged}/7 days logged, avg ${avgUsage}${unit}/day, ${daysUnder}/${daysLogged} logged days at or under limit`;
 
-        // Reduction signal — future-safe for when goal_aim lands in the schema.
-        // Handles both camelCase (post-migration rowToHabit) and raw snake_case.
-        // Only fires when ALL four conditions are true: intent is "reduce",
-        // enough data exists, average is well under budget, and most logged days
-        // were under. The hint tells the coach to raise it naturally, not lecture.
-        const goalAim = h.goalAim ?? h.goal_aim ?? null;
+        // Reduction signal — only fires when ALL conditions are true:
+        // explicit reduce intent, enough data, average well under cap, most days under.
+        // Tells coach to raise it naturally if it fits — never as a lecture.
         if (
           goalAim === "reduce" &&
           daysLogged >= 4 &&
@@ -1797,8 +1810,8 @@ ${journalEntries.length ? `Recent journal entries (for context — do not repeat
 ${journalEntries.slice(0, 5).map(e => `[${e.date}] "${e.content.slice(0, 200)}${e.content.length > 200 ? "…" : ""}"`).join("\n")}` : ""}
 
 ─── TOOLS ───
-create_habit: new habits only — never for edits, never for goals. One clarifying question if type is genuinely unclear.
-edit_habit: existing habit; use habit_id from [id:…] in the list above. Never pass target_value for a goal unless the latest user message explicitly confirms changing that goal target.
+create_habit: new habits only — never for edits, never for goals. One clarifying question if type is genuinely unclear. For LIMIT habits: ask what their aim is if it isn't obvious — monitor (just tracking), maintain (stay under cap), or reduce (cut down over time). Pass goal_aim accordingly.
+edit_habit: existing habit; use habit_id from [id:…] in the list above. Never pass target_value for a goal unless the latest user message explicitly confirms changing that goal target. Can also update goal_aim if the user explicitly says they want to change their intention for a limit habit.
 log_habit: project → minutes; limit → amount; goal → amount only for clear current progress/check-in; daily/weekly → nothing extra needed.
 add_daily_note: short personal note (1–3 sentences) — call alongside log_habit when personal context exists. First person, user's own words. Not a full journal entry.
 If a tool returns success:false, say it failed. Never claim success when it isn't.
@@ -3440,7 +3453,19 @@ function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, noti
       const target = parseFloat(wg.target)||80;
       return { ...base, startValue:start, targetValue:target, direction:inferProgressDirection(start, target), unit:wg.unit||"kg" };
     }
-    if (opt.habitType === "limit")    return { ...base, name:lb.name||opt.name, dailyBudget:parseInt(lb.budget)||60, unit:lb.unit||"min" };
+    if (opt.habitType === "limit") {
+      const budget = parseInt(lb.budget) || 60;
+      // "Reducing something" → reduce mode by default; record where they started
+      const isReducing = opt.label === "Reducing something";
+      return {
+        ...base,
+        name: lb.name || opt.name,
+        dailyBudget: budget,
+        unit: lb.unit || "min",
+        goalAim: isReducing ? "reduce" : "maintain",
+        originalBudget: isReducing ? budget : undefined,
+      };
+    }
     if (opt.habitType === "project")  return { ...base, dailyTargetMinutes: 60 };
     return base;
   }
