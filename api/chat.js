@@ -198,7 +198,14 @@ function buildActionReceipt(outcomes) {
     } else if (o.tool === "create_habit") {
       lines.push(`✓ Created ${o.name} (${o.habit_type})`);
     } else if (o.tool === "edit_habit") {
-      lines.push(`✓ Updated ${o.habit_name}`);
+      const changedKeys = Object.keys(o.updates || {}).filter(k => k !== "updated_at");
+      if (changedKeys.length === 1 && changedKeys[0] === "goal_aim") {
+        lines.push(`✓ ${o.habit_name} — intent updated`);
+      } else if (changedKeys.includes("daily_budget")) {
+        lines.push(`✓ ${o.habit_name} — limit now ${o.updates.daily_budget}`);
+      } else {
+        lines.push(`✓ Updated ${o.habit_name}`);
+      }
     }
   }
   for (const o of outcomes) {
@@ -654,7 +661,7 @@ async function handler(req, res) {
             const r = await executeEditHabit(tb.input, userId, db, actionSafety);
             actions.edited.push(r);
             result = { success: true, habit_name: r.habit_name, fields_updated: Object.keys(r.updates).filter(k => k !== "updated_at") };
-            outcomes.push({ tool: "edit_habit", success: true, habit_name: r.habit_name });
+            outcomes.push({ tool: "edit_habit", success: true, habit_name: r.habit_name, updates: r.updates });
           } else if (tb.name === "log_habit") {
             const habitId = tb.input?.habit_id;
             if (habitId && loggedHabitIds.has(habitId)) {

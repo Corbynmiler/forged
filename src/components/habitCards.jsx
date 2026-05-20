@@ -9,6 +9,7 @@ import {
   getLevel, nextLevel, formatWithUnit, truncateText,
   getGoalProgress, goalBarFillWidthPct, getGoalPacing, getGoalStatusText,
   goalTodayDeadlineLine, fmtGoalDueHuman, getHabitCardStreakSuffix, fmtEntryDate,
+  getLimitDayTotal,
 } from "../utils.js";
 import { Modal, GBtn, PBtn, FG, lbl, inp, Stat, DoneBanner, Toggle } from "./ui.jsx";
 import { useSpeechInput, MicBtn, mergeDictationIntoText, polishInterimDisplay } from "../hooks/useSpeechInput.jsx";
@@ -471,7 +472,7 @@ export function ProjectCard({ habit, onOpenLog, onAddNote, onEditHabit, onDelete
 }
 
 // ─── LIMIT CARD ───────────────────────────────────────────────────────────────
-export function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit }) {
+export function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit, onLowerBudget, onOpenCoachWithDraft }) {
   const todayLogsArr = habit.logs.filter(l => l.date === todayStr() && l.value !== "quicknote");
   const used   = todayLogsArr.reduce((s, l) => s + (typeof l.value === "number" ? l.value : 0), 0);
   const budget = habit.dailyBudget || 60;
@@ -487,6 +488,28 @@ export function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHa
   const [countFlashPhase, setCountFlashPhase] = useState(0);
   const countFlashSeqRef = useRef(0);
   const longPeek = useTodayHabitLongPeekHandlers(setHabitMenuOpen, !!(onEditHabit && onDeleteHabit));
+
+  // ── Reduce nudge: show when goalAim=reduce and user is consistently under
+  const goalAim = habit.goalAim ?? "maintain";
+  let reduceNudge = null;
+  if (goalAim === "reduce") {
+    let daysLogged = 0, daysUnder = 0, totalUsage = 0;
+    for (let d = 0; d < 7; d++) {
+      const dayTotal = getLimitDayTotal(habit, daysAgo(d));
+      if (dayTotal !== null) {
+        daysLogged++;
+        totalUsage += dayTotal;
+        if (dayTotal <= budget) daysUnder++;
+      }
+    }
+    if (daysLogged >= 4 && daysUnder >= 5) {
+      const avgUsage = Math.round((totalUsage / daysLogged) * 10) / 10;
+      if (avgUsage < budget * 0.7) {
+        const suggested = Math.max(1, Math.min(Math.ceil(avgUsage), budget - 1));
+        reduceNudge = { avgUsage, suggested };
+      }
+    }
+  }
 
   function handleLimitPlusTap(e) {
     const seq = ++countFlashSeqRef.current;
@@ -544,6 +567,27 @@ export function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHa
           <span style={{ fontSize:11, color:T.hint, flexShrink:0, textAlign:"right", maxWidth:"42%" }}>Under limit once you log · or mark none</span>
           <button onClick={() => onLogZero(habit.id)} title="Mark that you had none today"
             style={{ fontSize:11, color:T.muted, background:"none", border:`0.5px solid ${T.border}`, borderRadius:T.rsm, padding:"3px 9px", cursor:"pointer", flexShrink:0, whiteSpace:"nowrap" }}>None today</button>
+        </div>
+      )}
+      {reduceNudge && (
+        <div style={{ padding:"8px 15px 10px", borderTop:`0.5px solid ${T.border}`, display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+          <span style={{ fontSize:12, color:T.muted, flex:1, minWidth:120, lineHeight:1.35 }}>
+            Averaging {reduceNudge.avgUsage}{unitSuffix}/day — ready to try {reduceNudge.suggested}?
+          </span>
+          {onLowerBudget && (
+            <button
+              onClick={() => onLowerBudget(habit.id, reduceNudge.suggested, budget)}
+              style={{ fontSize:11, fontWeight:600, color:T.green, background:"none", border:`0.5px solid ${T.green}55`, borderRadius:T.rsm, padding:"3px 9px", cursor:"pointer", whiteSpace:"nowrap" }}>
+              Lower to {reduceNudge.suggested}
+            </button>
+          )}
+          {onOpenCoachWithDraft && (
+            <button
+              onClick={() => onOpenCoachWithDraft(`My ${habit.name} limit is ${budget}${unitSuffix}/day but I've been averaging ${reduceNudge.avgUsage}${unitSuffix} — what do you think about lowering it?`)}
+              style={{ fontSize:11, color:T.muted, background:"none", border:`0.5px solid ${T.border}`, borderRadius:T.rsm, padding:"3px 9px", cursor:"pointer", whiteSpace:"nowrap" }}>
+              Ask coach
+            </button>
+          )}
         </div>
       )}
       {logged && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote}/>}

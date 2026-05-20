@@ -175,6 +175,7 @@ TOMORROW field rules:
 - Not a guilt trip — just useful
 
 - Skip "Why:", "Pattern:", and "Tomorrow:" lines entirely if there's nothing real to say for them
+- Never write speculative filler about unlogged habits. Forbidden phrases: "I'm not sure what happened", "hard to say why", "not sure why I didn't", "unclear why", "must have been", "probably just", "I guess", "not sure what got in the way". If a habit was unlogged with no context, name it once in the Missed field and move on — no editorializing.
 - Max 200 words total
 - PLAIN TEXT ONLY. No markdown. No asterisks, no bold (**), no underscores, no backticks, no special formatting characters whatsoever. The title is plain text.
 
@@ -257,7 +258,7 @@ async function handler(req, res) {
         "(3) Never invent a Pattern observation without clear evidence in the data. If nothing stands out, skip the Pattern line entirely. " +
         "(4) Keep the Tomorrow line constructive and practical, not guilt-inducing. " +
         "(5) Plain text only — no markdown, no asterisks, no special characters. " +
-        "(6) When habits are unlogged and there are no context notes explaining why, do not speculate about intent, willpower, or what might have happened — unlogged is just unlogged. Describe only what did happen, and leave the gaps neutral. Speculation without evidence makes the entry less accurate, not more.",
+        "(6) When habits are unlogged and there are no context notes explaining why, do not speculate — unlogged is just unlogged. Never write 'I'm not sure what happened', 'hard to say why', 'not sure why I didn't', 'unclear why', or similar filler. Name the gap once in the Missed field, leave the narrative neutral, and move on.",
       messages: [{ role: "user", content: prompt }],
     });
     generatedText = (resp.content || [])
