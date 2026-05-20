@@ -29,7 +29,7 @@ export function CoachBar({
   coachName, coachIcon, habitColor, onOpenMic, onOpenText, coachEverOpened,
   isListening = false, listeningInterim = "",
   speechError = "", micBlocked = false, errorDismissed = false, onDismissError,
-  onTryAgain, onCopyLink, copyLinkConfirm = "", onTypeInstead,
+  onTryAgain, onCopyLink, copyLinkConfirm = "", onTypeInstead, reserveRightPx = 0,
 }) {
   const suppressClickRef = useRef(false);
   const coachLabelRaw = (coachName ?? "").trim() || "Coach";
@@ -59,16 +59,18 @@ export function CoachBar({
       <div
         role="alert"
         style={{
-          padding:"6px 8px 7px",
+          padding:`6px ${Math.max(8, reserveRightPx)}px 7px 8px`,
           borderRadius:10,
           background:"rgba(24,24,22,0.96)",
           border:`0.5px solid ${T.accent}33`,
           fontSize:10.5,
           lineHeight:1.4,
           color:T.sub,
+          position:"relative",
+          zIndex:1,
         }}
       >
-        <div style={{ display:"flex", alignItems:"flex-start", gap:6 }}>
+        <div style={{ display:"flex", alignItems:"flex-start", gap:6, paddingRight: reserveRightPx > 0 ? 0 : undefined }}>
           <div style={{ flex:1, minWidth:0, color:T.accent, fontSize:10.5, lineHeight:1.4 }}>{issueText}</div>
           {onDismissError ? (
             <button
@@ -76,9 +78,10 @@ export function CoachBar({
               onClick={onDismissError}
               aria-label="Dismiss microphone message"
               style={{
-                flexShrink:0, width:22, height:22, marginTop:-1,
-                border:"none", borderRadius:6, background:"transparent",
-                color:T.muted, fontSize:16, lineHeight:1, cursor:"pointer",
+                flexShrink:0, width:26, height:26, marginTop:-2,
+                border:`0.5px solid ${T.border}`,
+                borderRadius:7, background:T.raised,
+                color:T.text, fontSize:15, lineHeight:1, cursor:"pointer",
                 display:"flex", alignItems:"center", justifyContent:"center",
               }}
             >

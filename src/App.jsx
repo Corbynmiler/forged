@@ -3530,7 +3530,13 @@ export default function App() {
             !showCoach && ["today", "journal", "insights", "social"].includes(screen);
           const safeBottom = "env(safe-area-inset-bottom, 0px)";
           const aboveNav = `calc(62px + ${safeBottom})`;
-          const aboveCoachBar = `calc(132px + ${safeBottom})`;
+          const showPageSpeechMicIssue =
+            showCoachBar &&
+            (pageSpeech.speechError || pageSpeech.micBlocked) &&
+            !pageSpeechBarDismissed;
+          const aboveCoachBar = showPageSpeechMicIssue
+            ? `calc(212px + ${safeBottom})`
+            : `calc(132px + ${safeBottom})`;
           return (
             <>
               {!showCoach && (pageGuide?.page === screen || coachPageNudge) ? (
@@ -3674,12 +3680,13 @@ export default function App() {
                     width:"100%",
                     maxWidth:430,
                     bottom:aboveNav,
-                    zIndex:101,
+                    zIndex: showPageSpeechMicIssue ? 103 : 101,
                     padding:"0 10px 0",
                     boxSizing:"border-box",
                   }}
                 >
                   <CoachBar
+                    reserveRightPx={showTodayAdd && showPageSpeechMicIssue ? 118 : 0}
                     coachName={coachName}
                     coachIcon={coachIcon}
                     habitColor={habitColor}
