@@ -55,6 +55,64 @@ export function CoachBar({
   const micIconColor = isListening ? "#ff6b6b" : micColor;
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:4, fontFamily:T.font }}>
+    {showMicIssue && issueText ? (
+      <div
+        role="alert"
+        style={{
+          padding:"6px 8px 7px",
+          borderRadius:10,
+          background:"rgba(24,24,22,0.96)",
+          border:`0.5px solid ${T.accent}33`,
+          fontSize:10.5,
+          lineHeight:1.4,
+          color:T.sub,
+        }}
+      >
+        <div style={{ display:"flex", alignItems:"flex-start", gap:6 }}>
+          <div style={{ flex:1, minWidth:0, color:T.accent, fontSize:10.5, lineHeight:1.4 }}>{issueText}</div>
+          {onDismissError ? (
+            <button
+              type="button"
+              onClick={onDismissError}
+              aria-label="Dismiss microphone message"
+              style={{
+                flexShrink:0, width:22, height:22, marginTop:-1,
+                border:"none", borderRadius:6, background:"transparent",
+                color:T.muted, fontSize:16, lineHeight:1, cursor:"pointer",
+                display:"flex", alignItems:"center", justifyContent:"center",
+              }}
+            >
+              ×
+            </button>
+          ) : null}
+        </div>
+        {copyLinkConfirm ? (
+          <div style={{ fontSize:10, color:T.gold, marginTop:5, lineHeight:1.35 }}>{copyLinkConfirm}</div>
+        ) : null}
+        {showFallbackActions ? (
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:6 }}>
+            {onTryAgain ? (
+              <button type="button" onClick={onTryAgain}
+                style={{ ...actionBtn, color:T.text, background:T.raised, border:`0.5px solid ${T.borderStrong}` }}>
+                Try again
+              </button>
+            ) : null}
+            {onCopyLink ? (
+              <button type="button" onClick={onCopyLink}
+                style={{ ...actionBtn, color:T.gold, background:"rgba(200,144,42,0.10)", border:`0.5px solid ${T.gold}44` }}>
+                Copy link
+              </button>
+            ) : null}
+            {onTypeInstead ? (
+              <button type="button" onClick={onTypeInstead}
+                style={{ ...actionBtn, color:T.sub, background:"transparent", border:`0.5px solid ${T.border}` }}>
+                Type instead
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    ) : null}
     <div
       data-tour="coach-fab"
       style={{
@@ -192,64 +250,6 @@ export function CoachBar({
         </button>
       </div>
     </div>
-    {showMicIssue && issueText ? (
-      <div
-        role="alert"
-        style={{
-          padding:"6px 8px 7px",
-          borderRadius:10,
-          background:"rgba(24,24,22,0.96)",
-          border:`0.5px solid ${T.accent}33`,
-          fontSize:10.5,
-          lineHeight:1.4,
-          color:T.sub,
-        }}
-      >
-        <div style={{ display:"flex", alignItems:"flex-start", gap:6 }}>
-          <div style={{ flex:1, minWidth:0, color:T.accent, fontSize:10.5, lineHeight:1.4 }}>{issueText}</div>
-          {onDismissError ? (
-            <button
-              type="button"
-              onClick={onDismissError}
-              aria-label="Dismiss microphone message"
-              style={{
-                flexShrink:0, width:22, height:22, marginTop:-1,
-                border:"none", borderRadius:6, background:"transparent",
-                color:T.muted, fontSize:16, lineHeight:1, cursor:"pointer",
-                display:"flex", alignItems:"center", justifyContent:"center",
-              }}
-            >
-              ×
-            </button>
-          ) : null}
-        </div>
-        {copyLinkConfirm ? (
-          <div style={{ fontSize:10, color:T.gold, marginTop:5, lineHeight:1.35 }}>{copyLinkConfirm}</div>
-        ) : null}
-        {showFallbackActions ? (
-          <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:6 }}>
-            {onTryAgain ? (
-              <button type="button" onClick={onTryAgain}
-                style={{ ...actionBtn, color:T.text, background:T.raised, border:`0.5px solid ${T.borderStrong}` }}>
-                Try again
-              </button>
-            ) : null}
-            {onCopyLink ? (
-              <button type="button" onClick={onCopyLink}
-                style={{ ...actionBtn, color:T.gold, background:"rgba(200,144,42,0.10)", border:`0.5px solid ${T.gold}44` }}>
-                Copy link
-              </button>
-            ) : null}
-            {onTypeInstead ? (
-              <button type="button" onClick={onTypeInstead}
-                style={{ ...actionBtn, color:T.sub, background:"transparent", border:`0.5px solid ${T.border}` }}>
-                Type instead
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-    ) : null}
     </div>
   );
 }
