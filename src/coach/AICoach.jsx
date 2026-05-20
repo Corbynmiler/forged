@@ -1629,9 +1629,51 @@ function buildCoachSystemPrompt(user, habits, coachName, screen, goals = [], jou
       if (todayMins > 0) detail += `, ${(todayMins/60).toFixed(1)}h logged today`;
     }
     if (h.habitType === "limit" && h.dailyBudget) {
+      const budget = h.dailyBudget;
+      const unit = h.unit || "";
       const todayTotal = getLimitDayTotal(h, today);
-      detail += `, daily limit: ${h.dailyBudget}${h.unit || ""}`;
-      if (todayTotal != null) detail += `, used today: ${todayTotal}${h.unit || ""}`;
+
+      // Compute 7-day window stats (day 0 = today, day 6 = six days ago).
+      // Only counting days with a real numeric log — unlogged days are not
+      // assumed to be 0 and do not count toward daysUnder.
+      let daysLogged = 0;
+      let daysUnder = 0;
+      let totalUsage = 0;
+      for (let d = 0; d < 7; d++) {
+        const dayTotal = getLimitDayTotal(h, daysAgo(d));
+        if (dayTotal != null) {
+          daysLogged++;
+          totalUsage += dayTotal;
+          if (dayTotal <= budget) daysUnder++;
+        }
+      }
+      const avgUsage = daysLogged > 0
+        ? Math.round((totalUsage / daysLogged) * 10) / 10
+        : null;
+
+      detail += `, daily limit: ${budget}${unit}`;
+      if (todayTotal != null) detail += `, used today: ${todayTotal}${unit}`;
+
+      // Append 7-day context when there is enough data to say something meaningful.
+      if (daysLogged >= 2) {
+        detail += `\n  Last 7 days: ${daysLogged}/7 days logged, avg ${avgUsage}${unit}/day, ${daysUnder}/${daysLogged} logged days at or under limit`;
+
+        // Reduction signal — future-safe for when goal_aim lands in the schema.
+        // Handles both camelCase (post-migration rowToHabit) and raw snake_case.
+        // Only fires when ALL four conditions are true: intent is "reduce",
+        // enough data exists, average is well under budget, and most logged days
+        // were under. The hint tells the coach to raise it naturally, not lecture.
+        const goalAim = h.goalAim ?? h.goal_aim ?? null;
+        if (
+          goalAim === "reduce" &&
+          daysLogged >= 4 &&
+          avgUsage !== null &&
+          avgUsage < budget * 0.7 &&
+          daysUnder >= 5
+        ) {
+          detail += `\n  ⚡ Reduction signal: averaging ${avgUsage}${unit}/day, well under the limit of ${budget}${unit}. If reducing is still the aim, they may be ready to try a lower cap — mention it naturally if it fits the conversation, not as a lecture.`;
+        }
+      }
     }
 
     // Recent reflections
