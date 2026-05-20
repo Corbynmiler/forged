@@ -18,13 +18,30 @@ import {
   getHabitCardStreakSuffix, truncateText,
 } from "../utils.js";
 import { Modal, GBtn, PBtn, FG, lbl, inp } from "../components/ui.jsx";
-import { useSpeechInput, MicBtn, mergeDictationIntoText, polishInterimDisplay } from "../hooks/useSpeechInput.jsx";
+import {
+  useSpeechInput, MicBtn, mergeDictationIntoText, polishInterimDisplay,
+  speechUnsupportedHelpMessage, shouldDeferCoachMicAutoStart, openForgedInSafari,
+  isLikelyHomeScreenPwa,
+} from "../hooks/useSpeechInput.jsx";
 import { useScrollLock } from "../hooks/useScrollLock.js";
 
-export function CoachBar({ coachName, coachIcon, habitColor, onOpenMic, onOpenText, coachEverOpened, isListening = false, listeningInterim = "" }) {
+export function CoachBar({
+  coachName, coachIcon, habitColor, onOpenMic, onOpenText, coachEverOpened,
+  isListening = false, listeningInterim = "",
+  speechError = "", micBlocked = false, onTryAgain, onOpenInSafari, onTypeInstead,
+}) {
+  const suppressClickRef = useRef(false);
   const coachLabelRaw = (coachName ?? "").trim() || "Coach";
   const micColor = habitColor || T.accent;
   const initial = coachLabelRaw.charAt(0).toUpperCase();
+  const showMicIssue = !!(speechError || micBlocked);
+  const issueText = speechError
+    || (micBlocked ? "Microphone blocked. Allow the mic for this site in Settings, then try again." : "");
+  const showFallbackActions = showMicIssue && (onTryAgain || onOpenInSafari || onTypeInstead);
+
+  function handleMicActivate() {
+    onOpenMic?.();
+  }
   // When listening: mic button glows red with a pulsing animation to signal recording
   const micBg = isListening
     ? `linear-gradient(145deg, #E74C3C88 0%, #E74C3C55 55%, #C0392B 100%)`
@@ -32,6 +49,7 @@ export function CoachBar({ coachName, coachIcon, habitColor, onOpenMic, onOpenTe
   const micBorderColor = isListening ? "#E74C3Ccc" : `${micColor}88`;
   const micIconColor = isListening ? "#ff6b6b" : micColor;
   return (
+    <div style={{ display:"flex", flexDirection:"column", gap:6, fontFamily:T.font }}>
     <div
       data-tour="coach-fab"
       style={{
@@ -40,12 +58,11 @@ export function CoachBar({ coachName, coachIcon, habitColor, onOpenMic, onOpenTe
         minHeight:52,
         padding:"8px 10px",
         background:T.surface,
-        borderTop:`0.5px solid ${isListening ? "#E74C3C55" : T.border}`,
+        borderTop:`0.5px solid ${isListening ? "#E74C3C55" : showMicIssue ? `${T.accent}55` : T.border}`,
         borderRadius:20,
         boxShadow: isListening
           ? "0 -4px 24px rgba(231,76,60,0.28)"
           : "0 -4px 20px rgba(0,0,0,0.35)",
-        fontFamily:T.font,
         transition:"box-shadow 0.2s, border-top-color 0.2s",
       }}
     >
@@ -95,7 +112,25 @@ export function CoachBar({ coachName, coachIcon, habitColor, onOpenMic, onOpenTe
       </div>
       <button
         type="button"
-        onClick={onOpenMic}
+        onPointerDown={(e) => {
+          if (e.button !== 0) return;
+          if (e.pointerType === "touch") return;
+          suppressClickRef.current = true;
+          window.setTimeout(() => { suppressClickRef.current = false; }, 400);
+          e.preventDefault();
+          handleMicActivate();
+        }}
+        onTouchEnd={(e) => {
+          suppressClickRef.current = true;
+          window.setTimeout(() => { suppressClickRef.current = false; }, 400);
+          if (e.cancelable) e.preventDefault();
+          handleMicActivate();
+        }}
+        onClick={(e) => {
+          e.preventDefault();
+          if (suppressClickRef.current) return;
+          handleMicActivate();
+        }}
         aria-label={isListening ? "Stop listening" : `${coachLabelRaw} — voice`}
         title={isListening ? "Stop" : "Voice"}
         style={{
@@ -113,6 +148,8 @@ export function CoachBar({ coachName, coachIcon, habitColor, onOpenMic, onOpenTe
             ? "coachFabPulse 1s ease-in-out infinite"
             : coachEverOpened ? undefined : "coachFabPulse 2.4s ease-in-out infinite",
           transition:"background 0.2s, border-color 0.2s, box-shadow 0.2s, color 0.2s",
+          touchAction:"manipulation",
+          WebkitTapHighlightColor:"transparent",
         }}
       >
         {isListening ? (
@@ -149,6 +186,45 @@ export function CoachBar({ coachName, coachIcon, habitColor, onOpenMic, onOpenTe
           </svg>
         </button>
       </div>
+    </div>
+    {showMicIssue && issueText ? (
+      <div
+        role="alert"
+        style={{
+          padding:"8px 12px 10px",
+          borderRadius:12,
+          background:"rgba(24,24,22,0.98)",
+          border:`0.5px solid ${T.accent}44`,
+          fontSize:11,
+          lineHeight:1.5,
+          color:T.sub,
+        }}
+      >
+        <div style={{ color:T.accent, marginBottom: showFallbackActions ? 8 : 0 }}>{issueText}</div>
+        {showFallbackActions ? (
+          <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+            {onTryAgain ? (
+              <button type="button" onClick={onTryAgain}
+                style={{ fontSize:11, fontWeight:600, color:T.text, background:T.raised, border:`0.5px solid ${T.borderStrong}`, borderRadius:8, padding:"6px 10px", cursor:"pointer" }}>
+                Try again
+              </button>
+            ) : null}
+            {onOpenInSafari ? (
+              <button type="button" onClick={onOpenInSafari}
+                style={{ fontSize:11, fontWeight:600, color:T.gold, background:"rgba(200,144,42,0.12)", border:`0.5px solid ${T.gold}44`, borderRadius:8, padding:"6px 10px", cursor:"pointer" }}>
+                Open in Safari
+              </button>
+            ) : null}
+            {onTypeInstead ? (
+              <button type="button" onClick={onTypeInstead}
+                style={{ fontSize:11, fontWeight:600, color:T.sub, background:"none", border:`0.5px solid ${T.border}`, borderRadius:8, padding:"6px 10px", cursor:"pointer" }}>
+                Type instead
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    ) : null}
     </div>
   );
 }
@@ -2712,7 +2788,12 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
           onUpgrade?.();
           return;
         }
-        if (!speech.supported) return;
+        if (!speech.supported) {
+          alert(speechUnsupportedHelpMessage());
+          return;
+        }
+        // iOS Home Screen PWA: delayed start breaks user-gesture; tap mic in the sheet instead.
+        if (shouldDeferCoachMicAutoStart()) return;
         speech.toggle();
       }
     }, 160);
@@ -3311,8 +3392,27 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
             </div>
           ) : null}
           {speech.supported && speech.speechError ? (
-            <div style={{ fontSize:11, color:T.accent, marginTop:8, padding:"0 2px", lineHeight:1.5, whiteSpace:"pre-line" }}>
-              {speech.speechError}
+            <div style={{ marginTop:8, padding:"0 2px" }}>
+              <div style={{ fontSize:11, color:T.accent, lineHeight:1.5, whiteSpace:"pre-line" }}>
+                {speech.speechError}
+              </div>
+              {isLikelyHomeScreenPwa() && isPro ? (
+                <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginTop:8 }}>
+                  <button type="button" onClick={() => speech.toggle()}
+                    style={{ fontSize:11, fontWeight:600, color:T.text, background:T.raised, border:`0.5px solid ${T.borderStrong}`, borderRadius:8, padding:"6px 10px", cursor:"pointer" }}>
+                    Try again
+                  </button>
+                  <button type="button" onClick={openForgedInSafari}
+                    style={{ fontSize:11, fontWeight:600, color:T.gold, background:"rgba(200,144,42,0.12)", border:`0.5px solid ${T.gold}44`, borderRadius:8, padding:"6px 10px", cursor:"pointer" }}>
+                    Open in Safari
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {isPro && speech.supported && !speech.listening && !speech.speechError && shouldDeferCoachMicAutoStart() && openInputMode === "mic" ? (
+            <div style={{ fontSize:11, color:T.muted, marginTop:8, padding:"0 2px", lineHeight:1.45 }}>
+              Tap the mic below to start dictation in the installed app.
             </div>
           ) : null}
             </>

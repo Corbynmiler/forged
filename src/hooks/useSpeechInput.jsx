@@ -101,6 +101,33 @@ export function speechServiceBlockedHelpMessage() {
   return "Voice typing didn't start. Allow the microphone for this site in your browser settings, or type your entry instead.";
 }
 
+/** User-visible message when SpeechRecognition.start() or construction fails. */
+export function speechMicStartFailedMessage() {
+  if (isAppleMobileDevice() && isLikelyHomeScreenPwa()) {
+    return "Microphone didn't start in the installed app. Try opening Forged in Safari, or type instead.";
+  }
+  return "Voice input didn't start. Allow the microphone for this site and try again, or type instead.";
+}
+
+/**
+ * iOS Home Screen PWA: auto-starting SR after a setTimeout loses the user-gesture
+ * chain. Defer to an in-sheet mic tap instead.
+ */
+export function shouldDeferCoachMicAutoStart() {
+  return isAppleMobileDevice() && isLikelyHomeScreenPwa();
+}
+
+/** Best-effort: open the current URL outside the standalone web app (often Safari on iOS). */
+export function openForgedInSafari() {
+  if (typeof window === "undefined") return;
+  const url = window.location.href;
+  try {
+    window.open(url, "_blank", "noopener,noreferrer");
+  } catch {
+    try { window.location.assign(url); } catch { /* ignore */ }
+  }
+}
+
 // ─── SPEECH UTILITY FUNCTIONS ─────────────────────────────────────────────────
 /** BCP-47 tag for SpeechRecognition; bare `en` → `en-US` for broader engine support on Chromium. */
 export function speechRecognitionLangTag() {
@@ -462,8 +489,10 @@ export function useSpeechInput(onFinal, opts = {}) {
     let recog;
     try {
       recog = new SR();
-    } catch {
+    } catch (e) {
+      console.warn("[speech] SpeechRecognition constructor:", e);
       stream?.getTracks().forEach(t => t.stop());
+      setSpeechError(speechMicStartFailedMessage());
       return;
     }
 
@@ -578,7 +607,7 @@ export function useSpeechInput(onFinal, opts = {}) {
       if (stream) startVolumeMeter(stream);
     } catch (e) {
       console.warn("[speech] recog.start:", e);
-      // Let stopAll stop recognition and tracks (do not clear r.recog here first).
+      setSpeechError(speechMicStartFailedMessage());
       stopAll();
     }
     // onFinal intentionally omitted — we read it via onFinalRef so this

@@ -57,6 +57,7 @@ import {
   mergeDictationIntoText,
   polishInterimDisplay,
   isLikelyHomeScreenPwa,
+  openForgedInSafari,
   MicBtn,
 } from "./hooks/useSpeechInput.jsx";
 import { useScrollLock } from "./hooks/useScrollLock.js";
@@ -3691,6 +3692,14 @@ export default function App() {
                     coachEverOpened={coachEverOpened}
                     isListening={pageSpeech.listening}
                     listeningInterim={pageSpeech.interim || ""}
+                    speechError={pageSpeech.speechError || ""}
+                    micBlocked={pageSpeech.micBlocked}
+                    onTryAgain={() => {
+                      if (!pageSpeech.listening) pageDictationAccumulatorRef.current = "";
+                      pageSpeech.toggle();
+                    }}
+                    onOpenInSafari={isLikelyHomeScreenPwa() ? openForgedInSafari : undefined}
+                    onTypeInstead={() => openCoachWithMode("text")}
                   />
                 </div>
               ) : null}
