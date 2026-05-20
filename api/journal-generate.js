@@ -216,9 +216,49 @@ async function handler(req, res) {
 
   const db = createClient(SUPABASE_URL, serviceRoleKey);
 
-  const { date: rawDate, habits, goals, name } = req.body || {};
+  // Accept date and display name from the client; ignore client-sent habits/goals.
+  // Habits and logs are always fetched directly from Supabase so journal generation
+  // reflects the latest writes from the coach — never stale client state.
+  const { date: rawDate, name } = req.body || {};
 
   const date = DATE_RE.test(rawDate) ? rawDate : new Date().toISOString().slice(0, 10);
+
+  // ── Fetch authoritative habit + log data from Supabase ────────────────────────
+  const { data: habitRows, error: habitsErr } = await db
+    .from("habits")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at");
+
+  if (habitsErr) {
+    console.error("[journal-generate] habits fetch failed:", habitsErr.message);
+    return res.status(500).json({ error: "Could not load your habits." });
+  }
+
+  // Split into habits and goals. Raw DB rows use snake_case which matches what
+  // buildGenerationPrompt() expects (habit_type, goal_aim, daily_budget, etc.).
+  const habits = (habitRows || []).filter(
+    r => r.habit_type !== "goal" && r.habit_type !== "progress"
+  );
+  const goals = (habitRows || [])
+    .filter(r => r.habit_type === "goal" || r.habit_type === "progress")
+    .map(r => {
+      const logs = r.logs || [];
+      const numericLogs = logs
+        .filter(l => typeof l.value === "number")
+        .sort((a, b) => (a.date < b.date ? -1 : 1));
+      const currentValue =
+        numericLogs.length > 0
+          ? numericLogs[numericLogs.length - 1].value
+          : (r.start_value ?? 0);
+      return {
+        ...r,
+        currentValue,
+        targetValue: r.target_value ?? 0,
+        startValue:  r.start_value  ?? 0,
+        status:      r.goal_status  ?? "active",
+      };
+    });
 
   // Fetch any existing journal entry for today
   const { data: existing } = await db
