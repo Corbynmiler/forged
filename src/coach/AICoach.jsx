@@ -2809,7 +2809,8 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
       const used = applyCoachRemainingFromServer(serverRemaining);
       setFreeCoachMsgsToday(used != null ? used : bumpCoachMsgCountInStorage());
     };
-    setInput("");
+    // Do NOT clear input here — only clear after a successful completed response.
+    // This preserves the user's message for retry if the request fails.
     setError(null);
     const sendDay = todayStr();
     let baseMessages = messages;
@@ -2859,7 +2860,10 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
           setMessages(prev => prev.filter(m => m.id !== COACH_STREAM_ID));
           return;
         }
-        throw new Error(data?.error || "Something went wrong");
+        // Attach retryable flag so the catch block can communicate it in the error message.
+        const err = new Error(data?.error || "Something went wrong");
+        err.retryable = data?.retryable ?? false;
+        throw err;
       }
 
       // ── Stream the response word-by-word ────────────────────────────────────
@@ -2895,7 +2899,12 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
                 bottomRef.current?.scrollIntoView({ behavior: "smooth" });
               }
               if (evt.done) {
-                bumpAfterSuccess(evt.remaining);
+                // Always clear input on done — whether success or partial-success.
+                // Tools may have already saved data; clearing prevents accidental re-send.
+                setInput("");
+
+                if (!evt.error) bumpAfterSuccess(evt.remaining);
+
                 const receiptBlock = evt.receipt && String(evt.receipt).trim()
                   ? `\n\n${String(evt.receipt).trim()}`
                   : "";
@@ -2948,7 +2957,17 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
                   onJournalLogged?.(evt.journaled);
                 }
 
-                if (evt.error) setError(evt.error);
+                // ── Error on done (e.g. confirm-stream failed after tools ran) ─
+                // Receipt chips already rendered above. Show the error underneath.
+                // Do NOT suggest retry — tools already saved data; resending would double-log.
+                if (evt.error) {
+                  const hasReceipt = !!(evt.receipt && String(evt.receipt).trim());
+                  setError(
+                    hasReceipt
+                      ? `${evt.error} (habits above were saved — don't resend)`
+                      : evt.error
+                  );
+                }
               }
             } catch { /* malformed line — skip */ }
           }
@@ -2963,8 +2982,10 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
     } catch (e) {
       setLoading(false);
       setIsExecutingAction(false);
-      // Remove incomplete stream message if present
-      setMessages(prev => prev.filter(m => m.id !== COACH_STREAM_ID));
+      // Roll back to pre-send state so the user can retry cleanly
+      setMessages(baseMessages);
+      if (user?.id) saveCoachDayMessages(user.id, sendDay, baseMessages);
+      setInput(trimmed); // restore input — never lost on failure
       setError(e.message || "Couldn't reach the coach. Try again.");
     } finally {
       setLoading(false);

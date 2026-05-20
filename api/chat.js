@@ -508,6 +508,32 @@ function sse(res, data) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
+// ── Anthropic overload detection ───────────────────────────────────────────────
+// 529 is Anthropic's "overloaded" status. The SDK wraps it as InternalServerError
+// (all 5xx share that class). The error body is { type:"error", error:{ type:"overloaded_error" } }
+// so err.error.error.type is the reliable check; err.status===529 is the fast path.
+function isOverloadedError(err) {
+  return err?.status === 529 || err?.error?.error?.type === "overloaded_error";
+}
+
+// ── Retry wrapper for the FIRST Anthropic call only ────────────────────────────
+// Only wrap calls made before any tools execute. Never retry after tools run —
+// that risks double-logging habits.
+async function withRetry(fn, maxAttempts = 2, delayMs = 1500) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (isOverloadedError(err) && attempt < maxAttempts) {
+        console.warn("[chat] overload on attempt", attempt, "— retrying in", delayMs, "ms");
+        await new Promise(r => setTimeout(r, delayMs));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 // ── Free-tier server-side rate limit ───────────────────────────────────────────
 // Keep in sync with client-side FREE_DAILY_LIMIT in src/theme.js.
 const FREE_DAILY_LIMIT = 3;
@@ -592,15 +618,21 @@ async function handler(req, res) {
   const trimmedMessages = messages.slice(-12);
   const actionSafety = buildActionSafety(trimmedMessages);
 
+  // Hoisted so the catch block can include them in error context and partial-success SSE.
+  // toolsRan = true means tool calls have already executed — do NOT retry (would double-log).
+  let toolsRan = false;
+  let receiptForCatch = "";
+  let actionsForCatch = { created: [], edited: [], logged: [], noted: [] };
+
   try {
     // ── First call — detect tool_use ─────────────────────────────────────────
-    // max_tokens MUST be generous enough to fit ALL tool_use blocks the model
-    // wants to emit. Mixed dumps (many habits + add_daily_note) need headroom.
-    const firstResp = await client.messages.create({
+    // Wrapped in withRetry: one automatic retry after 1.5 s on 529 overload.
+    // ONLY the first call is retried — after tools run we must not retry.
+    const firstResp = await withRetry(() => client.messages.create({
       model: "claude-haiku-4-5", max_tokens: 2048,
       system: cachedSystem(system), tools,
       messages: trimmedMessages,
-    });
+    }));
 
     const firstToolBlocks = (firstResp.content || []).filter(b => b.type === "tool_use");
     console.log("[chat] firstResp", {
@@ -725,6 +757,11 @@ async function handler(req, res) {
         }).length,
       });
 
+      // Tools have executed — mark so the catch block knows not to suggest retry
+      // and can surface the receipt even if the confirmation stream fails.
+      toolsRan = true;
+      actionsForCatch = actions;
+
       // Stream confirmation — Claude now knows exact success/failure per action.
       // We intentionally leave `tools` available so Claude can chain a follow-up
       // tool call if needed (rare). max_tokens 480: enough for several warm
@@ -734,6 +771,7 @@ async function handler(req, res) {
       res.setHeader("X-Accel-Buffering", "no");
 
       const receiptText = buildActionReceipt(outcomes);
+      receiptForCatch = receiptText;
 
       const confirmStream = client.messages.stream({
         model: "claude-haiku-4-5", max_tokens: 900,
@@ -806,11 +844,46 @@ async function handler(req, res) {
     return res.end();
 
   } catch (err) {
-    console.error("[chat] error:", err?.status, err?.message);
-    captureException(err, { route: "chat", userId, status: err?.status });
-    const msg = err?.error?.message || err?.message || "Something went wrong.";
-    if (!res.headersSent) return res.status(err?.status || 500).json({ error: msg });
-    sse(res, { error: msg, done: true });
+    const overloaded = isOverloadedError(err);
+    // err.error is the raw Anthropic response body: { type:"error", error:{ type, message } }
+    // err.error.error.message is the human-readable string ("Overloaded").
+    // err.message is the SDK-formatted string: "529 {json}" — never show that raw.
+    const cleanMsg = overloaded
+      ? "The coach got overloaded. Your message is safe — try again in a few seconds."
+      : (err?.error?.error?.message || err?.message || "Something went wrong.");
+
+    console.error("[chat] error", {
+      status:    err?.status,
+      errorType: err?.error?.error?.type || err?.type || null,
+      retryable: overloaded,
+      toolsRan,
+      userId,
+      message:   err?.message,
+    });
+    captureException(err, {
+      route:     "chat",
+      userId,
+      status:    err?.status,
+      errorType: err?.error?.error?.type || err?.type || null,
+      retryable: overloaded,
+      toolsRan,
+    });
+
+    if (!res.headersSent) {
+      return res.status(err?.status || 500).json({ error: cleanMsg, retryable: overloaded });
+    }
+    // Headers already sent (SSE open) — tools may have run. Send receipt so the
+    // client can show what was saved even though the confirm stream failed.
+    sse(res, {
+      error:    cleanMsg,
+      retryable: overloaded && !toolsRan, // retrying is only safe if tools haven't run yet
+      done:     true,
+      receipt:  receiptForCatch || null,
+      created:  actionsForCatch.created.length ? actionsForCatch.created : null,
+      edited:   actionsForCatch.edited.length  ? actionsForCatch.edited  : null,
+      logged:   actionsForCatch.logged.length  ? actionsForCatch.logged  : null,
+      noted:    actionsForCatch.noted.length   ? actionsForCatch.noted   : null,
+    });
     return res.end();
   }
 }
