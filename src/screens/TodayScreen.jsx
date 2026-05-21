@@ -96,7 +96,13 @@ function buildCoachGreetingLine({ habits, goals }) {
   }
 
   if (all)  return tod === "morning" ? "All habits in — you're ahead today." : tod === "afternoon" ? "Full sweep already — nice." : "Everything logged — how was the day?";
-  if (some) return tod === "morning" ? "Good start — clear the rest when ready." : tod === "afternoon" ? "Halfway through — log what's left?" : "Solid progress — finish the set tonight?";
+  if (some) {
+    const rem = total - loggedCount;
+    if (rem === 1) return "One left — finish it off.";
+    return tod === "morning" ? `Good start — ${rem} more to go.`
+      : tod === "afternoon" ? `Almost there — ${rem} left.`
+      : `Solid progress — ${rem} left tonight.`;
+  }
   if (none) return tod === "morning" ? "Morning — tap a habit when you're ready." : tod === "afternoon" ? "Still time to log something today." : "Evening — log what you got done?";
   return tod === "morning" ? "How's the morning going?" : tod === "evening" ? "How did today go?" : "How's the day going?";
 }
@@ -297,7 +303,11 @@ export function TodayScreen({
   const totalTrackables = trackHabits.length;
   const pct = totalTrackables ? Math.round((loggedCount / totalTrackables) * 100) : 0;
   const hr  = new Date().getHours();
-  const greeting = hr < 12 ? "Rise and forge." : hr < 17 ? "Keep the heat up." : "Finish strong.";
+  const timeGreeting = hr < 12 ? "Rise and forge." : hr < 17 ? "Keep the heat up." : "Finish strong.";
+  const greeting = pct === 0 ? timeGreeting
+    : pct < 50  ? "Building momentum."
+    : pct < 100 ? "More than halfway."
+    : timeGreeting; // pct === 100 is overridden in JSX to "Forged for today"
   const level = getLevel(xp);
   const daily   = habits.filter(h => h.habitType === "daily");
   const limit   = habits.filter(h => h.habitType === "limit");
@@ -378,7 +388,7 @@ export function TodayScreen({
         </button>
       )}
       {onOpenCoachMic && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic} habitCompletionPercentage={pct} habitsLoggedTodayCount={loggedCount} totalTrackables={totalTrackables}/>}
-      <YesterdayReceiptCard entry={yesterdayJournalEntry} />
+      {loggedCount === 0 && <YesterdayReceiptCard entry={yesterdayJournalEntry} />}
       {showBriefHook && (
         <button type="button" onClick={onOpenBrief}
           style={{ display:"flex", alignItems:"center", gap:12, width:"calc(100% - 28px)", margin:"8px 14px 0", padding:"12px 14px", background:"linear-gradient(90deg, rgba(200,144,42,0.12), rgba(200,144,42,0.04))", border:"0.5px solid rgba(200,144,42,0.4)", borderRadius:T.rsm, cursor:"pointer", textAlign:"left", fontFamily:T.font, boxSizing:"border-box" }}>
