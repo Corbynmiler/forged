@@ -1,7 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { T, COACH_ICON_OPTIONS, WEEKLY_SUMMARY_TTL_MS, CREATOR_ID, HABIT_TYPES, XP_LEVELS, COLORS, DAYS, MONTHS, FREE_DAILY_LIMIT } from "../theme.js";
-import { supabase } from "../supabase.js";
+import { supabase, rowToHabit, rowToGoal } from "../supabase.js";
 import {
   todayStr, daysAgo, parseLocal, fmtDate, fmtEntryDate, fmtWeekRange,
   currentWeekStart, weekStartFor,
@@ -2906,6 +2906,10 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
     textareaRef.current?.blur();
     const trimmed = text.trim();
     if (!trimmed || loading) return;
+    // Stop speech recognition as soon as the text is captured. Prevents
+    // autoRestart from re-firing the last segment into the cleared input after
+    // evt.done. On request failure the text is still restored via setInput(trimmed).
+    speech.cancel?.();
     if (!isPro) {
       const c = syncCoachMsgCountFromStorage();
       setFreeCoachMsgsToday(c);
