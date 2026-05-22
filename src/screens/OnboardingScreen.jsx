@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { T, COLORS, HABIT_TYPES } from "../theme.js";
-import { supabase, SUPABASE_ANON_KEY } from "../supabase.js";
+import { supabase } from "../supabase.js";
 import { todayStr, daysAgo, isLegacyProgressType, inferProgressDirection, getStreak, isSatisfiedForTodayRing } from "../utils.js";
 import { Modal, GBtn, PBtn, Ring } from "../components/ui.jsx";
 import { useSpeechInput, MicBtn } from "../hooks/useSpeechInput.jsx";
@@ -176,8 +176,17 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
     setCoachIntroLoading(true);
     (async () => {
       try {
+        // onboard-chat now requires a real Supabase user JWT (api/onboard-chat.js
+        // validates via auth.getUser). The previous anon-key fallback would 401
+        // under the new gate — if the session isn't ready yet, skip the opener
+        // and let the user start the conversation manually. The catch path
+        // below already handles "chat stays empty until user types".
         const { data: { session } } = await supabase.auth.getSession();
-        const token = session?.access_token ?? SUPABASE_ANON_KEY;
+        const token = session?.access_token;
+        if (!token) {
+          setCoachIntroLoading(false);
+          return;
+        }
         const ctrl = new AbortController();
         const tid = setTimeout(() => ctrl.abort(), 6000);
         const res = await fetch("/api/onboard-chat", {
@@ -364,11 +373,20 @@ After creating, tell them they can log from Today and chat with you anytime.`;
       // user:"." → assistant:opener → user:msg1 → assistant:reply1 → user:msg2 …
       const apiMessages = [{ role: "user", content: "." }, ...withUser];
 
-      // Route onboarding chat through /api/onboard-chat (no auth/quota requirements)
-      // so it never burns the user's free daily coach limit during setup.
+      // Route onboarding chat through /api/onboard-chat. The route now requires
+      // a real Supabase user JWT (no anon-key fallback), but is still exempt
+      // from the 3/day chat_usage cap so it doesn't burn the user's free daily
+      // coach limit during setup.
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("No session");
+
       const res = await fetch("/api/onboard-chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
         body: JSON.stringify({
           name: name.trim() || "there",
           coachName: coachNameInput.trim() || "Coach",

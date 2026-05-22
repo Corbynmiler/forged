@@ -1,5 +1,15 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { createClient } from "@supabase/supabase-js";
 import { withSentry } from "./_lib/sentry.js";
+
+const SUPABASE_URL = "https://apdmvbzfjuvxworjepze.supabase.co";
+// Anon key is public — safe to hardcode (matches src/supabase.js).
+const SUPABASE_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFwZG12YnpmanV2eHdvcmplcHplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MzU4MzAsImV4cCI6MjA5MDIxMTgzMH0.s3O-0m7eN9dLTmCagjezHP4Wwn8fdtlCyXITkI82bPU";
+
+// Cap message history sent to Anthropic. Mirrors api/chat.js (messages.slice(-12))
+// so a single onboarding session can't be abused into an unbounded thread.
+const ONBOARD_MSG_WINDOW = 12;
 
 async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -10,9 +20,35 @@ async function handler(req, res) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: "Not configured" });
 
+  // ── Auth: REQUIRED ───────────────────────────────────────────────────────────
+  // Onboarding happens AFTER Supabase signup, so by the time this route fires
+  // the caller has a session. We validate the JWT here so anonymous traffic
+  // can't burn Anthropic credit. We deliberately do NOT touch chat_usage —
+  // onboarding chat is intentionally exempt from the 3/day free coach cap so
+  // a new user can keep chatting during setup without burning their allowance.
+  const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
+  if (!token) return res.status(401).json({ error: "Not authenticated" });
+
+  try {
+    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+    const { data: { user }, error: authErr } = await userClient.auth.getUser();
+    if (authErr || !user?.id) return res.status(401).json({ error: "Invalid token" });
+  } catch {
+    return res.status(401).json({ error: "Invalid token" });
+  }
+
   const { name, coachName, habitName, habitType, messages = [] } = req.body || {};
 
-  const isOpener = messages.length === 0;
+  // Defense-in-depth: cap the incoming message history. Onboarding never needs
+  // more than a handful of turns; this stops a malicious payload from billing
+  // an oversized prompt.
+  const trimmedMessages = Array.isArray(messages)
+    ? messages.slice(-ONBOARD_MSG_WINDOW)
+    : [];
+
+  const isOpener = trimmedMessages.length === 0;
 
   const system = `You are ${coachName || "a habit coach"} — the AI coach inside Forged, a personal habit tracking app. You are meeting ${name || "someone"} for the very first time.
 
@@ -30,10 +66,11 @@ Rules:
     : `Respond to what they actually said. Don't always ask another question. Sometimes just say something real and direct. Keep the conversation moving forward.`}`;
 
   // For the opener, use a neutral trigger so the assistant goes first.
-  // For follow-ups, the caller sends the full alternating conversation history.
+  // For follow-ups, the caller sends the alternating conversation history,
+  // capped at the most recent ONBOARD_MSG_WINDOW turns.
   const apiMessages = isOpener
     ? [{ role: "user", content: "." }]
-    : messages;
+    : trimmedMessages;
 
   try {
     const client = new Anthropic({ apiKey: apiKey.trim() });
