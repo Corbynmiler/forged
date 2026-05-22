@@ -1230,7 +1230,7 @@ export function EditModal({ habit, onClose, onSave }) {
 }
 
 // ─── ADD MODAL ────────────────────────────────────────────────────────────────
-export function AddModal({ onClose, onSave }) {
+export function AddModal({ onClose, onSave, habitCount = 0 }) {
   const [step,        setStep]        = useState("type");
   const [habitType,   setHabitType]   = useState(null);
   const [name,        setName]        = useState("");
@@ -1247,7 +1247,17 @@ export function AddModal({ onClose, onSave }) {
   if (step === "type") return (
     <Modal onClose={onClose}>
       <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, marginBottom:4 }}>New habit</div>
-      <div style={{ fontSize:13, color:T.muted, marginBottom:22 }}>What are you forging?</div>
+      <div style={{ fontSize:13, color:T.muted, marginBottom: habitCount >= 5 ? 12 : 22 }}>What are you forging?</div>
+      {habitCount >= 8 && (
+        <div style={{ marginBottom:16, padding:"10px 12px", borderRadius:T.rsm, background:"rgba(200,144,42,0.08)", border:"0.5px solid rgba(200,144,42,0.35)", fontSize:12, color:T.sub, lineHeight:1.5 }}>
+          <span style={{ fontWeight:600, color:T.gold }}>You&apos;re tracking a lot.</span>{" "}Adding more risks tracking nothing well. Add this one if it genuinely matters more than something you already have.
+        </div>
+      )}
+      {habitCount >= 5 && habitCount < 8 && (
+        <div style={{ marginBottom:16, padding:"10px 12px", borderRadius:T.rsm, background:"rgba(200,144,42,0.06)", border:"0.5px solid rgba(200,144,42,0.25)", fontSize:12, color:T.sub, lineHeight:1.5 }}>
+          Three real habits beat nine abandoned ones. Add this one if it matters most right now.
+        </div>
+      )}
       {Object.entries(HABIT_TYPES).map(([key, { label, desc, icon }]) => (
         <button key={key} onClick={() => { setHabitType(key); setStep("details"); }}
           style={{ display:"flex", alignItems:"flex-start", gap:12, width:"100%", padding:"12px 14px", borderRadius:T.rsm, border:`0.5px solid ${T.borderStrong}`, background:T.surface, marginBottom:8, cursor:"pointer", textAlign:"left" }}>

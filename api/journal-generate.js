@@ -19,7 +19,7 @@ function formatDate(ymd) {
 // (rest, recovery, sick, social, time off) rather than a genuine miss.
 const REST_DAY_NOTE_RE = /\b(rest day|rest_day|recovery|day off|took the day off|sick|ill|not feeling well|under the weather|rough day|rough physically|tired|exhausted|burnt out|burned out|injury|injured|wrist|back pain|social day|family day|travel day|planned rest|no gym|off day)\b/i;
 
-function buildGenerationPrompt({ date, habits, goals, name, existingNotes }) {
+function buildGenerationPrompt({ date, habits, goals, name, existingNotes, doneTasks = [], pendingTasks = [] }) {
   const displayDate = formatDate(date);
   const lines = [];
 
@@ -125,6 +125,18 @@ function buildGenerationPrompt({ date, habits, goals, name, existingNotes }) {
   if (notesText) {
     lines.push("Context / notes from today's conversations:");
     lines.push(notesText);
+    lines.push("");
+  }
+
+  if (doneTasks.length > 0) {
+    lines.push("Loose ends cleared today (one-off tasks, not habits):");
+    doneTasks.forEach(t => lines.push(`- ${t}`));
+    lines.push("");
+  }
+
+  if (pendingTasks.length > 0) {
+    lines.push("Loose ends not cleared today:");
+    pendingTasks.forEach(t => lines.push(`- ${t}`));
     lines.push("");
   }
 
@@ -282,7 +294,22 @@ async function handler(req, res) {
     ...(manualContent ? [`User's manual note: ${manualContent}`] : []),
   ].join("\n");
 
-  const prompt = buildGenerationPrompt({ date, habits, goals, name, existingNotes });
+  // Fetch loose ends (tasks) for the date — non-fatal
+  let doneTasks = [];
+  let pendingTasks = [];
+  try {
+    const { data: taskRows } = await db
+      .from("tasks")
+      .select("text, done")
+      .eq("user_id", userId)
+      .eq("date", date);
+    if (taskRows) {
+      doneTasks    = taskRows.filter(t => t.done).map(t => t.text);
+      pendingTasks = taskRows.filter(t => !t.done).map(t => t.text);
+    }
+  } catch { /* tasks are non-blocking — proceed without them */ }
+
+  const prompt = buildGenerationPrompt({ date, habits, goals, name, existingNotes, doneTasks, pendingTasks });
 
   const client = new Anthropic({ apiKey: apiKey.trim() });
 

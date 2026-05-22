@@ -1,7 +1,7 @@
 
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
 import { flushSync, createPortal } from "react-dom";
-import { supabase, habitToRow, rowToHabit, rowToGoal, goalToRow } from "./supabase.js";
+import { supabase, habitToRow, rowToHabit, rowToGoal, goalToRow, rowToTask, taskToRow } from "./supabase.js";
 
 // Theme
 import {
@@ -167,6 +167,7 @@ export default function App() {
   const [showAddGoal,    setShowAddGoal]    = useState(false);
   const [showAddChoice,  setShowAddChoice]  = useState(false);
   const [showAddLog,        setShowAddLog]        = useState(false);
+  const [tasks,             setTasks]             = useState([]);
   const [journalEntries,    setJournalEntries]    = useState([]);
   const [showJournalCompose,setShowJournalCompose]= useState(false);
   const [generatingReceipt, setGeneratingReceipt] = useState(false);
@@ -1592,6 +1593,16 @@ export default function App() {
           .eq("user_id", uid).order("date", { ascending: false })
           .then(({ data: jRows }) => {
             if (jRows) setJournalEntries(jRows);
+          });
+
+        // Load tasks: today's tasks + pinned undone carry-overs from previous days (non-fatal)
+        const todayIso = new Date().toISOString().slice(0, 10);
+        supabase.from("tasks").select("*")
+          .eq("user_id", uid)
+          .or(`date.eq.${todayIso},and(pinned.eq.true,done.eq.false)`)
+          .order("created_at")
+          .then(({ data: tRows }) => {
+            if (tRows) setTasks(tRows.map(rowToTask));
           });
       } catch (err) {
         console.error("loadUserData: fetch failed —", err.message);
@@ -3139,6 +3150,83 @@ export default function App() {
     }
   }
 
+  // ── Loose Ends (tasks) handlers ───────────────────────────────────────────────
+
+  async function handleAddTask(text) {
+    const uid = userIdRef.current;
+    if (!uid || !text.trim()) return;
+    const today = todayStr();
+    const { data: row, error } = await supabase.from("tasks")
+      .insert({ user_id: uid, text: text.trim(), date: today, done: false, pinned: false, source: "manual" })
+      .select()
+      .single();
+    if (error || !row) {
+      addToast("⚠️ Couldn't save loose end — check your connection");
+      return;
+    }
+    setTasks(prev => [...prev, rowToTask(row)]);
+  }
+
+  async function handleCompleteTask(id, done, eventTarget = null) {
+    const uid = userIdRef.current;
+    if (!uid) return;
+    const now = new Date().toISOString();
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, done, doneAt: done ? now : null } : t));
+    const { error } = await supabase.from("tasks")
+      .update({ done, done_at: done ? now : null })
+      .eq("id", id).eq("user_id", uid);
+    if (error) {
+      // Roll back optimistic update
+      setTasks(prev => prev.map(t => t.id === id ? { ...t, done: !done, doneAt: done ? null : now } : t));
+      addToast("⚠️ Couldn't update loose end");
+      return;
+    }
+    // Award / withdraw +5 XP for task completion
+    const awardKey = `task:${id}`;
+    if (done && !xpAwardedDates.has(awardKey)) {
+      setXp(x => x + 5);
+      setXpAwardedDates(prev => { const n = new Set(prev); n.add(awardKey); return n; });
+      if (eventTarget) {
+        const r = eventTarget.getBoundingClientRect();
+        addFlash(r.left + r.width / 2, r.top + r.height / 2, "+5 xp");
+      }
+    } else if (!done && xpAwardedDates.has(awardKey)) {
+      setXp(x => Math.max(0, x - 5));
+      setXpAwardedDates(prev => { const n = new Set(prev); n.delete(awardKey); return n; });
+    }
+  }
+
+  async function handlePinTask(id, pinned) {
+    const uid = userIdRef.current;
+    if (!uid) return;
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, pinned } : t));
+    const { error } = await supabase.from("tasks")
+      .update({ pinned })
+      .eq("id", id).eq("user_id", uid);
+    if (error) {
+      setTasks(prev => prev.map(t => t.id === id ? { ...t, pinned: !pinned } : t));
+      addToast("⚠️ Couldn't update loose end");
+    }
+  }
+
+  async function handleDeleteTask(id) {
+    const uid = userIdRef.current;
+    if (!uid) return;
+    setTasks(prev => prev.filter(t => t.id !== id));
+    const { error } = await supabase.from("tasks").delete().eq("id", id).eq("user_id", uid);
+    if (error) {
+      addToast("⚠️ Couldn't delete loose end");
+      // Reload tasks from DB to restore state
+      const today = todayStr();
+      supabase.from("tasks").select("*").eq("user_id", uid)
+        .or(`date.eq.${today},and(pinned.eq.true,done.eq.false)`)
+        .order("created_at")
+        .then(({ data: tRows }) => { if (tRows) setTasks(tRows.map(rowToTask)); });
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+
   async function handleAddGoal(goal) {
     const saved = await syncGoal(goal);
     if (!saved) {
@@ -3418,7 +3506,7 @@ export default function App() {
             >×</button>
           </div>
         )}
-        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} coachEverOpened={coachEverOpened} onOpenCoachMic={() => openCoachWithMode("mic")} onOpenCoachWithDraft={openCoachWithDraft} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} hideFloatingAdd onOpenGoalDetail={id => setOpenGoalId(id)} onOpenInsights={() => setScreen("insights")} todayJournalEntry={journalEntries.find(e => e.date === todayStr()) ?? null} onGenerateReceipt={handleGenerateReceipt} generatingReceipt={generatingReceipt} onOpenJournal={() => { setJournalOpenTab("journal"); setScreen("journal"); }} yesterdayJournalEntry={journalEntries.find(e => e.date === daysAgo(1)) ?? null} onLowerBudget={handleLowerBudget}/>}
+        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} coachEverOpened={coachEverOpened} onOpenCoachMic={() => openCoachWithMode("mic")} onOpenCoachWithDraft={openCoachWithDraft} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} hideFloatingAdd onOpenGoalDetail={id => setOpenGoalId(id)} onOpenInsights={() => setScreen("insights")} todayJournalEntry={journalEntries.find(e => e.date === todayStr()) ?? null} onGenerateReceipt={handleGenerateReceipt} generatingReceipt={generatingReceipt} onOpenJournal={() => { setJournalOpenTab("journal"); setScreen("journal"); }} yesterdayJournalEntry={journalEntries.find(e => e.date === daysAgo(1)) ?? null} onLowerBudget={handleLowerBudget} tasks={tasks} onAddTask={handleAddTask} onCompleteTask={handleCompleteTask} onPinTask={handlePinTask} onDeleteTask={handleDeleteTask}/>}
         {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} journalEntries={journalEntries} onSaveJournalEntry={handleSaveJournalEntry} onJournalGenerated={handleJournalGenerated} initialTab={showJournalCompose ? "journal" : journalOpenTab ?? undefined} onInitialComposeDone={() => { setShowJournalCompose(false); setJournalOpenTab(null); }} userName={user.name || ""} coachName={coachName}/>}
         {screen === "insights" && <InsightsScreen habits={habits} goals={goals} journalEntries={journalEntries} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} userId={sessionUserId} userName={user.name || ""}/>}
         {screen === "social"   && <SocialScreen
@@ -3754,7 +3842,7 @@ export default function App() {
       </div>
 
       {/* Modals */}
-      {showAdd       && <AddModal      onClose={() => setShowAdd(false)}     onSave={handleAddHabit}/>}
+      {showAdd       && <AddModal      onClose={() => setShowAdd(false)}     onSave={handleAddHabit} habitCount={habits.length}/>}
       {showAddGoal   && <AddGoalModal  onClose={() => setShowAddGoal(false)} onSave={handleAddGoal}/>}
       {showAddLog    && <AddLogModal   onClose={() => setShowAddLog(false)} onSave={async h => {
         if (demoBounce()) return;

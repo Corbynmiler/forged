@@ -117,6 +117,35 @@ export function goalToRow(goal, userId) {
   };
 }
 
+// ─── Task converters ──────────────────────────────────────────────────────────
+// Convert a DB tasks row → in-app task object
+export function rowToTask(row) {
+  return {
+    id:        row.id,
+    text:      row.text,
+    date:      row.date,           // YYYY-MM-DD string (user's local date)
+    done:      row.done ?? false,
+    doneAt:    row.done_at ?? null,
+    pinned:    row.pinned ?? false,
+    source:    row.source ?? "manual",
+    createdAt: row.created_at,
+  };
+}
+
+// Convert an in-app task object → DB row
+export function taskToRow(task, userId) {
+  return {
+    ...(task.id ? { id: task.id } : {}),
+    user_id:    userId,
+    text:       task.text,
+    date:       task.date,
+    done:       task.done ?? false,
+    done_at:    task.done ? (task.doneAt ?? new Date().toISOString()) : null,
+    pinned:     task.pinned ?? false,
+    source:     task.source ?? "manual",
+  };
+}
+
 // Convert a DB row → an in-app habit object
 export function rowToHabit(row) {
   // Legacy safety: old "progress" rows are now goals.

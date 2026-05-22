@@ -1,5 +1,5 @@
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { T, COACH_ICON_OPTIONS } from "../theme.js";
 import { todayStr, daysAgo, isSatisfiedForTodayRing, getLevel, getStreak, analyzeDeepInsights } from "../utils.js";
 import { Ring, SLabel } from "../components/ui.jsx";
@@ -265,6 +265,157 @@ function TodayReceiptCard({ entry, loggedCount, generating, onGenerate, onOpenJo
   );
 }
 
+// ── LooseEndsSection ─────────────────────────────────────────────────────────
+function LooseEndsSection({ tasks = [], today, onAdd, onComplete, onPin, onDelete }) {
+  const [inputText, setInputText]   = useState("");
+  const [inputOpen, setInputOpen]   = useState(false);
+  const inputRef = useRef(null);
+
+  // Split: pending (today or pinned carry-overs), done
+  const pending = tasks.filter(t => !t.done);
+  const done    = tasks.filter(t => t.done);
+  const all     = [...pending, ...done];
+
+  if (!onAdd) return null; // read-only contexts (demo)
+
+  function submitAdd() {
+    const text = inputText.trim();
+    if (!text) { setInputOpen(false); return; }
+    onAdd(text);
+    setInputText("");
+    setInputOpen(false);
+  }
+
+  function openInput() {
+    setInputOpen(true);
+    setTimeout(() => inputRef.current?.focus(), 60);
+  }
+
+  const pinBtn = (task) => (
+    <button
+      type="button"
+      onClick={() => onPin(task.id, !task.pinned)}
+      title={task.pinned ? "Unpin (won't carry forward)" : "Pin to carry forward if not done"}
+      style={{
+        background: "none", border: "none", cursor: "pointer", padding: "4px 6px",
+        color: task.pinned ? T.gold : T.hint, fontSize: 13, lineHeight: 1, flexShrink: 0,
+      }}
+      aria-label={task.pinned ? "Unpin task" : "Pin task to carry forward"}
+    >
+      📌
+    </button>
+  );
+
+  const delBtn = (task) => (
+    <button
+      type="button"
+      onClick={() => onDelete(task.id)}
+      title="Delete loose end"
+      style={{
+        background: "none", border: "none", cursor: "pointer", padding: "4px 6px",
+        color: T.hint, fontSize: 14, lineHeight: 1, flexShrink: 0,
+      }}
+      aria-label="Delete loose end"
+    >
+      ✕
+    </button>
+  );
+
+  const isCarryOver = (task) => task.date !== today;
+
+  return (
+    <div style={{ margin: "0 14px 10px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, marginTop: 2 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>
+          Loose Ends
+        </div>
+        {done.length > 0 && (
+          <div style={{ fontSize: 11, color: T.muted, fontWeight: 500 }}>
+            {done.length} cleared
+          </div>
+        )}
+      </div>
+
+      {all.length === 0 && !inputOpen && (
+        <button type="button" onClick={openInput}
+          style={{ width: "100%", padding: "11px 14px", borderRadius: T.rsm, border: `0.5px dashed ${T.border}`, background: "none", color: T.hint, fontSize: 13, cursor: "pointer", textAlign: "left", fontFamily: T.font }}>
+          + Add a loose end
+        </button>
+      )}
+
+      {pending.map(task => (
+        <div key={task.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${T.border}` }}>
+          <button
+            type="button"
+            onClick={e => onComplete(task.id, true, e.currentTarget)}
+            style={{
+              width: 22, height: 22, borderRadius: "50%", border: `1.5px solid ${T.borderStrong}`,
+              background: "none", cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+            aria-label="Mark done"
+          />
+          <span style={{ flex: 1, fontSize: 14, color: T.text, lineHeight: 1.4 }}>
+            {isCarryOver(task) && <span style={{ fontSize: 10, color: T.gold, fontWeight: 600, marginRight: 5 }}>↩</span>}
+            {task.text}
+          </span>
+          {pinBtn(task)}
+          {delBtn(task)}
+        </div>
+      ))}
+
+      {done.map(task => (
+        <div key={task.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `0.5px solid ${T.border}`, opacity: 0.5 }}>
+          <button
+            type="button"
+            onClick={e => onComplete(task.id, false, e.currentTarget)}
+            style={{
+              width: 22, height: 22, borderRadius: "50%", border: `1.5px solid ${T.borderStrong}`,
+              background: T.accent, cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+              color: "#fff", fontSize: 12, fontWeight: 700,
+            }}
+            aria-label="Mark undone"
+          >
+            ✓
+          </button>
+          <span style={{ flex: 1, fontSize: 14, color: T.muted, lineHeight: 1.4, textDecoration: "line-through" }}>
+            {task.text}
+          </span>
+          {delBtn(task)}
+        </div>
+      ))}
+
+      {all.length > 0 && !inputOpen && (
+        <button type="button" onClick={openInput}
+          style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 0 2px", background: "none", border: "none", cursor: "pointer", color: T.hint, fontSize: 12, fontFamily: T.font }}>
+          <span style={{ fontSize: 16, lineHeight: 1 }}>+</span> Add a loose end
+        </button>
+      )}
+
+      {inputOpen && (
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <input
+            ref={inputRef}
+            value={inputText}
+            onChange={e => setInputText(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); submitAdd(); } if (e.key === "Escape") { setInputOpen(false); setInputText(""); } }}
+            placeholder="What needs clearing?"
+            maxLength={120}
+            style={{ flex: 1, padding: "9px 12px", borderRadius: T.rsm, border: `0.5px solid ${T.borderStrong}`, background: T.surface, color: T.text, fontSize: 14, fontFamily: T.font, outline: "none", boxSizing: "border-box" }}
+          />
+          <button type="button" onClick={submitAdd}
+            style={{ padding: "9px 14px", borderRadius: T.rsm, border: "none", background: T.accent, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: T.font, flexShrink: 0 }}>
+            Add
+          </button>
+          <button type="button" onClick={() => { setInputOpen(false); setInputText(""); }}
+            style={{ padding: "9px 10px", borderRadius: T.rsm, border: "none", background: T.surface, color: T.muted, fontSize: 13, cursor: "pointer", fontFamily: T.font, flexShrink: 0 }}>
+            ✕
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── TodayScreen ────────────────────────────────────────────────────────────
 export function TodayScreen({
   habits, goals = [], xp,
@@ -282,6 +433,12 @@ export function TodayScreen({
   generatingReceipt = false,
   onOpenJournal = null,
   yesterdayJournalEntry = null,
+  // Loose Ends
+  tasks = [],
+  onAddTask = null,
+  onCompleteTask = null,
+  onPinTask = null,
+  onDeleteTask = null,
 }) {
   const [briefPreview, setBriefPreview] = useState(null);
   useEffect(() => {
@@ -318,6 +475,9 @@ export function TodayScreen({
     : logHabits.length
       ? "Logs below — ring is for habits & goals"
       : "";
+  const today = todayStr();
+  const doneTasksCount = tasks.filter(t => t.done).length;
+  const totalTasksCount = tasks.length;
 
   if (habits.length === 0 && activeGoals.length === 0) return (
     <div>
@@ -443,6 +603,11 @@ export function TodayScreen({
           <button onClick={onXPInfo} style={{ marginTop:10, display:"inline-flex", alignItems:"center", gap:5, fontSize:11, fontWeight:500, padding:"3px 10px", borderRadius:12, background:"rgba(200,144,42,0.15)", color:T.gold, border:"none", cursor:"pointer" }}>
             {xp === 0 ? "⚡ Log a habit to earn XP" : `⚡ ${xp} xp · ${level.label}`}
           </button>
+          {doneTasksCount > 0 && (
+            <div style={{ marginTop:6, fontSize:11, color:T.muted, fontWeight:500 }}>
+              ✓ {doneTasksCount}{totalTasksCount > doneTasksCount ? ` of ${totalTasksCount}` : ""} loose end{doneTasksCount === 1 ? "" : "s"} cleared
+            </div>
+          )}
         </div>
       </div>
       {onGenerateReceipt && (
@@ -483,6 +648,16 @@ export function TodayScreen({
           i === 0 ? <div key={i} data-tour="today-first-section">{sec}</div> : <div key={i}>{sec}</div>
         );
       })()}
+      {onAddTask && (
+        <LooseEndsSection
+          tasks={tasks}
+          today={today}
+          onAdd={onAddTask}
+          onComplete={onCompleteTask}
+          onPin={onPinTask}
+          onDelete={onDeleteTask}
+        />
+      )}
       <div style={{ height:16 }}/>
       {!hideFloatingAdd && (trackHabits.length > 0 || activeGoals.length > 0 || logHabits.length > 0) && onAdd && (
         <button type="button" onClick={onAdd} aria-label="Add habit or goal" title="Add habit or goal"

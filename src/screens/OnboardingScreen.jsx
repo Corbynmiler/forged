@@ -507,8 +507,11 @@ After creating, tell them they can log from Today and chat with you anytime.`;
               <div style={{ fontFamily:T.serif, fontSize:30, color:T.text, marginBottom:12, lineHeight:1.15, letterSpacing:"-0.005em" }}>
                 Let&apos;s build, {name.trim() || "you"}.
               </div>
-              <div style={{ fontSize:14, color:T.muted, lineHeight:1.7, maxWidth:300, margin:"0 auto 28px" }}>
+              <div style={{ fontSize:14, color:T.muted, lineHeight:1.7, maxWidth:300, margin:"0 auto 16px" }}>
                 Your habits are ready. Log consistently, reflect when it matters, and let the patterns show you what&apos;s working.
+              </div>
+              <div style={{ fontSize:12, color:T.hint, lineHeight:1.5, maxWidth:260, margin:"0 auto 28px" }}>
+                Start with this one. Add more when the loop is real.
               </div>
             </div>
 
