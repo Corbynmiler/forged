@@ -1,7 +1,7 @@
 
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
 import { flushSync, createPortal } from "react-dom";
-import { supabase, habitToRow, rowToHabit, rowToGoal, goalToRow, rowToTask, taskToRow } from "./supabase.js";
+import { supabase, habitToRow, rowToHabit, rowToGoal, goalToRow, rowToTask, taskToRow, rowToForgeBlock } from "./supabase.js";
 
 // Theme
 import {
@@ -158,6 +158,10 @@ export default function App() {
   const [user,        setUser]        = useState({ name:"", avatarUrl:null });
   const [habits,      setHabits]     = useState([]);
   const [goals,       setGoals]      = useState([]);
+  // Active Arc (forge_block). Null when the user has no active Arc.
+  // Phase 1: written on signup via onSaveProgress; loaded on every signed-in
+  // session via loadUserData. Phase 2+3 will consume this for Today + coach.
+  const [activeBlock, setActiveBlock] = useState(null);
   const [screen,      setScreen]     = useState("today");
   const [xp,          setXp]         = useState(0);
   const [particles,   setParticles]  = useState([]);
@@ -1714,6 +1718,29 @@ export default function App() {
         if (linkedPushers.length) await Promise.all(linkedPushers.map(fn => fn()));
       }
 
+      // ── Load active Arc (forge_block) ────────────────────────────────────────
+      // Non-fatal: a missing table (pre-migration) or zero rows just clears state.
+      try {
+        const { data: blockRow, error: blockErr } = await supabase
+          .from("forge_blocks")
+          .select("*")
+          .eq("user_id", uid)
+          .eq("status", "active")
+          .order("start_date", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (blockErr) {
+          // Likely 42P01 (relation doesn't exist) until the migration runs — leave activeBlock null.
+          console.warn("[Forged] forge_blocks load skipped:", blockErr.message);
+          setActiveBlock(null);
+        } else {
+          setActiveBlock(blockRow ? rowToForgeBlock(blockRow) : null);
+        }
+      } catch (err) {
+        console.warn("[Forged] forge_blocks load exception:", err?.message || err);
+        setActiveBlock(null);
+      }
+
       userIdRef.current = uid;
       accountDataLoadedRef.current = true;
       setAccountLoadError(false);
@@ -2120,6 +2147,7 @@ export default function App() {
           setAccountDataReady(false);
           setAccountLoadError(false);
           setHabits([]);
+          setActiveBlock(null);
           setUser({ name: "", avatarUrl: null });
           setXp(0);
           setCoachName("Coach");
@@ -2732,7 +2760,7 @@ export default function App() {
       <><style>{CSS}</style>
       <OnboardingScreen
         onComplete={completeOnboarding}
-        onSaveProgress={async ({ name, habits, coachName, emailUpdatesOptIn }) => {
+        onSaveProgress={async ({ name, habits, coachName, emailUpdatesOptIn, arc }) => {
           const uid = userIdRef.current;
           if (typeof emailUpdatesOptIn === "boolean") {
             writeForgedBetaEmailOptIn(uid, emailUpdatesOptIn);
@@ -2744,6 +2772,55 @@ export default function App() {
           });
           const hRows = habits.map(h => habitToRow(h, uid));
           if (hRows.length > 0) await supabase.from("habits").upsert(hRows);
+
+          // ── Create the user's first Arc (forge_block) if they filled identity ──
+          // Skipped entirely when identity is blank, so onboarding remains usable
+          // for anyone who bails out of the Arc questions. Failures are logged
+          // but non-fatal — we never block the user from entering the app.
+          const identity = (arc?.identity || "").trim();
+          if (identity) {
+            try {
+              const startDate = todayStr();
+              const _t = new Date();
+              const end = new Date(_t.getFullYear(), _t.getMonth(), _t.getDate() + 56);
+              const endDate = `${end.getFullYear()}-${String(end.getMonth()+1).padStart(2,"0")}-${String(end.getDate()).padStart(2,"0")}`;
+              const insertPayload = {
+                user_id: uid,
+                identity,
+                why_statement: (arc?.why || "").trim() || null,
+                old_pattern:   (arc?.oldPattern || "").trim() || null,
+                minimum_proof: (arc?.minimumProof || "").trim() || null,
+                start_date: startDate,
+                end_date:   endDate,
+                status:     "active",
+                duration_days: 56,
+              };
+              const { data: blockRow, error: blockErr } = await supabase
+                .from("forge_blocks")
+                .insert(insertPayload)
+                .select()
+                .single();
+              if (blockErr) {
+                console.warn("[Forged] Arc insert failed (continuing without Arc):", blockErr.message);
+              } else if (blockRow) {
+                // Link every habit this brand-new user just created to the Arc as
+                // a proof action. New users have no prior habits, so a flat update
+                // by user_id is safe and avoids the client-side temp-id problem.
+                const { error: linkErr } = await supabase
+                  .from("habits")
+                  .update({
+                    block_id: blockRow.id,
+                    is_proof_action: true,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq("user_id", uid);
+                if (linkErr) console.warn("[Forged] Arc habit linkage failed:", linkErr.message);
+                setActiveBlock(rowToForgeBlock(blockRow));
+              }
+            } catch (err) {
+              console.warn("[Forged] Arc creation exception:", err?.message || err);
+            }
+          }
         }}
         onCheckout={async () => {
           const { data: { session } } = await supabase.auth.getSession();

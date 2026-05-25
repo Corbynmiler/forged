@@ -47,6 +47,9 @@ export function habitToRow(habit, userId) {
     goal_aim:          habit.goalAim       ?? null,
     original_budget:   habit.originalBudget ?? null,
     logs:              habit.logs ?? [],
+    // Arc / forge_block linkage. Null block_id means "not part of an Arc."
+    block_id:          habit.blockId       ?? null,
+    is_proof_action:   !!habit.isProofAction,
     updated_at:        new Date().toISOString(),
   };
 }
@@ -181,5 +184,30 @@ export function rowToHabit(row) {
     goalAim:          row.goal_aim         ?? "maintain",
     originalBudget:   row.original_budget  ?? undefined,
     logs:             row.logs ?? [],
+    // Arc / forge_block linkage. Surfaced to clients so Today can filter to proof actions.
+    blockId:          row.block_id        ?? null,
+    isProofAction:    !!row.is_proof_action,
+  };
+}
+
+// ─── Forge Block (user-facing "Arc") converters ────────────────────────────────
+// Convert a DB row from public.forge_blocks → an in-app block (Arc) object.
+// Internal: "forge_block" / `forge_blocks`. User-facing: "Arc".
+export function rowToForgeBlock(row) {
+  if (!row) return null;
+  return {
+    id:            row.id,
+    userId:        row.user_id,
+    identity:      row.identity,
+    whyStatement:  row.why_statement ?? "",
+    oldPattern:    row.old_pattern   ?? "",
+    minimumProof:  row.minimum_proof ?? "",
+    startDate:     row.start_date,
+    endDate:       row.end_date,
+    status:        row.status         ?? "active",
+    durationDays:  row.duration_days  ?? 56,
+    review:        row.review         ?? null,
+    createdAt:     row.created_at,
+    updatedAt:     row.updated_at,
   };
 }

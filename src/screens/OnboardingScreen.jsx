@@ -20,9 +20,9 @@ const ONBOARD_STEPS = [
   {
     id:"welcome",
     title:"Forged.",
-    sub:"Most habit apps track what you do. Forged helps you understand why you keep stopping.",
-    body:"You already know what you want to change. The hard part is figuring out what's actually getting in the way — and why the same patterns keep derailing you. Forged is built to help you see that.",
-    cta:"Let's build",
+    sub:"An 8-week system for becoming the next version of yourself.",
+    body:"You define who you're becoming, pick the daily proof that backs it up, and an AI coach helps you stay honest about whether you're actually showing up. Eight weeks. One Arc.",
+    cta:"Let's begin",
   },
   {
     id:"name",
@@ -34,17 +34,52 @@ const ONBOARD_STEPS = [
   {
     id:"coach",
     title:"Meet your AI coach",
-    sub:"It reads your logs and reflections — then tells you what you can't see yourself.",
+    sub:"It remembers what you said you're becoming — and reflects your actions back through that lens.",
     body:null,
     cta:"Continue",
   },
+  // ─── Arc setup (the new product spine) ────────────────────────────────────────
+  // These three steps capture the user-facing "Arc" — internally a forge_block.
+  // Identity is required to create an Arc; the others are optional. If identity
+  // is left blank, onboarding falls back to legacy behaviour and no Arc is created.
+  {
+    id:"arc-becoming",
+    title:"Who are you becoming?",
+    sub:"Over the next 8 weeks. One or two sentences. Honest, not aspirational.",
+    body:null,
+    cta:"Next",
+  },
+  {
+    id:"arc-why",
+    title:"Why does this matter right now?",
+    sub:"What is this Arc actually for? Skip if you'd rather not say.",
+    body:null,
+    cta:"Next",
+  },
+  {
+    id:"arc-bad-day",
+    title:"On bad days, what counts?",
+    sub:"The pattern you're trying to weaken, and the bare minimum that still counts as proof. Both optional.",
+    body:null,
+    cta:"Next",
+  },
   {
     id:"focus",
-    title:"What are you forging?",
-    sub:"Pick what matters right now. You can always add more later.",
+    title:"Pick your first proof action",
+    sub:"One action that shows up regularly to prove this Arc. You can add more once you're in.",
     body:null,
     cta:"Start forging",
   },
+];
+
+// Example identity statements surfaced under the Arc identity textarea. Tap-to-fill.
+// Kept grounded — no "warrior", no "elite", no aspirational wellness language.
+const ARC_IDENTITY_EXAMPLES = [
+  "Fitter, sharper, and more consistent.",
+  "Building income outside my job.",
+  "Less dependent on old crutches.",
+  "More present, disciplined, and in control.",
+  "Stronger, calmer, and harder to knock off track.",
 ];
 
 const FOCUS_OPTIONS = [
@@ -125,6 +160,14 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
   const [step,            setStep]            = useState(0);
   const [name,            setName]            = useState("");
   const [coachNameInput,  setCoachNameInput]  = useState("");
+  // ── Arc setup state (user-facing "Arc" = forge_block internally) ──
+  // Only `arcIdentity` is required to create an Arc; the rest are optional.
+  // If `arcIdentity` is blank at submit time, onboarding falls back to the
+  // legacy flow and no forge_block is created.
+  const [arcIdentity,     setArcIdentity]     = useState("");
+  const [arcWhy,          setArcWhy]          = useState("");
+  const [arcOldPattern,   setArcOldPattern]   = useState("");
+  const [arcMinimumProof, setArcMinimumProof] = useState("");
   const [selected,        setSelected]        = useState([]);
   const [weightGoal,      setWeightGoal]      = useState({ start:"", target:"", unit:"kg" });
   const [limitBudget,     setLimitBudget]     = useState({ budget:"60", unit:"min", name:"" });
@@ -160,6 +203,10 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
   const isLast    = step === ONBOARD_STEPS.length - 1;
   const FOCUS_STEP = ONBOARD_STEPS.findIndex(s => s.id === "focus");
   const COACH_STEP = ONBOARD_STEPS.findIndex(s => s.id === "coach");
+  // Arc step indices (resolved by id so reordering inside ONBOARD_STEPS is safe).
+  const ARC_BECOMING_STEP = ONBOARD_STEPS.findIndex(s => s.id === "arc-becoming");
+  const ARC_WHY_STEP      = ONBOARD_STEPS.findIndex(s => s.id === "arc-why");
+  const ARC_BAD_DAY_STEP  = ONBOARD_STEPS.findIndex(s => s.id === "arc-bad-day");
   const INTER_STEP = ONBOARD_STEPS.length;       // virtual step 5 (transition)
   // After the interstitial we now run Home → Notifs → First-log so that the
   // very last action inside onboarding is the user actually logging a habit —
@@ -217,16 +264,25 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
 
   const isVirtual = step >= ONBOARD_STEPS.length;
 
-  // Canonical 1-based step number for the progress header. The interstitial
-  // shares Focus' number (it's a sub-screen), and the three virtual post-focus
-  // steps are reordered visually: Home (6) → Notifs (7) → First log (8).
-  const DISPLAY_TOTAL = 5;
+  // Canonical 1-based step number for the progress header. The three Arc
+  // sub-screens share number 4 ("Your Arc"), focus becomes 5 ("Proof actions"),
+  // and the final coach-chat handoff is 6. Notif + interstitial sit under 5.
+  const DISPLAY_TOTAL = 6;
   function displayStepNumber(s) {
-    if (s === INTER_STEP) return 4;   // Focus' number — interstitial is a transition
-    if (s === NOTIF_STEP) return 4;   // notifications is still part of setup
-    if (s === FIRST_STEP) return 5;   // (kept for safety, not shown in normal flow)
-    if (s === COACH_INTRO_STEP) return 5; // merged coach+first-log is the finale
-    return Math.min(s + 1, 4);        // standard steps 0..3 → 1..4
+    // 0 welcome, 1 name, 2 coach → 1, 2, 3
+    if (s === 0) return 1;
+    if (s === 1) return 2;
+    if (s === COACH_STEP) return 3;
+    // Arc sub-screens
+    if (s === ARC_BECOMING_STEP || s === ARC_WHY_STEP || s === ARC_BAD_DAY_STEP) return 4;
+    // Focus / interstitial / notif all live in the "Proof actions" block
+    if (s === FOCUS_STEP) return 5;
+    if (s === INTER_STEP) return 5;
+    if (s === NOTIF_STEP) return 5;
+    // Final coach handoff
+    if (s === FIRST_STEP) return 6;
+    if (s === COACH_INTRO_STEP) return 6;
+    return Math.min(s + 1, DISPLAY_TOTAL);
   }
   const progressNumber = displayStepNumber(step);
 
@@ -312,12 +368,23 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
     return builtHabits.map(h => h.id === firstHabit.id ? { ...h, logs:[logEntry] } : h);
   }
 
+  // Bundle the Arc payload once so handleEnterApp + handleGoPro stay aligned.
+  // identity is the only field that gates Arc creation server-side.
+  function arcPayload() {
+    return {
+      identity:     arcIdentity.trim(),
+      why:          arcWhy.trim(),
+      oldPattern:   arcOldPattern.trim(),
+      minimumProof: arcMinimumProof.trim(),
+    };
+  }
+
   async function handleEnterApp() {
     if (enteringApp) return;
     setEnteringApp(true);
     try {
       await Promise.race([
-        onSaveProgress({ name:name.trim()||"You", habits:habitsSaved(), coachName:coachNameInput.trim()||"Coach", emailUpdatesOptIn }),
+        onSaveProgress({ name:name.trim()||"You", habits:habitsSaved(), coachName:coachNameInput.trim()||"Coach", emailUpdatesOptIn, arc: arcPayload() }),
         new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 4000)),
       ]);
       onComplete();
@@ -330,7 +397,7 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
     setCheckoutLoading(true);
     setCheckoutError(null);
     try {
-      await onSaveProgress({ name:name.trim()||"You", habits:habitsSaved(), coachName:coachNameInput.trim()||"Coach", emailUpdatesOptIn });
+      await onSaveProgress({ name:name.trim()||"You", habits:habitsSaved(), coachName:coachNameInput.trim()||"Coach", emailUpdatesOptIn, arc: arcPayload() });
       await onCheckout();
     } catch(err) {
       setCheckoutError(err.message || "Something went wrong. Try again.");
@@ -1007,6 +1074,85 @@ After creating, tell them they can log from Today and chat with you anytime.`;
           </div>
         )}
 
+        {step === ARC_BECOMING_STEP && (
+          <div>
+            <textarea
+              style={{ ...styleInp, fontSize:16, padding:"14px 16px", minHeight:96, resize:"vertical", lineHeight:1.55, fontFamily:T.font }}
+              placeholder="e.g. Fitter, sharper, and less reactive."
+              value={arcIdentity}
+              onChange={e => setArcIdentity(e.target.value)}
+              maxLength={250}
+              autoFocus
+            />
+            <div style={{ marginTop:14, marginBottom:8, fontSize:11, fontWeight:600, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em" }}>
+              Or start from one of these
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+              {ARC_IDENTITY_EXAMPLES.map(ex => (
+                <button key={ex} type="button" onClick={() => setArcIdentity(ex)}
+                  style={{
+                    padding:"9px 12px", borderRadius:T.rsm,
+                    border:`0.5px solid ${arcIdentity === ex ? T.accent : T.border}`,
+                    background: arcIdentity === ex ? "rgba(192,57,43,0.08)" : T.surface,
+                    color: arcIdentity === ex ? T.text : T.sub,
+                    fontSize:13, cursor:"pointer", textAlign:"left", lineHeight:1.4,
+                    fontFamily:T.font,
+                  }}>
+                  {ex}
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize:11, color:T.hint, marginTop:14, lineHeight:1.55 }}>
+              You can edit any of this later. Leave blank if you'd rather skip the Arc and just track habits.
+            </div>
+          </div>
+        )}
+
+        {step === ARC_WHY_STEP && (
+          <div>
+            <textarea
+              style={{ ...styleInp, fontSize:16, padding:"14px 16px", minHeight:96, resize:"vertical", lineHeight:1.55, fontFamily:T.font }}
+              placeholder="e.g. Tired of starting and stopping. Want to be someone who finishes."
+              value={arcWhy}
+              onChange={e => setArcWhy(e.target.value)}
+              maxLength={250}
+              autoFocus
+            />
+            <div style={{ fontSize:11, color:T.hint, marginTop:12, lineHeight:1.55 }}>
+              The coach will quietly remember this. Optional — skip if you'd rather not say.
+            </div>
+          </div>
+        )}
+
+        {step === ARC_BAD_DAY_STEP && (
+          <div>
+            <div style={{ fontSize:11, fontWeight:600, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>
+              Old pattern to weaken
+            </div>
+            <textarea
+              style={{ ...styleInp, fontSize:16, padding:"12px 14px", minHeight:64, resize:"vertical", lineHeight:1.55, marginBottom:16, fontFamily:T.font }}
+              placeholder="e.g. Doom-scrolling when I'm tired instead of training."
+              value={arcOldPattern}
+              onChange={e => setArcOldPattern(e.target.value)}
+              maxLength={200}
+              autoFocus
+            />
+            <div style={{ fontSize:11, fontWeight:600, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>
+              On a bad day, what still counts as proof?
+            </div>
+            <input
+              style={{ ...styleInp, fontSize:16, padding:"12px 14px" }}
+              placeholder="e.g. 15 minutes of training, even if it's terrible."
+              value={arcMinimumProof}
+              onChange={e => setArcMinimumProof(e.target.value)}
+              maxLength={150}
+            />
+            <div style={{ fontSize:11, color:T.hint, marginTop:12, lineHeight:1.55 }}>
+              Both optional. The minimum is what the coach falls back to on rough days.
+            </div>
+          </div>
+        )}
+
         {step === FOCUS_STEP && (
           <>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:16 }}>
@@ -1056,7 +1202,9 @@ After creating, tell them they can log from Today and chat with you anytime.`;
           <button
             onClick={handleContinue}
             style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:500, cursor:"pointer", transition:"all 0.2s" }}>
-            {current.cta}
+            {step === ARC_BECOMING_STEP && !arcIdentity.trim()
+              ? "Skip — just track habits →"
+              : current.cta}
           </button>
         </div>
       )}
