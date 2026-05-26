@@ -496,7 +496,7 @@ function ArcStrip({ activeBlock }) {
   );
 }
 
-function OtherHabitsCollapsible({ children, defaultOpen = false }) {
+function SectionCollapsible({ label, children, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div>
@@ -509,12 +509,20 @@ function OtherHabitsCollapsible({ children, defaultOpen = false }) {
           background:"none", border:"none", cursor:"pointer", fontFamily:T.font,
         }}
       >
-        <span style={{ fontSize:11, fontWeight:600, letterSpacing:"0.08em", color:T.sub, textTransform:"uppercase" }}>Other habits</span>
+        <span style={{ fontSize:11, fontWeight:600, letterSpacing:"0.08em", color:T.sub, textTransform:"uppercase" }}>{label}</span>
         <span style={{ fontSize:12, color:T.muted }} aria-hidden>{open ? "▾" : "▸"}</span>
       </button>
       {open ? children : null}
     </div>
   );
+}
+
+function OtherHabitsCollapsible({ children, defaultOpen = false }) {
+  return <SectionCollapsible label="Other habits" defaultOpen={defaultOpen}>{children}</SectionCollapsible>;
+}
+
+function GoalsCollapsible({ children, defaultOpen = false }) {
+  return <SectionCollapsible label="Goals" defaultOpen={defaultOpen}>{children}</SectionCollapsible>;
 }
 
 // ── TodayScreen ────────────────────────────────────────────────────────────
@@ -541,6 +549,7 @@ export function TodayScreen({
   onPinTask = null,
   onDeleteTask = null,
   activeBlock = null,
+  arcProofSyncing = false,
   onStartArc = null,
 }) {
   const [briefPreview, setBriefPreview] = useState(null);
@@ -840,28 +849,40 @@ export function TodayScreen({
           ),
         ].filter(Boolean);
 
-        const goalsSection = activeGoals.length > 0
-          ? <><SLabel>Goals</SLabel>{activeGoals.map(g => <TodayGoalCard key={g.id} goal={g} onOpenLog={onOpenGoalLog} onEdit={onEditGoal} onComplete={onCompleteGoal} onDelete={onDeleteGoal} onShareGoal={onShareGoal} onOpen={onOpenGoalDetail}/>)}</>
-          : habits.length > 0 && onOpenCoachMic && (
-            <div key="goal-cta">
-              <SLabel>Goals</SLabel>
-              <button type="button" onClick={onOpenCoachMic}
+        const goalsInner = activeGoals.length > 0
+          ? activeGoals.map(g => <TodayGoalCard key={g.id} goal={g} onOpenLog={onOpenGoalLog} onEdit={onEditGoal} onComplete={onCompleteGoal} onDelete={onDeleteGoal} onShareGoal={onShareGoal} onOpen={onOpenGoalDetail}/>)
+          : habits.length > 0 && onOpenCoachMic
+            ? (
+              <button key="goal-cta" type="button" onClick={onOpenCoachMic}
                 style={{ display:"flex", alignItems:"center", gap:14, margin:"0 14px 10px", width:"calc(100% - 28px)", padding:"14px 16px", borderRadius:T.r, border:"0.5px dashed rgba(200,144,42,0.4)", background:"rgba(200,144,42,0.04)", cursor:"pointer", textAlign:"left" }}>
                 <div style={{ width:38, height:38, borderRadius:11, background:"rgba(200,144,42,0.12)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>🎯</div>
                 <div style={{ flex:1 }}>
                   <div style={{ fontSize:14, fontWeight:500, color:T.text, marginBottom:2 }}>Set a goal with your coach</div>
-                  <div style={{ fontSize:12, color:T.muted, lineHeight:1.45 }}>Tell the AI what outcome you're working toward — it'll help you plan milestones and track progress.</div>
+                  <div style={{ fontSize:12, color:T.muted, lineHeight:1.45 }}>Tell the AI what outcome you&apos;re working toward — it&apos;ll help you plan milestones and track progress.</div>
                 </div>
                 <div style={{ fontSize:16, color:T.gold, flexShrink:0 }}>→</div>
               </button>
-            </div>
-          );
+            )
+            : null;
+
+        const goalsSection = goalsInner
+          ? (arcActive
+            ? <GoalsCollapsible key="goals" defaultOpen={false}>{goalsInner}</GoalsCollapsible>
+            : <><SLabel key="goals-label">Goals</SLabel>{goalsInner}</>)
+          : null;
 
         const logsSection = logHabits.length > 0 && onSaveLogEntry && (
           <><SLabel>Logs</SLabel>{logHabits.map(h => <LogCard key={h.id} habit={h} onSaveEntry={onSaveLogEntry} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit}/>)}</>
         );
 
-        const proofEmptyCard = arcActive && proofTotal === 0 && (
+        const proofSyncCard = arcActive && proofTotal === 0 && arcProofSyncing && (
+          <div style={{ margin:"0 14px 10px", padding:"14px 16px", borderRadius:T.r, border:`0.5px solid ${T.border}`, background:T.surface, fontFamily:T.font }}>
+            <div style={{ fontSize:14, fontWeight:500, color:T.text, marginBottom:4 }}>Setting up your proof actions…</div>
+            <div style={{ fontSize:12, color:T.muted, lineHeight:1.5 }}>Linking habits to your Arc.</div>
+          </div>
+        );
+
+        const proofEmptyCard = arcActive && proofTotal === 0 && !arcProofSyncing && (
           <button type="button" onClick={onAdd}
             style={{ display:"flex", alignItems:"center", gap:14, margin:"0 14px 10px", width:"calc(100% - 28px)", padding:"14px 16px", borderRadius:T.r, border:`0.5px dashed ${T.borderStrong}`, background:T.surface, cursor:"pointer", textAlign:"left", fontFamily:T.font }}>
             <div style={{ flex:1 }}>
@@ -874,7 +895,7 @@ export function TodayScreen({
 
         const proofSection = arcActive && (
           proofTotal === 0
-            ? <div key="proof-empty">{proofEmptyCard}</div>
+            ? <div key="proof-empty">{proofSyncCard || proofEmptyCard}</div>
             : <>
                 <SLabel>Proof actions</SLabel>
                 {proofDaily.map(h => <DailyCard key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id}/>)}

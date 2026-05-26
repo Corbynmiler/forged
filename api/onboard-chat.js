@@ -103,7 +103,11 @@ ${habitList.length > 0
     : "";
 
   const existingUserRules = showExistingHabitsBlock
-    ? `- Prefer the user's EXISTING habit names in proofActions. Only suggest brand-new proof actions when nothing existing fits. When recommending a tight list, say things like "Keep X and Y from what you already track, add Z" — don't pretend their habits don't exist.
+    ? `- Study EXISTING HABITS before you suggest proofActions. Reuse the exact habit names already in the list whenever they fit — never suggest a near-duplicate (e.g. do NOT suggest "Limit pouches" if they already track "Nicotine pouches" or "Pouch limit").
+- Only put a brand-new name in proofActions when nothing existing is a reasonable match.
+- Before you emit the draft (not on the opener): ask ONE question like "Any existing habits you definitely want in this Arc, or should I keep the proof list tight?" unless they already answered that.
+- You may mention leaving unrelated habits under Other Habits — do NOT tell the app to archive or delete anything.
+- When recommending a tight list, say things like "Keep X and Y from what you already track, add Z".
 `
     : "";
 
@@ -154,7 +158,7 @@ Rules for the draft JSON:
 - Valid JSON only inside the tags. Single line. No comments, no trailing commas, no markdown.
 - identity: concrete, one sentence, max ~140 chars. Borrow their phrasing.
 - why, oldPattern, minimumProof: short sentences in their voice. Empty string "" is allowed only if you truly have nothing.
-- proofActions: 3 to 5 short habit names, max ~30 chars each. Prefer habits the user mentioned. When it makes sense, the first one should be the habit they already picked (${habitName || "their picked habit"}).
+- proofActions: 3 to 5 short habit names, max ~30 chars each. ${showExistingHabitsBlock ? "Use EXACT names from EXISTING HABITS when reusing — do not paraphrase into a duplicate label." : "Prefer habits the user mentioned."} When it makes sense, the first one should be the habit they already picked (${habitName || "their picked habit"}).
 
 WHEN YOU EMIT THE DRAFT, write 1–2 short sentences BEFORE the block to introduce it. Examples:
 "Alright, I've got enough to build your first Arc. Here's the draft — tweak anything that feels off."

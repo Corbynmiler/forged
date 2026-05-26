@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { T } from "../theme.js";
 import { todayStr } from "../utils.js";
+import { habitToRow, rowToHabit } from "../supabase.js";
+import {
+  resolveProofActionHabits,
+  buildNewProofHabit,
+  formatCoachChatDisplay,
+} from "../arcProofMatch.js";
 import { parseArcDraftFromText } from "./OnboardingScreen.jsx";
 
 const MAX_QUESTIONS = 6;
@@ -40,16 +46,11 @@ function buildRequestBody({ name, coachName, messages, existingHabits }) {
   };
 }
 
-function unmatchedProofNames(draft, existingHabits) {
-  if (!draft?.proofActions?.length) return [];
-  const names = new Set(
-    (existingHabits || []).map(h => String(h.name || "").trim().toLowerCase()).filter(Boolean),
-  );
-  return draft.proofActions.filter(p => !names.has(String(p).trim().toLowerCase()));
-}
-
 function ArcDraftCard({ draft, existingHabits, saveError, saving }) {
-  const unmatched = useMemo(() => unmatchedProofNames(draft, existingHabits), [draft, existingHabits]);
+  const { unmatched } = useMemo(
+    () => resolveProofActionHabits(draft?.proofActions || [], existingHabits),
+    [draft, existingHabits],
+  );
 
   return (
     <div style={{
@@ -119,6 +120,7 @@ function ArcDraftCard({ draft, existingHabits, saveError, saving }) {
 export default function ArcCoachSheet({
   onClose,
   onCreated,
+  onSyncStart,
   onUseFormInstead,
   userId,
   existingHabits,
@@ -168,7 +170,7 @@ export default function ArcCoachSheet({
           const j = await res.json();
           if (j.reply) {
             const { prose, draft } = parseArcDraftFromText(j.reply);
-            setMsgs([{ role: "assistant", content: prose || j.reply }]);
+            setMsgs([{ role: "assistant", content: formatCoachChatDisplay(prose || j.reply) }]);
             if (draft) setArcDraft(draft);
           }
           if (typeof j.prior_assistant_turns === "number") setPriorTurns(j.prior_assistant_turns);
@@ -215,7 +217,7 @@ export default function ArcCoachSheet({
       const j = await postChat(withUser);
       if (j.reply) {
         const { prose, draft } = parseArcDraftFromText(j.reply);
-        setMsgs(p => [...p, { role: "assistant", content: prose || j.reply }]);
+        setMsgs(p => [...p, { role: "assistant", content: formatCoachChatDisplay(prose || j.reply) }]);
         if (draft) setArcDraft(draft);
       }
       if (typeof j.prior_assistant_turns === "number") setPriorTurns(j.prior_assistant_turns);
@@ -230,6 +232,7 @@ export default function ArcCoachSheet({
     if (!arcDraft?.identity?.trim() || !userId || !supabase || saving) return;
     setSaving(true);
     setSaveError("");
+    onSyncStart?.();
 
     try {
       const startDate = todayStr();
@@ -256,21 +259,35 @@ export default function ArcCoachSheet({
       if (insErr) throw insErr;
       if (!blockRow?.id) throw new Error("Arc insert failed");
 
-      const proofNames = (arcDraft.proofActions || []).map(p => String(p).trim().toLowerCase()).filter(Boolean);
-      const matchedIds = (existingHabits || [])
-        .filter(h => proofNames.includes(String(h.name || "").trim().toLowerCase()))
-        .map(h => h.id);
+      const blockId = blockRow.id;
+      const { matched, unmatched } = resolveProofActionHabits(arcDraft.proofActions || [], existingHabits);
+      const habitsPatch = [];
 
+      const matchedIds = matched.map(m => m.habit.id);
       if (matchedIds.length > 0) {
         const { error: updErr } = await supabase
           .from("habits")
-          .update({ block_id: blockRow.id, is_proof_action: true, updated_at: nowIso })
+          .update({ block_id: blockId, is_proof_action: true, updated_at: nowIso })
           .eq("user_id", userId)
           .in("id", matchedIds);
         if (updErr) throw updErr;
+        for (const { habit } of matched) {
+          habitsPatch.push({ ...habit, blockId, isProofAction: true });
+        }
       }
 
-      if (onCreated) await onCreated();
+      for (const proofName of unmatched) {
+        const draftHabit = buildNewProofHabit(proofName, blockId);
+        const { data: row, error: createErr } = await supabase
+          .from("habits")
+          .insert(habitToRow(draftHabit, userId))
+          .select("*")
+          .single();
+        if (createErr) throw createErr;
+        habitsPatch.push(rowToHabit(row));
+      }
+
+      if (onCreated) await onCreated({ block: blockRow, habitsPatch });
       onClose();
     } catch (e) {
       setSaveError(e?.message || "Could not start Arc");

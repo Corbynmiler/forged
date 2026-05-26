@@ -84,7 +84,7 @@ function HabitPickRow({ habit, selected, onToggle }) {
   );
 }
 
-export default function ArcSetupSheet({ onClose, onCreated, userId, existingHabits, supabase }) {
+export default function ArcSetupSheet({ onClose, onCreated, onSyncStart, userId, existingHabits, supabase }) {
   const [identity, setIdentity] = useState("");
   const [why, setWhy] = useState("");
   const [oldPattern, setOldPattern] = useState("");
@@ -116,6 +116,7 @@ export default function ArcSetupSheet({ onClose, onCreated, userId, existingHabi
     if (!idt || !userId || !supabase) return;
     setSaving(true);
     setErr("");
+    onSyncStart?.();
     try {
       const start = todayStr();
       const end = addDaysYmd(start, 56);
@@ -152,7 +153,7 @@ export default function ArcSetupSheet({ onClose, onCreated, userId, existingHabi
         if (updErr) throw updErr;
       }
 
-      if (onCreated) await onCreated(blockRow);
+      if (onCreated) await onCreated({ block: blockRow, linkedIds: ids });
       onClose();
     } catch (e) {
       setErr(e?.message || "Could not start Arc");
