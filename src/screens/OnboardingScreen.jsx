@@ -15,6 +15,42 @@ function cssPadXSafe(basePx) {
   };
 }
 
+// ─── ARC DRAFT PARSING ────────────────────────────────────────────────────────
+// onboard-chat ends its reply with <arc_draft>{json}</arc_draft> once it has
+// enough info. This splits the bubble text from the structured draft so the
+// chat doesn't show raw JSON, and validates the shape before we trust it.
+const ARC_DRAFT_RE = /<arc_draft>([\s\S]*?)<\/arc_draft>/i;
+export function parseArcDraftFromText(text) {
+  if (!text) return { prose: "", draft: null };
+  const m = String(text).match(ARC_DRAFT_RE);
+  if (!m) return { prose: String(text), draft: null };
+  const prose = String(text).replace(ARC_DRAFT_RE, "").trim();
+  try {
+    const parsed = JSON.parse(m[1].trim());
+    if (!parsed || typeof parsed !== "object") return { prose, draft: null };
+    const proofActions = Array.isArray(parsed.proofActions)
+      ? parsed.proofActions
+          .filter(x => typeof x === "string" && x.trim())
+          .map(x => x.trim().slice(0, 60))
+          .slice(0, 5)
+      : [];
+    const identity = String(parsed.identity ?? "").trim();
+    if (!identity) return { prose, draft: null };
+    return {
+      prose,
+      draft: {
+        identity:     identity.slice(0, 250),
+        why:          String(parsed.why ?? "").trim().slice(0, 250),
+        oldPattern:   String(parsed.oldPattern ?? "").trim().slice(0, 200),
+        minimumProof: String(parsed.minimumProof ?? "").trim().slice(0, 150),
+        proofActions,
+      },
+    };
+  } catch {
+    return { prose, draft: null };
+  }
+}
+
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const ONBOARD_STEPS = [
   {
@@ -72,14 +108,17 @@ const ONBOARD_STEPS = [
   },
 ];
 
-// Example identity statements surfaced under the Arc identity textarea. Tap-to-fill.
-// Kept grounded — no "warrior", no "elite", no aspirational wellness language.
+// Concrete identity examples surfaced under the Arc identity textarea. Tap-to-fill,
+// then the user is expected to edit. Specific > vague: numbers, named habits, and
+// real friction land better than "more consistent." Kept grounded — no "warrior",
+// no "elite", no aspirational wellness language.
 export const ARC_IDENTITY_EXAMPLES = [
-  "Fitter, sharper, and more consistent.",
-  "Building income outside my job.",
-  "Less dependent on old crutches.",
-  "More present, disciplined, and in control.",
-  "Stronger, calmer, and harder to knock off track.",
+  "Gain 3kg without skipping breakfast.",
+  "Build income outside work.",
+  "Cut back nicotine and eat properly.",
+  "Get back to football fitness.",
+  "Stretch every morning before work.",
+  "Stop relying on old crutches.",
 ];
 
 const FOCUS_OPTIONS = [
@@ -190,6 +229,10 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
   const [onboardSending,     setOnboardSending]      = useState(false);
   const [habitCreatedInChat, setHabitCreatedInChat]  = useState(false);
   const [skipConfirmVisible, setSkipConfirmVisible]  = useState(false);
+  // Arc draft emitted by the coach once enough info is gathered. Parsed from
+  // <arc_draft>…</arc_draft> JSON in an assistant message. When set, the CTA
+  // swaps from "Skip for now" to "Use this Arc →".
+  const [arcDraft,           setArcDraft]            = useState(null);
   const chatEndRef  = useRef(null);
   const textareaRef = useRef(null);
 
@@ -245,13 +288,22 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
             habitName: firstHabit.name,
             habitType: firstHabit.habitType,
             messages: [],
-            ...(arcIdentity.trim() ? { arcIdentity: arcIdentity.trim() } : {}),
+            arc: {
+              identity:     arcIdentity.trim(),
+              why:          arcWhy.trim(),
+              oldPattern:   arcOldPattern.trim(),
+              minimumProof: arcMinimumProof.trim(),
+            },
           }),
         });
         clearTimeout(tid);
         if (res.ok) {
           const j = await res.json();
-          if (j.reply) setOnboardMsgs([{ role: "assistant", content: j.reply }]);
+          if (j.reply) {
+            const { prose, draft } = parseArcDraftFromText(j.reply);
+            setOnboardMsgs([{ role: "assistant", content: prose || j.reply }]);
+            if (draft) setArcDraft(draft);
+          }
         }
       } catch { /* fall through — chat just stays empty until user types */ }
       setCoachIntroLoading(false);
@@ -394,6 +446,40 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
     }
   }
 
+  // Confirm-and-create from the coach's <arc_draft>. Bypasses arcPayload() so
+  // the new values are used immediately without waiting for state to flush.
+  // The Arc fields are also mirrored to local state in case the user backs
+  // out before submit (cosmetic). Existing handleEnterApp is reused via
+  // onSaveProgress shape — it's the same code path as the manual flow.
+  async function useArcDraft() {
+    if (!arcDraft || enteringApp) return;
+    setEnteringApp(true);
+    setArcIdentity(arcDraft.identity || "");
+    setArcWhy(arcDraft.why || "");
+    setArcOldPattern(arcDraft.oldPattern || "");
+    setArcMinimumProof(arcDraft.minimumProof || "");
+    try {
+      await Promise.race([
+        onSaveProgress({
+          name: name.trim() || "You",
+          habits: habitsSaved(),
+          coachName: coachNameInput.trim() || "Coach",
+          emailUpdatesOptIn,
+          arc: {
+            identity:     (arcDraft.identity || "").trim(),
+            why:          (arcDraft.why || "").trim(),
+            oldPattern:   (arcDraft.oldPattern || "").trim(),
+            minimumProof: (arcDraft.minimumProof || "").trim(),
+          },
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 4000)),
+      ]);
+      onComplete();
+    } catch {
+      onComplete();
+    }
+  }
+
   async function handleGoPro() {
     setCheckoutLoading(true);
     setCheckoutError(null);
@@ -461,7 +547,12 @@ After creating, tell them they can log from Today and chat with you anytime.`;
           habitName: firstHabit?.name || "",
           habitType: firstHabit?.habitType || "daily",
           messages: apiMessages,
-          ...(arcIdentity.trim() ? { arcIdentity: arcIdentity.trim() } : {}),
+          arc: {
+            identity:     arcIdentity.trim(),
+            why:          arcWhy.trim(),
+            oldPattern:   arcOldPattern.trim(),
+            minimumProof: arcMinimumProof.trim(),
+          },
         }),
       });
 
@@ -509,7 +600,10 @@ After creating, tell them they can log from Today and chat with you anytime.`;
       } else {
         const data = await res.json();
         setOnboardSending(false);
-        setOnboardMsgs(p => [...p, { role: "assistant", content: data.reply || "" }]);
+        const raw = data.reply || "";
+        const { prose, draft } = parseArcDraftFromText(raw);
+        setOnboardMsgs(p => [...p, { role: "assistant", content: prose || raw }]);
+        if (draft) setArcDraft(draft);
       }
     } catch {
       setOnboardSending(false);
@@ -825,6 +919,63 @@ After creating, tell them they can log from Today and chat with you anytime.`;
             </div>
           )}
 
+          {/* Arc draft preview — appears when the coach emits <arc_draft>. */}
+          {arcDraft && (
+            <div style={{
+              margin:"4px 0 6px",
+              padding:"14px 16px",
+              borderRadius:T.r,
+              border:"0.5px solid rgba(200,144,42,0.45)",
+              background:"linear-gradient(180deg, rgba(200,144,42,0.10), rgba(26,26,22,0.96))",
+            }}>
+              <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:8 }}>
+                Arc draft
+              </div>
+              <div style={{ fontSize:11, fontWeight:700, color:T.hint, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:4 }}>
+                You're becoming
+              </div>
+              <div style={{ fontFamily:T.serif, fontSize:17, color:T.text, lineHeight:1.35, marginBottom:14 }}>
+                {arcDraft.identity}
+              </div>
+              {arcDraft.why ? (
+                <div style={{ marginBottom:10 }}>
+                  <div style={{ fontSize:10, fontWeight:700, color:T.hint, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:3 }}>Why</div>
+                  <div style={{ fontSize:13, color:T.sub, lineHeight:1.55 }}>{arcDraft.why}</div>
+                </div>
+              ) : null}
+              {arcDraft.oldPattern ? (
+                <div style={{ marginBottom:10 }}>
+                  <div style={{ fontSize:10, fontWeight:700, color:T.hint, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:3 }}>Old pattern</div>
+                  <div style={{ fontSize:13, color:T.sub, lineHeight:1.55 }}>{arcDraft.oldPattern}</div>
+                </div>
+              ) : null}
+              {arcDraft.minimumProof ? (
+                <div style={{ marginBottom:10 }}>
+                  <div style={{ fontSize:10, fontWeight:700, color:T.hint, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:3 }}>Bad-day minimum</div>
+                  <div style={{ fontSize:13, color:T.sub, lineHeight:1.55 }}>{arcDraft.minimumProof}</div>
+                </div>
+              ) : null}
+              {arcDraft.proofActions?.length > 0 ? (
+                <div style={{ marginBottom:4 }}>
+                  <div style={{ fontSize:10, fontWeight:700, color:T.hint, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:6 }}>
+                    Suggested proof actions
+                  </div>
+                  <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
+                    {arcDraft.proofActions.map((p, i) => (
+                      <div key={`${p}-${i}`} style={{ display:"flex", gap:8, alignItems:"flex-start" }}>
+                        <span style={{ fontSize:11, color:T.gold, fontWeight:700, marginTop:2, flexShrink:0 }}>·</span>
+                        <span style={{ fontSize:13, color:T.text, lineHeight:1.45 }}>{p}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ fontSize:11, color:T.hint, marginTop:10, lineHeight:1.5 }}>
+                    Add any that aren&apos;t already in your habits from Today, after you start.
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          )}
+
           <div ref={chatEndRef}/>
         </div>
 
@@ -876,9 +1027,38 @@ After creating, tell them they can log from Today and chat with you anytime.`;
           </div>
         </div>
 
-        {/* CTA — "Start Forged →" unlocks after coach creates something; otherwise show skip with confirmation */}
+        {/* CTA — promotes to "Use this Arc" once the coach emits a draft. */}
         <div style={{ flexShrink:0, padding:"8px 16px", paddingBottom:"max(28px, env(safe-area-inset-bottom, 28px))", background:T.bg }}>
-          {habitCreatedInChat ? (
+          {arcDraft ? (
+            <>
+              <button
+                type="button"
+                onClick={useArcDraft}
+                disabled={enteringApp}
+                style={{
+                  width:"100%", padding:15, borderRadius:T.rsm, border:"none",
+                  background:T.gold, color:"#0F0F0D",
+                  fontSize:16, fontWeight:700, cursor: enteringApp ? "not-allowed" : "pointer",
+                  opacity: enteringApp ? 0.7 : 1,
+                  fontFamily:T.font,
+                }}
+              >
+                {enteringApp ? "Starting Arc…" : "Use this Arc →"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setArcDraft(null)}
+                disabled={enteringApp}
+                style={{
+                  width:"100%", marginTop:8, padding:10, background:"none", border:"none",
+                  color:T.muted, fontSize:12, cursor: enteringApp ? "default" : "pointer",
+                  fontFamily:T.font,
+                }}
+              >
+                Keep chatting first
+              </button>
+            </>
+          ) : habitCreatedInChat ? (
             <button
               type="button"
               onClick={() => setShowingFinal(true)}

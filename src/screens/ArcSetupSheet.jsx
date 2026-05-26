@@ -166,24 +166,30 @@ export default function ArcSetupSheet({ onClose, onCreated, userId, existingHabi
   return (
     <Modal onClose={onClose}>
       <div style={{ paddingBottom: 10 }}>
+        <div style={{ fontSize: 10, fontWeight: 800, color: T.accent, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 6 }}>
+          8-WEEK ARC
+        </div>
         <div style={{ fontFamily: T.serif, fontSize: 22, color: T.text, marginBottom: 8 }}>
           Start your first Arc
         </div>
         <div style={{ fontSize: 13, color: T.muted, lineHeight: 1.7, marginBottom: 18 }}>
-          Define who you&apos;re becoming over the next 8 weeks. Pick the habits that prove it. You can change all of this later.
+          Eight weeks to become a slightly different person. Define who. Pick the daily proof. The coach takes it from there. Everything below can change later.
         </div>
 
-        <FG label="Who are you becoming?" mb={14}>
+        <FG label="Who are you becoming?" mb={10}>
           <textarea
             autoFocus
             value={identity}
             onChange={(e) => setIdentity(e.target.value.slice(0, 250))}
             rows={3}
             maxLength={250}
-            placeholder="e.g. Fitter, sharper, and more consistent."
+            placeholder="e.g. Gain 3kg without skipping breakfast."
             style={{ ...inp, resize: "none", lineHeight: 1.55 }}
           />
         </FG>
+        <div style={{ fontSize: 11, color: T.hint, lineHeight: 1.5, marginBottom: 12 }}>
+          Specific lands better than vague. Pick an example below or write your own.
+        </div>
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, margin: "0 0 18px" }}>
           {examples.map((ex) => (
@@ -193,7 +199,7 @@ export default function ArcSetupSheet({ onClose, onCreated, userId, existingHabi
           ))}
         </div>
 
-        <FG label="Why does this matter right now? (optional)" mb={14}>
+        <FG label="Why does this matter right now? (optional)" mb={6}>
           <textarea
             value={why}
             onChange={(e) => setWhy(e.target.value.slice(0, 250))}
@@ -203,46 +209,64 @@ export default function ArcSetupSheet({ onClose, onCreated, userId, existingHabi
             style={{ ...inp, resize: "none", lineHeight: 1.55 }}
           />
         </FG>
+        <div style={{ fontSize: 11, color: T.hint, lineHeight: 1.5, marginBottom: 14 }}>
+          The coach reads this back to you on hard days.
+        </div>
 
-        <FG label="Old pattern to weaken (optional)" mb={14}>
+        <FG label="Old pattern to weaken (optional)" mb={6}>
           <textarea
             value={oldPattern}
             onChange={(e) => setOldPattern(e.target.value.slice(0, 200))}
             rows={2}
             maxLength={200}
-            placeholder="The thing that keeps dragging you back."
+            placeholder="e.g. Nicotine kills appetite and I skip breakfast."
             style={{ ...inp, resize: "none", lineHeight: 1.55 }}
           />
         </FG>
+        <div style={{ fontSize: 11, color: T.hint, lineHeight: 1.5, marginBottom: 14 }}>
+          Naming it once helps the coach call it out when it shows up.
+        </div>
 
-        <div style={{ marginBottom: 18 }}>
+        <div style={{ marginBottom: 6 }}>
           <label style={lbl}>On a bad day, what still counts as proof? (optional)</label>
           <input
             value={minimumProof}
             onChange={(e) => setMinimumProof(e.target.value.slice(0, 150))}
             maxLength={150}
-            placeholder="Bare minimum that still counts"
+            placeholder="e.g. Eat breakfast and one small build action."
             style={{ ...inp, fontSize: 15 }}
           />
         </div>
+        <div style={{ fontSize: 11, color: T.hint, lineHeight: 1.5, marginBottom: 18 }}>
+          The bare minimum the coach falls back to on rough days.
+        </div>
 
         <div style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: T.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 10 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: T.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6 }}>
             Pick your proof actions
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {trackHabits.map((h) => (
-              <HabitPickRow
-                key={h.id}
-                habit={h}
-                selected={selected.has(h.id)}
-                onToggle={() => toggleHabit(h.id)}
-              />
-            ))}
+          <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.55, marginBottom: 12 }}>
+            Proof actions are the habits that count toward this Arc each day. Pick three to five.
           </div>
+          {trackHabits.length === 0 ? (
+            <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.55, padding: "10px 12px", borderRadius: T.rsm, border: `0.5px dashed ${T.border}`, background: T.surface }}>
+              You don&apos;t have any habits yet. Start the Arc, then add proof actions from Today.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {trackHabits.map((h) => (
+                <HabitPickRow
+                  key={h.id}
+                  habit={h}
+                  selected={selected.has(h.id)}
+                  onToggle={() => toggleHabit(h.id)}
+                />
+              ))}
+            </div>
+          )}
           {softCapHint && (
             <div style={{ marginTop: 10, fontSize: 11, color: T.hint, lineHeight: 1.5 }}>
-              Five proof actions is usually enough
+              Five proof actions is usually enough.
             </div>
           )}
         </div>

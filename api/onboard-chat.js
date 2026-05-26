@@ -11,6 +11,11 @@ const SUPABASE_ANON_KEY =
 // so a single onboarding session can't be abused into an unbounded thread.
 const ONBOARD_MSG_WINDOW = 12;
 
+// Hard cap on assistant questions before the coach MUST emit an <arc_draft>.
+// Counts real assistant turns already in the transcript. The system prompt
+// surfaces the same number so the model can self-pace before being forced.
+const MAX_ASSISTANT_TURNS = 4;
+
 async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
@@ -39,7 +44,16 @@ async function handler(req, res) {
     return res.status(401).json({ error: "Invalid token" });
   }
 
-  const { name, coachName, habitName, habitType, messages = [], arcIdentity } = req.body || {};
+  const {
+    name,
+    coachName,
+    habitName,
+    habitType,
+    messages = [],
+    // `arcIdentity` kept for backwards compat. Prefer `arc` (full object).
+    arcIdentity,
+    arc,
+  } = req.body || {};
 
   // Defense-in-depth: cap the incoming message history. Onboarding never needs
   // more than a handful of turns; this stops a malicious payload from billing
@@ -49,26 +63,80 @@ async function handler(req, res) {
     : [];
 
   const isOpener = trimmedMessages.length === 0;
+  const priorAssistantTurns = trimmedMessages.filter(m => m && m.role === "assistant").length;
 
-  let system = `You are ${coachName || "a habit coach"} — the AI coach inside Forged, a personal habit tracking app. You are meeting ${name || "someone"} for the very first time.
+  // Merge legacy arcIdentity into the arc object so the prompt reads one shape.
+  const arcFromBody = arc && typeof arc === "object" ? arc : {};
+  const arcCtx = {
+    identity:     String(arcFromBody.identity     ?? arcIdentity ?? "").trim(),
+    why:          String(arcFromBody.why          ?? "").trim(),
+    oldPattern:   String(arcFromBody.oldPattern   ?? "").trim(),
+    minimumProof: String(arcFromBody.minimumProof ?? "").trim(),
+  };
+  const dash = "—";
+  const filledCount =
+    (arcCtx.identity ? 1 : 0) +
+    (arcCtx.why ? 1 : 0) +
+    (arcCtx.oldPattern ? 1 : 0) +
+    (arcCtx.minimumProof ? 1 : 0);
 
-They just chose to track: ${habitName || "a habit"} (${habitType || "daily"} type).
+  const turnsRemaining = Math.max(0, MAX_ASSISTANT_TURNS - priorAssistantTurns);
+  const mustDraftThisTurn = priorAssistantTurns >= MAX_ASSISTANT_TURNS;
 
-Your goal right now: have a short, real first conversation. Not a sales pitch. Not generic wellness tips. Just find out who this person actually is and what's going on with this habit for them specifically.
+  const arcContextBlock = `─── ARC CONTEXT (what they already typed) ───
+Identity (who they're becoming): ${arcCtx.identity || dash}
+Why it matters: ${arcCtx.why || dash}
+Old pattern to weaken: ${arcCtx.oldPattern || dash}
+Bad-day minimum proof: ${arcCtx.minimumProof || dash}
+First habit picked: ${habitName || dash} (${habitType || dash})
+Fields filled so far: ${filledCount} of 4.`;
 
-Rules:
-- Keep every message under 55 words
-- Be direct, specific, warm — reference their actual habit (${habitName}) by name
-- Sound like a coach who has worked with real people, not a chatbot that read a self-help book
-- No "Great choice!", no filler encouragement, no bullet points, no hashtags, no "journey"
-- ${isOpener
-    ? `This is your opening message. Welcome ${name || "them"} by name, reference ${habitName} specifically, and end with ONE targeted question — something that actually tells you useful information about their relationship with this habit. Not "what are your goals?" — something more specific and interesting.`
-    : `Respond to what they actually said. Don't always ask another question. Sometimes just say something real and direct. Keep the conversation moving forward.`}`;
+  const finishRules = mustDraftThisTurn
+    ? `\nYOU HAVE HIT YOUR QUESTION LIMIT. You MUST emit an <arc_draft> block this turn — no more questions, no exceptions. If a field is genuinely missing, fill it with the most reasonable inference from what they've already told you.`
+    : `\nQuestions remaining: ${turnsRemaining}. If you can already infer the five fields with confidence, emit the <arc_draft> block now instead of asking another question. Don't drag this out.`;
 
-  const arcIdentityTrimmed = typeof arcIdentity === "string" ? arcIdentity.trim() : "";
-  if (arcIdentityTrimmed) {
-    system += `\n\nThis person just defined an 8-week Arc — they said they're becoming: ${arcIdentityTrimmed}. Reference it naturally in your opener.`;
-  }
+  const system = `You are ${coachName || "a habit coach"} — the AI coach inside Forged. You're meeting ${name || "someone"} for the first time. Your one job in this conversation is to help them build their first 8-week Arc and then HAND OFF with a draft they can confirm.
+
+${arcContextBlock}
+
+WHAT YOU ARE GATHERING (these become the Arc draft below):
+1. identity — who they're becoming (one sentence, concrete)
+2. why — why it matters to them right now
+3. oldPattern — the pattern they're trying to weaken (the thing that keeps tripping them up)
+4. minimumProof — what still counts as proof on a bad day
+5. proofActions — 3 to 5 short habit names that prove this Arc (e.g. "Eat breakfast", "Limit nicotine before lunch", "Build for 30 minutes")
+
+CONVERSATION RULES (most important):
+- Max ${MAX_ASSISTANT_TURNS} assistant questions total across the whole chat. Already used: ${priorAssistantTurns}.
+- Ask ONE question at a time. Build on their last answer. Never stack questions.
+- Keep every conversational message under 60 words.
+- Direct, grounded, warm. Like a sharp friend. No filler, no "great choice".
+- NEVER use: "warrior", "elite", "alpha", "future you", "stay strong king/queen", "journey", or any wellness-guru phrasing.
+- Do NOT re-ask anything already in ARC CONTEXT above. Build forward.
+${finishRules}
+
+WHEN YOU HAVE ENOUGH (or hit the limit) — EMIT THE DRAFT.
+End your reply with a structured block on its own lines, EXACTLY in this format:
+
+<arc_draft>
+{"identity":"…","why":"…","oldPattern":"…","minimumProof":"…","proofActions":["…","…","…"]}
+</arc_draft>
+
+Rules for the draft JSON:
+- Valid JSON only inside the tags. Single line. No comments, no trailing commas, no markdown.
+- identity: concrete, one sentence, max ~140 chars. Borrow their phrasing.
+- why, oldPattern, minimumProof: short sentences in their voice. Empty string "" is allowed only if you truly have nothing.
+- proofActions: 3 to 5 short habit names, max ~30 chars each. Prefer habits the user mentioned. When it makes sense, the first one should be the habit they already picked (${habitName || "their picked habit"}).
+
+WHEN YOU EMIT THE DRAFT, write 1–2 short sentences BEFORE the block to introduce it. Examples:
+"Alright, I've got enough to build your first Arc. Here's the draft — tweak anything that feels off."
+"That's what I needed. Here's your Arc — adjust it before you start."
+
+After the draft, the app shows a "Use this Arc" button. Do NOT tell them to type anything more.
+
+${isOpener
+  ? `THIS IS YOUR OPENING MESSAGE. Welcome ${name || "them"} by name. ${arcCtx.identity ? `Reference what they already wrote ("${arcCtx.identity}") and ask one sharp follow-up to fill in the biggest missing piece.` : "Ask ONE specific question to start filling the Arc — not 'what are your goals?'"} Do NOT emit a draft on the opener unless ALL five fields are already obvious from the ARC CONTEXT.`
+  : `Respond to what they just said. If you have enough, emit the draft. Otherwise ask the single next most useful question.`}`;
 
   // For the opener, use a neutral trigger so the assistant goes first.
   // For follow-ups, the caller sends the alternating conversation history,
@@ -81,12 +149,20 @@ Rules:
     const client = new Anthropic({ apiKey: apiKey.trim() });
     const resp = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 130,
+      // Bumped from 130 → 500 so the draft JSON fits alongside the
+      // conversational intro. A plain question reply is still ~50-100 tokens;
+      // this only costs more on the turn that actually emits the draft.
+      max_tokens: 500,
       system,
       messages: apiMessages,
     });
     const reply = resp.content?.[0]?.text?.trim() || "";
-    return res.status(200).json({ reply });
+    return res.status(200).json({
+      reply,
+      prior_assistant_turns: priorAssistantTurns,
+      questions_remaining: turnsRemaining,
+      must_draft_next: mustDraftThisTurn,
+    });
   } catch (err) {
     console.error("[onboard-chat]", err.message);
     return res.status(500).json({ error: "Failed to generate response" });

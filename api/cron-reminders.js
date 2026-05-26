@@ -352,7 +352,7 @@ function applyCoachName(body, coachName) {
  * coach-name personalised. Evening slot branches on whether the user has
  * logged anything today. Urgent goal deadlines surface as contextual copy.
  */
-function pickNormalMessage(habits, goals, todayYmd, localHour, coachName) {
+function pickNormalMessage(habits, goals, todayYmd, localHour, coachName, arcBlock = null) {
   const TRACKABLE = ["daily", "weekly", "project", "limit"];
   const trackableHabits = (habits || []).filter(
     h => TRACKABLE.includes(h.habit_type) && h.habit_type !== "log"
@@ -365,18 +365,76 @@ function pickNormalMessage(habits, goals, todayYmd, localHour, coachName) {
   const dateSeed = parseInt(todayYmd.replace(/-/g, ""), 10);
   const seed = dateSeed * 11 + (localHour ?? 0) * 7;
 
+  // ── Arc-aware path ─────────────────────────────────────────────────────────
+  // When an active Arc exists, prefer Arc-framed copy over the legacy
+  // goal-deadline templates (e.g. "Gain Weight is due in 5 days"). The
+  // legacy goal block only fires when no Arc is active so existing users
+  // without an Arc keep their previous experience.
+  const arcActive = !!arcBlock?.identity;
+  const arcDayX = arcActive ? forgeBlockDayNumber(arcBlock, todayYmd) : 0;
+  const arcDur = arcActive ? (arcBlock.duration_days || 56) : 56;
+  const proofRows = arcActive
+    ? trackableHabits.filter(h => h.is_proof_action === true && h.block_id === arcBlock.id)
+    : [];
+  const proofTotal = proofRows.length;
+  const proofDone = proofRows.filter(h => forgedRingSatisfiedTodayRow(h, todayYmd)).length;
+  const proofPending = Math.max(0, proofTotal - proofDone);
+  const minimum = arcActive ? (arcBlock.minimum_proof || "").trim() : "";
+
+  // All proof actions done — short, affirming.
+  if (arcActive && proofTotal > 0 && proofDone === proofTotal) {
+    const lines = [
+      `Day ${arcDayX} — all proof shown. Clean day. — {coach}`,
+      `Day ${arcDayX}/${arcDur}. Proof's in. — {coach}`,
+      `Day ${arcDayX}. Banked it. — {coach}`,
+    ];
+    return { title: "Forged", body: resolve(lines[Math.abs(seed) % lines.length]) };
+  }
+
+  // Evening + no proof yet + minimum on file — surface the bare minimum.
+  if (arcActive && slot === "evening" && proofDone === 0 && minimum) {
+    const trimmed = minimum.length > 60 ? minimum.slice(0, 57) + "…" : minimum;
+    return {
+      title: "Forged",
+      body: resolve(`Day ${arcDayX}. Bad day version: ${trimmed} — {coach}`),
+    };
+  }
+
+  // Morning during an Arc — anchor the day with a small ask.
+  if (arcActive && slot === "morning") {
+    const lines = [
+      `Day ${arcDayX}/${arcDur}. One proof action today. Small counts. — {coach}`,
+      `Day ${arcDayX}. Pick the easiest piece of proof first. — {coach}`,
+    ];
+    return { title: "Forged", body: resolve(lines[Math.abs(seed) % lines.length]) };
+  }
+
+  // Midday during an Arc — gentle proof nudge.
+  if (arcActive && proofPending > 0) {
+    const lines = [
+      `Day ${arcDayX}. ${proofPending} proof action${proofPending === 1 ? "" : "s"} left. — {coach}`,
+      `Day ${arcDayX}/${arcDur}. One more piece of proof today? — {coach}`,
+    ];
+    return { title: "Forged", body: resolve(lines[Math.abs(seed) % lines.length]) };
+  }
+
+  // ── Legacy (no active Arc) ─────────────────────────────────────────────────
+
   // All habits logged today — short, affirming.
   if (trackableHabits.length > 0 && trackableHabits.every(h => forgedRingSatisfiedTodayRow(h, todayYmd))) {
     const idx = Math.abs(seed) % NORMAL_ALL_LOGGED.length;
     return { title: "Forged", body: resolve(NORMAL_ALL_LOGGED[idx]) };
   }
 
-  // Goal deadline within 7 days — contextual nudge.
-  const urgentGoals = (goals || [])
-    .filter(g => g.goal_status === "active" && g.target_date)
-    .map(g => ({ ...g, daysLeft: daysBetween(todayYmd, g.target_date) }))
-    .filter(g => g.daysLeft >= 0 && g.daysLeft <= 7)
-    .sort((a, b) => a.daysLeft - b.daysLeft);
+  // Goal deadline within 7 days — only when no active Arc. Arc users get
+  // identity-framed copy above instead of generic goal countdowns.
+  const urgentGoals = !arcActive
+    ? (goals || [])
+        .filter(g => g.goal_status === "active" && g.target_date)
+        .map(g => ({ ...g, daysLeft: daysBetween(todayYmd, g.target_date) }))
+        .filter(g => g.daysLeft >= 0 && g.daysLeft <= 7)
+        .sort((a, b) => a.daysLeft - b.daysLeft)
+    : [];
   if (urgentGoals.length > 0) {
     const g = urgentGoals[0];
     const e = g.emoji || "🎯";
@@ -451,6 +509,7 @@ async function aiPickMessage(name, coachName, habits, goals, todayYmd, localHour
   const signOff = `— ${coachName || "Forged"}`;
 
   let arcContext = "";
+  let arcGuidance = "";
   if (arcBlock?.identity) {
     const dayX = forgeBlockDayNumber(arcBlock, todayYmd);
     const dur = arcBlock.duration_days || 56;
@@ -460,6 +519,17 @@ Day ${dayX} of ${dur} of their current Arc.
 They said they're becoming: ${arcBlock.identity}
 The bare minimum on a bad day is: ${minimum}
 `;
+    arcGuidance = `
+ARC FRAMING (use it):
+- Anchor the message in the Arc when natural — e.g. open with "Day ${dayX}." (no other day-counters).
+- Reference the identity OR the minimum OR a single proof action — pick one, never all three.
+- If they haven't logged, lean toward the bad-day minimum ("Bad day version: ${minimum}").
+- Do NOT mention goal deadlines like "Gain Weight is due in 5 days" — Arc framing replaces that copy.
+Good examples (use the shape, not the words):
+  Day 3. Breakfast is the first proof. Don't let nicotine win the morning. — ${coachName || "Coach"}
+  Day 14. One proof action today. Small counts. — ${coachName || "Coach"}
+  Day 22. Bad day version: ${minimum}. — ${coachName || "Coach"}
+NEVER use: warrior, elite, alpha, journey, future you, stay strong king/queen.`;
   }
 
   const prompt = `You are ${coachName || "a habit coach"}, writing a push notification for ${name}'s Forged app.
@@ -470,7 +540,7 @@ Date: ${todayYmd}
 Their habits:
 ${summaries || "No habits yet"}
 ${goalLine}
-${arcContext}
+${arcContext}${arcGuidance}
 Write ONE short push notification body. ${toneHint}
 
 Rules:
@@ -728,9 +798,9 @@ async function handler(req, res) {
     // AI generation only for Pro users at the evening slot — morning/noon use curated templates.
     if (profile.is_pro && process.env.ANTHROPIC_API_KEY && normalUserSlot(now.hour) === "evening") {
       const aiMsg = await aiPickMessage(profile.name || "there", coachName, habits, goals, todayYmd, now.hour, arcBlock);
-      ({ title, body } = aiMsg || pickNormalMessage(habits, goals, todayYmd, now.hour, coachName));
+      ({ title, body } = aiMsg || pickNormalMessage(habits, goals, todayYmd, now.hour, coachName, arcBlock));
     } else {
-      ({ title, body } = pickNormalMessage(habits, goals, todayYmd, now.hour, coachName));
+      ({ title, body } = pickNormalMessage(habits, goals, todayYmd, now.hour, coachName, arcBlock));
     }
 
     const payload = JSON.stringify({ title, body, url: "/", tag: "forged-reminder" });

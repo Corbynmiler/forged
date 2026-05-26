@@ -865,7 +865,8 @@ export function TodayScreen({
           <button type="button" onClick={onAdd}
             style={{ display:"flex", alignItems:"center", gap:14, margin:"0 14px 10px", width:"calc(100% - 28px)", padding:"14px 16px", borderRadius:T.r, border:`0.5px dashed ${T.borderStrong}`, background:T.surface, cursor:"pointer", textAlign:"left", fontFamily:T.font }}>
             <div style={{ flex:1 }}>
-              <div style={{ fontSize:14, fontWeight:500, color:T.text }}>No proof actions yet — add one</div>
+              <div style={{ fontSize:14, fontWeight:500, color:T.text, marginBottom:2 }}>Add proof actions to make this Arc active</div>
+              <div style={{ fontSize:12, color:T.muted, lineHeight:1.5 }}>Pick three to five habits that prove who you&apos;re becoming.</div>
             </div>
             <div style={{ fontSize:16, color:T.accent, flexShrink:0 }}>→</div>
           </button>
