@@ -6,6 +6,7 @@ import {
   resolveProofActionHabits,
   buildNewProofHabit,
   formatCoachChatDisplay,
+  resolveArcTitle,
 } from "../arcProofMatch.js";
 import { parseArcDraftFromText } from "./OnboardingScreen.jsx";
 
@@ -34,7 +35,7 @@ function buildRequestBody({ name, coachName, messages, existingHabits, arc, isEd
     habitName: "",
     habitType: "daily",
     messages,
-    arc: arc || { identity: "", why: "", oldPattern: "", minimumProof: "" },
+    arc: arc || { title: "", identity: "", why: "", oldPattern: "", minimumProof: "" },
     existingHabits: (existingHabits || []).map(h => ({
       id: h.id,
       name: h.name,
@@ -47,7 +48,8 @@ function buildRequestBody({ name, coachName, messages, existingHabits, arc, isEd
   };
 }
 
-function ArcDraftCard({ draft, existingHabits, saveError, saving }) {
+function ArcDraftCard({ draft, existingHabits, saveError, saving, isEdit }) {
+  const displayTitle = resolveArcTitle(draft?.title, draft?.identity);
   const { unmatched } = useMemo(
     () => resolveProofActionHabits(draft?.proofActions || [], existingHabits),
     [draft, existingHabits],
@@ -64,10 +66,13 @@ function ArcDraftCard({ draft, existingHabits, saveError, saving }) {
       <div style={{ fontSize: 10, fontWeight: 800, color: T.gold, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 8 }}>
         Arc draft
       </div>
+      <div style={{ fontFamily: T.serif, fontSize: 22, color: T.text, lineHeight: 1.2, marginBottom: 12 }}>
+        {displayTitle}
+      </div>
       <div style={{ fontSize: 11, fontWeight: 700, color: T.hint, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>
         You&apos;re becoming
       </div>
-      <div style={{ fontFamily: T.serif, fontSize: 17, color: T.text, lineHeight: 1.35, marginBottom: 14 }}>
+      <div style={{ fontSize: 14, color: T.sub, lineHeight: 1.5, marginBottom: 14 }}>
         {draft.identity}
       </div>
       {draft.why ? (
@@ -135,12 +140,13 @@ export default function ArcCoachSheet({
   const isEdit = mode === "edit" && !!activeBlock?.id;
   const arcPayload = isEdit
     ? {
+        title: activeBlock.title || "",
         identity: activeBlock.identity || "",
         why: activeBlock.whyStatement || "",
         oldPattern: activeBlock.oldPattern || "",
         minimumProof: activeBlock.minimumProof || "",
       }
-    : { identity: "", why: "", oldPattern: "", minimumProof: "" };
+    : { title: "", identity: "", why: "", oldPattern: "", minimumProof: "" };
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -168,7 +174,7 @@ export default function ArcCoachSheet({
     if (isEdit) {
       setMsgs([{
         role: "assistant",
-        content: "Want to adjust the identity, the proof actions, or the bad-day minimum?",
+        content: "Want to adjust the title, identity, proof actions, or bad-day minimum?",
       }]);
       setLoadingOpener(false);
       return;
@@ -291,12 +297,14 @@ export default function ArcCoachSheet({
 
     try {
       const nowIso = new Date().toISOString();
+      const arcTitle = resolveArcTitle(arcDraft.title, arcDraft.identity);
       let blockRow;
 
       if (isEdit) {
         const { data, error: updErr } = await supabase
           .from("forge_blocks")
           .update({
+            title: arcTitle,
             identity: arcDraft.identity.trim(),
             why_statement: (arcDraft.why || "").trim() || null,
             old_pattern: (arcDraft.oldPattern || "").trim() || null,
@@ -317,6 +325,7 @@ export default function ArcCoachSheet({
           .from("forge_blocks")
           .insert({
             user_id: userId,
+            title: arcTitle,
             identity: arcDraft.identity.trim(),
             why_statement: (arcDraft.why || "").trim() || null,
             old_pattern: (arcDraft.oldPattern || "").trim() || null,
@@ -406,7 +415,7 @@ export default function ArcCoachSheet({
         )}
 
         {arcDraft && (
-          <ArcDraftCard draft={arcDraft} existingHabits={existingHabits} saveError={saveError} saving={saving} />
+          <ArcDraftCard draft={arcDraft} existingHabits={existingHabits} saveError={saveError} saving={saving} isEdit={isEdit} />
         )}
 
         <div ref={chatEndRef} />

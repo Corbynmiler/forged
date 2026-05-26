@@ -71,6 +71,7 @@ async function handler(req, res) {
   // Merge legacy arcIdentity into the arc object so the prompt reads one shape.
   const arcFromBody = arc && typeof arc === "object" ? arc : {};
   const arcCtx = {
+    title:        String(arcFromBody.title        ?? "").trim(),
     identity:     String(arcFromBody.identity     ?? arcIdentity ?? "").trim(),
     why:          String(arcFromBody.why          ?? "").trim(),
     oldPattern:   String(arcFromBody.oldPattern   ?? "").trim(),
@@ -113,6 +114,7 @@ ${habitList.length > 0
     : "";
 
   const arcContextBlock = `─── ARC CONTEXT (what they already typed) ───
+Arc title: ${arcCtx.title || dash}
 Identity (who they're becoming): ${arcCtx.identity || dash}
 Why it matters: ${arcCtx.why || dash}
 Old pattern to weaken: ${arcCtx.oldPattern || dash}
@@ -135,11 +137,12 @@ Fields filled so far: ${filledCount} of 4.`;
 ${arcContextBlock}${existingHabitsBlock}
 
 WHAT YOU ARE GATHERING (these become the Arc draft below):
-1. identity — who they're becoming (one sentence, concrete)
-2. why — why it matters to them right now
-3. oldPattern — the pattern they're trying to weaken (the thing that keeps tripping them up)
-4. minimumProof — what still counts as proof on a bad day
-5. proofActions — 3 to 5 short habit names that prove this Arc (e.g. "Eat breakfast", "Limit nicotine before lunch", "Build for 30 minutes")
+1. title — short Arc name, 1–3 words max (e.g. "Fuel Arc", "Clean Fuel", "Builder Arc"). Punchy, not a sentence. Never use "Someone who…" or the full identity as the title.
+2. identity — who they're becoming (one sentence, concrete)
+3. why — why it matters to them right now
+4. oldPattern — the pattern they're trying to weaken (the thing that keeps tripping them up)
+5. minimumProof — what still counts as proof on a bad day
+6. proofActions — 3 to 5 short habit names that prove this Arc (e.g. "Eat breakfast", "Limit nicotine before lunch", "Build for 30 minutes")
 
 CONVERSATION RULES (most important):
 - Max ${maxAssistantTurns} assistant questions total across the whole chat. Already used: ${priorAssistantTurns}.
@@ -148,17 +151,19 @@ CONVERSATION RULES (most important):
 - Direct, grounded, warm. Like a sharp friend. No filler, no "great choice".
 - NEVER use: "warrior", "elite", "alpha", "future you", "stay strong king/queen", "journey", or any wellness-guru phrasing.
 - Do NOT re-ask anything already in ARC CONTEXT above. Build forward.
-${existingUserRules}${finishRules}
+${isEditMode === true ? `- When editing: if identity changes materially, refresh title in the draft. If they ask for a name/title, offer 3 short options in prose OR use their custom title in the draft JSON.
+` : ""}${existingUserRules}${finishRules}
 
 WHEN YOU HAVE ENOUGH (or hit the limit) — EMIT THE DRAFT.
 End your reply with a structured block on its own lines, EXACTLY in this format:
 
 <arc_draft>
-{"identity":"…","why":"…","oldPattern":"…","minimumProof":"…","proofActions":["…","…","…"]}
+{"title":"…","identity":"…","why":"…","oldPattern":"…","minimumProof":"…","proofActions":["…","…","…"]}
 </arc_draft>
 
 Rules for the draft JSON:
 - Valid JSON only inside the tags. Single line. No comments, no trailing commas, no markdown.
+- title: 1–3 words. Natural and branded. "Arc" optional. NEVER warrior/alpha/elite/beast/grindset. NEVER a full sentence or "Someone who…". If they ask to rename, use their exact short title or suggest 3 options in prose before the draft.
 - identity: concrete, one sentence, max ~140 chars. Borrow their phrasing.
 - why, oldPattern, minimumProof: short sentences in their voice. Empty string "" is allowed only if you truly have nothing.
 - proofActions: 3 to 5 short habit names, max ~30 chars each. ${showExistingHabitsBlock ? "Use EXACT names from EXISTING HABITS when reusing — do not paraphrase into a duplicate label." : "Prefer habits the user mentioned."} When it makes sense, the first one should be the habit they already picked (${habitName || "their picked habit"}).

@@ -3,6 +3,7 @@ import { T } from "../theme.js";
 import { Modal, inp } from "../components/ui.jsx";
 import { todayStr } from "../utils.js";
 import { ARC_IDENTITY_EXAMPLES } from "./OnboardingScreen.jsx";
+import { resolveArcTitle } from "../arcProofMatch.js";
 
 function addDaysYmd(ymd, deltaDays) {
   const [y, m, d] = String(ymd || "").split("-").map(Number);
@@ -124,6 +125,7 @@ export default function ArcSetupSheet({ onClose, onCreated, onSyncStart, userId,
 
       const insertPayload = {
         user_id: userId,
+        title: resolveArcTitle("", idt),
         identity: idt,
         why_statement: why.trim() || null,
         old_pattern: oldPattern.trim() || null,

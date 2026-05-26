@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { T, COLORS, HABIT_TYPES } from "../theme.js";
+import { resolveArcTitle } from "../arcProofMatch.js";
 import { supabase } from "../supabase.js";
 import { todayStr, daysAgo, isLegacyProgressType, inferProgressDirection, getStreak, isSatisfiedForTodayRing } from "../utils.js";
 import { Modal, GBtn, PBtn, Ring } from "../components/ui.jsx";
@@ -36,9 +37,11 @@ export function parseArcDraftFromText(text) {
       : [];
     const identity = String(parsed.identity ?? "").trim();
     if (!identity) return { prose, draft: null };
+    const title = resolveArcTitle(String(parsed.title ?? "").trim(), identity);
     return {
       prose,
       draft: {
+        title,
         identity:     identity.slice(0, 250),
         why:          String(parsed.why ?? "").trim().slice(0, 250),
         oldPattern:   String(parsed.oldPattern ?? "").trim().slice(0, 200),
@@ -466,6 +469,7 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
           coachName: coachNameInput.trim() || "Coach",
           emailUpdatesOptIn,
           arc: {
+            title:        arcDraft.title || resolveArcTitle("", arcDraft.identity),
             identity:     (arcDraft.identity || "").trim(),
             why:          (arcDraft.why || "").trim(),
             oldPattern:   (arcDraft.oldPattern || "").trim(),
@@ -931,10 +935,13 @@ After creating, tell them they can log from Today and chat with you anytime.`;
               <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:8 }}>
                 Arc draft
               </div>
+              <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, lineHeight:1.2, marginBottom:12 }}>
+                {arcDraft.title || resolveArcTitle("", arcDraft.identity)}
+              </div>
               <div style={{ fontSize:11, fontWeight:700, color:T.hint, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:4 }}>
                 You're becoming
               </div>
-              <div style={{ fontFamily:T.serif, fontSize:17, color:T.text, lineHeight:1.35, marginBottom:14 }}>
+              <div style={{ fontSize:14, color:T.sub, lineHeight:1.5, marginBottom:14 }}>
                 {arcDraft.identity}
               </div>
               {arcDraft.why ? (

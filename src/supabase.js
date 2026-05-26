@@ -199,6 +199,7 @@ export function rowToForgeBlock(row) {
     id:            row.id,
     userId:        row.user_id,
     identity:      row.identity,
+    title:         row.title ?? "",
     whyStatement:  row.why_statement ?? "",
     oldPattern:    row.old_pattern   ?? "",
     minimumProof:  row.minimum_proof ?? "",

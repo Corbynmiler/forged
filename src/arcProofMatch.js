@@ -150,6 +150,79 @@ export function buildNewProofHabit(proofName, blockId) {
   return base;
 }
 
+const TITLE_CRINGE_RE = /\b(warrior|alpha|elite|beast|grindset|king|queen)\b/i;
+
+/** Clean a user/AI-provided Arc title (1–3 words). Returns "" if unusable. */
+export function sanitizeArcTitle(title) {
+  let t = String(title || "").trim().replace(/\s+/g, " ");
+  if (!t || /^someone who\b/i.test(t) || TITLE_CRINGE_RE.test(t)) return "";
+  const words = t.split(" ").filter(Boolean).slice(0, 3);
+  t = words.join(" ");
+  if (!t || t.length > 36) return "";
+  return t;
+}
+
+/**
+ * Derive a short Arc title from identity when the draft omits one.
+ * Never returns a full sentence or "Someone who…".
+ */
+export function fallbackArcTitleFromIdentity(identity) {
+  const raw = String(identity || "").trim();
+  if (!raw) return "Foundation Arc";
+
+  const lower = raw.toLowerCase();
+  if (/pouch|nicotine|vape|smok|cigarette/.test(lower)) return "Clean Fuel Arc";
+  if (/weight|kg\b|pound|gain\s+\d|bulk/.test(lower)) return "Fuel Arc";
+  if (/build|ship|code|founder|startup/.test(lower)) return "Builder Arc";
+  if (/reset|restart|fresh start/.test(lower)) return "Reset Arc";
+  if (/momentum|streak|consisten/.test(lower)) return "Momentum Arc";
+  if (/queenstown|travel|trip/.test(lower)) return "Queenstown Arc";
+
+  let core = raw
+    .replace(/^someone who\s+/i, "")
+    .replace(/^a\s+/i, "")
+    .replace(/^an\s+/i, "")
+    .replace(/^i\s+want\s+to\s+be\s+/i, "")
+    .replace(/^i'?m\s+becoming\s+/i, "")
+    .replace(/[.!?].*$/, "")
+    .trim();
+
+  const segment = core.split(/[,—–-]/)[0].trim();
+  const skip = new Set(["gain", "lose", "become", "being", "without", "with", "more", "less", "who", "that", "this"]);
+  const words = segment
+    .split(/\s+/)
+    .map(w => w.replace(/[^a-zA-Z0-9']/g, ""))
+    .filter(w => w.length > 2 && !skip.has(w.toLowerCase()));
+
+  if (words.length > 0) {
+    const picked = words.slice(0, 2).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+    const base = picked.join(" ");
+    if (base && !/^Someone/i.test(base)) {
+      return /\barc\b/i.test(base) ? base : `${base} Arc`;
+    }
+  }
+
+  return "Foundation Arc";
+}
+
+/** Prefer draft title; otherwise generate from identity. */
+export function resolveArcTitle(title, identity) {
+  const clean = sanitizeArcTitle(title);
+  if (clean) return clean;
+  return fallbackArcTitleFromIdentity(identity);
+}
+
+/** Short subtitle for the Today Arc header (~50–70 chars). */
+export function arcHeaderSubtitle(block) {
+  if (!block) return "";
+  const why = String(block.whyStatement || "").trim();
+  if (why) return why.length > 70 ? `${why.slice(0, 67)}…` : why;
+  let id = String(block.identity || "").trim();
+  id = id.replace(/^someone who\s+/i, "").replace(/^i\s+want\s+to\s+be\s+/i, "").trim();
+  if (!id) return "";
+  return id.length > 70 ? `${id.slice(0, 67)}…` : id;
+}
+
 /**
  * Strip obvious markdown from coach bubbles (**, *, `, ##) for plain display.
  * Raw message text sent to the API is unchanged.

@@ -7,6 +7,7 @@ import {
   DailyCard, WeeklyCard, ProjectCard, LimitCard, LogCard,
   TodayGoalCard,
 } from "../components/habitCards.jsx";
+import { resolveArcTitle, arcHeaderSubtitle } from "../arcProofMatch.js";
 
 // ── Coach greeting helpers (deterministic, no AI) ──────────────────────────
 function coachGreetingDaysLeft(targetYmd) {
@@ -486,77 +487,43 @@ function AddProofActionSheet({ activeBlock, habits, onClose, onSelectHabit, onCr
 }
 
 function ArcStrip({ activeBlock, onEditArc }) {
-  const [open, setOpen] = useState(false);
   const { dayX, week, progress } = arcDayInfo(activeBlock);
+  const arcTitle = resolveArcTitle(activeBlock.title, activeBlock.identity);
+  const subtitle = arcHeaderSubtitle(activeBlock);
 
   return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        style={{
-          display:"block", width:"calc(100% - 28px)", margin:"8px 14px 0",
-          padding:"14px 16px", borderRadius:T.r, border:`0.5px solid ${T.border}`,
-          background:T.raised, cursor:"pointer", textAlign:"left", fontFamily:T.font, boxSizing:"border-box",
-        }}
-      >
-        <div style={{ fontSize:10, fontWeight:700, color:T.muted, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:10 }}>
-          Day {dayX} of {ARC_DURATION_DAYS} · Week {week}/8
+    <button
+      type="button"
+      onClick={() => { if (onEditArc) onEditArc(); }}
+      style={{
+        display: "block",
+        width: "calc(100% - 28px)",
+        margin: "8px 14px 0",
+        padding: "12px 14px",
+        borderRadius: T.r,
+        border: "0.5px solid rgba(200,144,42,0.4)",
+        background: "linear-gradient(135deg, rgba(192,57,43,0.12) 0%, rgba(200,144,42,0.08) 45%, rgba(26,26,22,0.98) 100%)",
+        cursor: onEditArc ? "pointer" : "default",
+        textAlign: "left",
+        fontFamily: T.font,
+        boxSizing: "border-box",
+      }}
+    >
+      <div style={{ fontSize: 10, fontWeight: 800, color: T.gold, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 8 }}>
+        Day {dayX} of {ARC_DURATION_DAYS} · Week {week}/8
+      </div>
+      <div style={{ fontFamily: T.serif, fontSize: 22, color: T.text, lineHeight: 1.15, marginBottom: subtitle ? 6 : 10 }}>
+        {arcTitle}
+      </div>
+      {subtitle ? (
+        <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.45, marginBottom: 10 }}>
+          {subtitle}
         </div>
-        <div style={{ fontSize:9, fontWeight:700, color:T.hint, letterSpacing:"0.12em", textTransform:"uppercase", marginBottom:4 }}>
-          You're becoming
-        </div>
-        <div style={{
-          fontFamily:T.serif, fontSize:19, color:T.text, lineHeight:1.35, marginBottom:12,
-          display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden",
-        }}>
-          {activeBlock.identity}
-        </div>
-        <div style={{ height:3, borderRadius:2, background:T.surface, overflow:"hidden" }}>
-          <div style={{ height:"100%", width:`${Math.round(progress * 100)}%`, background:T.accent, borderRadius:2, transition:"width 0.4s ease" }}/>
-        </div>
-      </button>
-      {open && (
-        <Modal onClose={() => setOpen(false)}>
-          <div style={{ fontSize:10, fontWeight:700, color:T.muted, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:6 }}>
-            Day {dayX} of {ARC_DURATION_DAYS} · Week {week}/8
-          </div>
-          <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, lineHeight:1.3, marginBottom:20 }}>{activeBlock.identity}</div>
-          {activeBlock.whyStatement ? (
-            <div style={{ marginBottom:16 }}>
-              <div style={{ fontSize:10, fontWeight:700, color:T.hint, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:6 }}>Why</div>
-              <div style={{ fontSize:14, color:T.sub, lineHeight:1.6 }}>{activeBlock.whyStatement}</div>
-            </div>
-          ) : null}
-          {activeBlock.oldPattern ? (
-            <div style={{ marginBottom:16 }}>
-              <div style={{ fontSize:10, fontWeight:700, color:T.hint, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:6 }}>Old pattern</div>
-              <div style={{ fontSize:14, color:T.sub, lineHeight:1.6 }}>{activeBlock.oldPattern}</div>
-            </div>
-          ) : null}
-          {activeBlock.minimumProof ? (
-            <div style={{ marginBottom:16 }}>
-              <div style={{ fontSize:10, fontWeight:700, color:T.hint, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:6 }}>On bad days…</div>
-              <div style={{ fontSize:14, color:T.sub, lineHeight:1.6 }}>{activeBlock.minimumProof}</div>
-            </div>
-          ) : null}
-          {onEditArc ? (
-            <button
-              type="button"
-              onClick={() => { setOpen(false); onEditArc(); }}
-              style={{
-                width: "100%", padding: 12, borderRadius: T.rsm, border: `0.5px solid ${T.border}`,
-                background: "rgba(200,144,42,0.12)", color: T.gold, fontSize: 14, fontWeight: 600,
-                cursor: "pointer", fontFamily: T.font, marginBottom: 8,
-              }}
-            >
-              Edit my Arc →
-            </button>
-          ) : null}
-          <GBtn onClick={() => setOpen(false)}>Close</GBtn>
-        </Modal>
-      )}
-    </>
+      ) : null}
+      <div style={{ height: 3, borderRadius: 2, background: T.surface, overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${Math.round(progress * 100)}%`, background: `linear-gradient(90deg, ${T.accent}, ${T.gold})`, borderRadius: 2, transition: "width 0.4s ease" }} />
+      </div>
+    </button>
   );
 }
 
@@ -689,7 +656,7 @@ export function TodayScreen({
 
   if (habits.length === 0 && activeGoals.length === 0) return (
     <div>
-      {onOpenCoachMic && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic} habitCompletionPercentage={pct} habitsLoggedTodayCount={loggedCount} totalTrackables={totalTrackables}/>}
+      {onOpenCoachMic && !arcActive && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic} habitCompletionPercentage={pct} habitsLoggedTodayCount={loggedCount} totalTrackables={totalTrackables}/>}
       <div style={{ padding:"40px 28px 32px", textAlign:"center" }}>
         <div style={{ fontSize:48, marginBottom:16 }}>⚒️</div>
         <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, marginBottom:10 }}>Nothing forged yet</div>
@@ -804,7 +771,7 @@ export function TodayScreen({
           onCreateNew={() => { setShowProofPicker(false); onAdd?.(); }}
         />
       )}
-      {onOpenCoachMic && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic} habitCompletionPercentage={pct} habitsLoggedTodayCount={loggedCount} totalTrackables={totalTrackables}/>}
+      {onOpenCoachMic && !arcActive && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic} habitCompletionPercentage={pct} habitsLoggedTodayCount={loggedCount} totalTrackables={totalTrackables}/>}
       {loggedCount === 0 && !arcActive && <YesterdayReceiptCard entry={yesterdayJournalEntry} />}
       {showBriefHook && (
         <button type="button" onClick={onOpenBrief}

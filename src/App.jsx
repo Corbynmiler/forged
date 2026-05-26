@@ -42,6 +42,7 @@ import {
   writeNudgeWatermarkIfNewer,
   writePageGuideSeen,
 } from "./utils.js";
+import { resolveArcTitle } from "./arcProofMatch.js";
 
 // UI primitives
 import {
@@ -2869,6 +2870,7 @@ export default function App() {
               const endDate = `${end.getFullYear()}-${String(end.getMonth()+1).padStart(2,"0")}-${String(end.getDate()).padStart(2,"0")}`;
               const insertPayload = {
                 user_id: uid,
+                title: resolveArcTitle(arc?.title, identity),
                 identity,
                 why_statement: (arc?.why || "").trim() || null,
                 old_pattern:   (arc?.oldPattern || "").trim() || null,
