@@ -1,0 +1,33 @@
+# Forged protected paths — never edited by agents without explicit override.
+# One glob per line. Lines starting with # are comments.
+# Override: set env FORGED_OVERRIDE_PROTECTED=1 in your shell before invoking Claude Code,
+# OR include the exact phrase OVERRIDE PROTECTED in your user message.
+
+# Schema / migrations
+supabase/migrations/**
+
+# Payments
+api/stripe-webhook.js
+api/create-checkout.js
+api/create-portal-session.js
+
+# Observability boundary
+api/_lib/sentry.js
+
+# Deployment + dependency manifests
+vercel.json
+package.json
+package-lock.json
+
+# Local env / settings
+.env
+.env.*
+.claude/settings.json
+.claude/settings.local.json
+
+# Coach personality + cost invariants
+api/chat.js
+api/coach-summary.js
+api/coach-intro.js
+src/coach/AICoach.jsx
+src/coach/CoachApp.jsx

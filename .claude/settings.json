@@ -4,5 +4,28 @@
       "type": "http",
       "url": "https://mcp.supabase.com/mcp?project_ref=apdmvbzfjuvxworjepze"
     }
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|NotebookEdit|Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/pre-tool-use.sh"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/session-end.sh"
+          }
+        ]
+      }
+    ]
   }
 }

@@ -3,3 +3,12 @@ node_modules
 .env.local
 .env*.local
 scripts/demo-client-test-seed.sql
+
+# Forged audit reports — keep dir tracked via .gitkeep, ignore the reports themselves.
+# dashboard.md is tracked so the rolling builder view has git history.
+.claude/reports/*
+!.claude/reports/.gitkeep
+!.claude/reports/dashboard.md
+
+# Claude Code agent worktrees (created on demand)
+.claude/worktrees/

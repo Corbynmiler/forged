@@ -74,7 +74,7 @@ const ONBOARD_STEPS = [
 
 // Example identity statements surfaced under the Arc identity textarea. Tap-to-fill.
 // Kept grounded — no "warrior", no "elite", no aspirational wellness language.
-const ARC_IDENTITY_EXAMPLES = [
+export const ARC_IDENTITY_EXAMPLES = [
   "Fitter, sharper, and more consistent.",
   "Building income outside my job.",
   "Less dependent on old crutches.",

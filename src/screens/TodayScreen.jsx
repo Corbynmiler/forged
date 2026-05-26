@@ -541,6 +541,7 @@ export function TodayScreen({
   onPinTask = null,
   onDeleteTask = null,
   activeBlock = null,
+  onStartArc = null,
 }) {
   const [briefPreview, setBriefPreview] = useState(null);
   useEffect(() => {
@@ -669,6 +670,42 @@ export function TodayScreen({
   const showCoachNudge = habits.length > 0 && !coachEverOpened;
   return (
     <div>
+      {!activeBlock && habits.length > 0 && typeof onStartArc === "function" && (
+        <button
+          type="button"
+          onClick={onStartArc}
+          style={{
+            display: "block",
+            width: "calc(100% - 28px)",
+            margin: "8px 14px 0",
+            padding: "14px 16px",
+            borderRadius: T.r,
+            border: "0.5px solid rgba(192,57,43,0.35)",
+            background: "linear-gradient(90deg, rgba(192,57,43,0.14), rgba(26,26,22,0.96))",
+            cursor: "pointer",
+            textAlign: "left",
+            fontFamily: T.font,
+            boxSizing: "border-box",
+          }}
+        >
+          <div style={{ fontSize: 10, fontWeight: 800, color: T.accent, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 8 }}>
+            8-WEEK ARC
+          </div>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontFamily: T.serif, fontSize: 18, color: T.text, lineHeight: 1.2, marginBottom: 6 }}>
+                Start your first Arc
+              </div>
+              <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.55 }}>
+                Define who you&apos;re becoming. Turn your habits into proof. The coach takes it from there.
+              </div>
+            </div>
+            <div style={{ flexShrink: 0, alignSelf: "center", fontSize: 12, fontWeight: 700, color: T.gold }}>
+              Start your first Arc →
+            </div>
+          </div>
+        </button>
+      )}
       {showCoachNudge && (
         <button type="button" onClick={onOpenCoachMic}
           style={{ display:"flex", alignItems:"center", gap:8, width:"calc(100% - 28px)", margin:"6px 14px 0", padding:"9px 12px", background:"linear-gradient(90deg, rgba(200,144,42,0.14), rgba(200,144,42,0.04))", border:"0.5px solid rgba(200,144,42,0.35)", borderRadius:T.rsm, color:T.gold, fontSize:12, fontWeight:600, cursor:"pointer", textAlign:"left", fontFamily:T.font }}>
