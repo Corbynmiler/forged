@@ -1,7 +1,13 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { T, COACH_ICON_OPTIONS, WEEKLY_SUMMARY_TTL_MS, CREATOR_ID, HABIT_TYPES, XP_LEVELS, COLORS, DAYS, MONTHS, FREE_DAILY_LIMIT } from "../theme.js";
-import { detectsArcEditIntent } from "../arcProofMatch.js";
+import {
+  detectsArcEditIntent,
+  formatCoachChatDisplay,
+  arcDurationWeeksLabel,
+  resolveArcTitle,
+} from "../arcProofMatch.js";
+import { getArcDayNumber, getArcDurationDays, isProofHabitForBlock } from "../arcProgress.js";
 import { supabase, rowToHabit, rowToGoal } from "../supabase.js";
 import {
   todayStr, daysAgo, parseLocal, fmtDate, fmtEntryDate, fmtWeekRange,
@@ -1714,26 +1720,63 @@ function weeklyBriefBlocks(text) {
 
 
 
+function habitLogLineForCoach(h, today) {
+  const type = HABIT_TYPES[h.habitType]?.label || h.habitType;
+  const loggedToday = h.logs.some(l => l.date === today && (
+    l.value === true || (typeof l.value === "number") || (l.value?.minutes > 0) || l.value === "skip"
+  ));
+  return `- [id:${h.id}] ${h.emoji || ""} ${h.name} (${type}, logged today: ${loggedToday})`;
+}
+
 function buildArcSystemBlock(activeBlock, habits) {
   if (!activeBlock?.id) return "";
   const today = todayStr();
-  const daysElapsed = Math.floor((parseLocal(today) - parseLocal(activeBlock.startDate)) / 86400000);
+  const duration = getArcDurationDays(activeBlock);
+  const dayNum = getArcDayNumber(activeBlock);
+  const weeksTotal = Math.max(1, Math.ceil(duration / 7));
+  const weekNum = Math.min(weeksTotal, Math.max(1, Math.ceil(dayNum / 7)));
   const trackHabits = habits.filter(h => h.habitType !== "log");
-  const proofHabits = trackHabits.filter(h => h.isProofAction === true && h.blockId === activeBlock.id);
+  const proofHabits = trackHabits.filter(h => isProofHabitForBlock(h, activeBlock.id));
+  const otherHabits = trackHabits.filter(h => !isProofHabitForBlock(h, activeBlock.id));
   const proofDone = proofHabits.filter(h => isSatisfiedForTodayRing(h)).length;
   const proofTotal = proofHabits.length;
   const dash = "—";
+  const arcTitle = resolveArcTitle(activeBlock.title, activeBlock.identity);
+
+  const proofList = proofHabits.length
+    ? proofHabits.map(h => habitLogLineForCoach(h, today)).join("\n")
+    : "(none linked yet)";
+  const otherList = otherHabits.length
+    ? otherHabits.map(h => habitLogLineForCoach(h, today)).join("\n")
+    : "(none)";
+
   return `─── ACTIVE ARC ───
-You are ${daysElapsed} days into an 8-week Arc this person defined themselves on ${activeBlock.startDate}.
-They said they are becoming: ${activeBlock.identity}
-Why it matters to them: ${(activeBlock.whyStatement || "").trim() || dash}
-The old pattern they are trying to weaken: ${(activeBlock.oldPattern || "").trim() || dash}
-On bad days, the bare minimum still counts as proof: ${(activeBlock.minimumProof || "").trim() || dash}
+Title: ${arcTitle}
+Day ${dayNum} of ${duration} (${arcDurationWeeksLabel(duration)}, week ${weekNum} of ${weeksTotal})
+Started: ${activeBlock.startDate}
+Direction: ${activeBlock.identity}
+Why it matters: ${(activeBlock.whyStatement || "").trim() || dash}
+Old pattern to weaken: ${(activeBlock.oldPattern || "").trim() || dash}
+Bad-day minimum proof: ${(activeBlock.minimumProof || "").trim() || dash}
 Proof actions today: ${proofDone} of ${proofTotal}.
 
-Use this with restraint. When they win, name once — lightly — what version of them that proves. When they drift, name the pattern they're trying to weaken once, no preaching, no lectures. When they ask what to do or have a clearly rough day, set tomorrow's minimum in one concrete sentence.
+PROOF ACTIONS (log these with log_habit when the user did them — they drive Arc progress):
+${proofList}
 
-NEVER say: "future you", "the warrior in you", "the elite version", "your journey", "stay strong king/queen", or any motivational-guru phrasing. Stay in the existing grounded tone.
+OTHER HABITS (still loggable — lifetime activity only, NOT Arc proof):
+${otherList}
+
+ARC RULES FOR THIS CHAT:
+- Proof actions are the main focus during an active Arc. Other habits are secondary.
+- When they mention something that matches a proof action, log that habit with log_habit. Do not mark non-proof habits as proof.
+- create_habit never makes a proof action — proof linking happens in the Arc editor only.
+- If they ask to change Arc title, identity, proof list, or minimum: do NOT pretend to edit here. Tell them to tap "Edit my Arc" (or you will route them).
+- Arc length (weeks/days) CANNOT be changed after the Arc has started. If they ask to shorten/lengthen the Arc, say duration is locked for this Arc — they can still edit the fields above.
+- If they ask "what is my Arc" or "summarise my Arc", answer from this block in plain language.
+
+Use Arc context with restraint. When they win, name once — lightly — what that proves. When they drift, name the old pattern once, no lecture.
+
+NEVER say: "future you", "the warrior in you", "the elite version", "your journey", "stay strong king/queen", or motivational-guru phrasing.
 
 `;
 }
@@ -1753,7 +1796,10 @@ function buildCoachSystemPrompt(user, habits, coachName, screen, goals = [], jou
 
     const liveStreak = getStreak(h);
     const loggedToday = h.logs.some(l => l.date === today && (l.value === true || (typeof l.value === "number") || l.value?.minutes > 0));
-    let detail = `- [id:${h.id}] ${h.emoji || ""} ${h.name} (${type}, streak: ${liveStreak} days, logged today: ${loggedToday})`;
+    const arcTag = activeBlock?.id
+      ? (isProofHabitForBlock(h, activeBlock.id) ? " [PROOF for active Arc]" : " [other habit — not Arc proof]")
+      : "";
+    let detail = `- [id:${h.id}] ${h.emoji || ""} ${h.name} (${type}, streak: ${liveStreak} days, logged today: ${loggedToday})${arcTag}`;
 
     if (h.habitType === "weekly" && h.weeklyTarget) {
       const weekCount = getWeeklyCount(h);
@@ -1930,7 +1976,18 @@ Only ask a clarifying question if something critical is truly missing — like w
 - If the user asks "what haven't I logged today?", "what else haven't I logged?", or similar, do not call any write tool. Compare the logged today fields above and list the missing habits/goals plainly.
 
 ─── PRODUCT CONTEXT ───
-Forged is the habit-tracking app ${name} is using — and may also be building. If they reference "Forged", "the build", "the app", "shipping a feature", or "working on the product", that's their software project. Look for a project-type habit in their list and log it. Don't treat "Forged" as an unknown reference.
+Forged is an Arc-first habit app ${name} is using${activeBlock?.id ? " (they have an active Arc — see ACTIVE ARC above)" : ""}. It is not just a generic streak tracker. If they reference "Forged", "the build", "the app", "shipping a feature", or "working on the product", that's their software project — look for a project-type habit and log it.
+
+─── MESSY DAY DUMPS ───
+When they list many things in one message (water, breakfast, gym, work, slips, etc.):
+- Map each clear item to log_habit on the matching habit id. Prefer proof actions when both could match.
+- Use add_daily_note for story, mood, or "took the day off" context.
+- Do not invent logs for vague items. One short clarification question at the end if something important is ambiguous.
+- Confirm in 2–4 short sentences what you logged — no essay, no fake hype. The receipt chips list saves; you add the human read.
+
+─── HONEST LIMITS ───
+You can: create_habit, edit_habit, log_habit, add_daily_note, and goal planning via <goal_plan>.
+You cannot: create tasks/loose ends, change Arc duration mid-Arc, or link habits as proof actions from here. Say so plainly if asked.
 
 ─── GOAL PLANNING ───
 When the user wants a goal (any outcome tied to a number — lose weight, run a distance, save money, hit a target), do NOT call create_habit. Instead:
@@ -2144,12 +2201,23 @@ function CoachFormattedBubble({ text, isUser, muted }) {
               wordBreak: "break-word",
             }}
           >
-            {lines.map((line, li) => (
-              <span key={li}>
-                {li > 0 ? <br /> : null}
-                {coachRichTextToElements(line, { strongColor, baseColor, keyRoot: `p${pi}-l${li}` })}
-              </span>
-            ))}
+            {lines.map((line, li) => {
+              const bullet = /^\s*•\s/.test(line);
+              const body = bullet ? line.replace(/^\s*•\s*/, "") : line;
+              return (
+                <div
+                  key={li}
+                  style={{
+                    marginTop: li > 0 ? 6 : 0,
+                    paddingLeft: bullet ? 14 : 0,
+                    textIndent: bullet ? -10 : 0,
+                  }}
+                >
+                  {bullet ? <span style={{ color: baseColor, marginRight: 6 }}>•</span> : null}
+                  {coachRichTextToElements(body, { strongColor, baseColor, keyRoot: `p${pi}-l${li}` })}
+                </div>
+              );
+            })}
           </div>
         );
       })}
@@ -2170,130 +2238,21 @@ function formatCoachMsgTime(ts) {
 }
 
 // ─── COACH GREETING ───────────────────────────────────────────────────────────
-// Build a warmer, context-aware opener. Uses data already in memory (no extra
-// /api/chat tokens). Returns one short line + one short follow-up question.
-function buildCoachGreeting({ name, habits = [], goals = [] }) {
+/** Normal-user coach opener — explains what this chat is for (no extra API tokens). */
+function buildNormalCoachOpener({ name, activeBlock = null }) {
   const who = name && String(name).trim() ? String(name).trim() : "";
-  const hi = who ? `Hey ${who}` : `Hey`;
-  const hasHabits = habits.length > 0;
-  const activeGoals = (goals || []).filter(g => !g.completedAt && !g.archivedAt);
-
-  // Real logs only (ignore quicknotes + skips) — same filter used elsewhere.
-  const realLogs = habits.flatMap(h =>
-    (h.logs || []).filter(l => l && l.date && l.value !== "quicknote" && l.value !== "skip"),
-  );
-  const logDates = new Set(realLogs.map(l => l.date));
-  const totalRealLogs = realLogs.length;
-
-  const today = todayStr();
-  const y1 = daysAgo(1);
-  const loggedToday = logDates.has(today);
-  const loggedYesterday = logDates.has(y1);
-
-  // Count unique days logged in the last 7 calendar days (incl. today).
-  let last7Days = 0;
-  for (let i = 0; i < 7; i++) if (logDates.has(daysAgo(i))) last7Days++;
-
-  // How many days since the most recent real log (null if never logged).
-  let daysSinceLast = null;
-  if (logDates.size > 0) {
-    for (let i = 0; i < 60; i++) {
-      if (logDates.has(daysAgo(i))) { daysSinceLast = i; break; }
-    }
-    if (daysSinceLast == null) daysSinceLast = 60; // cap for copy purposes
+  const hi = who ? `Hey ${who}` : "Hey";
+  let line = `${hi}. Chuck the day in here — typed or voice note. Tell me what happened, what you did, what you skipped, or what you want to sort out.`;
+  if (activeBlock?.id) {
+    line += " If you mention habits, goals, notes, or Arc proof actions, I'll try to log the useful bits. I can see your Arc too, so I'll keep your proof actions in mind.";
+  } else {
+    line += " If you mention habits, goals, or notes, I'll try to log the useful bits.";
   }
+  return line;
+}
 
-  // Highest current streak across habits (for light, non-overbearing mention).
-  const topStreak = hasHabits ? Math.max(0, ...habits.map(h => getStreak(h))) : 0;
-
-  // Seed — stable within ~4h window, shifts naturally across day/hour so users
-  // don't see the exact same line on every open but aren't jarred either.
-  const now = new Date();
-  const dayOfYear = Math.floor(
-    (now - new Date(now.getFullYear(), 0, 0)) / (1000 * 60 * 60 * 24),
-  );
-  const seed = dayOfYear * 4 + Math.floor(now.getHours() / 6);
-  const pick = (arr) => arr[Math.abs(seed) % arr.length];
-
-  // — Scenarios, ordered most-specific first. Each returns a line that pairs a
-  // warm opener with a gently useful next question. Kept short on purpose.
-  // First-ever open / no habits yet.
-  if (!hasHabits) {
-    return pick([
-      `${hi} 👋 I find patterns from what you log and write — but I need data first. Tell me what you're trying to change and I'll set it up.`,
-      `${hi}. The more you log, the more I can show you. Start with one habit — say "add [habit name]" and I'll create it now.`,
-      `${hi}. Nothing to analyse yet. Tell me what you keep meaning to do and I'll get it on the board.`,
-    ]);
-  }
-
-  // Has habits but never logged one.
-  if (totalRealLogs === 0) {
-    return pick([
-      `${hi} 👋 Habits are set up but no data yet — I need logs to find patterns. Tell me what you did today and I'll record it.`,
-      `${hi}. No logs yet, which means nothing for me to analyse. Tell me what you actually did today and I'll start the record.`,
-      `${hi}. The habits are there — now I need data. One log is all it takes. What did you do today?`,
-    ]);
-  }
-
-  // Already logged today.
-  if (loggedToday) {
-    const streakBit = topStreak >= 3 ? ` ${topStreak}-day streak going.` : "";
-    return pick([
-      `${hi} — already logged today.${streakBit} Want to add a note on how it went? The more you write, the more I can find.`,
-      `${hi}. Today's log is in.${streakBit} Anything you want to reflect on, or another habit to hit?`,
-      `Nice ${who || "one"} — you showed up today.${streakBit} Want to add a reflection while it's fresh, or look at how the week's tracking?`,
-    ]);
-  }
-
-  // Logged yesterday, not today yet — warm, forward-leaning.
-  if (loggedYesterday) {
-    const streakBit = topStreak >= 3 ? ` ${topStreak}-day streak on the line.` : "";
-    return pick([
-      `${hi} — yesterday was solid.${streakBit} What are we hitting today?`,
-      `${hi}. Good to see you back. Yesterday's in the books${streakBit ? `,${streakBit.replace(" ", " ")}` : ""} — what's today?`,
-      `${hi}. You showed up yesterday${streakBit ? `, and that${streakBit}` : ""}. Want me to log today's, or chat through it first?`,
-    ]);
-  }
-
-  // Came back after a short gap (2–3 days).
-  if (daysSinceLast != null && daysSinceLast >= 2 && daysSinceLast <= 3) {
-    const lastWord = daysSinceLast === 2 ? "two days" : "a few days";
-    return pick([
-      `${hi}. Been ${lastWord} — all good, let's get moving again. Want me to log something now, or talk first?`,
-      `${hi}. Quiet couple of days. No big deal — what do you want to do today?`,
-      `Good to see you back, ${who || "mate"}. ${lastWord} off doesn't undo anything. Want to log one now?`,
-    ]);
-  }
-
-  // Longer gap (4+ days) — softer, non-judgmental re-entry.
-  if (daysSinceLast != null && daysSinceLast >= 4) {
-    return pick([
-      `${hi}. Good to see you back. A little time off is fine — want to restart with one small log today?`,
-      `${hi} 👋 Been a minute. No guilt — just tell me what you did today and we'll pick it back up.`,
-      `${hi}. Welcome back. Let's keep today simple: one log, and we're rolling again.`,
-    ]);
-  }
-
-  // Active recent user (logged 4+ of last 7) but not today yet.
-  if (last7Days >= 4) {
-    const streakBit = topStreak >= 3 ? ` ${topStreak}-day streak active.` : "";
-    return pick([
-      `${hi}. You've logged well this week.${streakBit} What are we hitting today?`,
-      `${hi} — steady week so far.${streakBit} Anything specific on your mind, or shall I log today's?`,
-      `${hi}. Momentum's there.${streakBit} Want me to log today, or talk through what's coming up?`,
-    ]);
-  }
-
-  // Default fallback — has habits, some history, not today, small sample size.
-  const nHabits = habits.length;
-  const goalBit = activeGoals.length > 0
-    ? ` You've got ${activeGoals.length} active goal${activeGoals.length !== 1 ? "s" : ""} in play too.`
-    : "";
-  return pick([
-    `${hi} 👋 ${nHabits} habit${nHabits !== 1 ? "s" : ""} on the board.${goalBit} What's on your mind today?`,
-    `${hi}. Good to see you.${goalBit} Want to log something, check progress, or just talk through the day?`,
-    `${hi}. I'm here — tell me what you did today, ask about your streaks, or add a new habit.`,
-  ]);
+function buildCoachGreeting({ name, habits = [], goals = [], activeBlock = null }) {
+  return buildNormalCoachOpener({ name, activeBlock });
 }
 
 // ─── CREATOR GREETING ─────────────────────────────────────────────────────────
@@ -2747,7 +2706,7 @@ function GoalPlanPreview({ plan, onConfirm, onDismiss }) {
   );
 }
 
-export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, coachIcon, coachAccentColor, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onGoalLogged, onHabitRenamed, onGoalPlanConfirm, onJournalLogged, journalEntries = [], openInputMode = null, pendingMessage = null, onNavigateTo = null, activeBlock = null, onOpenEditArc = null }) {
+export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, coachIcon, coachAccentColor, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onGoalLogged, onHabitRenamed, onGoalPlanConfirm, onJournalLogged, journalEntries = [], openInputMode = null, pendingMessage = null, onNavigateTo = null, activeBlock = null, onOpenEditArc = null, previewNormalCoachGreeting = false }) {
   useScrollLock(true);
   const cName = coachName || "Coach";
   const isCreatorUser = user?.id === CREATOR_ID;
@@ -2761,9 +2720,9 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
   // so back-to-back opens never repeat).
   const greetingRef = useRef(null);
   if (greetingRef.current === null) {
-    greetingRef.current = isCreatorUser
+    greetingRef.current = (isCreatorUser && !previewNormalCoachGreeting)
       ? buildCreatorGreeting({ name: user?.name, habits, goals })
-      : buildCoachGreeting({ name: user?.name, habits, goals });
+      : buildCoachGreeting({ name: user?.name, habits, goals, activeBlock });
   }
   const greeting = greetingRef.current;
   const [messages, setMessages] = useState(() => {
@@ -3287,7 +3246,9 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
                       ))}
                     </div>
                     <div style={{ fontSize:11, color:T.muted, lineHeight:1.5, marginTop:2, padding:"0 2px" }}>
-                      I can set goals with milestones, log habits, track your progress, and tell you what patterns I'm seeing.
+                      {activeBlock?.id
+                        ? "Voice or text — dump the day. I'll log habits, proof actions, goals, and notes where I can."
+                        : "Voice or text — dump the day. I'll log habits, goals, and notes where I can."}
                     </div>
                   </div>
                 );
@@ -3304,8 +3265,11 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
               : m.role === "assistant"
                 ? stripPartialGoalPlan(m.content)
                 : m.content;
-            const { main: coachMain, receipt: coachReceipt } =
+            const { main: coachMainRaw, receipt: coachReceipt } =
               m.role === "assistant" ? splitCoachReceipt(rawVisible) : { main: rawVisible, receipt: null };
+            const coachMain = m.role === "assistant"
+              ? formatCoachChatDisplay(coachMainRaw)
+              : coachMainRaw;
             return (
               <div key={m.id || `${m.role}-${i}-${m.ts ?? ""}`} style={{ display:"flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
                 <div style={{ maxWidth:"90%", display:"flex", flexDirection:"column", alignItems: m.role === "user" ? "flex-end" : "flex-start", width: parsed ? "100%" : undefined }}>

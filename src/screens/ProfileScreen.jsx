@@ -270,7 +270,7 @@ export function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
     </div>
   );
 }
-export function ProfileScreen({ user, xp, habits, isPro, isCoach, stripeCustomerId, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onReplayPageGuides, onPreviewCoach, onSignOut, onShowTour, onUpgrade, coachName, coachIcon, onSaveCoach, notifEnabled, notifTime, notifLoading, notifPermission, dailyRemindersEnabled, nudgesEnabled, invitesEnabled, onNotifToggle, onNotifTimeChange, onNotifCategoryChange }) {
+export function ProfileScreen({ user, xp, habits, isPro, isCoach, stripeCustomerId, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onReplayPageGuides, onPreviewCoach, previewNormalCoachGreeting = false, onTogglePreviewNormalCoachGreeting, onSignOut, onShowTour, onUpgrade, coachName, coachIcon, onSaveCoach, notifEnabled, notifTime, notifLoading, notifPermission, dailyRemindersEnabled, nudgesEnabled, invitesEnabled, onNotifToggle, onNotifTimeChange, onNotifCategoryChange }) {
   const [editingName,    setEditingName]    = useState(false);
   const [nameVal,        setNameVal]        = useState(user.name);
   const [showCoachSheet, setShowCoachSheet] = useState(false);
@@ -803,9 +803,18 @@ export function ProfileScreen({ user, xp, habits, isPro, isCoach, stripeCustomer
             Replay AI page tour (safe — no data changes)
           </button>
           <button onClick={onPreviewCoach}
-            style={{ width:"100%", padding:"11px 0", borderRadius:T.rsm, border:`0.5px solid rgba(200,144,42,0.4)`, background:"none", color:T.gold, fontSize:13, cursor:"pointer", fontFamily:T.font }}>
+            style={{ width:"100%", padding:"11px 0", borderRadius:T.rsm, border:`0.5px solid rgba(200,144,42,0.4)`, background:"none", color:T.gold, fontSize:13, cursor:"pointer", fontFamily:T.font, marginBottom:8 }}>
             Preview coach workspace →
           </button>
+          {onTogglePreviewNormalCoachGreeting ? (
+            <button
+              type="button"
+              onClick={onTogglePreviewNormalCoachGreeting}
+              style={{ width:"100%", padding:"11px 0", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background: previewNormalCoachGreeting ? "rgba(200,144,42,0.12)" : "none", color:T.muted, fontSize:12, cursor:"pointer", fontFamily:T.font }}
+            >
+              {previewNormalCoachGreeting ? "Normal-user coach intro: ON (creator preview)" : "Preview normal-user coach intro"}
+            </button>
+          ) : null}
         </div>
       )}
 

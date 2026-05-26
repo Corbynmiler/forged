@@ -45,6 +45,7 @@ import {
   todayLogs,
   todayStr,
   daysAgo,
+  isSatisfiedForTodayRing,
   urlBase64ToUint8Array,
   weekStartFor,
   writeForgedBetaEmailOptIn,
@@ -286,6 +287,7 @@ export default function App() {
   // paywall in CoachApp — coaches without a tier see the subscribe screen.
   const [coachTier,      setCoachTier]      = useState(null);
   const [previewCoach,   setPreviewCoach]   = useState(false);
+  const [previewNormalCoachGreeting, setPreviewNormalCoachGreeting] = useState(false);
   /** Signed-out coach shell demo — only opened via `?coach_dev_preview=1` (dev / QA), not consumer auth UI */
   const [publicCoachPreview, setPublicCoachPreview] = useState(false);
   /** From profiles.stripe_customer_id — used for Stripe Customer Portal */
@@ -445,6 +447,12 @@ export default function App() {
       return next.size === prev.size ? prev : next;
     });
   }, [habits, goals]);
+
+  useEffect(() => {
+    try {
+      setPreviewNormalCoachGreeting(localStorage.getItem("forged_coach_preview_normal_greeting") === "1");
+    } catch { /* ignore */ }
+  }, []);
 
   // Sync Arc daily score when habits or active Arc change (refresh + proof edits).
   useEffect(() => {
@@ -3149,6 +3157,97 @@ export default function App() {
     return true;
   }
 
+  /** Coach log_habit SSE — same side effects as manual logs (Arc XP + lifetime XP). */
+  function applyCoachHabitLogSideEffects(habitId, updatedLogs) {
+    const prev = habits.find(h => String(h.id) === String(habitId));
+    if (!prev) {
+      setHabits(p => p.map(h => (String(h.id) === String(habitId) ? { ...h, logs: updatedLogs } : h)));
+      return;
+    }
+    const updated = { ...prev, logs: updatedLogs };
+    const nextHabits = habits.map(h => (String(h.id) === String(habitId) ? updated : h));
+    setHabits(nextHabits);
+
+    const today = todayStr();
+    const block = activeBlock;
+    if (block) void reconcileArcProgress(block, nextHabits);
+
+    const isProof = block && isProofHabitForBlock(updated, block.id);
+    const lifetimeUnit = lifetimeXpForHabitLog({ hasActiveArc: !!block, isProof: !!isProof });
+
+    if (updated.habitType === "project") {
+      const targetMins = updated.dailyTargetMinutes ?? 60;
+      const prevMins = prev.logs.filter(l => l.date === today).reduce((s, l) => s + (l.value?.minutes || 0), 0);
+      const nextMins = updated.logs.filter(l => l.date === today).reduce((s, l) => s + (l.value?.minutes || 0), 0);
+      const firstKey = `project-first:${habitId}:${today}`;
+      const bonusKey = `project-target:${habitId}:${today}`;
+      let xpGain = 0;
+      if (prevMins === 0 && !xpAwardedDates.has(firstKey)) xpGain += lifetimeUnit;
+      if (prevMins < targetMins && nextMins >= targetMins && !xpAwardedDates.has(bonusKey)) xpGain += lifetimeUnit;
+      if (xpGain > 0) {
+        setXp(x => x + xpGain);
+        setXpAwardedDates(prevSet => {
+          const next = new Set(prevSet);
+          if (prevMins === 0) next.add(firstKey);
+          if (prevMins < targetMins && nextMins >= targetMins) next.add(bonusKey);
+          return next;
+        });
+      }
+      return;
+    }
+
+    if (updated.habitType === "limit") return;
+
+    const wasDone = prev.logs.some(l => l.date === today && l.value === true);
+    const isDone = updated.logs.some(l => l.date === today && l.value === true);
+    if (!isDone || wasDone) return;
+
+    const awardKey = `${habitId}:${today}`;
+    if (xpAwardedDates.has(awardKey)) return;
+
+    setXp(x => x + lifetimeUnit);
+    setXpAwardedDates(prevSet => {
+      const next = new Set(prevSet);
+      next.add(awardKey);
+      return next;
+    });
+  }
+
+  function applyCoachGoalLogSideEffects(goalId, updatedLogs) {
+    const goal = goals.find(g => String(g.id) === String(goalId));
+    if (!goal) {
+      setGoals(p => p.map(g => (String(g.id) === String(goalId) ? { ...g, logs: updatedLogs } : g)));
+      return;
+    }
+    const prevValue = Number(goal.currentValue);
+    const lastLog = [...updatedLogs].reverse().find(l => l.date === todayStr() && typeof l.value === "number");
+    const nextValue = lastLog ? Number(lastLog.value) : prevValue;
+    const updated = {
+      ...goal,
+      logs: updatedLogs,
+      currentValue: Number.isFinite(nextValue) ? nextValue : goal.currentValue,
+    };
+    setGoals(p => p.map(g => (String(g.id) === String(goalId) ? updated : g)));
+
+    const today = todayStr();
+    const awardKey = `goal:${goalId}:${today}`;
+    if (xpAwardedDates.has(awardKey)) return;
+    if (!Number.isFinite(prevValue) || !Number.isFinite(nextValue) || nextValue === prevValue) return;
+
+    const target = Number(goal.targetValue);
+    const prevDist = Math.abs(target - prevValue);
+    const nextDist = Math.abs(target - nextValue);
+    const xpGain = nextDist < prevDist ? 15 : 5;
+    if (xpGain > 0) {
+      setXp(x => x + xpGain);
+      setXpAwardedDates(prevSet => {
+        const next = new Set(prevSet);
+        next.add(awardKey);
+        return next;
+      });
+    }
+  }
+
   // Tap handler: daily, weekly, limit
   async function handleTap(id, e) {
     if (demoBounce()) return;
@@ -3945,6 +4044,12 @@ onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} o
           onResetOnboarding={() => setOnboarded(false)}
           onPreviewOnboarding={() => setPreviewOnboarding(true)}
           onPreviewCoach={() => setPreviewCoach(true)}
+          previewNormalCoachGreeting={previewNormalCoachGreeting}
+          onTogglePreviewNormalCoachGreeting={() => {
+            const next = !previewNormalCoachGreeting;
+            setPreviewNormalCoachGreeting(next);
+            try { localStorage.setItem("forged_coach_preview_normal_greeting", next ? "1" : "0"); } catch { /* ignore */ }
+          }}
           onReplayPageGuides={() => {
             // Dev-only: wipe the 4 page-guide seen flags so the first-time
             // AI bubble re-triggers on next visit to Today/Journal/Insights/
@@ -4319,8 +4424,9 @@ onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} o
           onNavigateTo={(s) => setScreen(s)}
           onHabitCreated={h  => setHabits(p => p.some(x => String(x.id) === String(h.id)) ? p.map(x => String(x.id) === String(h.id) ? h : x) : [...p, h])}
           onGoalCreated={g   => setGoals(p  => p.some(x => String(x.id) === String(g.id)) ? p.map(x => String(x.id) === String(g.id) ? g : x) : [...p, g])}
-          onHabitLogged={(id, logs) => setHabits(p => p.map(h => String(h.id) === String(id) ? { ...h, logs } : h))}
-          onGoalLogged={(id, logs)  => setGoals(p  => p.map(g => String(g.id) === String(id) ? { ...g, logs } : g))}
+          previewNormalCoachGreeting={previewNormalCoachGreeting}
+          onHabitLogged={applyCoachHabitLogSideEffects}
+          onGoalLogged={applyCoachGoalLogSideEffects}
           onHabitRenamed={(id, name) => setHabits(p => p.map(h => String(h.id) === String(id) ? { ...h, name } : h))}
           onGoalPlanConfirm={handleGoalPlanConfirm}
           journalEntries={journalEntries}
