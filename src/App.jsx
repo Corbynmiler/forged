@@ -3157,23 +3157,15 @@ export default function App() {
     return true;
   }
 
-  /** Coach log_habit SSE — same side effects as manual logs (Arc XP + lifetime XP). */
-  function applyCoachHabitLogSideEffects(habitId, updatedLogs) {
-    const prev = habits.find(h => String(h.id) === String(habitId));
-    if (!prev) {
-      setHabits(p => p.map(h => (String(h.id) === String(habitId) ? { ...h, logs: updatedLogs } : h)));
-      return;
-    }
-    const updated = { ...prev, logs: updatedLogs };
-    const nextHabits = habits.map(h => (String(h.id) === String(habitId) ? updated : h));
-    setHabits(nextHabits);
-
+  /** Lifetime XP deltas for one coach habit log (read-only; does not mutate state). */
+  function coachHabitXpDelta(prev, updated, block, awarded) {
+    if (!prev || !updated) return { xp: 0, keys: [] };
     const today = todayStr();
-    const block = activeBlock;
-    if (block) void reconcileArcProgress(block, nextHabits);
-
+    const habitId = updated.id;
     const isProof = block && isProofHabitForBlock(updated, block.id);
     const lifetimeUnit = lifetimeXpForHabitLog({ hasActiveArc: !!block, isProof: !!isProof });
+    const keys = [];
+    let xp = 0;
 
     if (updated.habitType === "project") {
       const targetMins = updated.dailyTargetMinutes ?? 60;
@@ -3181,69 +3173,105 @@ export default function App() {
       const nextMins = updated.logs.filter(l => l.date === today).reduce((s, l) => s + (l.value?.minutes || 0), 0);
       const firstKey = `project-first:${habitId}:${today}`;
       const bonusKey = `project-target:${habitId}:${today}`;
-      let xpGain = 0;
-      if (prevMins === 0 && !xpAwardedDates.has(firstKey)) xpGain += lifetimeUnit;
-      if (prevMins < targetMins && nextMins >= targetMins && !xpAwardedDates.has(bonusKey)) xpGain += lifetimeUnit;
-      if (xpGain > 0) {
-        setXp(x => x + xpGain);
-        setXpAwardedDates(prevSet => {
-          const next = new Set(prevSet);
-          if (prevMins === 0) next.add(firstKey);
-          if (prevMins < targetMins && nextMins >= targetMins) next.add(bonusKey);
-          return next;
-        });
-      }
-      return;
+      if (prevMins === 0 && !awarded.has(firstKey)) { xp += lifetimeUnit; keys.push(firstKey); }
+      if (prevMins < targetMins && nextMins >= targetMins && !awarded.has(bonusKey)) { xp += lifetimeUnit; keys.push(bonusKey); }
+      return { xp, keys };
     }
 
-    if (updated.habitType === "limit") return;
+    if (updated.habitType === "limit") return { xp: 0, keys: [] };
 
     const wasDone = prev.logs.some(l => l.date === today && l.value === true);
     const isDone = updated.logs.some(l => l.date === today && l.value === true);
-    if (!isDone || wasDone) return;
+    if (!isDone || wasDone) return { xp: 0, keys: [] };
 
     const awardKey = `${habitId}:${today}`;
-    if (xpAwardedDates.has(awardKey)) return;
-
-    setXp(x => x + lifetimeUnit);
-    setXpAwardedDates(prevSet => {
-      const next = new Set(prevSet);
-      next.add(awardKey);
-      return next;
-    });
+    if (awarded.has(awardKey)) return { xp: 0, keys: [] };
+    return { xp: lifetimeUnit, keys: [awardKey] };
   }
 
-  function applyCoachGoalLogSideEffects(goalId, updatedLogs) {
-    const goal = goals.find(g => String(g.id) === String(goalId));
-    if (!goal) {
-      setGoals(p => p.map(g => (String(g.id) === String(goalId) ? { ...g, logs: updatedLogs } : g)));
-      return;
+  /** Apply all coach log_habit results in one state update (avoids stale habits when many tools run). */
+  function applyCoachLogsBatch(logged = []) {
+    if (!logged.length) return;
+
+    const habitLogs = logged.filter(l => l.habit_type !== "goal");
+    const goalLogs = logged.filter(l => l.habit_type === "goal");
+
+    if (habitLogs.length) {
+      setHabits(prevHabits => {
+        const logMap = new Map(habitLogs.map(l => [String(l.habit_id), l.updatedLogs]));
+        const nextHabits = prevHabits.map(h => {
+          const logs = logMap.get(String(h.id));
+          return logs ? { ...h, logs } : h;
+        });
+        const block = activeBlock;
+        let xpTotal = 0;
+        const awardKeys = [];
+        const awarded = xpAwardedDates;
+        for (const l of habitLogs) {
+          const prev = prevHabits.find(h => String(h.id) === String(l.habit_id));
+          const updated = nextHabits.find(h => String(h.id) === String(l.habit_id));
+          const { xp, keys } = coachHabitXpDelta(prev, updated, block, awarded);
+          xpTotal += xp;
+          awardKeys.push(...keys);
+        }
+        queueMicrotask(() => {
+          if (xpTotal > 0) setXp(x => x + xpTotal);
+          if (awardKeys.length) {
+            setXpAwardedDates(prevSet => {
+              const next = new Set(prevSet);
+              awardKeys.forEach(k => next.add(k));
+              return next;
+            });
+          }
+          if (block) void reconcileArcProgress(block, nextHabits);
+        });
+        return nextHabits;
+      });
     }
-    const prevValue = Number(goal.currentValue);
-    const lastLog = [...updatedLogs].reverse().find(l => l.date === todayStr() && typeof l.value === "number");
-    const nextValue = lastLog ? Number(lastLog.value) : prevValue;
-    const updated = {
-      ...goal,
-      logs: updatedLogs,
-      currentValue: Number.isFinite(nextValue) ? nextValue : goal.currentValue,
-    };
-    setGoals(p => p.map(g => (String(g.id) === String(goalId) ? updated : g)));
 
-    const today = todayStr();
-    const awardKey = `goal:${goalId}:${today}`;
-    if (xpAwardedDates.has(awardKey)) return;
-    if (!Number.isFinite(prevValue) || !Number.isFinite(nextValue) || nextValue === prevValue) return;
-
-    const target = Number(goal.targetValue);
-    const prevDist = Math.abs(target - prevValue);
-    const nextDist = Math.abs(target - nextValue);
-    const xpGain = nextDist < prevDist ? 15 : 5;
-    if (xpGain > 0) {
-      setXp(x => x + xpGain);
-      setXpAwardedDates(prevSet => {
-        const next = new Set(prevSet);
-        next.add(awardKey);
-        return next;
+    if (goalLogs.length) {
+      setGoals(prevGoals => {
+        const logMap = new Map(goalLogs.map(l => [String(l.habit_id), l.updatedLogs]));
+        const nextGoals = prevGoals.map(g => {
+          const logs = logMap.get(String(g.id));
+          if (!logs) return g;
+          const lastLog = [...logs].reverse().find(l => l.date === todayStr() && typeof l.value === "number");
+          const nextValue = lastLog ? Number(lastLog.value) : g.currentValue;
+          return {
+            ...g,
+            logs,
+            currentValue: Number.isFinite(nextValue) ? nextValue : g.currentValue,
+          };
+        });
+        const today = todayStr();
+        let xpTotal = 0;
+        const awardKeys = [];
+        for (const l of goalLogs) {
+          const prev = prevGoals.find(g => String(g.id) === String(l.habit_id));
+          const updated = nextGoals.find(g => String(g.id) === String(l.habit_id));
+          if (!prev || !updated) continue;
+          const awardKey = `goal:${l.habit_id}:${today}`;
+          if (xpAwardedDates.has(awardKey)) continue;
+          const prevValue = Number(prev.currentValue);
+          const nextValue = Number(updated.currentValue);
+          if (!Number.isFinite(prevValue) || !Number.isFinite(nextValue) || nextValue === prevValue) continue;
+          const target = Number(prev.targetValue);
+          const prevDist = Math.abs(target - prevValue);
+          const nextDist = Math.abs(target - nextValue);
+          xpTotal += nextDist < prevDist ? 15 : 5;
+          awardKeys.push(awardKey);
+        }
+        queueMicrotask(() => {
+          if (xpTotal > 0) setXp(x => x + xpTotal);
+          if (awardKeys.length) {
+            setXpAwardedDates(prevSet => {
+              const next = new Set(prevSet);
+              awardKeys.forEach(k => next.add(k));
+              return next;
+            });
+          }
+        });
+        return nextGoals;
       });
     }
   }
@@ -4425,8 +4453,7 @@ onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} o
           onHabitCreated={h  => setHabits(p => p.some(x => String(x.id) === String(h.id)) ? p.map(x => String(x.id) === String(h.id) ? h : x) : [...p, h])}
           onGoalCreated={g   => setGoals(p  => p.some(x => String(x.id) === String(g.id)) ? p.map(x => String(x.id) === String(g.id) ? g : x) : [...p, g])}
           previewNormalCoachGreeting={previewNormalCoachGreeting}
-          onHabitLogged={applyCoachHabitLogSideEffects}
-          onGoalLogged={applyCoachGoalLogSideEffects}
+          onCoachLogsApplied={applyCoachLogsBatch}
           onHabitRenamed={(id, name) => setHabits(p => p.map(h => String(h.id) === String(id) ? { ...h, name } : h))}
           onGoalPlanConfirm={handleGoalPlanConfirm}
           journalEntries={journalEntries}

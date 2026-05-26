@@ -2706,7 +2706,7 @@ function GoalPlanPreview({ plan, onConfirm, onDismiss }) {
   );
 }
 
-export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, coachIcon, coachAccentColor, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onGoalLogged, onHabitRenamed, onGoalPlanConfirm, onJournalLogged, journalEntries = [], openInputMode = null, pendingMessage = null, onNavigateTo = null, activeBlock = null, onOpenEditArc = null, previewNormalCoachGreeting = false }) {
+export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, coachIcon, coachAccentColor, currentScreen, onHabitCreated, onGoalCreated, onCoachLogsApplied, onHabitRenamed, onGoalPlanConfirm, onJournalLogged, journalEntries = [], openInputMode = null, pendingMessage = null, onNavigateTo = null, activeBlock = null, onOpenEditArc = null, previewNormalCoachGreeting = false }) {
   useScrollLock(true);
   const cName = coachName || "Coach";
   const isCreatorUser = user?.id === CREATOR_ID;
@@ -3071,15 +3071,9 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
                   });
                 }
 
-                // ── Logged ────────────────────────────────────────────────────
+                // ── Logged (batch — one setState so Today updates instantly) ───
                 if (evt.logged?.length) {
-                  evt.logged.forEach(l => {
-                    if (l.habit_type === "goal") {
-                      onGoalLogged?.(l.habit_id, l.updatedLogs);
-                    } else {
-                      onHabitLogged?.(l.habit_id, l.updatedLogs);
-                    }
-                  });
+                  onCoachLogsApplied?.(evt.logged);
                 }
 
                 // ── Journaled ─────────────────────────────────────────────────
