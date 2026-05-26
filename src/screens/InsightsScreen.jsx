@@ -74,6 +74,12 @@ function weeklyBriefBlocks(text) {
 }
 
 /** Per-habit weekly counts from local logs — no API. */
+function arcWeekOf8(activeBlock, clientDate = todayStr()) {
+  if (!activeBlock?.startDate) return 1;
+  const daysElapsed = Math.floor((parseLocal(clientDate) - parseLocal(activeBlock.startDate)) / 86400000);
+  return Math.min(8, Math.ceil((daysElapsed + 1) / 7));
+}
+
 function computeLocalMomentumSignals(habits, weekDates, todayYmd) {
   return habits
     .filter(h => h.habitType !== "log")
@@ -122,7 +128,7 @@ function MomentumSignalsSection({ rows, habits }) {
   );
 }
 
-export function InsightsScreen({ habits, goals = [], journalEntries = [], onShowHistory, onShare, isPro = false, onUpgrade, userId = null, userName = "" }) {
+export function InsightsScreen({ habits, goals = [], journalEntries = [], onShowHistory, onShare, isPro = false, onUpgrade, userId = null, userName = "", activeBlock = null }) {
   // ── Weekly brief state ─────────────────────────────────────────────────────
   // The brief is now persisted in `weekly_brief_generation_usage` (brief_text +
   // brief_generated_at) and fetched once on mount via GET /api/weekly-summary.
@@ -262,6 +268,7 @@ export function InsightsScreen({ habits, goals = [], journalEntries = [], onShow
           journalEntries,
           name: (userName || "").trim() || "there",
           client_date: todayStr(),
+          ...(activeBlock?.id ? { activeBlock } : {}),
         }),
       });
       const payload = await res.json().catch(() => ({}));
@@ -410,6 +417,12 @@ export function InsightsScreen({ habits, goals = [], journalEntries = [], onShow
   const gridHabits = habitGridExpanded || habits.length <= 6 ? habits : habits.slice(0, 6);
   const hiddenHabitGridCount = habits.length > 6 && !habitGridExpanded ? habits.length - 6 : 0;
   const canTapRefresh = hasFreshBrief && !isGenerating && !isFetching && !!briefQuota?.can_generate;
+  const arcActive = !!activeBlock?.id;
+  const arcWeekN = arcActive ? arcWeekOf8(activeBlock) : null;
+  const briefEyebrow = arcActive ? "YOUR ARC REVIEW" : "YOUR WEEKLY BRIEF";
+  const briefHeadline = arcActive
+    ? `Arc Review · Week ${arcWeekN} of 8`
+    : "What actually moved this week";
 
   if (noWeekLogs) {
     return (
@@ -472,9 +485,9 @@ export function InsightsScreen({ habits, goals = [], journalEntries = [], onShow
           </div>
         )}
 
-        <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.14em", marginBottom:10 }}>YOUR WEEKLY BRIEF</div>
+        <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.14em", marginBottom:10 }}>{briefEyebrow}</div>
         <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, letterSpacing:"-0.03em", lineHeight:1.15, marginBottom:10, maxWidth:320 }}>
-          What actually moved this week
+          {briefHeadline}
         </div>
         <div style={{ fontSize:12, color:T.muted, lineHeight:1.6, marginBottom:14, maxWidth:360, fontWeight:450 }}>
           Plain-language read on what held, what slipped, and what deserves attention. <strong style={{ color:T.sub, fontWeight:600 }}>Uses AI</strong> — capped so it stays sustainable.

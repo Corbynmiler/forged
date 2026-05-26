@@ -57,15 +57,77 @@ function daysAgoStr(n) {
   return d.toISOString().slice(0, 10);
 }
 
-function buildContext({ habits = [], goals = [], journalEntries = [], name = "there", clientDate }) {
+function parseLocalYmd(ymd) {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0);
+}
+
+function arcDayAndWeek(activeBlock, clientDate) {
+  const today = (clientDate && DATE_RE.test(clientDate)) ? clientDate : new Date().toISOString().slice(0, 10);
+  const start = activeBlock?.startDate;
+  if (!start || !DATE_RE.test(start)) return { dayX: 1, weekN: 1 };
+  const daysElapsed = Math.floor((parseLocalYmd(today) - parseLocalYmd(start)) / 86400000);
+  const dayX = Math.min(56, Math.max(1, daysElapsed + 1));
+  const weekN = Math.min(8, Math.ceil((daysElapsed + 1) / 7));
+  return { dayX, weekN };
+}
+
+function proofActionsWeekLines(habits, activeBlock, weekStart, weekEnd) {
+  const track = (habits || []).filter(
+    (h) => h && h.habitType !== "log" && h.isProofAction === true && h.blockId === activeBlock.id,
+  );
+  if (!track.length) return ["- (none linked yet)"];
+  return track.map((h) => {
+    const realLogs = (h.logs || []).filter(
+      (l) =>
+        l.date >= weekStart &&
+        l.date <= weekEnd &&
+        l.value !== "skip" &&
+        l.value !== "quicknote" &&
+        l.value !== false &&
+        l.value != null,
+    );
+    if (h.habitType === "weekly") {
+      const sessions = realLogs.filter((l) => l.value === true).length;
+      const target = h.weeklyTarget || 3;
+      return `- ${h.emoji || ""} ${h.name}: ${sessions}/${target} sessions this week`;
+    }
+    const uniqueDays = new Set(realLogs.map((l) => l.date)).size;
+    return `- ${h.emoji || ""} ${h.name}: ${uniqueDays} of 7 days this week`;
+  });
+}
+
+function buildArcContextSection(activeBlock, habits, clientDate, weekStart, weekEnd) {
+  const { dayX } = arcDayAndWeek(activeBlock, clientDate);
+  const dash = "—";
+  const lines = [
+    "Active Arc:",
+    `- They said they are becoming: ${activeBlock.identity || dash}`,
+    `- Why it matters: ${(activeBlock.whyStatement || "").trim() || dash}`,
+    `- Day ${dayX} of 56 (Arc started ${activeBlock.startDate})`,
+    `- Old pattern they're weakening: ${(activeBlock.oldPattern || "").trim() || dash}`,
+    "Proof actions logged this week:",
+    ...proofActionsWeekLines(habits, activeBlock, weekStart, weekEnd),
+    "",
+  ];
+  return lines.join("\n");
+}
+
+function buildContext({ habits = [], goals = [], journalEntries = [], name = "there", clientDate, activeBlock = null, weekStart = null, weekEnd = null }) {
   const today = (clientDate && DATE_RE.test(clientDate)) ? clientDate : new Date().toISOString().slice(0, 10);
   const day7  = daysAgoStr(7);
   const day14 = daysAgoStr(14);
+  const ws = weekStart && DATE_RE.test(weekStart) ? weekStart : day7;
+  const we = weekEnd && DATE_RE.test(weekEnd) ? weekEnd : today;
 
   const lines = [];
   lines.push(`User: ${name}`);
   lines.push(`Today: ${today}`);
   lines.push("");
+
+  if (activeBlock?.id) {
+    lines.push(buildArcContextSection(activeBlock, habits, today, ws, we));
+  }
 
   // ── Habits — last 14 days of real logs ──────────────────────────────────────
   if (habits.length > 0) {
@@ -178,6 +240,48 @@ Rules for the JSON array:
 - For daily habits: lead with "X of 7 days" where X = days logged this week (rest days don't count as logged).
 - For weekly habits: lead with "X of Y sessions" where Y = the stated weekly target.
 - Only add a characterisation (e.g. "— best week yet", "— missed target", "— zero contact this week") when the data clearly supports it. Do NOT use subjective labels like "slipping" or "holding steady" unless comparing to a clear trend in the last 14 days.
+- Do not invent numbers. Every figure in the signal must come from the data provided.
+- Valid JSON only between SIGNALS_JSON and END_SIGNALS_JSON. No markdown fences.`;
+}
+
+function arcReviewPrompt(context, habitNamesForSignals) {
+  const namesBlock =
+    habitNamesForSignals.length > 0
+      ? `
+Active habits (use these EXACT habit_name strings in SIGNALS_JSON — one object per line below, same order):
+${habitNamesForSignals.map((n) => `- ${n}`).join("\n")}
+`
+      : `
+No active habits listed — output SIGNALS_JSON as an empty array: [] between the markers.
+`;
+
+  return `You are writing a Weekly Arc Review for someone using Forged — comparing what they actually did this week against the identity they chose at the start of their 8-week Arc.
+
+${context}
+---
+${namesBlock}
+Write them a 4–6 sentence Arc Review. Be specific to their actual data — habit names, real numbers, what they wrote.
+
+Your job:
+1. Compare this week's proof and habits to who they said they are becoming (identity on day 1 of the Arc).
+2. Name what they showed up for — tie wins lightly to that identity, once, without guru language.
+3. If the data shows drift, name the old pattern they're trying to weaken once — no preaching, no lectures.
+4. End with one specific, concrete thing to lean into next week (one habit, one action, or one boundary).
+
+Tone: direct, grounded, like a coach who's been watching. Not cheerleader energy. Not corporate wellness. No "future you", "your journey", "warrior", or motivational-guru phrasing. Short sentences. Do not start with "This week".
+
+After the prose only, output momentum signals on separate lines exactly like this:
+
+SIGNALS_JSON
+[{"habit_name": "Running", "signal": "4 of 7 days — your best week this month"}]
+END_SIGNALS_JSON
+
+Rules for the JSON array:
+- One object per habit in the "Active habits" list (same order as listed). habit_name must match the list exactly.
+- Each "signal" is one short clause (under ~90 characters) grounded strictly in the numbers above.
+- For daily habits: lead with "X of 7 days" where X = days logged this week (rest days don't count as logged).
+- For weekly habits: lead with "X of Y sessions" where Y = the stated weekly target.
+- Only add a characterisation when the data clearly supports it. Do NOT use subjective labels like "slipping" unless comparing to a clear trend in the last 14 days.
 - Do not invent numbers. Every figure in the signal must come from the data provided.
 - Valid JSON only between SIGNALS_JSON and END_SIGNALS_JSON. No markdown fences.`;
 }
@@ -324,13 +428,26 @@ async function handler(req, res) {
     }
   }
 
-  const { habits, goals, journalEntries, name, client_date: bodyClientDate } = req.body || {};
+  const { habits, goals, journalEntries, name, client_date: bodyClientDate, activeBlock } = req.body || {};
+  const anchorDate = bodyClientDate || anchor;
+  const weekEnd = anchorDate;
 
-  const context = buildContext({ habits, goals, journalEntries, name, clientDate: bodyClientDate || anchor });
+  const context = buildContext({
+    habits,
+    goals,
+    journalEntries,
+    name,
+    clientDate: anchorDate,
+    activeBlock: activeBlock?.id ? activeBlock : null,
+    weekStart,
+    weekEnd,
+  });
   const habitNamesForSignals = (habits || [])
     .filter((h) => h && typeof h.name === "string" && h.name.trim())
     .map((h) => h.name.trim());
-  const prompt = buildPrompt(context, habitNamesForSignals);
+  const prompt = activeBlock?.id
+    ? arcReviewPrompt(context, habitNamesForSignals)
+    : buildPrompt(context, habitNamesForSignals);
 
   const client = new Anthropic({ apiKey: apiKey.trim() });
 
