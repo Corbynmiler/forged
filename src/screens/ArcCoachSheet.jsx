@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { T } from "../theme.js";
-import { todayStr } from "../utils.js";
+import { todayStr, parseLocal } from "../utils.js";
 import { habitToRow, rowToHabit } from "../supabase.js";
 import {
   resolveProofActionHabits,
   buildNewProofHabit,
   formatCoachChatDisplay,
   resolveArcTitle,
+  normalizeArcDuration,
+  arcDurationWeeksLabel,
 } from "../arcProofMatch.js";
 import { parseArcDraftFromText } from "./OnboardingScreen.jsx";
 import ArcSuggestionPills from "../components/ArcSuggestionPills.jsx";
@@ -73,8 +75,11 @@ function ArcDraftCard({ draft, existingHabits, saveError, saving, isEdit }) {
       <div style={{ fontSize: 10, fontWeight: 800, color: T.gold, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 8 }}>
         Arc draft
       </div>
-      <div style={{ fontFamily: T.serif, fontSize: 22, color: T.text, lineHeight: 1.2, marginBottom: 12 }}>
+      <div style={{ fontFamily: T.serif, fontSize: 22, color: T.text, lineHeight: 1.2, marginBottom: 6 }}>
         {displayTitle}
+      </div>
+      <div style={{ fontSize: 11, color: T.muted, marginBottom: 12 }}>
+        {arcDurationWeeksLabel(draft?.durationDays)} · {draft?.durationDays || 56} days
       </div>
       <div style={{ fontSize: 11, fontWeight: 700, color: T.hint, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>
         You&apos;re becoming
@@ -310,6 +315,7 @@ export default function ArcCoachSheet({
       let blockRow;
 
       if (isEdit) {
+        // duration_days / end_date unchanged on edit — changing mid-Arc needs XP-3 (see plan).
         const { data, error: updErr } = await supabase
           .from("forge_blocks")
           .update({
@@ -329,7 +335,8 @@ export default function ArcCoachSheet({
         blockRow = data;
       } else {
         const startDate = todayStr();
-        const endDate = addDaysLocalYmd(startDate, 56);
+        const durationDays = normalizeArcDuration(arcDraft.durationDays);
+        const endDate = addDaysLocalYmd(startDate, durationDays);
         const { data, error: insErr } = await supabase
           .from("forge_blocks")
           .insert({
@@ -342,7 +349,7 @@ export default function ArcCoachSheet({
             start_date: startDate,
             end_date: endDate,
             status: "active",
-            duration_days: 56,
+            duration_days: durationDays,
             updated_at: nowIso,
           })
           .select("*")
@@ -406,8 +413,16 @@ export default function ArcCoachSheet({
           border: `0.5px solid rgba(200,144,42,0.35)`, background: "rgba(200,144,42,0.06)",
           maxHeight: 200, overflowY: "auto",
         }}>
-          <div style={{ fontFamily: T.serif, fontSize: 18, color: T.text, marginBottom: 8 }}>
+          <div style={{ fontFamily: T.serif, fontSize: 18, color: T.text, marginBottom: 4 }}>
             {resolveArcTitle(activeBlock.title, activeBlock.identity)}
+          </div>
+          <div style={{ fontSize: 11, color: T.muted, marginBottom: 10 }}>
+            {(() => {
+              const dur = activeBlock.durationDays || 56;
+              const elapsed = Math.floor((parseLocal(todayStr()) - parseLocal(activeBlock.startDate)) / 86400000);
+              const dayX = Math.min(dur, Math.max(1, elapsed + 1));
+              return `${arcDurationWeeksLabel(dur)} · Day ${dayX} of ${dur}`;
+            })()}
           </div>
           <div style={{ fontSize: 11, fontWeight: 700, color: T.hint, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 3 }}>Direction</div>
           <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.5, marginBottom: 10 }}>{activeBlock.identity}</div>

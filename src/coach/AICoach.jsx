@@ -1,6 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { T, COACH_ICON_OPTIONS, WEEKLY_SUMMARY_TTL_MS, CREATOR_ID, HABIT_TYPES, XP_LEVELS, COLORS, DAYS, MONTHS, FREE_DAILY_LIMIT } from "../theme.js";
+import { detectsArcEditIntent } from "../arcProofMatch.js";
 import { supabase, rowToHabit, rowToGoal } from "../supabase.js";
 import {
   todayStr, daysAgo, parseLocal, fmtDate, fmtEntryDate, fmtWeekRange,
@@ -2941,6 +2942,28 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
     textareaRef.current?.blur();
     const trimmed = text.trim();
     if (!trimmed || loading) return;
+
+    if (activeBlock?.id && onOpenEditArc && detectsArcEditIntent(trimmed)) {
+      speech.cancel?.();
+      const routeMsg = "Yep — I'll open your Arc editor for that.";
+      const sendDay = todayStr();
+      let baseMessages = messages;
+      if (sendDay !== coachPersistDayRef.current) {
+        coachPersistDayRef.current = sendDay;
+        baseMessages = [];
+      }
+      const userMsg = { role: "user", content: trimmed, ts: Date.now() };
+      const next = baseMessages.length === 0
+        ? [{ role: "assistant", content: greeting, ts: coachOpenedAtRef.current }, userMsg]
+        : [...baseMessages, userMsg];
+      const withReply = [...next, { role: "assistant", content: routeMsg, ts: Date.now() }];
+      setMessages(withReply);
+      if (user?.id) saveCoachDayMessages(user.id, sendDay, withReply);
+      setInput("");
+      window.setTimeout(() => onOpenEditArc(), 400);
+      return;
+    }
+
     // Stop speech recognition as soon as the text is captured. Prevents
     // autoRestart from re-firing the last segment into the cleared input after
     // evt.done. On request failure the text is still restored via setInput(trimmed).

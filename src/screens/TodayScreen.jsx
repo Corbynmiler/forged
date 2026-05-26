@@ -7,7 +7,7 @@ import {
   DailyCard, WeeklyCard, ProjectCard, LimitCard, LogCard,
   TodayGoalCard,
 } from "../components/habitCards.jsx";
-import { resolveArcTitle, arcHeaderSubtitle } from "../arcProofMatch.js";
+import { resolveArcTitle, arcHeaderSubtitle, arcDurationWeeksLabel } from "../arcProofMatch.js";
 
 // ── Coach greeting helpers (deterministic, no AI) ──────────────────────────
 function coachGreetingDaysLeft(targetYmd) {
@@ -417,16 +417,17 @@ function LooseEndsSection({ tasks = [], today, onAdd, onComplete, onPin, onDelet
   );
 }
 
-const ARC_DURATION_DAYS = 56;
 const MS_PER_DAY = 86400000;
 
 function arcDayInfo(activeBlock) {
+  const duration = Math.max(1, activeBlock.durationDays || 56);
+  const totalWeeks = Math.max(1, Math.round(duration / 7));
   const today = todayStr();
   const daysElapsed = Math.floor((parseLocal(today) - parseLocal(activeBlock.startDate)) / MS_PER_DAY);
-  const dayX = Math.min(ARC_DURATION_DAYS, Math.max(1, daysElapsed + 1));
-  const week = Math.min(8, Math.ceil((daysElapsed + 1) / 7));
-  const progress = Math.min(1, Math.max(0, daysElapsed / ARC_DURATION_DAYS));
-  return { dayX, week, daysElapsed, progress };
+  const dayX = Math.min(duration, Math.max(1, daysElapsed + 1));
+  const week = Math.min(totalWeeks, Math.ceil((daysElapsed + 1) / 7));
+  const progress = Math.min(1, Math.max(0, daysElapsed / duration));
+  return { dayX, week, daysElapsed, progress, duration, totalWeeks };
 }
 
 function isProofForArc(habit, blockId) {
@@ -487,9 +488,10 @@ function AddProofActionSheet({ activeBlock, habits, onClose, onSelectHabit, onCr
 }
 
 function ArcStrip({ activeBlock, onEditArc }) {
-  const { dayX, week, progress } = arcDayInfo(activeBlock);
+  const { dayX, week, progress, duration, totalWeeks } = arcDayInfo(activeBlock);
   const arcTitle = resolveArcTitle(activeBlock.title, activeBlock.identity);
   const subtitle = arcHeaderSubtitle(activeBlock);
+  const weeksLabel = arcDurationWeeksLabel(duration);
 
   return (
     <button
@@ -510,7 +512,7 @@ function ArcStrip({ activeBlock, onEditArc }) {
       }}
     >
       <div style={{ fontSize: 10, fontWeight: 800, color: T.gold, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 8 }}>
-        Day {dayX} of {ARC_DURATION_DAYS} · Week {week}/8
+        {weeksLabel} · Day {dayX} of {duration} · Week {week}/{totalWeeks}
       </div>
       <div style={{ fontFamily: T.serif, fontSize: 22, color: T.text, lineHeight: 1.15, marginBottom: subtitle ? 6 : 10 }}>
         {arcTitle}
@@ -769,7 +771,7 @@ export function TodayScreen({
           <div style={{ fontSize:13, color:T.muted }}>{ringSummary || " "}</div>
           <button onClick={onXPInfo} style={{ marginTop:10, display:"inline-flex", alignItems:"center", gap:5, fontSize:11, fontWeight:500, padding:"3px 10px", borderRadius:12, background:"rgba(200,144,42,0.15)", color:T.gold, border:"none", cursor:"pointer" }}>
             {arcActive
-              ? (xp === 0 ? `⚡ Day ${arcDayX} of ${ARC_DURATION_DAYS}` : `⚡ Day ${arcDayX} · ${xp} xp`)
+              ? (xp === 0 ? `⚡ Day ${arcDayX} of ${activeBlock.durationDays || 56}` : `⚡ Day ${arcDayX} · ${xp} xp`)
               : (xp === 0 ? "⚡ Log a habit to earn XP" : `⚡ ${xp} xp · ${level.label}`)}
           </button>
           {doneTasksCount > 0 && (

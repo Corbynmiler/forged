@@ -42,7 +42,7 @@ import {
   writeNudgeWatermarkIfNewer,
   writePageGuideSeen,
 } from "./utils.js";
-import { resolveArcTitle } from "./arcProofMatch.js";
+import { resolveArcTitle, normalizeArcDuration } from "./arcProofMatch.js";
 
 // UI primitives
 import {
@@ -2867,8 +2867,9 @@ export default function App() {
           if (identity) {
             try {
               const startDate = todayStr();
+              const durationDays = normalizeArcDuration(arc?.durationDays);
               const _t = new Date();
-              const end = new Date(_t.getFullYear(), _t.getMonth(), _t.getDate() + 56);
+              const end = new Date(_t.getFullYear(), _t.getMonth(), _t.getDate() + durationDays);
               const endDate = `${end.getFullYear()}-${String(end.getMonth()+1).padStart(2,"0")}-${String(end.getDate()).padStart(2,"0")}`;
               const insertPayload = {
                 user_id: uid,
@@ -2880,7 +2881,7 @@ export default function App() {
                 start_date: startDate,
                 end_date:   endDate,
                 status:     "active",
-                duration_days: 56,
+                duration_days: durationDays,
               };
               const { data: blockRow, error: blockErr } = await supabase
                 .from("forge_blocks")

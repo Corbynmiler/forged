@@ -143,6 +143,7 @@ WHAT YOU ARE GATHERING (these become the Arc draft below):
 4. oldPattern — the pattern they're trying to weaken (the thing that keeps tripping them up)
 5. minimumProof — what still counts as proof on a bad day
 6. proofActions — 3 to 5 short habit names that prove this Arc (e.g. "Eat breakfast", "Limit nicotine before lunch", "Build for 30 minutes")
+7. durationDays — length in days. Default 56 (8 weeks). Only use 14, 28, 56, or 84 (2/4/8/12 weeks). Ask about duration only if they mention a timeline; do not make it a big sidebar question.
 
 FIRST QUESTION FRAMING (critical):
 - Do NOT open with "Who are you becoming?" as the main question.
@@ -174,7 +175,7 @@ WHEN YOU HAVE ENOUGH (or hit the limit) — EMIT THE DRAFT.
 End your reply with a structured block on its own lines, EXACTLY in this format:
 
 <arc_draft>
-{"title":"…","identity":"…","why":"…","oldPattern":"…","minimumProof":"…","proofActions":["…","…","…"]}
+{"title":"…","identity":"…","why":"…","oldPattern":"…","minimumProof":"…","durationDays":56,"proofActions":["…","…","…"]}
 </arc_draft>
 
 Rules for the draft JSON:
@@ -182,6 +183,7 @@ Rules for the draft JSON:
 - title: 1–3 words. Natural and branded. "Arc" optional. NEVER warrior/alpha/elite/beast/grindset. NEVER a full sentence or "Someone who…". If they ask to rename, use their exact short title or suggest 3 options in prose before the draft.
 - identity: concrete, one sentence, max ~140 chars. Borrow their phrasing.
 - why, oldPattern, minimumProof: short sentences in their voice. Empty string "" is allowed only if you truly have nothing.
+- durationDays: one of 14, 28, 56, 84. Default 56 unless they clearly want 2/4/12 weeks.
 - proofActions: 3 to 5 short habit names, max ~30 chars each. ${showExistingHabitsBlock ? "Use EXACT names from EXISTING HABITS when reusing — do not paraphrase into a duplicate label." : "Prefer habits the user mentioned."} When it makes sense, the first one should be the habit they already picked (${habitName || "their picked habit"}).
 
 WHEN YOU EMIT THE DRAFT, write 1–2 short sentences BEFORE the block to introduce it. Examples:

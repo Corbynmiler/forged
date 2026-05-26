@@ -1368,7 +1368,7 @@ export function XPModal({ xp, onClose }) {
     <Modal onClose={onClose}>
       <div style={{ marginTop:-4, paddingBottom:4 }}>
         <p style={{ fontSize:12, color:T.goldBright, letterSpacing:"0.06em", textTransform:"uppercase", fontWeight:600, margin:"0 0 22px", textAlign:"center", lineHeight:1.4 }}>
-          XP is proof you showed up.
+          Lifetime XP from logging habits. Arc proof progression is tracked separately (more coming soon).
         </p>
         <div style={{ background:`linear-gradient(165deg, rgba(18,18,16,0.98) 0%, ${T.bg} 55%, rgba(12,12,10,1) 100%)`, border:`1px solid ${T.borderMid}`, borderRadius:T.r, padding:"24px 18px 22px", marginBottom:20, boxShadow:"inset 0 1px 0 rgba(255,255,255,0.05), 0 12px 40px rgba(0,0,0,0.35)" }}>
           <div style={{ fontFamily:T.serif, fontSize:34, fontWeight:700, color:level.color, lineHeight:1.05, letterSpacing:"-0.02em", textShadow:`0 0 48px ${level.color}33` }}>{level.label}</div>

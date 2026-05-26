@@ -212,15 +212,66 @@ export function resolveArcTitle(title, identity) {
   return fallbackArcTitleFromIdentity(identity);
 }
 
+/** Truncate at a word boundary so subtitles don't end mid-word ("for a shor…"). */
+export function truncateAtWordBoundary(text, maxLen = 110) {
+  const s = String(text || "").trim();
+  if (!s || s.length <= maxLen) return s;
+  const slice = s.slice(0, maxLen);
+  const lastSpace = slice.lastIndexOf(" ");
+  if (lastSpace >= Math.floor(maxLen * 0.55)) {
+    return `${slice.slice(0, lastSpace).trimEnd()}…`;
+  }
+  return `${slice.trimEnd()}…`;
+}
+
+const ARC_DURATION_OPTIONS = [14, 28, 56, 84];
+
+/** Normalize coach/user duration to 2 / 4 / 8 / 12 weeks (days). Default 56. */
+export function normalizeArcDuration(days) {
+  const n = parseInt(days, 10);
+  if (ARC_DURATION_OPTIONS.includes(n)) return n;
+  if (Number.isFinite(n)) {
+    if (n <= 21) return 14;
+    if (n <= 42) return 28;
+    if (n <= 70) return 56;
+    if (n <= 98) return 84;
+  }
+  return 56;
+}
+
+export function arcDurationWeeksLabel(durationDays) {
+  const d = normalizeArcDuration(durationDays);
+  if (d === 14) return "2 weeks";
+  if (d === 28) return "4 weeks";
+  if (d === 84) return "12 weeks";
+  return "8 weeks";
+}
+
+/** Obvious Arc edit intent in normal coach chat — route to ArcCoachSheet. */
+export function detectsArcEditIntent(text) {
+  const t = String(text || "").toLowerCase().trim();
+  if (!t) return false;
+  if (/\b(edit|change|update|tweak|rename|adjust)\b/.test(t) && /\barc\b/.test(t)) return true;
+  if (/\barc\b/.test(t) && /\b(edit|change|update|rename)\b/.test(t)) return true;
+  if (/\b(change|edit|update|tweak)\b/.test(t) && /\b(proof action|proof actions|bad[- ]?day minimum|arc title)\b/.test(t)) {
+    return true;
+  }
+  return false;
+}
+
 /** Short subtitle for the Today Arc header (shown with 2-line clamp in UI). */
 export function arcHeaderSubtitle(block) {
   if (!block) return "";
   const why = String(block.whyStatement || "").trim();
-  if (why) return why.length > 140 ? `${why.slice(0, 137)}…` : why;
+  if (why) {
+    const firstSentence = why.split(/(?<=[.!?])\s+/)[0]?.trim() || why;
+    const pick = firstSentence.length >= 18 && firstSentence.length <= 100 ? firstSentence : why;
+    return truncateAtWordBoundary(pick, 110);
+  }
   let id = String(block.identity || "").trim();
   id = id.replace(/^someone who\s+/i, "").replace(/^i\s+want\s+to\s+be\s+/i, "").trim();
   if (!id) return "";
-  return id.length > 140 ? `${id.slice(0, 137)}…` : id;
+  return truncateAtWordBoundary(id, 110);
 }
 
 /**
