@@ -162,6 +162,8 @@ export default function App() {
   // Phase 1: written on signup via onSaveProgress; loaded on every signed-in
   // session via loadUserData. Phase 2+3 will consume this for Today + coach.
   const [activeBlock, setActiveBlock] = useState(null);
+  /** Latest completed Arc (for Insights end-of-Arc review display). */
+  const [completedArcBlock, setCompletedArcBlock] = useState(null);
   const [screen,      setScreen]     = useState("today");
   const [xp,          setXp]         = useState(0);
   const [particles,   setParticles]  = useState([]);
@@ -1718,28 +1720,7 @@ export default function App() {
         if (linkedPushers.length) await Promise.all(linkedPushers.map(fn => fn()));
       }
 
-      // ── Load active Arc (forge_block) ────────────────────────────────────────
-      // Non-fatal: a missing table (pre-migration) or zero rows just clears state.
-      try {
-        const { data: blockRow, error: blockErr } = await supabase
-          .from("forge_blocks")
-          .select("*")
-          .eq("user_id", uid)
-          .eq("status", "active")
-          .order("start_date", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (blockErr) {
-          // Likely 42P01 (relation doesn't exist) until the migration runs — leave activeBlock null.
-          console.warn("[Forged] forge_blocks load skipped:", blockErr.message);
-          setActiveBlock(null);
-        } else {
-          setActiveBlock(blockRow ? rowToForgeBlock(blockRow) : null);
-        }
-      } catch (err) {
-        console.warn("[Forged] forge_blocks load exception:", err?.message || err);
-        setActiveBlock(null);
-      }
+      await reloadForgeBlocks(uid);
 
       userIdRef.current = uid;
       accountDataLoadedRef.current = true;
@@ -1753,6 +1734,54 @@ export default function App() {
       return false;
     } finally {
       loadingUidRef.current = null;
+    }
+  }
+
+  async function reloadForgeBlocks(uid = userIdRef.current) {
+    if (!uid) {
+      setActiveBlock(null);
+      setCompletedArcBlock(null);
+      return;
+    }
+    try {
+      const { data: blockRow, error: blockErr } = await supabase
+        .from("forge_blocks")
+        .select("*")
+        .eq("user_id", uid)
+        .eq("status", "active")
+        .order("start_date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (blockErr) {
+        console.warn("[Forged] forge_blocks load skipped:", blockErr.message);
+        setActiveBlock(null);
+        setCompletedArcBlock(null);
+        return;
+      }
+      if (blockRow) {
+        setActiveBlock(rowToForgeBlock(blockRow));
+        setCompletedArcBlock(null);
+        return;
+      }
+      setActiveBlock(null);
+      const { data: doneRow, error: doneErr } = await supabase
+        .from("forge_blocks")
+        .select("*")
+        .eq("user_id", uid)
+        .eq("status", "completed")
+        .order("end_date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (doneErr) {
+        console.warn("[Forged] completed forge_blocks load skipped:", doneErr.message);
+        setCompletedArcBlock(null);
+      } else {
+        setCompletedArcBlock(doneRow ? rowToForgeBlock(doneRow) : null);
+      }
+    } catch (err) {
+      console.warn("[Forged] forge_blocks load exception:", err?.message || err);
+      setActiveBlock(null);
+      setCompletedArcBlock(null);
     }
   }
 
@@ -3585,7 +3614,7 @@ export default function App() {
         )}
         {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} activeBlock={activeBlock} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} coachEverOpened={coachEverOpened} onOpenCoachMic={() => openCoachWithMode("mic")} onOpenCoachWithDraft={openCoachWithDraft} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} hideFloatingAdd onOpenGoalDetail={id => setOpenGoalId(id)} onOpenInsights={() => setScreen("insights")} todayJournalEntry={journalEntries.find(e => e.date === todayStr()) ?? null} onGenerateReceipt={handleGenerateReceipt} generatingReceipt={generatingReceipt} onOpenJournal={() => { setJournalOpenTab("journal"); setScreen("journal"); }} yesterdayJournalEntry={journalEntries.find(e => e.date === daysAgo(1)) ?? null} onLowerBudget={handleLowerBudget} tasks={tasks} onAddTask={handleAddTask} onCompleteTask={handleCompleteTask} onPinTask={handlePinTask} onDeleteTask={handleDeleteTask}/>}
         {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} journalEntries={journalEntries} onSaveJournalEntry={handleSaveJournalEntry} onJournalGenerated={handleJournalGenerated} initialTab={showJournalCompose ? "journal" : journalOpenTab ?? undefined} onInitialComposeDone={() => { setShowJournalCompose(false); setJournalOpenTab(null); }} userName={user.name || ""} coachName={coachName}/>}
-        {screen === "insights" && <InsightsScreen habits={habits} goals={goals} journalEntries={journalEntries} activeBlock={activeBlock} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} userId={sessionUserId} userName={user.name || ""}/>}
+        {screen === "insights" && <InsightsScreen habits={habits} goals={goals} journalEntries={journalEntries} activeBlock={activeBlock} completedArcBlock={completedArcBlock} onArcReviewComplete={() => reloadForgeBlocks(sessionUserId)} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} userId={sessionUserId} userName={user.name || ""}/>}
         {screen === "social"   && <SocialScreen
           user={user} xp={xp} habits={habits}
           friends={friends} friendRequests={friendRequests} sentRequests={sentRequests} friendsLoading={friendsLoading}

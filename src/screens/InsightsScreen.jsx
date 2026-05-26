@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { T, MONTHS } from "../theme.js";
-import { supabase } from "../supabase.js";
+import { supabase, rowToForgeBlock } from "../supabase.js";
 import {
   todayStr, weekStartFor, getStreak, getBestStreak,
   getCompletionRate, get7DayActivity, getBestDayOfWeek,
@@ -80,6 +80,16 @@ function arcWeekOf8(activeBlock, clientDate = todayStr()) {
   return Math.min(8, Math.ceil((daysElapsed + 1) / 7));
 }
 
+function ymdAddDays(ymd, delta) {
+  const d = parseLocal(ymd);
+  d.setDate(d.getDate() + delta);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function arcReviewBlocks(text) {
+  return weeklyBriefBlocks(text);
+}
+
 function computeLocalMomentumSignals(habits, weekDates, todayYmd) {
   return habits
     .filter(h => h.habitType !== "log")
@@ -128,7 +138,12 @@ function MomentumSignalsSection({ rows, habits }) {
   );
 }
 
-export function InsightsScreen({ habits, goals = [], journalEntries = [], onShowHistory, onShare, isPro = false, onUpgrade, userId = null, userName = "", activeBlock = null }) {
+export function InsightsScreen({
+  habits, goals = [], journalEntries = [],
+  onShowHistory, onShare, isPro = false, onUpgrade,
+  userId = null, userName = "",
+  activeBlock = null, completedArcBlock = null, onArcReviewComplete = null,
+}) {
   // ── Weekly brief state ─────────────────────────────────────────────────────
   // The brief is now persisted in `weekly_brief_generation_usage` (brief_text +
   // brief_generated_at) and fetched once on mount via GET /api/weekly-summary.
@@ -150,6 +165,13 @@ export function InsightsScreen({ habits, goals = [], journalEntries = [], onShow
   const [activityExpanded, setActivityExpanded] = useState(false);
   /** Collapsible "This week's numbers" — false = collapsed (default). */
   const [statsNumbersOpen, setStatsNumbersOpen] = useState(false);
+  const [isGeneratingArcReview, setIsGeneratingArcReview] = useState(false);
+  const [arcReviewError, setArcReviewError] = useState(null);
+  const [localCompletedArc, setLocalCompletedArc] = useState(completedArcBlock);
+
+  useEffect(() => {
+    setLocalCompletedArc(completedArcBlock);
+  }, [completedArcBlock]);
 
   const thisWeekStart = weekStartFor(todayStr());
   const thisISOWeek   = getISOWeek(todayStr());
@@ -326,6 +348,38 @@ export function InsightsScreen({ habits, goals = [], journalEntries = [], onShow
     }
     generateWeeklySummary();
   }
+
+  async function generateArcReview() {
+    if (!activeBlock?.id) return;
+    setIsGeneratingArcReview(true);
+    setArcReviewError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("Not authenticated");
+      const res = await fetch("/api/arc-review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          block_id: activeBlock.id,
+          name: (userName || "").trim() || "there",
+        }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload.error || `Error ${res.status}`);
+      if (payload.block) {
+        setLocalCompletedArc(rowToForgeBlock({
+          ...payload.block,
+          review: payload.review ?? payload.block.review,
+        }));
+      }
+      if (onArcReviewComplete) await onArcReviewComplete();
+    } catch (err) {
+      setArcReviewError(err.message || "Generation failed");
+    } finally {
+      setIsGeneratingArcReview(false);
+    }
+  }
   function IC({ title, children, action, dataTour, subtitle, flush }) {
     return (
       <div data-tour={dataTour} style={{ margin: flush ? "0 0 12px" : "0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:18 }}>
@@ -417,8 +471,10 @@ export function InsightsScreen({ habits, goals = [], journalEntries = [], onShow
   const gridHabits = habitGridExpanded || habits.length <= 6 ? habits : habits.slice(0, 6);
   const hiddenHabitGridCount = habits.length > 6 && !habitGridExpanded ? habits.length - 6 : 0;
   const canTapRefresh = hasFreshBrief && !isGenerating && !isFetching && !!briefQuota?.can_generate;
-  const arcActive = !!activeBlock?.id;
+  const arcActive = !!activeBlock?.id && activeBlock.status === "active";
   const arcWeekN = arcActive ? arcWeekOf8(activeBlock) : null;
+  const arcReviewText = localCompletedArc?.review?.text || null;
+  const showArcReviewGenerate = arcActive && todayYmd >= ymdAddDays(activeBlock.endDate, -3) && !arcReviewText;
   const briefEyebrow = arcActive ? "YOUR ARC REVIEW" : "YOUR WEEKLY BRIEF";
   const briefHeadline = arcActive
     ? `Arc Review · Week ${arcWeekN} of 8`
@@ -467,6 +523,68 @@ export function InsightsScreen({ habits, goals = [], journalEntries = [], onShow
           </button>
         )}
       </div>
+
+      {/* ══ End-of-Arc review (56-day) ═══════════════════════════════════════ */}
+      {arcReviewText && (
+        <div style={{
+          margin:"0 14px 18px",
+          background:`linear-gradient(165deg, rgba(192,57,43,0.14) 0%, rgba(26,26,22,0.94) 38%, ${T.raised} 100%)`,
+          borderRadius:T.r,
+          border:`1px solid rgba(192,57,43,0.35)`,
+          padding:"22px 18px 20px",
+          boxShadow:"0 2px 24px rgba(0,0,0,0.35)",
+        }}>
+          <div style={{ fontSize:10, fontWeight:800, color:T.accent, letterSpacing:"0.14em", marginBottom:10 }}>
+            END-OF-ARC REVIEW
+          </div>
+          <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, letterSpacing:"-0.03em", lineHeight:1.15, marginBottom:12 }}>
+            {localCompletedArc?.identity || "Your Arc"}
+          </div>
+          {arcReviewBlocks(arcReviewText).map((block, i, arr) => (
+            <div
+              key={i}
+              style={{
+                fontSize:14, color:T.text, lineHeight:1.72, fontWeight:450,
+                marginBottom: i < arr.length - 1 ? 14 : 0,
+                paddingBottom: i < arr.length - 1 ? 14 : 0,
+                borderBottom: i < arr.length - 1 ? `0.5px solid rgba(255,255,255,0.06)` : "none",
+              }}
+            >
+              {block}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showArcReviewGenerate && (
+        <div style={{
+          margin:"0 14px 18px", padding:"18px 16px", borderRadius:T.r,
+          border:`0.5px solid rgba(192,57,43,0.35)`, background:"rgba(192,57,43,0.06)",
+        }}>
+          <div style={{ fontFamily:T.serif, fontSize:20, color:T.text, marginBottom:8 }}>
+            Your Arc is ending
+          </div>
+          <div style={{ fontSize:13, color:T.sub, lineHeight:1.6, marginBottom:14 }}>
+            Generate your end-of-Arc review — how your proof matched who you said you&apos;re becoming.
+          </div>
+          {arcReviewError && (
+            <div style={{ fontSize:12, color:T.amber, marginBottom:10, lineHeight:1.5 }}>{arcReviewError}</div>
+          )}
+          <button
+            type="button"
+            onClick={generateArcReview}
+            disabled={isGeneratingArcReview}
+            style={{
+              padding:"12px 22px", borderRadius:T.rsm, border:"none",
+              background:T.accent, color:"#fff",
+              fontSize:13, fontWeight:700, cursor:isGeneratingArcReview ? "default" : "pointer",
+              opacity:isGeneratingArcReview ? 0.55 : 1,
+            }}
+          >
+            {isGeneratingArcReview ? "Writing your Arc review…" : "Generate Arc Review →"}
+          </button>
+        </div>
+      )}
 
       {/* ══ Weekly brief — headline feature, top of page above stats ════════ */}
       <div style={{

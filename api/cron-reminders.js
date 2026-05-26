@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import { withSentry } from "./_lib/sentry.js";
 
 const SUPABASE_URL = "https://apdmvbzfjuvxworjepze.supabase.co";
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // ── Calendar dates in the user's IANA timezone (must match client `todayStr()` semantics) ──
 
@@ -91,6 +92,14 @@ function weekStartMondayFromYmd(ymd) {
 function daysBetween(fromStr, toStr) {
   return Math.round((new Date(toStr) - new Date(fromStr)) / 86400000);
 }
+
+function forgeBlockDayNumber(block, todayYmd) {
+  if (!block?.start_date || !DATE_RE.test(block.start_date)) return 1;
+  const elapsed = daysBetween(block.start_date, todayYmd);
+  return Math.max(1, elapsed + 1);
+}
+
+const ARC_PAUSE_SUFFIX = "_arc_pause";
 
 // ── Row shape (snake_case from Supabase) ───────────────────────────────────────
 
@@ -394,7 +403,7 @@ function pickNormalMessage(habits, goals, todayYmd, localHour, coachName) {
   return { title: "Forged", body: resolve(body) };
 }
 
-async function aiPickMessage(name, coachName, habits, goals, todayYmd, localHour) {
+async function aiPickMessage(name, coachName, habits, goals, todayYmd, localHour, arcBlock = null) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return null;
 
@@ -441,6 +450,18 @@ async function aiPickMessage(name, coachName, habits, goals, todayYmd, localHour
 
   const signOff = `— ${coachName || "Forged"}`;
 
+  let arcContext = "";
+  if (arcBlock?.identity) {
+    const dayX = forgeBlockDayNumber(arcBlock, todayYmd);
+    const dur = arcBlock.duration_days || 56;
+    const minimum = (arcBlock.minimum_proof || "").trim() || "—";
+    arcContext = `
+Day ${dayX} of ${dur} of their current Arc.
+They said they're becoming: ${arcBlock.identity}
+The bare minimum on a bad day is: ${minimum}
+`;
+  }
+
   const prompt = `You are ${coachName || "a habit coach"}, writing a push notification for ${name}'s Forged app.
 
 Time of day: ${timeLabel} (local hour: ${hour})
@@ -449,7 +470,7 @@ Date: ${todayYmd}
 Their habits:
 ${summaries || "No habits yet"}
 ${goalLine}
-
+${arcContext}
 Write ONE short push notification body. ${toneHint}
 
 Rules:
@@ -568,8 +589,17 @@ async function handler(req, res) {
     .select("id, name, is_pro, coach_name")
     .in("id", userIds);
 
+  const { data: activeArcRows } = await supabase
+    .from("forge_blocks")
+    .select("user_id, identity, minimum_proof, start_date, end_date, duration_days, status, review")
+    .eq("status", "active")
+    .in("user_id", userIds);
+
   const profileByUser = {};
   for (const p of profiles || []) profileByUser[p.id] = p;
+
+  const arcBlockByUser = {};
+  for (const b of activeArcRows || []) arcBlockByUser[b.user_id] = b;
 
   const habitsByUser = {};
   const goalsByUser = {};
@@ -593,6 +623,9 @@ async function handler(req, res) {
   let skippedDedup = 0;
   let skippedWindow = 0;
   let skippedCategory = 0;
+  let skippedArcPause = 0;
+  let skippedArcEnded = 0;
+  let sentArcEnd = 0;
   const staleIds = [];
   // Per-user trace populated when DEBUG_CRON=1; surfaced in the response so
   // you can hit the cron manually with curl + Bearer CRON_SECRET to see who
@@ -637,12 +670,64 @@ async function handler(req, res) {
     const goals = goalsByUser[sub.user_id] || [];
     const profile = profileByUser[sub.user_id] || {};
     const coachName = profile.coach_name || null;
+    const arcBlock = arcBlockByUser[sub.user_id] || null;
+
+    // Paused after Arc end until a new Arc is in its early days (day < duration).
+    if (sub.last_reminder_sent_date?.endsWith(ARC_PAUSE_SUFFIX)) {
+      const dayX = arcBlock ? forgeBlockDayNumber(arcBlock, todayYmd) : null;
+      const dur = arcBlock?.duration_days || 56;
+      if (!arcBlock || (dayX != null && dayX >= dur)) {
+        if (debug) trace.push({ user_id: sub.user_id, skipped: "arc_pause" });
+        skippedArcPause++;
+        continue;
+      }
+    }
+
+    const arcDuration = arcBlock?.duration_days || 56;
+    const arcDayX = arcBlock ? forgeBlockDayNumber(arcBlock, todayYmd) : 0;
+    const isArcEndMorning = isWindowed && now.hour === 7 && bucketMinute(now.minute) === 0;
+
+    if (arcBlock && arcDayX >= arcDuration && isArcEndMorning) {
+      const pauseKey = `${todayYmd}${ARC_PAUSE_SUFFIX}`;
+      if (sub.last_reminder_sent_date !== pauseKey) {
+        const title = "Forged";
+        const body = applyCoachName("Your Arc ends today — your review is ready", coachName);
+        const payload = JSON.stringify({ title, body, url: "/?screen=insights", tag: "forged-arc-end" });
+        try {
+          await webpush.sendNotification(sub.subscription, payload);
+          sent++;
+          sentArcEnd++;
+          if (debug) trace.push({ user_id: sub.user_id, sent: true, arc_end: true, dedup_key: pauseKey });
+          try {
+            await supabase
+              .from("push_subscriptions")
+              .update({ last_reminder_sent_date: pauseKey })
+              .eq("id", sub.id);
+          } catch (markErr) {
+            if (!String(markErr?.message || "").includes("last_reminder_sent_date")) {
+              console.warn(`[Forged cron] arc pause stamp failed for ${sub.user_id}:`, markErr.message);
+            }
+          }
+        } catch (err) {
+          failed++;
+          if (err.statusCode === 404 || err.statusCode === 410) staleIds.push(sub.id);
+          else console.error(`[Forged cron] arc-end push error for ${sub.user_id}:`, err.message);
+        }
+      }
+      continue;
+    }
+
+    if (arcBlock && arcDayX >= arcDuration) {
+      if (debug) trace.push({ user_id: sub.user_id, skipped: "arc_ended_phase" });
+      skippedArcEnded++;
+      continue;
+    }
 
     let title;
     let body;
     // AI generation only for Pro users at the evening slot — morning/noon use curated templates.
     if (profile.is_pro && process.env.ANTHROPIC_API_KEY && normalUserSlot(now.hour) === "evening") {
-      const aiMsg = await aiPickMessage(profile.name || "there", coachName, habits, goals, todayYmd, now.hour);
+      const aiMsg = await aiPickMessage(profile.name || "there", coachName, habits, goals, todayYmd, now.hour, arcBlock);
       ({ title, body } = aiMsg || pickNormalMessage(habits, goals, todayYmd, now.hour, coachName));
     } else {
       ({ title, body } = pickNormalMessage(habits, goals, todayYmd, now.hour, coachName));
@@ -689,7 +774,7 @@ async function handler(req, res) {
   }
 
   console.log(
-    `[Forged cron] done mode=${cronMode} sent=${sent} failed=${failed} skipped_dedup=${skippedDedup} skipped_window=${skippedWindow} skipped_category=${skippedCategory} stale_removed=${staleIds.length}`
+    `[Forged cron] done mode=${cronMode} sent=${sent} failed=${failed} skipped_dedup=${skippedDedup} skipped_window=${skippedWindow} skipped_category=${skippedCategory} skipped_arc_pause=${skippedArcPause} skipped_arc_ended=${skippedArcEnded} sent_arc_end=${sentArcEnd} stale_removed=${staleIds.length}`
   );
   return res.status(200).json({
     mode: cronMode,
@@ -699,6 +784,9 @@ async function handler(req, res) {
     skippedDedup,
     skippedWindow,
     skippedCategory,
+    skippedArcPause,
+    skippedArcEnded,
+    sentArcEnd,
     staleRemoved: staleIds.length,
     ...(debug ? { trace } : {}),
   });
