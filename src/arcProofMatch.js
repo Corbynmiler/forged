@@ -275,12 +275,34 @@ export function arcHeaderSubtitle(block) {
 }
 
 /**
+ * Coerce typed input, pill payloads, or mistaken event objects into a plain string.
+ * Never pass React events into message state.
+ */
+export function normalizeChatInput(value) {
+  if (value == null) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value).trim();
+  if (typeof value === "object") {
+    if (typeof value.preventDefault === "function" || value.nativeEvent != null) return "";
+    if (value.target != null && (value.type === "click" || value.type === "submit")) return "";
+    for (const k of ["text", "message", "label", "prompt", "value", "content"]) {
+      const v = value[k];
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+  }
+  const coerced = String(value);
+  return coerced === "[object Object]" ? "" : coerced.trim();
+}
+
+/**
  * Strip obvious markdown from coach bubbles (**, *, `, ##) for plain display.
- * Raw message text sent to the API is unchanged.
+ * Splits inline • bullets and section labels onto separate lines (mobile-friendly).
  */
 export function formatCoachChatDisplay(text) {
-  if (!text) return "";
-  let s = String(text);
+  const raw = normalizeChatInput(text) || (typeof text === "string" ? text.trim() : "");
+  if (!raw) return "";
+
+  let s = raw;
   s = s.replace(/\*\*([^*]+)\*\*/g, "$1");
   s = s.replace(/\*([^*]+)\*/g, "$1");
   s = s.replace(/__([^_]+)__/g, "$1");
@@ -288,5 +310,25 @@ export function formatCoachChatDisplay(text) {
   s = s.replace(/`([^`]+)`/g, "$1");
   s = s.replace(/^#{1,6}\s+/gm, "");
   s = s.replace(/^\s*[-*]\s+/gm, "• ");
+
+  // Inline bullet chains → one bullet per line
+  if (s.includes("•")) {
+    s = s.replace(/\s*•\s*/g, "\n• ");
+    s = s.replace(/^\n+/, "");
+  }
+
+  // Section labels (Vision:, Why:, Proof actions:, …) on their own line
+  const labelPattern = /(?:^|[.!?]\s+)((?:Vision|Why(?:\s+it\s+matters)?|Old\s+pattern|Minimum\s+proof|Bad[- ]?day\s+minimum|Proof\s+actions|Identity|Title|Direction):)\s*/gi;
+  s = s.replace(labelPattern, "\n\n$1\n");
+
+  s = s.replace(/\n{3,}/g, "\n\n");
   return s.trim();
+}
+
+/** Safe string for chat bubble render — never shows [object Object]. */
+export function bubbleContentForDisplay(content) {
+  const normalized = normalizeChatInput(content);
+  if (normalized) return formatCoachChatDisplay(normalized);
+  if (typeof content === "string" && content.trim()) return formatCoachChatDisplay(content);
+  return "";
 }

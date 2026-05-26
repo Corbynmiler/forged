@@ -5,6 +5,8 @@ import { habitToRow, rowToHabit } from "../supabase.js";
 import {
   resolveProofActionHabits,
   buildNewProofHabit,
+  bubbleContentForDisplay,
+  normalizeChatInput,
   formatCoachChatDisplay,
   resolveArcTitle,
   normalizeArcDuration,
@@ -30,7 +32,7 @@ function addDaysLocalYmd(startYmd, deltaDays) {
 function apiMessagesFromUi(msgs) {
   const trimmed = msgs
     .filter(m => m.role === "user" || m.role === "assistant")
-    .map(m => ({ role: m.role, content: m.content || "" }));
+    .map(m => ({ role: m.role, content: normalizeChatInput(m.content) || String(m.content || "") }));
   if (trimmed.length > 0 && trimmed[0].role === "assistant") {
     return [{ role: "user", content: "." }, ...trimmed];
   }
@@ -245,9 +247,11 @@ export default function ArcCoachSheet({
   }
 
   async function sendMessage(overrideText) {
-    const text = String(overrideText ?? input).trim();
+    const text = overrideText !== undefined
+      ? normalizeChatInput(overrideText)
+      : normalizeChatInput(input);
     if (!text || sending || arcDraft) return;
-    if (!overrideText) {
+    if (overrideText === undefined) {
       setInput("");
       if (textareaRef.current) textareaRef.current.style.height = "auto";
     }
@@ -471,14 +475,14 @@ export default function ArcCoachSheet({
           msg.role === "assistant" ? (
             <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
               <div style={{ width: 28, height: 28, borderRadius: "50%", background: "rgba(200,144,42,0.15)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, flexShrink: 0 }}>{avatar}</div>
-              <div style={{ background: T.surface, borderRadius: "14px 14px 14px 3px", padding: "10px 16px", fontSize: 15, color: T.text, lineHeight: 1.65, maxWidth: "82%" }}>
-                {msg.content}
+              <div style={{ background: T.surface, borderRadius: "14px 14px 14px 3px", padding: "10px 16px", fontSize: 15, color: T.text, lineHeight: 1.65, maxWidth: "82%", whiteSpace: "pre-wrap" }}>
+                {bubbleContentForDisplay(msg.content)}
               </div>
             </div>
           ) : (
             <div key={i} style={{ display: "flex", justifyContent: "flex-end" }}>
-              <div style={{ background: T.accent, borderRadius: "14px 14px 3px 14px", padding: "10px 16px", fontSize: 15, color: "#fff", lineHeight: 1.65, maxWidth: "82%" }}>
-                {msg.content}
+              <div style={{ background: T.accent, borderRadius: "14px 14px 3px 14px", padding: "10px 16px", fontSize: 15, color: "#fff", lineHeight: 1.65, maxWidth: "82%", whiteSpace: "pre-wrap" }}>
+                {bubbleContentForDisplay(msg.content)}
               </div>
             </div>
           ),
@@ -518,7 +522,7 @@ export default function ArcCoachSheet({
               value={input}
               onChange={e => setInput(e.target.value)}
               onInput={e => { e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, 88)}px`; }}
-              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendMessage(); } }}
               placeholder={loadingOpener ? "Coach is typing…" : "Your answer…"}
               disabled={sending || loadingOpener || !!arcDraft}
               style={{
@@ -534,7 +538,7 @@ export default function ArcCoachSheet({
           </div>
           <button
             type="button"
-            onClick={sendMessage}
+            onClick={() => sendMessage()}
             disabled={!canSend}
             style={{
               width: 36, height: 36, borderRadius: "50%", border: `0.5px solid ${T.border}`,

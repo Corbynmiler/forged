@@ -9,7 +9,7 @@ export const ARC_OPENER_NEW =
   "Let's build your first 8-week Arc. Picture yourself eight weeks from now — in an ideal world, what feels different? What are you doing more of, doing less of, or finally getting under control?";
 
 export const ARC_EDIT_OPENER =
-  "Want to adjust the title, identity, proof actions, or bad-day minimum? Tap View Arc above to see everything at a glance.";
+  "Want to adjust the title, identity, proof actions, or bad-day minimum? Tap View Arc above to see everything at a glance. Arc length (weeks) is locked once you've started — we can't shorten or extend mid-Arc yet.";
 
 /** @typedef {{ label: string, mode: "send" | "insert", text: string }} ArcSuggestionPill */
 

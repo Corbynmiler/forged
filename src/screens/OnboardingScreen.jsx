@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { T, COLORS, HABIT_TYPES } from "../theme.js";
-import { resolveArcTitle, normalizeArcDuration, arcDurationWeeksLabel } from "../arcProofMatch.js";
+import {
+  resolveArcTitle,
+  normalizeArcDuration,
+  arcDurationWeeksLabel,
+  normalizeChatInput,
+  bubbleContentForDisplay,
+} from "../arcProofMatch.js";
 import ArcSuggestionPills from "../components/ArcSuggestionPills.jsx";
 import {
   inferArcCoachStage,
@@ -490,7 +496,9 @@ After creating, tell them they can log from Today and chat with you anytime.`;
   }
 
   async function sendOnboardMessage(overrideText) {
-    const inputText = String(overrideText ?? onboardInput).trim();
+    const inputText = overrideText !== undefined
+      ? normalizeChatInput(overrideText)
+      : normalizeChatInput(onboardInput);
     if (!inputText || onboardSending || arcDraft) return;
     if (speech.listening) speech.stopListening?.();
     if (!overrideText) {
@@ -892,17 +900,16 @@ After creating, tell them they can log from Today and chat with you anytime.`;
             msg.role === "assistant" ? (
               <div key={i} style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
                 <div style={{ width:28, height:28, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, flexShrink:0 }}>🤖</div>
-                <div style={{ background:T.surface, borderRadius:"14px 14px 14px 3px", padding:"10px 16px", fontSize:15, color:T.text, lineHeight:1.65, maxWidth:"82%" }}>
-                  {msg.content || (msg.id === ONBOARD_STREAM_ID
-                    ? <div style={{ display:"flex", gap:5 }}>{[0,1,2].map(i => <div key={i} style={{ width:6, height:6, borderRadius:"50%", background:T.muted, animation:`obDot 1.2s ease-in-out ${i*0.2}s infinite` }}/>)}</div>
-                    : null
-                  )}
+                <div style={{ background:T.surface, borderRadius:"14px 14px 14px 3px", padding:"10px 16px", fontSize:15, color:T.text, lineHeight:1.65, maxWidth:"82%", whiteSpace:"pre-wrap" }}>
+                  {msg.id === ONBOARD_STREAM_ID && !msg.content ? (
+                    <div style={{ display:"flex", gap:5 }}>{[0,1,2].map(i => <div key={i} style={{ width:6, height:6, borderRadius:"50%", background:T.muted, animation:`obDot 1.2s ease-in-out ${i*0.2}s infinite` }}/>)}</div>
+                  ) : bubbleContentForDisplay(msg.content)}
                 </div>
               </div>
             ) : (
               <div key={i} style={{ display:"flex", justifyContent:"flex-end" }}>
-                <div style={{ background:T.accent, borderRadius:"14px 14px 3px 14px", padding:"10px 16px", fontSize:15, color:"#fff", lineHeight:1.65, maxWidth:"82%" }}>
-                  {msg.content}
+                <div style={{ background:T.accent, borderRadius:"14px 14px 3px 14px", padding:"10px 16px", fontSize:15, color:"#fff", lineHeight:1.65, maxWidth:"82%", whiteSpace:"pre-wrap" }}>
+                  {bubbleContentForDisplay(msg.content)}
                 </div>
               </div>
             )
@@ -1019,7 +1026,7 @@ After creating, tell them they can log from Today and chat with you anytime.`;
             </div>
             <button
               type="button"
-              onClick={sendOnboardMessage}
+              onClick={() => sendOnboardMessage()}
               disabled={!canSend}
               style={{
                 width:36, height:36, borderRadius:"50%", border:`0.5px solid ${T.border}`,

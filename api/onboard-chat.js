@@ -169,6 +169,7 @@ CONVERSATION RULES (most important):
 - NEVER use: "warrior", "elite", "alpha", "future you", "stay strong king/queen", "journey", or any wellness-guru phrasing.
 - Do NOT re-ask anything already in ARC CONTEXT above. Build forward.
 ${isEditMode === true ? `- When editing: if identity changes materially, refresh title in the draft. If they ask for a name/title, offer 3 short options in prose OR use their custom title in the draft JSON.
+- DURATION (edit mode only): Arc length cannot be changed after the Arc has started. If they ask to make it 1 month, 4 weeks, 8 weeks, shorter, longer, etc., say clearly that duration is locked for this Arc — they can still edit title, identity, why, old pattern, minimum proof, and proof actions. Do NOT promise a duration change. Omit durationDays from the draft JSON when editing (the app ignores it on save).
 ` : ""}${existingUserRules}${finishRules}
 
 WHEN YOU HAVE ENOUGH (or hit the limit) — EMIT THE DRAFT.
