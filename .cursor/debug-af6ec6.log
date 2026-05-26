@@ -1,3 +1,0 @@
-{"sessionId":"af6ec6","timestamp":1777585310614,"hypothesisId":"A","location":"App.jsx:onAuthStateChange","message":"auth_event","data":{"event":"SIGNED_IN","hasSession":true,"uid8":"5e9b4ba7","initHandledBefore":true,"loadingUid8":"5e9b4ba7","accountReady":true}}
-{"sessionId":"af6ec6","timestamp":1777585311365,"hypothesisId":"A","location":"App.jsx:loadUserData","message":"load_ok","data":{"uid8":"5e9b4ba7","hasProfile":true,"habitCount":5}}
-{"sessionId":"af6ec6","timestamp":1777585315015,"hypothesisId":"A","location":"App.jsx:onAuthStateChange","message":"auth_event","data":{"event":"SIGNED_IN","hasSession":true,"uid8":"5e9b4ba7","initHandledBefore":true,"loadingUid8":null,"accountReady":true}}

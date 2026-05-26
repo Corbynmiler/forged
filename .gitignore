@@ -12,3 +12,24 @@ scripts/demo-client-test-seed.sql
 
 # Claude Code agent worktrees (created on demand)
 .claude/worktrees/
+
+# ── Build cache / artefacts (regenerate on every dev or deploy) ──────────────
+# Vite transient cache — written on every `npm run dev`.
+.vite/
+# Build output — Vercel rebuilds via `npm run build` on every deploy
+# (vercel.json: buildCommand=npm run build, outputDirectory=dist).
+dist/
+
+# ── IDE / OS junk ────────────────────────────────────────────────────────────
+.DS_Store
+**/.DS_Store
+
+# Cursor: ignore IDE-local junk but KEEP mcp.json (team-shared Supabase MCP
+# config — see AGENTS.md "Cursor + Supabase MCP" section).
+.cursor/
+!.cursor/mcp.json
+
+# ── Stray personal screenshots accidentally dropped into public/ ─────────────
+# (the landing page uses public/screenshots/*.jpg, NOT these PNGs)
+public/IMG_*.PNG
+public/Screenshot*.png
