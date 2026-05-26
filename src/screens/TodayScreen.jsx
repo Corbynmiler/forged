@@ -8,6 +8,7 @@ import {
   TodayGoalCard,
 } from "../components/habitCards.jsx";
 import { resolveArcTitle, arcHeaderSubtitle, arcDurationWeeksLabel } from "../arcProofMatch.js";
+import { getArcRankDisplay, getArcDayNumber, ARC_DAILY_XP_CAP } from "../arcProgress.js";
 
 // ── Coach greeting helpers (deterministic, no AI) ──────────────────────────
 function coachGreetingDaysLeft(targetYmd) {
@@ -591,6 +592,8 @@ export function TodayScreen({
   onPinTask = null,
   onDeleteTask = null,
   activeBlock = null,
+  todayArcScore = null,
+  arcLedgerRows = [],
   arcProofSyncing = false,
   onStartArc = null,
   onEditArc = null,
@@ -630,6 +633,11 @@ export function TodayScreen({
     : pct < 100 ? "More than halfway."
     : timeGreeting;
   const level = getLevel(xp);
+  const arcDayNum = arcActive ? getArcDayNumber(activeBlock) : 1;
+  const arcRankLabel = arcActive
+    ? (activeBlock.arcRank?.trim() || getArcRankDisplay(activeBlock.completionScore, arcLedgerRows.length > 0).label)
+    : "";
+  const arcXpToday = todayArcScore?.arcXpAwarded ?? 0;
   const habitsForSections = arcActive ? otherTrackHabits : habits;
   const daily   = habitsForSections.filter(h => h.habitType === "daily");
   const limit   = habitsForSections.filter(h => h.habitType === "limit");
@@ -769,9 +777,16 @@ export function TodayScreen({
             {!arcActive && pct === 100 && totalTrackables > 0 ? "Forged for today" : greeting}
           </div>
           <div style={{ fontSize:13, color:T.muted }}>{ringSummary || " "}</div>
+          {arcActive && proofTotal > 0 && (
+            <div style={{ fontSize:11, color:T.hint, marginTop:5, fontVariantNumeric:"tabular-nums" }}>
+              Arc XP today: {arcXpToday} / {ARC_DAILY_XP_CAP}
+            </div>
+          )}
           <button onClick={onXPInfo} style={{ marginTop:10, display:"inline-flex", alignItems:"center", gap:5, fontSize:11, fontWeight:500, padding:"3px 10px", borderRadius:12, background:"rgba(200,144,42,0.15)", color:T.gold, border:"none", cursor:"pointer" }}>
             {arcActive
-              ? (xp === 0 ? `⚡ Day ${arcDayX} of ${activeBlock.durationDays || 56}` : `⚡ Day ${arcDayX} · ${xp} xp`)
+              ? (proofTotal > 0
+                ? `⚡ ${arcRankLabel} · ${proofDone}/${proofTotal}`
+                : `⚡ Day ${arcDayNum} · add proof`)
               : (xp === 0 ? "⚡ Log a habit to earn XP" : `⚡ ${xp} xp · ${level.label}`)}
           </button>
           {doneTasksCount > 0 && (

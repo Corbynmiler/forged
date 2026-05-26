@@ -1,7 +1,16 @@
 
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
 import { flushSync, createPortal } from "react-dom";
-import { supabase, habitToRow, rowToHabit, rowToGoal, goalToRow, rowToTask, taskToRow, rowToForgeBlock } from "./supabase.js";
+import { supabase, habitToRow, rowToHabit, rowToGoal, goalToRow, rowToTask, taskToRow, rowToForgeBlock, rowToArcDailyScore } from "./supabase.js";
+import {
+  calculateArcProofPercent,
+  computeTodayArcXpAward,
+  getArcRankFromPercent,
+  isProofHabitForBlock,
+  lifetimeXpForHabitLog,
+  LIFETIME_XP_DURING_ARC_NON_PROOF,
+  LIFETIME_XP_LIMIT_NONE,
+} from "./arcProgress.js";
 
 // Theme
 import {
@@ -174,6 +183,8 @@ export default function App() {
   const [arcSetupFromCoach, setArcSetupFromCoach] = useState(false);
   /** True while Arc proof habits are being linked/created — suppresses empty proof CTA on Today. */
   const [arcProofSyncing, setArcProofSyncing] = useState(false);
+  const [arcLedgerRows, setArcLedgerRows] = useState([]);
+  const [todayArcScore, setTodayArcScore] = useState(null);
   const [screen,      setScreen]     = useState("today");
   const [xp,          setXp]         = useState(0);
   const [particles,   setParticles]  = useState([]);
@@ -434,6 +445,15 @@ export default function App() {
       return next.size === prev.size ? prev : next;
     });
   }, [habits, goals]);
+
+  // Sync Arc daily score when habits or active Arc change (refresh + proof edits).
+  useEffect(() => {
+    if (!activeBlock?.id || !accountDataReady) return;
+    void (async () => {
+      await loadArcLedgerForBlock(activeBlock.id);
+      await reconcileArcProgress(activeBlock, habits);
+    })();
+  }, [activeBlock?.id, accountDataReady, habits]);
 
   // ── App-level notification restore (survives tab switches) ───────────────────
   useEffect(() => {
@@ -1790,8 +1810,134 @@ export default function App() {
       addToast("⚠️ Couldn't link habit — check your connection");
       return;
     }
-    setHabits(prev => prev.map(h => (h.id === habitId ? updated : h)));
+    const nextHabits = habits.map(h => (h.id === habitId ? updated : h));
+    setHabits(nextHabits);
+    if (activeBlock?.id) void reconcileArcProgress(activeBlock, nextHabits);
     addToast("✓ Added as proof action");
+  }
+
+  async function loadArcLedgerForBlock(blockId) {
+    if (!blockId) {
+      setArcLedgerRows([]);
+      setTodayArcScore(null);
+      return;
+    }
+    const today = todayStr();
+    const { data, error } = await supabase
+      .from("arc_daily_scores")
+      .select("id, user_id, block_id, date, proof_total, proof_done, arc_xp_awarded, perfect_day")
+      .eq("block_id", blockId)
+      .order("date", { ascending: true });
+    if (error) {
+      console.warn("[Forged] arc_daily_scores load:", error.message);
+      setArcLedgerRows([]);
+      return;
+    }
+    const rows = (data || []).map(rowToArcDailyScore).filter(Boolean);
+    setArcLedgerRows(rows);
+    const todayRow = rows.find(r => r.date === today);
+    setTodayArcScore(todayRow || {
+      date: today, proofTotal: 0, proofDone: 0, arcXpAwarded: 0, perfectDay: false,
+    });
+  }
+
+  /**
+   * Recompute today's Arc XP from proof habits, upsert ledger, adjust forge_blocks.arc_xp.
+   * Idempotent: safe on retick/untick and page refresh.
+   */
+  async function reconcileArcProgress(block, habitsList) {
+    const uid = userIdRef.current;
+    if (!block?.id || !uid) return { ok: true, delta: 0 };
+
+    const blockId = block.id;
+    const today = todayStr();
+    const proofHabits = (habitsList || []).filter(
+      h => h && h.habitType !== "log" && isProofHabitForBlock(h, blockId),
+    );
+    const proofTotal = proofHabits.length;
+    const proofDone = proofHabits.filter(h => isSatisfiedForTodayRing(h)).length;
+    const newAward = computeTodayArcXpAward({ proofTotal, proofDone });
+    const perfectDay = proofTotal > 0 && proofDone === proofTotal;
+
+    const { data: existing, error: fetchErr } = await supabase
+      .from("arc_daily_scores")
+      .select("*")
+      .eq("block_id", blockId)
+      .eq("date", today)
+      .maybeSingle();
+
+    if (fetchErr) {
+      console.warn("[Forged] arc_daily_scores fetch:", fetchErr.message);
+      return { ok: false, delta: 0 };
+    }
+
+    const prevAward = existing?.arc_xp_awarded ?? 0;
+    const delta = newAward - prevAward;
+
+    const upsertPayload = {
+      user_id: uid,
+      block_id: blockId,
+      date: today,
+      proof_total: proofTotal,
+      proof_done: proofDone,
+      arc_xp_awarded: newAward,
+      perfect_day: perfectDay,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error: upsertErr } = await supabase
+      .from("arc_daily_scores")
+      .upsert(upsertPayload, { onConflict: "block_id,date" });
+
+    if (upsertErr) {
+      console.warn("[Forged] arc_daily_scores upsert:", upsertErr.message);
+      return { ok: false, delta: 0 };
+    }
+
+    const ledgerForPercent = [
+      ...arcLedgerRows.filter(r => r.date !== today),
+      { date: today, proof_total: proofTotal, proof_done: proofDone },
+    ];
+    const percent = calculateArcProofPercent({
+      ledgerRows: ledgerForPercent,
+      habits: habitsList,
+      blockId,
+      today,
+    });
+    const rankLabel = getArcRankFromPercent(percent ?? 0).label;
+
+    const blockPatch = {
+      completion_score: percent,
+      arc_rank: rankLabel,
+      updated_at: new Date().toISOString(),
+    };
+    if (delta !== 0) {
+      blockPatch.arc_xp = Math.max(0, (block.arcXp ?? 0) + delta);
+    }
+
+    const { data: updatedBlock, error: blockErr } = await supabase
+      .from("forge_blocks")
+      .update(blockPatch)
+      .eq("id", blockId)
+      .eq("user_id", uid)
+      .select("*")
+      .single();
+
+    if (blockErr) {
+      console.warn("[Forged] forge_blocks arc_xp update:", blockErr?.message);
+      return { ok: false, delta: 0 };
+    }
+
+    if (updatedBlock) setActiveBlock(rowToForgeBlock(updatedBlock));
+
+    const scoreRow = rowToArcDailyScore({ ...existing, ...upsertPayload, id: existing?.id });
+    setTodayArcScore(scoreRow);
+    setArcLedgerRows(prev => {
+      const rest = prev.filter(r => r.date !== today);
+      return [...rest, scoreRow].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    });
+
+    return { ok: true, delta, newAward, proofTotal, proofDone };
   }
 
   async function reloadForgeBlocks(uid = userIdRef.current) {
@@ -1816,10 +1962,14 @@ export default function App() {
         return;
       }
       if (blockRow) {
-        setActiveBlock(rowToForgeBlock(blockRow));
+        const block = rowToForgeBlock(blockRow);
+        setActiveBlock(block);
         setCompletedArcBlock(null);
+        void loadArcLedgerForBlock(block.id);
         return;
       }
+      setArcLedgerRows([]);
+      setTodayArcScore(null);
       setActiveBlock(null);
       const { data: doneRow, error: doneErr } = await supabase
         .from("forge_blocks")
@@ -3013,18 +3163,33 @@ export default function App() {
     }
     const saved = await syncHabit(tapped);
     if (!saved) return;
-    setHabits(prev => prev.map(h => h.id === id ? tapped : h));
+    const nextHabits = habits.map(h => h.id === id ? tapped : h);
+    setHabits(nextHabits);
     syncLastActive();
     // Accountability sync: handled inside syncHabit → pushSharedMemberProgressFromLinked
     // Limit + taps never award XP or celebration — usage logging is not rewarded.
     if (tapped.habitType === "limit") return;
+
     const today = todayStr();
+    const block = activeBlock;
+    if (block) {
+      const { ok, delta } = await reconcileArcProgress(block, nextHabits);
+      if (!ok) addToast("⚠️ Couldn't sync Arc progress");
+      else if (delta > 0) addFlash(cx, cy, `+${delta} arc xp`);
+    }
+
+    const wasLogged = base.logs.some(l => l.date === today && l.value === true);
+    const isNowLogged = tapped.logs.some(l => l.date === today && l.value === true);
+    if (!isNowLogged) return;
+
     const awardKey = `${id}:${today}`;
-    const alreadyEarnedToday = xpAwardedDates.has(awardKey) || base.logs.some(l => l.date === today && l.value === true);
+    const alreadyEarnedToday = xpAwardedDates.has(awardKey) || wasLogged;
     if (!alreadyEarnedToday) {
+      const isProof = block && isProofHabitForBlock(tapped, block.id);
+      const amount = lifetimeXpForHabitLog({ hasActiveArc: !!block, isProof: !!isProof });
       spawnParticles(cx, cy, tapped.color);
-      addFlash(cx, cy, "+10 xp");
-      setXp(x => x + 10);
+      addFlash(cx, cy, `+${amount} xp`);
+      setXp(x => x + amount);
       setXpAwardedDates(prev => {
         const next = new Set(prev);
         next.add(awardKey);
@@ -3044,7 +3209,16 @@ export default function App() {
       : { ...habit, logs: habit.logs.map(l => l.date === todayStr() ? { ...l, ...logData } : l) };
     const saved = await syncHabit(updated);
     if (!saved) return;
-    setHabits(prev => prev.map(h => h.id === id ? updated : h));
+    const nextHabits = habits.map(h => h.id === id ? updated : h);
+    setHabits(nextHabits);
+    const block = activeBlock;
+    if (block) {
+      const { ok, delta } = await reconcileArcProgress(block, nextHabits);
+      if (!ok) addToast("⚠️ Couldn't sync Arc progress");
+      else if (delta > 0) addFlash(window.innerWidth / 2, 120, `+${delta} arc xp`);
+    }
+    const isProof = block && isProofHabitForBlock(updated, block.id);
+    const lifetimeUnit = lifetimeXpForHabitLog({ hasActiveArc: !!block, isProof: !!isProof });
     // Linked accountability sync runs inside syncHabit (full projection from personal logs).
     if (habit.habitType === "project") {
       const today = todayStr();
@@ -3057,11 +3231,11 @@ export default function App() {
       let earnedFirst = false;
       let earnedBonus = false;
       if (prevMins === 0 && !xpAwardedDates.has(firstKey)) {
-        xpGain += 10;
+        xpGain += lifetimeUnit;
         earnedFirst = true;
       }
       if (prevMins < targetMins && nextMins >= targetMins && !xpAwardedDates.has(bonusKey)) {
-        xpGain += 10;
+        xpGain += lifetimeUnit;
         earnedBonus = true;
       }
       if (xpGain > 0) {
@@ -3075,8 +3249,8 @@ export default function App() {
         });
       }
     } else if (isNew) {
-      addFlash(window.innerWidth / 2, 120, "+10 xp");
-      setXp(x => x + 10);
+      addFlash(window.innerWidth / 2, 120, `+${lifetimeUnit} xp`);
+      setXp(x => x + lifetimeUnit);
     }
   }
 
@@ -3105,7 +3279,9 @@ export default function App() {
     const updated = { ...habit, logs:[...withoutToday, { date:today, value:"skip", note: note || "" }] };
     const saved = await syncHabit(updated);
     if (!saved) return;
-    setHabits(prev => prev.map(h => h.id === id ? updated : h));
+    const nextHabits = habits.map(h => h.id === id ? updated : h);
+    setHabits(nextHabits);
+    if (activeBlock?.id) void reconcileArcProgress(activeBlock, nextHabits);
     addToast(habit.habitType === "weekly"
       ? "🛡️ Weekly rest day — ring counts this; session tally unchanged"
       : "🛡️ Rest day — streak protected");
@@ -3164,11 +3340,16 @@ export default function App() {
     const updated = { ...habit, logs: nextLogs };
     const saved = await syncHabit(updated);
     if (!saved) return;
-    setHabits(prev => prev.map(h => h.id === id ? updated : h));
+    const nextHabits = habits.map(h => h.id === id ? updated : h);
+    setHabits(nextHabits);
+    const block = activeBlock;
+    if (block) void reconcileArcProgress(block, nextHabits);
     const noneTodayXpKey = `limit-none:${id}:${today}`;
     if (!xpAwardedDates.has(noneTodayXpKey)) {
-      addFlash(window.innerWidth / 2, 120, "+15 xp");
-      setXp(x => x + 15);
+      const isProof = block && isProofHabitForBlock(habit, block.id);
+      const amount = block && !isProof ? LIFETIME_XP_DURING_ARC_NON_PROOF : LIFETIME_XP_LIMIT_NONE;
+      addFlash(window.innerWidth / 2, 120, `+${amount} xp`);
+      setXp(x => x + amount);
       setXpAwardedDates(prev => {
         const next = new Set(prev);
         next.add(noneTodayXpKey);
@@ -3671,7 +3852,7 @@ export default function App() {
             >×</button>
           </div>
         )}
-        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} activeBlock={activeBlock} arcProofSyncing={arcProofSyncing} onStartArc={openArcCoachCreate}
+        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} activeBlock={activeBlock} todayArcScore={todayArcScore} arcLedgerRows={arcLedgerRows} arcProofSyncing={arcProofSyncing} onStartArc={openArcCoachCreate}
 onEditArc={openArcCoachEdit}
 onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} coachEverOpened={coachEverOpened} onOpenCoachMic={() => openCoachWithMode("mic")} onOpenCoachWithDraft={openCoachWithDraft} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} hideFloatingAdd onOpenGoalDetail={id => setOpenGoalId(id)} onOpenInsights={() => setScreen("insights")} todayJournalEntry={journalEntries.find(e => e.date === todayStr()) ?? null} onGenerateReceipt={handleGenerateReceipt} generatingReceipt={generatingReceipt} onOpenJournal={() => { setJournalOpenTab("journal"); setScreen("journal"); }} yesterdayJournalEntry={journalEntries.find(e => e.date === daysAgo(1)) ?? null} onLowerBudget={handleLowerBudget} tasks={tasks} onAddTask={handleAddTask} onCompleteTask={handleCompleteTask} onPinTask={handlePinTask} onDeleteTask={handleDeleteTask}/>}
         {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} journalEntries={journalEntries} onSaveJournalEntry={handleSaveJournalEntry} onJournalGenerated={handleJournalGenerated} initialTab={showJournalCompose ? "journal" : journalOpenTab ?? undefined} onInitialComposeDone={() => { setShowJournalCompose(false); setJournalOpenTab(null); }} userName={user.name || ""} coachName={coachName}/>}
@@ -4097,7 +4278,7 @@ onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} o
       {logGoalId     && (() => { const g = resolveGoalForModal(logGoalId, goals, habits); return g ? <LogGoalModal goal={g} onClose={() => setLogGoalId(null)} onLog={(id, val, note) => { handleLogGoal(id, val, note); setLogGoalId(null); }}/> : null; })()}
       {editGoalId    && (() => { const g = resolveGoalForModal(editGoalId, goals, habits); return g ? <EditGoalModal goal={g} onClose={() => setEditGoalId(null)} onSave={handleEditGoalSave}/> : null; })()}
       {openGoalId    && (() => { const g = resolveGoalForModal(openGoalId, goals, habits); return g ? <GoalDetailSheet goal={g} habits={habits} onClose={() => setOpenGoalId(null)} onLog={id => { setOpenGoalId(null); setLogGoalId(id); }} onEdit={id => { setOpenGoalId(null); openEditGoal(id); }} onComplete={handleCompleteGoal} onDelete={id => { handleDeleteGoal(id); setOpenGoalId(null); }} onCheckin={handleGoalCheckin} onLinkHabits={handleGoalLinkHabits}/> : null; })()}
-      {showXP        && <XPModal       xp={xp}                               onClose={() => setShowXP(false)}/>}
+      {showXP        && <XPModal       xp={xp} activeBlock={activeBlock} todayArcScore={todayArcScore} arcLedgerRows={arcLedgerRows} habits={habits} onClose={() => setShowXP(false)}/>}
       {showHistory   && <HistoryModal  habits={habits} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onClose={() => setShowHistory(false)}/>}
       {reflectId     && <ReflectModal  habit={reflectHabit}                  onClose={() => setReflectId(null)} onSave={handleSaveReflection} hasCoach={!!user.coachId}/>}
       {editId && !editGoalId && editHabit && !isGoalLikeHabitType(editHabit) && <EditModal habit={editHabit} onClose={() => setEditId(null)} onSave={handleEditSave}/>}

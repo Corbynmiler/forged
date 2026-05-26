@@ -207,8 +207,25 @@ export function rowToForgeBlock(row) {
     endDate:       row.end_date,
     status:        row.status         ?? "active",
     durationDays:  row.duration_days  ?? 56,
+    arcXp:         row.arc_xp ?? 0,
+    completionScore: row.completion_score != null ? Number(row.completion_score) : null,
+    arcRank:       row.arc_rank ?? "",
     review:        row.review         ?? null,
     createdAt:     row.created_at,
     updatedAt:     row.updated_at,
+  };
+}
+
+export function rowToArcDailyScore(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    userId: row.user_id,
+    blockId: row.block_id,
+    date: row.date,
+    proofTotal: row.proof_total ?? 0,
+    proofDone: row.proof_done ?? 0,
+    arcXpAwarded: row.arc_xp_awarded ?? 0,
+    perfectDay: !!row.perfect_day,
   };
 }

@@ -12,6 +12,14 @@ import {
   getLimitDayTotal,
 } from "../utils.js";
 import { Modal, GBtn, PBtn, FG, lbl, inp, Stat, DoneBanner, Toggle } from "./ui.jsx";
+import {
+  ARC_DAILY_XP_CAP,
+  ARC_RANKS,
+  calculateArcProofPercent,
+  getArcRankDisplay,
+  getArcDayNumber,
+  getProofHabitsForBlock,
+} from "../arcProgress.js";
 import { useSpeechInput, MicBtn, mergeDictationIntoText, polishInterimDisplay } from "../hooks/useSpeechInput.jsx";
 import { useScrollLock } from "../hooks/useScrollLock.js";
 
@@ -1358,33 +1366,88 @@ export function AddLogModal({ onClose, onSave }) {
 }
 
 // ─── XP MODAL ─────────────────────────────────────────────────────────────────
-export function XPModal({ xp, onClose }) {
+export function XPModal({ xp, activeBlock = null, todayArcScore = null, arcLedgerRows = [], habits = [], onClose }) {
   const level = getLevel(xp);
   const next  = nextLevel(xp);
   const span  = next ? Math.max(1, next.min - level.min) : 1;
   const pct   = next ? Math.round(((xp - level.min) / span) * 100) : 100;
   const gap   = next ? next.min - xp : 0;
+  const arcActive = !!activeBlock?.id;
+  const proofHabits = arcActive ? getProofHabitsForBlock(habits, activeBlock.id) : [];
+  const proofDoneToday = proofHabits.filter(h => isSatisfiedForTodayRing(h)).length;
+  const proofTotal = proofHabits.length;
+  const arcPercent = arcActive
+    ? calculateArcProofPercent({ ledgerRows: arcLedgerRows, habits, blockId: activeBlock.id })
+    : null;
+  const arcRank = arcActive
+    ? getArcRankDisplay(arcPercent ?? activeBlock.completionScore, arcLedgerRows.length > 0 || proofTotal > 0)
+    : null;
+  const arcXpToday = todayArcScore?.arcXpAwarded ?? 0;
+  const arcDay = arcActive ? getArcDayNumber(activeBlock) : 1;
+
   return (
     <Modal onClose={onClose}>
       <div style={{ marginTop:-4, paddingBottom:4 }}>
-        <p style={{ fontSize:12, color:T.goldBright, letterSpacing:"0.06em", textTransform:"uppercase", fontWeight:600, margin:"0 0 22px", textAlign:"center", lineHeight:1.4 }}>
-          Lifetime XP from logging habits. Arc proof progression is tracked separately (more coming soon).
+        <p style={{ fontSize:12, color:T.goldBright, letterSpacing:"0.04em", fontWeight:500, margin:"0 0 18px", textAlign:"center", lineHeight:1.55 }}>
+          Arc progress is earned from proof actions. Other habits still count as lifetime activity, but they don&apos;t define this Arc.
         </p>
-        <div style={{ background:`linear-gradient(165deg, rgba(18,18,16,0.98) 0%, ${T.bg} 55%, rgba(12,12,10,1) 100%)`, border:`1px solid ${T.borderMid}`, borderRadius:T.r, padding:"24px 18px 22px", marginBottom:20, boxShadow:"inset 0 1px 0 rgba(255,255,255,0.05), 0 12px 40px rgba(0,0,0,0.35)" }}>
-          <div style={{ fontFamily:T.serif, fontSize:34, fontWeight:700, color:level.color, lineHeight:1.05, letterSpacing:"-0.02em", textShadow:`0 0 48px ${level.color}33` }}>{level.label}</div>
-          <div style={{ fontSize:14, color:T.sub, marginTop:10, lineHeight:1.55, maxWidth:320 }}>{level.meaning}</div>
-          <div style={{ marginTop:22, fontSize:14, color:T.text, fontWeight:500, lineHeight:1.5 }}>
+
+        {arcActive && (
+          <>
+            <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.12em", fontWeight:600, marginBottom:8, paddingLeft:2 }}>Current Arc</div>
+            <div style={{ background:`linear-gradient(165deg, rgba(18,18,16,0.98) 0%, ${T.bg} 55%, rgba(12,12,10,1) 100%)`, border:`1px solid ${T.borderMid}`, borderRadius:T.r, padding:"20px 18px 18px", marginBottom:16, boxShadow:"inset 0 1px 0 rgba(255,255,255,0.05), 0 12px 40px rgba(0,0,0,0.35)" }}>
+              <div style={{ fontFamily:T.serif, fontSize:28, fontWeight:700, color:arcRank.color, lineHeight:1.1 }}>{arcRank.label}</div>
+              <div style={{ fontSize:13, color:T.sub, marginTop:8, lineHeight:1.5 }}>{arcRank.meaning}</div>
+              <div style={{ marginTop:16, fontSize:13, color:T.text, lineHeight:1.55 }}>
+                <div>Day {arcDay} · {proofDoneToday}/{proofTotal || "—"} proof today</div>
+                <div style={{ marginTop:6, fontVariantNumeric:"tabular-nums" }}>
+                  <span style={{ color:T.gold }}>{activeBlock.arcXp ?? 0} arc xp</span>
+                  <span style={{ color:T.hint }}> total · </span>
+                  <span style={{ color:T.sub }}>{arcXpToday} / {ARC_DAILY_XP_CAP} today</span>
+                </div>
+                {arcPercent != null && (
+                  <div style={{ marginTop:4, fontSize:12, color:T.muted }}>{arcPercent}% proof consistency</div>
+                )}
+              </div>
+            </div>
+            <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.12em", fontWeight:600, marginBottom:8, paddingLeft:2 }}>Arc ranks (proof %)</div>
+            <div style={{ border:`1px solid ${T.borderMid}`, borderRadius:T.r, overflow:"hidden", background:T.bg, marginBottom:18 }}>
+              {ARC_RANKS.map((r, i) => {
+                const isCurrent = r.label === arcRank.label;
+                const isFuture = arcPercent != null && arcPercent < r.minPercent;
+                return (
+                  <div key={r.label} style={{ display:"flex", gap:12, padding:"12px 14px", borderTop:i>0?`1px solid ${T.border}`:"none", opacity:isFuture?0.45:1, background:isCurrent?`${r.color}12`:"transparent", borderLeft:isCurrent?`3px solid ${r.color}`:"3px solid transparent" }}>
+                    <div style={{ width:10, height:10, borderRadius:"50%", background:r.color, flexShrink:0, marginTop:4 }}/>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:14, fontWeight:isCurrent?600:500, color:isFuture?T.hint:T.text }}>
+                        {r.label}{isCurrent ? <span style={{ marginLeft:6, fontSize:10, color:r.color, textTransform:"uppercase" }}>Now</span> : null}
+                        <span style={{ float:"right", fontSize:11, color:T.hint, fontWeight:500 }}>{r.minPercent}%+</span>
+                      </div>
+                      <div style={{ fontSize:11, color:T.sub, marginTop:4, lineHeight:1.4 }}>{r.meaning}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.12em", fontWeight:600, marginBottom:8, paddingLeft:2 }}>Lifetime XP</div>
+        <div style={{ background:T.raised, border:`1px solid ${T.borderMid}`, borderRadius:T.r, padding:"18px 18px 16px", marginBottom:16 }}>
+          <div style={{ fontFamily:T.serif, fontSize:22, fontWeight:700, color:level.color, lineHeight:1.1 }}>{level.label}</div>
+          <div style={{ fontSize:12, color:T.sub, marginTop:6, lineHeight:1.45 }}>{level.meaning}</div>
+          <div style={{ marginTop:14, fontSize:13, color:T.text, fontWeight:500, lineHeight:1.5 }}>
             {next ? (
               <><span style={{ color:level.color, fontVariantNumeric:"tabular-nums" }}>{xp} xp</span><span style={{ color:T.hint }}> — </span><span style={{ color:T.sub }}>{gap} to </span><span style={{ color:next.color, fontWeight:600 }}>{next.label}</span></>
             ) : (
               <><span style={{ color:level.color, fontVariantNumeric:"tabular-nums" }}>{xp} xp</span><span style={{ color:T.hint }}> — </span><span style={{ color:T.goldBright, fontWeight:600 }}>Peak rank</span></>
             )}
           </div>
-          <div style={{ height:12, background:T.bg, borderRadius:8, overflow:"hidden", marginTop:14, border:`1px solid ${T.border}`, boxShadow:"inset 0 2px 6px rgba(0,0,0,0.45)" }}>
-            <div style={{ height:"100%", borderRadius:7, background:next?`linear-gradient(90deg, ${level.color}, ${next.color})`:`linear-gradient(90deg, ${level.color}, ${T.goldBright})`, width:`${pct}%`, maxWidth:"100%", transition:"width 0.65s ease", boxShadow:`0 0 16px ${level.color}55` }}/>
+          <div style={{ height:10, background:T.bg, borderRadius:6, overflow:"hidden", marginTop:12, border:`1px solid ${T.border}` }}>
+            <div style={{ height:"100%", borderRadius:5, background:next?`linear-gradient(90deg, ${level.color}, ${next.color})`:`linear-gradient(90deg, ${level.color}, ${T.goldBright})`, width:`${pct}%`, maxWidth:"100%", transition:"width 0.65s ease" }}/>
           </div>
         </div>
-        <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.12em", fontWeight:600, marginBottom:10, paddingLeft:2 }}>Ranks</div>
+        <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.12em", fontWeight:600, marginBottom:10, paddingLeft:2 }}>Lifetime ranks</div>
         <div style={{ border:`1px solid ${T.borderMid}`, borderRadius:T.r, overflow:"hidden", background:T.bg, marginBottom:18, boxShadow:"inset 0 1px 0 rgba(255,255,255,0.03)" }}>
           {XP_LEVELS.map((l, i) => {
             const isCurrent = l.min === level.min;

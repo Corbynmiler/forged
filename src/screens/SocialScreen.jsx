@@ -777,7 +777,7 @@ export function SocialScreen({ user, xp, habits, friends, friendRequests, sentRe
             <span>🏆 Forged Beta</span>
           </div>
           <div style={{ fontSize: 10, fontWeight: 600, color: T.hint, letterSpacing: "0.04em", textTransform: "uppercase" }}>
-            Top 10 · All-time XP
+            Top 10 · Lifetime XP
           </div>
         </div>
 
