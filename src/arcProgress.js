@@ -109,12 +109,28 @@ export function calculateArcProofPercent({ ledgerRows, habits, blockId, today = 
   return Math.round((sumDone / sumTotal) * 100);
 }
 
-export function getArcRankDisplay(percent, hasLedgerData) {
+/**
+ * @param {number|null} percent
+ * @param {boolean} hasLedgerData
+ * @param {{ proofDoneToday?: number, priorLedgerDays?: number }} [opts]
+ */
+export function getArcRankDisplay(percent, hasLedgerData, opts = {}) {
+  const proofDoneToday = opts.proofDoneToday ?? 0;
+  const priorLedgerDays = opts.priorLedgerDays ?? 0;
+
+  // Day-one / pre-proof: neutral placeholder — not Spark-at-0%.
+  if (proofDoneToday === 0 && priorLedgerDays === 0) {
+    return {
+      label: "Forming",
+      color: "#B8B6AC",
+      meaning: "Your Arc rank builds as you show proof — start with one action today.",
+    };
+  }
   if (percent == null && !hasLedgerData) {
     return {
       label: "Forming",
       color: "#B8B6AC",
-      meaning: "Log proof actions to establish your Arc rank",
+      meaning: "Add proof actions to this Arc to start tracking rank.",
     };
   }
   if (percent == null) {

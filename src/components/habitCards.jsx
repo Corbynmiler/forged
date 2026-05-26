@@ -1380,7 +1380,10 @@ export function XPModal({ xp, activeBlock = null, todayArcScore = null, arcLedge
     ? calculateArcProofPercent({ ledgerRows: arcLedgerRows, habits, blockId: activeBlock.id })
     : null;
   const arcRank = arcActive
-    ? getArcRankDisplay(arcPercent ?? activeBlock.completionScore, arcLedgerRows.length > 0 || proofTotal > 0)
+    ? getArcRankDisplay(arcPercent ?? activeBlock.completionScore, arcLedgerRows.length > 0 || proofTotal > 0, {
+        proofDoneToday: proofDoneToday,
+        priorLedgerDays: arcLedgerRows.filter(r => r.date !== todayStr()).length,
+      })
     : null;
   const arcXpToday = todayArcScore?.arcXpAwarded ?? 0;
   const arcDay = arcActive ? getArcDayNumber(activeBlock) : 1;
@@ -1412,8 +1415,19 @@ export function XPModal({ xp, activeBlock = null, todayArcScore = null, arcLedge
             </div>
             <div style={{ fontSize:10, color:T.hint, textTransform:"uppercase", letterSpacing:"0.12em", fontWeight:600, marginBottom:8, paddingLeft:2 }}>Arc ranks (proof %)</div>
             <div style={{ border:`1px solid ${T.borderMid}`, borderRadius:T.r, overflow:"hidden", background:T.bg, marginBottom:18 }}>
+              {arcRank.label === "Forming" && (
+                <div style={{ display:"flex", gap:12, padding:"12px 14px", background:`${arcRank.color}12`, borderLeft:`3px solid ${arcRank.color}` }}>
+                  <div style={{ width:10, height:10, borderRadius:"50%", background:arcRank.color, flexShrink:0, marginTop:4 }}/>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:14, fontWeight:600, color:T.text }}>
+                      Forming<span style={{ marginLeft:6, fontSize:10, color:arcRank.color, textTransform:"uppercase" }}>Now</span>
+                    </div>
+                    <div style={{ fontSize:11, color:T.sub, marginTop:4, lineHeight:1.4 }}>Early in your Arc — rank updates as proof adds up.</div>
+                  </div>
+                </div>
+              )}
               {ARC_RANKS.map((r, i) => {
-                const isCurrent = r.label === arcRank.label;
+                const isCurrent = arcRank.label !== "Forming" && r.label === arcRank.label;
                 const isFuture = arcPercent != null && arcPercent < r.minPercent;
                 return (
                   <div key={r.label} style={{ display:"flex", gap:12, padding:"12px 14px", borderTop:i>0?`1px solid ${T.border}`:"none", opacity:isFuture?0.45:1, background:isCurrent?`${r.color}12`:"transparent", borderLeft:isCurrent?`3px solid ${r.color}`:"3px solid transparent" }}>

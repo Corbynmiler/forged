@@ -5,7 +5,7 @@ import { supabase, habitToRow, rowToHabit, rowToGoal, goalToRow, rowToTask, task
 import {
   calculateArcProofPercent,
   computeTodayArcXpAward,
-  getArcRankFromPercent,
+  getArcRankDisplay,
   isProofHabitForBlock,
   lifetimeXpForHabitLog,
   LIFETIME_XP_DURING_ARC_NON_PROOF,
@@ -1904,16 +1904,30 @@ export default function App() {
       blockId,
       today,
     });
-    const rankLabel = getArcRankFromPercent(percent ?? 0).label;
+    const priorLedgerDays = arcLedgerRows.filter(r => r.date !== today).length;
+    const rankLabel = getArcRankDisplay(
+      percent,
+      arcLedgerRows.length > 0 || proofTotal > 0,
+      { proofDoneToday: proofDone, priorLedgerDays },
+    ).label;
+
+    const { data: allScores, error: sumErr } = await supabase
+      .from("arc_daily_scores")
+      .select("arc_xp_awarded")
+      .eq("block_id", blockId);
+
+    if (sumErr) {
+      console.warn("[Forged] arc_daily_scores sum:", sumErr.message);
+      return { ok: false, delta: 0 };
+    }
+    const totalArcXp = (allScores || []).reduce((s, r) => s + (r.arc_xp_awarded ?? 0), 0);
 
     const blockPatch = {
+      arc_xp: totalArcXp,
       completion_score: percent,
       arc_rank: rankLabel,
       updated_at: new Date().toISOString(),
     };
-    if (delta !== 0) {
-      blockPatch.arc_xp = Math.max(0, (block.arcXp ?? 0) + delta);
-    }
 
     const { data: updatedBlock, error: blockErr } = await supabase
       .from("forge_blocks")
@@ -3166,9 +3180,6 @@ export default function App() {
     const nextHabits = habits.map(h => h.id === id ? tapped : h);
     setHabits(nextHabits);
     syncLastActive();
-    // Accountability sync: handled inside syncHabit → pushSharedMemberProgressFromLinked
-    // Limit + taps never award XP or celebration — usage logging is not rewarded.
-    if (tapped.habitType === "limit") return;
 
     const today = todayStr();
     const block = activeBlock;
@@ -3177,6 +3188,9 @@ export default function App() {
       if (!ok) addToast("⚠️ Couldn't sync Arc progress");
       else if (delta > 0) addFlash(cx, cy, `+${delta} arc xp`);
     }
+
+    // Limit taps never award lifetime XP — but proof limits still drive Arc progress.
+    if (tapped.habitType === "limit") return;
 
     const wasLogged = base.logs.some(l => l.date === today && l.value === true);
     const isNowLogged = tapped.logs.some(l => l.date === today && l.value === true);
@@ -3249,8 +3263,17 @@ export default function App() {
         });
       }
     } else if (isNew) {
-      addFlash(window.innerWidth / 2, 120, `+${lifetimeUnit} xp`);
-      setXp(x => x + lifetimeUnit);
+      const today = todayStr();
+      const awardKey = `log:${id}:${today}`;
+      if (!xpAwardedDates.has(awardKey)) {
+        addFlash(window.innerWidth / 2, 120, `+${lifetimeUnit} xp`);
+        setXp(x => x + lifetimeUnit);
+        setXpAwardedDates(prev => {
+          const next = new Set(prev);
+          next.add(awardKey);
+          return next;
+        });
+      }
     }
   }
 

@@ -635,7 +635,14 @@ export function TodayScreen({
   const level = getLevel(xp);
   const arcDayNum = arcActive ? getArcDayNumber(activeBlock) : 1;
   const arcRankLabel = arcActive
-    ? (activeBlock.arcRank?.trim() || getArcRankDisplay(activeBlock.completionScore, arcLedgerRows.length > 0).label)
+    ? getArcRankDisplay(
+        activeBlock.completionScore,
+        arcLedgerRows.length > 0 || proofTotal > 0,
+        {
+          proofDoneToday: proofDone,
+          priorLedgerDays: arcLedgerRows.filter(r => r.date !== todayStr()).length,
+        },
+      ).label
     : "";
   const arcXpToday = todayArcScore?.arcXpAwarded ?? 0;
   const habitsForSections = arcActive ? otherTrackHabits : habits;
