@@ -1,8 +1,8 @@
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
 import { useMemo, useState, useEffect, useRef } from "react";
 import { T, COACH_ICON_OPTIONS } from "../theme.js";
-import { todayStr, daysAgo, isSatisfiedForTodayRing, getLevel, getStreak, analyzeDeepInsights } from "../utils.js";
-import { Ring, SLabel } from "../components/ui.jsx";
+import { todayStr, daysAgo, parseLocal, isSatisfiedForTodayRing, getLevel, getStreak, analyzeDeepInsights } from "../utils.js";
+import { Ring, SLabel, Modal, GBtn } from "../components/ui.jsx";
 import {
   DailyCard, WeeklyCard, ProjectCard, LimitCard, LogCard,
   TodayGoalCard,
@@ -416,6 +416,107 @@ function LooseEndsSection({ tasks = [], today, onAdd, onComplete, onPin, onDelet
   );
 }
 
+const ARC_DURATION_DAYS = 56;
+const MS_PER_DAY = 86400000;
+
+function arcDayInfo(activeBlock) {
+  const today = todayStr();
+  const daysElapsed = Math.floor((parseLocal(today) - parseLocal(activeBlock.startDate)) / MS_PER_DAY);
+  const dayX = Math.min(ARC_DURATION_DAYS, Math.max(1, daysElapsed + 1));
+  const week = Math.min(8, Math.ceil((daysElapsed + 1) / 7));
+  const progress = Math.min(1, Math.max(0, daysElapsed / ARC_DURATION_DAYS));
+  return { dayX, week, daysElapsed, progress };
+}
+
+function isProofForArc(habit, blockId) {
+  return habit.isProofAction === true && habit.blockId === blockId;
+}
+
+// ── Arc strip + detail modal ───────────────────────────────────────────────
+function ArcStrip({ activeBlock }) {
+  const [open, setOpen] = useState(false);
+  const { dayX, week, progress } = arcDayInfo(activeBlock);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        style={{
+          display:"block", width:"calc(100% - 28px)", margin:"8px 14px 0",
+          padding:"14px 16px", borderRadius:T.r, border:`0.5px solid ${T.border}`,
+          background:T.raised, cursor:"pointer", textAlign:"left", fontFamily:T.font, boxSizing:"border-box",
+        }}
+      >
+        <div style={{ fontSize:10, fontWeight:700, color:T.muted, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:10 }}>
+          Day {dayX} of {ARC_DURATION_DAYS} · Week {week}/8
+        </div>
+        <div style={{ fontSize:9, fontWeight:700, color:T.hint, letterSpacing:"0.12em", textTransform:"uppercase", marginBottom:4 }}>
+          You're becoming
+        </div>
+        <div style={{
+          fontFamily:T.serif, fontSize:19, color:T.text, lineHeight:1.35, marginBottom:12,
+          display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden",
+        }}>
+          {activeBlock.identity}
+        </div>
+        <div style={{ height:3, borderRadius:2, background:T.surface, overflow:"hidden" }}>
+          <div style={{ height:"100%", width:`${Math.round(progress * 100)}%`, background:T.accent, borderRadius:2, transition:"width 0.4s ease" }}/>
+        </div>
+      </button>
+      {open && (
+        <Modal onClose={() => setOpen(false)}>
+          <div style={{ fontSize:10, fontWeight:700, color:T.muted, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:6 }}>
+            Day {dayX} of {ARC_DURATION_DAYS} · Week {week}/8
+          </div>
+          <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, lineHeight:1.3, marginBottom:20 }}>{activeBlock.identity}</div>
+          {activeBlock.whyStatement ? (
+            <div style={{ marginBottom:16 }}>
+              <div style={{ fontSize:10, fontWeight:700, color:T.hint, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:6 }}>Why</div>
+              <div style={{ fontSize:14, color:T.sub, lineHeight:1.6 }}>{activeBlock.whyStatement}</div>
+            </div>
+          ) : null}
+          {activeBlock.oldPattern ? (
+            <div style={{ marginBottom:16 }}>
+              <div style={{ fontSize:10, fontWeight:700, color:T.hint, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:6 }}>Old pattern</div>
+              <div style={{ fontSize:14, color:T.sub, lineHeight:1.6 }}>{activeBlock.oldPattern}</div>
+            </div>
+          ) : null}
+          {activeBlock.minimumProof ? (
+            <div style={{ marginBottom:16 }}>
+              <div style={{ fontSize:10, fontWeight:700, color:T.hint, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:6 }}>On bad days…</div>
+              <div style={{ fontSize:14, color:T.sub, lineHeight:1.6 }}>{activeBlock.minimumProof}</div>
+            </div>
+          ) : null}
+          <div style={{ fontSize:12, color:T.hint, marginBottom:8 }}>Tap to edit (soon)</div>
+          <GBtn onClick={() => setOpen(false)}>Close</GBtn>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+function OtherHabitsCollapsible({ children, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        style={{
+          display:"flex", alignItems:"center", justifyContent:"space-between",
+          width:"calc(100% - 28px)", margin:"4px 14px 8px", padding:"8px 4px",
+          background:"none", border:"none", cursor:"pointer", fontFamily:T.font,
+        }}
+      >
+        <span style={{ fontSize:11, fontWeight:600, letterSpacing:"0.08em", color:T.sub, textTransform:"uppercase" }}>Other habits</span>
+        <span style={{ fontSize:12, color:T.muted }} aria-hidden>{open ? "▾" : "▸"}</span>
+      </button>
+      {open ? children : null}
+    </div>
+  );
+}
+
 // ── TodayScreen ────────────────────────────────────────────────────────────
 export function TodayScreen({
   habits, goals = [], xp,
@@ -439,6 +540,7 @@ export function TodayScreen({
   onCompleteTask = null,
   onPinTask = null,
   onDeleteTask = null,
+  activeBlock = null,
 }) {
   const [briefPreview, setBriefPreview] = useState(null);
   useEffect(() => {
@@ -456,25 +558,54 @@ export function TodayScreen({
   const activeGoals    = goals.filter(g => g.status !== "completed");
   const trackHabits    = habits.filter(h => h.habitType !== "log");
   const logHabits      = habits.filter(h => h.habitType === "log");
-  const loggedCount    = trackHabits.filter(h => isSatisfiedForTodayRing(h)).length;
-  const totalTrackables = trackHabits.length;
+  const arcActive      = !!activeBlock?.id;
+  const { dayX: arcDayX } = arcActive ? arcDayInfo(activeBlock) : { dayX: 1 };
+  const proofHabits    = arcActive
+    ? trackHabits.filter(h => isProofForArc(h, activeBlock.id))
+    : [];
+  const otherTrackHabits = arcActive
+    ? trackHabits.filter(h => !isProofForArc(h, activeBlock.id))
+    : trackHabits;
+  const proofDone      = proofHabits.filter(h => isSatisfiedForTodayRing(h)).length;
+  const proofTotal     = proofHabits.length;
+  const loggedCount    = arcActive
+    ? proofDone
+    : trackHabits.filter(h => isSatisfiedForTodayRing(h)).length;
+  const totalTrackables = arcActive ? proofTotal : trackHabits.length;
   const pct = totalTrackables ? Math.round((loggedCount / totalTrackables) * 100) : 0;
   const hr  = new Date().getHours();
   const timeGreeting = hr < 12 ? "Rise and forge." : hr < 17 ? "Keep the heat up." : "Finish strong.";
-  const greeting = pct === 0 ? timeGreeting
+  const arcGreeting = proofTotal === 0
+    ? `Day ${arcDayX} — show one piece of proof.`
+    : pct === 100
+      ? `Day ${arcDayX} — proof shown.`
+      : `Day ${arcDayX} — show one piece of proof.`;
+  const greeting = arcActive
+    ? arcGreeting
+    : pct === 0 ? timeGreeting
     : pct < 50  ? "Building momentum."
     : pct < 100 ? "More than halfway."
-    : timeGreeting; // pct === 100 is overridden in JSX to "Forged for today"
+    : timeGreeting;
   const level = getLevel(xp);
-  const daily   = habits.filter(h => h.habitType === "daily");
-  const limit   = habits.filter(h => h.habitType === "limit");
-  const weekly  = habits.filter(h => h.habitType === "weekly");
-  const project = habits.filter(h => h.habitType === "project");
-  const ringSummary = totalTrackables
-    ? `${loggedCount} of ${totalTrackables} logged`
-    : logHabits.length
-      ? "Logs below — ring is for habits & goals"
-      : "";
+  const habitsForSections = arcActive ? otherTrackHabits : habits;
+  const daily   = habitsForSections.filter(h => h.habitType === "daily");
+  const limit   = habitsForSections.filter(h => h.habitType === "limit");
+  const weekly  = habitsForSections.filter(h => h.habitType === "weekly");
+  const project = habitsForSections.filter(h => h.habitType === "project");
+  const proofDaily   = proofHabits.filter(h => h.habitType === "daily");
+  const proofLimit   = proofHabits.filter(h => h.habitType === "limit");
+  const proofWeekly  = proofHabits.filter(h => h.habitType === "weekly");
+  const proofProject = proofHabits.filter(h => h.habitType === "project");
+  const ringSummary = arcActive
+    ? (proofTotal ? `${proofDone} of ${proofTotal} proof actions` : "")
+    : totalTrackables
+      ? `${loggedCount} of ${totalTrackables} logged`
+      : logHabits.length
+        ? "Logs below — ring is for habits & goals"
+        : "";
+  const showMinimumHint = arcActive && hr >= 19 && proofDone === 0 && !!(activeBlock.minimumProof || "").trim();
+  const ringCenterMain = arcActive && proofTotal > 0 ? `${proofDone}/${proofTotal}` : undefined;
+  const ringCenterSub = arcActive && proofTotal > 0 ? "proof" : undefined;
   const today = todayStr();
   const doneTasksCount = tasks.filter(t => t.done).length;
   const totalTasksCount = tasks.length;
@@ -547,8 +678,9 @@ export function TodayScreen({
           </span>
         </button>
       )}
+      {arcActive && <ArcStrip activeBlock={activeBlock} />}
       {onOpenCoachMic && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic} habitCompletionPercentage={pct} habitsLoggedTodayCount={loggedCount} totalTrackables={totalTrackables}/>}
-      {loggedCount === 0 && <YesterdayReceiptCard entry={yesterdayJournalEntry} />}
+      {loggedCount === 0 && !arcActive && <YesterdayReceiptCard entry={yesterdayJournalEntry} />}
       {showBriefHook && (
         <button type="button" onClick={onOpenBrief}
           style={{ display:"flex", alignItems:"center", gap:12, width:"calc(100% - 28px)", margin:"8px 14px 0", padding:"12px 14px", background:"linear-gradient(90deg, rgba(200,144,42,0.12), rgba(200,144,42,0.04))", border:"0.5px solid rgba(200,144,42,0.4)", borderRadius:T.rsm, cursor:"pointer", textAlign:"left", fontFamily:T.font, boxSizing:"border-box" }}>
@@ -595,10 +727,19 @@ export function TodayScreen({
           </div>
         </button>
       )}
+      {showMinimumHint && (
+        <div style={{ margin:"0 14px 8px", padding:"11px 14px", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:T.surface }}>
+          <div style={{ fontSize:13, color:T.sub, lineHeight:1.5 }}>
+            Bad day? Minimum is: <span style={{ color:T.text, fontWeight:500 }}>{activeBlock.minimumProof.trim()}</span>
+          </div>
+        </div>
+      )}
       <div data-tour="today-summary" style={{ margin:"6px 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:"18px 20px", display:"flex", alignItems:"center", gap:18 }}>
-        <Ring pct={pct}/>
+        <Ring pct={pct} centerMain={ringCenterMain} centerSub={ringCenterSub}/>
         <div style={{ flex:1 }}>
-          <div style={{ fontFamily:T.serif, fontSize:20, color:T.text, marginBottom:4 }}>{pct === 100 && totalTrackables > 0 ? "Forged for today" : greeting}</div>
+          <div style={{ fontFamily:T.serif, fontSize:20, color:T.text, marginBottom:4 }}>
+            {!arcActive && pct === 100 && totalTrackables > 0 ? "Forged for today" : greeting}
+          </div>
           <div style={{ fontSize:13, color:T.muted }}>{ringSummary || " "}</div>
           <button onClick={onXPInfo} style={{ marginTop:10, display:"inline-flex", alignItems:"center", gap:5, fontSize:11, fontWeight:500, padding:"3px 10px", borderRadius:12, background:"rgba(200,144,42,0.15)", color:T.gold, border:"none", cursor:"pointer" }}>
             {xp === 0 ? "⚡ Log a habit to earn XP" : `⚡ ${xp} xp · ${level.label}`}
@@ -621,29 +762,106 @@ export function TodayScreen({
         />
       )}
       {(() => {
-        const sections = [
-          activeGoals.length > 0
-            ? <><SLabel>Goals</SLabel>{activeGoals.map(g => <TodayGoalCard key={g.id} goal={g} onOpenLog={onOpenGoalLog} onEdit={onEditGoal} onComplete={onCompleteGoal} onDelete={onDeleteGoal} onShareGoal={onShareGoal} onOpen={onOpenGoalDetail}/>)}</>
-            : habits.length > 0 && onOpenCoachMic && (
-              <div key="goal-cta">
-                <SLabel>Goals</SLabel>
-                <button type="button" onClick={onOpenCoachMic}
-                  style={{ display:"flex", alignItems:"center", gap:14, margin:"0 14px 10px", width:"calc(100% - 28px)", padding:"14px 16px", borderRadius:T.r, border:"0.5px dashed rgba(200,144,42,0.4)", background:"rgba(200,144,42,0.04)", cursor:"pointer", textAlign:"left" }}>
-                  <div style={{ width:38, height:38, borderRadius:11, background:"rgba(200,144,42,0.12)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>🎯</div>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontSize:14, fontWeight:500, color:T.text, marginBottom:2 }}>Set a goal with your coach</div>
-                    <div style={{ fontSize:12, color:T.muted, lineHeight:1.45 }}>Tell the AI what outcome you're working toward — it'll help you plan milestones and track progress.</div>
-                  </div>
-                  <div style={{ fontSize:16, color:T.gold, flexShrink:0 }}>→</div>
-                </button>
-              </div>
-            ),
-          daily.length   > 0 && <><SLabel>Daily</SLabel>          {daily.map(h   => <DailyCard  key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id}/>)}</>,
-          limit.length   > 0 && <><SLabel>Limits</SLabel>         {limit.map(h   => <LimitCard  key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} onLowerBudget={onLowerBudget} onOpenCoachWithDraft={onOpenCoachWithDraft}/>)}</>,
-          weekly.length  > 0 && <><SLabel>Weekly targets</SLabel> {weekly.map(h  => <WeeklyCard key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id}/>)}</>,
-          project.length > 0 && <><SLabel>Build</SLabel>          {project.map(h => <ProjectCard key={h.id} habit={h} onOpenLog={onOpenLog} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id}/>)}</>,
-          logHabits.length > 0 && onSaveLogEntry && <><SLabel>Logs</SLabel>{logHabits.map(h => <LogCard key={h.id} habit={h} onSaveEntry={onSaveLogEntry} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit}/>)}</>,
+        const cardProps = {
+          onTap, onSkip, onAddNote, onUndo, onLogZero, onOpenLog,
+          onEditHabit, onDeleteHabit, onShareHabit, sharingHabitId,
+          onLowerBudget, onOpenCoachWithDraft,
+        };
+        const habitTypeSections = (list, keyPrefix = "") => [
+          list.filter(h => h.habitType === "daily").length > 0 && (
+            <><SLabel key={`${keyPrefix}daily`}>Daily</SLabel>
+              {list.filter(h => h.habitType === "daily").map(h => (
+                <DailyCard key={h.id} habit={h} onTap={cardProps.onTap} onSkip={cardProps.onSkip} onAddNote={cardProps.onAddNote}
+                  onEditHabit={cardProps.onEditHabit} onDeleteHabit={cardProps.onDeleteHabit} onShareHabit={cardProps.onShareHabit}
+                  sharingThisHabit={cardProps.sharingHabitId === h.id}/>
+              ))}</>
+          ),
+          list.filter(h => h.habitType === "limit").length > 0 && (
+            <><SLabel key={`${keyPrefix}limit`}>Limits</SLabel>
+              {list.filter(h => h.habitType === "limit").map(h => (
+                <LimitCard key={h.id} habit={h} onTap={cardProps.onTap} onUndo={cardProps.onUndo} onLogZero={cardProps.onLogZero}
+                  onAddNote={cardProps.onAddNote} onEditHabit={cardProps.onEditHabit} onDeleteHabit={cardProps.onDeleteHabit}
+                  onShareHabit={cardProps.onShareHabit} sharingThisHabit={cardProps.sharingHabitId === h.id}
+                  onLowerBudget={cardProps.onLowerBudget} onOpenCoachWithDraft={cardProps.onOpenCoachWithDraft}/>
+              ))}</>
+          ),
+          list.filter(h => h.habitType === "weekly").length > 0 && (
+            <><SLabel key={`${keyPrefix}weekly`}>Weekly targets</SLabel>
+              {list.filter(h => h.habitType === "weekly").map(h => (
+                <WeeklyCard key={h.id} habit={h} onTap={cardProps.onTap} onSkip={cardProps.onSkip} onAddNote={cardProps.onAddNote}
+                  onEditHabit={cardProps.onEditHabit} onDeleteHabit={cardProps.onDeleteHabit} onShareHabit={cardProps.onShareHabit}
+                  sharingThisHabit={cardProps.sharingHabitId === h.id}/>
+              ))}</>
+          ),
+          list.filter(h => h.habitType === "project").length > 0 && (
+            <><SLabel key={`${keyPrefix}project`}>Build</SLabel>
+              {list.filter(h => h.habitType === "project").map(h => (
+                <ProjectCard key={h.id} habit={h} onOpenLog={cardProps.onOpenLog} onAddNote={cardProps.onAddNote}
+                  onEditHabit={cardProps.onEditHabit} onDeleteHabit={cardProps.onDeleteHabit} onShareHabit={cardProps.onShareHabit}
+                  sharingThisHabit={cardProps.sharingHabitId === h.id}/>
+              ))}</>
+          ),
         ].filter(Boolean);
+
+        const goalsSection = activeGoals.length > 0
+          ? <><SLabel>Goals</SLabel>{activeGoals.map(g => <TodayGoalCard key={g.id} goal={g} onOpenLog={onOpenGoalLog} onEdit={onEditGoal} onComplete={onCompleteGoal} onDelete={onDeleteGoal} onShareGoal={onShareGoal} onOpen={onOpenGoalDetail}/>)}</>
+          : habits.length > 0 && onOpenCoachMic && (
+            <div key="goal-cta">
+              <SLabel>Goals</SLabel>
+              <button type="button" onClick={onOpenCoachMic}
+                style={{ display:"flex", alignItems:"center", gap:14, margin:"0 14px 10px", width:"calc(100% - 28px)", padding:"14px 16px", borderRadius:T.r, border:"0.5px dashed rgba(200,144,42,0.4)", background:"rgba(200,144,42,0.04)", cursor:"pointer", textAlign:"left" }}>
+                <div style={{ width:38, height:38, borderRadius:11, background:"rgba(200,144,42,0.12)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>🎯</div>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:14, fontWeight:500, color:T.text, marginBottom:2 }}>Set a goal with your coach</div>
+                  <div style={{ fontSize:12, color:T.muted, lineHeight:1.45 }}>Tell the AI what outcome you're working toward — it'll help you plan milestones and track progress.</div>
+                </div>
+                <div style={{ fontSize:16, color:T.gold, flexShrink:0 }}>→</div>
+              </button>
+            </div>
+          );
+
+        const logsSection = logHabits.length > 0 && onSaveLogEntry && (
+          <><SLabel>Logs</SLabel>{logHabits.map(h => <LogCard key={h.id} habit={h} onSaveEntry={onSaveLogEntry} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit}/>)}</>
+        );
+
+        const proofEmptyCard = arcActive && proofTotal === 0 && (
+          <button type="button" onClick={onAdd}
+            style={{ display:"flex", alignItems:"center", gap:14, margin:"0 14px 10px", width:"calc(100% - 28px)", padding:"14px 16px", borderRadius:T.r, border:`0.5px dashed ${T.borderStrong}`, background:T.surface, cursor:"pointer", textAlign:"left", fontFamily:T.font }}>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:14, fontWeight:500, color:T.text }}>No proof actions yet — add one</div>
+            </div>
+            <div style={{ fontSize:16, color:T.accent, flexShrink:0 }}>→</div>
+          </button>
+        );
+
+        const proofSection = arcActive && (
+          proofTotal === 0
+            ? <div key="proof-empty">{proofEmptyCard}</div>
+            : <>
+                <SLabel>Proof actions</SLabel>
+                {proofDaily.map(h => <DailyCard key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id}/>)}
+                {proofLimit.map(h => <LimitCard key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} onLowerBudget={onLowerBudget} onOpenCoachWithDraft={onOpenCoachWithDraft}/>)}
+                {proofWeekly.map(h => <WeeklyCard key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id}/>)}
+                {proofProject.map(h => <ProjectCard key={h.id} habit={h} onOpenLog={onOpenLog} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id}/>)}
+              </>
+        );
+
+        const otherHabitSections = habitTypeSections(otherTrackHabits, "other-");
+        const otherWrapped = otherHabitSections.length > 0
+          ? <OtherHabitsCollapsible key="other-habits">{otherHabitSections}</OtherHabitsCollapsible>
+          : null;
+
+        const legacyHabitSections = !arcActive ? [
+          daily.length   > 0 && <><SLabel>Daily</SLabel>{daily.map(h => <DailyCard key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id}/>)}</>,
+          limit.length   > 0 && <><SLabel>Limits</SLabel>{limit.map(h => <LimitCard key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} onLowerBudget={onLowerBudget} onOpenCoachWithDraft={onOpenCoachWithDraft}/>)}</>,
+          weekly.length  > 0 && <><SLabel>Weekly targets</SLabel>{weekly.map(h => <WeeklyCard key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id}/>)}</>,
+          project.length > 0 && <><SLabel>Build</SLabel>{project.map(h => <ProjectCard key={h.id} habit={h} onOpenLog={onOpenLog} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id}/>)}</>,
+        ].filter(Boolean) : [];
+
+        const sections = arcActive
+          ? [proofSection, otherWrapped, goalsSection, logsSection].filter(Boolean)
+          : [goalsSection, ...legacyHabitSections, logsSection].filter(Boolean);
+
         return sections.map((sec, i) =>
           i === 0 ? <div key={i} data-tour="today-first-section">{sec}</div> : <div key={i}>{sec}</div>
         );

@@ -34,8 +34,10 @@ export function Toast({ msg, onDone }) {
     boxShadow:"0 4px 20px rgba(0,0,0,0.5)",
   }}>{msg}</div>;
 }
-export function Ring({ pct, size = 88 }) {
+export function Ring({ pct, size = 88, centerMain, centerSub }) {
   const r = size * 0.4, c = 2 * Math.PI * r, off = c - (pct / 100) * c;
+  const main = centerMain ?? `${pct}%`;
+  const sub = centerSub ?? "forged";
   return (
     <div style={{ position:"relative", width:size, height:size, flexShrink:0 }}>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ transform:"rotate(-90deg)" }}>
@@ -46,8 +48,8 @@ export function Ring({ pct, size = 88 }) {
           style={{ transition:"stroke-dashoffset 0.8s cubic-bezier(.4,0,.2,1)" }}/>
       </svg>
       <div style={{ position:"absolute", inset:0, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}>
-        <span style={{ fontSize:16, fontWeight:500, color:T.text }}>{pct}%</span>
-        <span style={{ fontSize:9, color:T.muted, letterSpacing:"0.05em", textTransform:"uppercase" }}>forged</span>
+        <span style={{ fontSize:centerMain != null ? 15 : 16, fontWeight:500, color:T.text }}>{main}</span>
+        <span style={{ fontSize:9, color:T.muted, letterSpacing:"0.05em", textTransform:"uppercase" }}>{sub}</span>
       </div>
     </div>
   );
