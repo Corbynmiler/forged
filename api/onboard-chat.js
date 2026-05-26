@@ -53,6 +53,8 @@ async function handler(req, res) {
     // `arcIdentity` kept for backwards compat. Prefer `arc` (full object).
     arcIdentity,
     arc,
+    existingHabits = [],
+    isExistingUser = false,
   } = req.body || {};
 
   // Defense-in-depth: cap the incoming message history. Onboarding never needs
@@ -80,8 +82,30 @@ async function handler(req, res) {
     (arcCtx.oldPattern ? 1 : 0) +
     (arcCtx.minimumProof ? 1 : 0);
 
-  const turnsRemaining = Math.max(0, MAX_ASSISTANT_TURNS - priorAssistantTurns);
-  const mustDraftThisTurn = priorAssistantTurns >= MAX_ASSISTANT_TURNS;
+  const maxAssistantTurns = isExistingUser === true ? 6 : MAX_ASSISTANT_TURNS;
+  const turnsRemaining = Math.max(0, maxAssistantTurns - priorAssistantTurns);
+  const mustDraftThisTurn = priorAssistantTurns >= maxAssistantTurns;
+
+  const habitList = Array.isArray(existingHabits) ? existingHabits.slice(0, 50) : [];
+  const showExistingHabitsBlock = habitList.length > 0 || isExistingUser === true;
+  const existingHabitsBlock = showExistingHabitsBlock
+    ? `\n─── EXISTING HABITS ───
+This person has already been tracking these (don't pretend they're new):
+${habitList.length > 0
+  ? habitList.map(h => {
+      const em = String(h?.emoji || "").trim();
+      const nm = String(h?.name || "").trim() || "Habit";
+      const ht = String(h?.habitType || "daily").trim();
+      return `- ${em ? `${em} ` : ""}${nm} (${ht})`;
+    }).join("\n")
+  : "(none listed yet — ask what they already track)"}
+`
+    : "";
+
+  const existingUserRules = showExistingHabitsBlock
+    ? `- Prefer the user's EXISTING habit names in proofActions. Only suggest brand-new proof actions when nothing existing fits. When recommending a tight list, say things like "Keep X and Y from what you already track, add Z" — don't pretend their habits don't exist.
+`
+    : "";
 
   const arcContextBlock = `─── ARC CONTEXT (what they already typed) ───
 Identity (who they're becoming): ${arcCtx.identity || dash}
@@ -95,9 +119,13 @@ Fields filled so far: ${filledCount} of 4.`;
     ? `\nYOU HAVE HIT YOUR QUESTION LIMIT. You MUST emit an <arc_draft> block this turn — no more questions, no exceptions. If a field is genuinely missing, fill it with the most reasonable inference from what they've already told you.`
     : `\nQuestions remaining: ${turnsRemaining}. If you can already infer the five fields with confidence, emit the <arc_draft> block now instead of asking another question. Don't drag this out.`;
 
-  const system = `You are ${coachName || "a habit coach"} — the AI coach inside Forged. You're meeting ${name || "someone"} for the first time. Your one job in this conversation is to help them build their first 8-week Arc and then HAND OFF with a draft they can confirm.
+  const meetLine = isExistingUser === true
+    ? `You're helping ${name || "someone"} start a new 8-week Arc. They already use Forged — treat their existing habits as real.`
+    : `You're meeting ${name || "someone"} for the first time.`;
 
-${arcContextBlock}
+  const system = `You are ${coachName || "a habit coach"} — the AI coach inside Forged. ${meetLine} Your one job in this conversation is to help them build their 8-week Arc and then HAND OFF with a draft they can confirm.
+
+${arcContextBlock}${existingHabitsBlock}
 
 WHAT YOU ARE GATHERING (these become the Arc draft below):
 1. identity — who they're becoming (one sentence, concrete)
@@ -107,13 +135,13 @@ WHAT YOU ARE GATHERING (these become the Arc draft below):
 5. proofActions — 3 to 5 short habit names that prove this Arc (e.g. "Eat breakfast", "Limit nicotine before lunch", "Build for 30 minutes")
 
 CONVERSATION RULES (most important):
-- Max ${MAX_ASSISTANT_TURNS} assistant questions total across the whole chat. Already used: ${priorAssistantTurns}.
+- Max ${maxAssistantTurns} assistant questions total across the whole chat. Already used: ${priorAssistantTurns}.
 - Ask ONE question at a time. Build on their last answer. Never stack questions.
 - Keep every conversational message under 60 words.
 - Direct, grounded, warm. Like a sharp friend. No filler, no "great choice".
 - NEVER use: "warrior", "elite", "alpha", "future you", "stay strong king/queen", "journey", or any wellness-guru phrasing.
 - Do NOT re-ask anything already in ARC CONTEXT above. Build forward.
-${finishRules}
+${existingUserRules}${finishRules}
 
 WHEN YOU HAVE ENOUGH (or hit the limit) — EMIT THE DRAFT.
 End your reply with a structured block on its own lines, EXACTLY in this format:

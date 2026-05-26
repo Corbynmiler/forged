@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { T } from "../theme.js";
-import { Modal, FG, inp, lbl } from "../components/ui.jsx";
+import { Modal, inp } from "../components/ui.jsx";
 import { todayStr } from "../utils.js";
 import { ARC_IDENTITY_EXAMPLES } from "./OnboardingScreen.jsx";
 
@@ -162,6 +162,16 @@ export default function ArcSetupSheet({ onClose, onCreated, userId, existingHabi
   }
 
   const examples = (ARC_IDENTITY_EXAMPLES || []).slice(0, 5);
+  const arcLbl = {
+    fontSize: 11,
+    fontWeight: 700,
+    color: T.sub,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+    marginBottom: 8,
+    display: "block",
+  };
+  const arcHint = { fontSize: 12, color: T.muted, lineHeight: 1.5 };
 
   return (
     <Modal onClose={onClose}>
@@ -176,7 +186,8 @@ export default function ArcSetupSheet({ onClose, onCreated, userId, existingHabi
           Eight weeks to become a slightly different person. Define who. Pick the daily proof. The coach takes it from there. Everything below can change later.
         </div>
 
-        <FG label="Who are you becoming?" mb={10}>
+        <div style={{ marginBottom: 10 }}>
+          <label style={arcLbl}>Who are you becoming?</label>
           <textarea
             autoFocus
             value={identity}
@@ -186,8 +197,8 @@ export default function ArcSetupSheet({ onClose, onCreated, userId, existingHabi
             placeholder="e.g. Gain 3kg without skipping breakfast."
             style={{ ...inp, resize: "none", lineHeight: 1.55 }}
           />
-        </FG>
-        <div style={{ fontSize: 11, color: T.hint, lineHeight: 1.5, marginBottom: 12 }}>
+        </div>
+        <div style={{ ...arcHint, marginBottom: 12 }}>
           Specific lands better than vague. Pick an example below or write your own.
         </div>
 
@@ -199,7 +210,8 @@ export default function ArcSetupSheet({ onClose, onCreated, userId, existingHabi
           ))}
         </div>
 
-        <FG label="Why does this matter right now? (optional)" mb={6}>
+        <div style={{ marginBottom: 6 }}>
+          <label style={arcLbl}>Why does this matter right now? (optional)</label>
           <textarea
             value={why}
             onChange={(e) => setWhy(e.target.value.slice(0, 250))}
@@ -208,12 +220,13 @@ export default function ArcSetupSheet({ onClose, onCreated, userId, existingHabi
             placeholder="What would change if you stuck to this?"
             style={{ ...inp, resize: "none", lineHeight: 1.55 }}
           />
-        </FG>
-        <div style={{ fontSize: 11, color: T.hint, lineHeight: 1.5, marginBottom: 14 }}>
+        </div>
+        <div style={{ ...arcHint, marginBottom: 14 }}>
           The coach reads this back to you on hard days.
         </div>
 
-        <FG label="Old pattern to weaken (optional)" mb={6}>
+        <div style={{ marginBottom: 6 }}>
+          <label style={arcLbl}>Old pattern to weaken (optional)</label>
           <textarea
             value={oldPattern}
             onChange={(e) => setOldPattern(e.target.value.slice(0, 200))}
@@ -222,13 +235,13 @@ export default function ArcSetupSheet({ onClose, onCreated, userId, existingHabi
             placeholder="e.g. Nicotine kills appetite and I skip breakfast."
             style={{ ...inp, resize: "none", lineHeight: 1.55 }}
           />
-        </FG>
-        <div style={{ fontSize: 11, color: T.hint, lineHeight: 1.5, marginBottom: 14 }}>
+        </div>
+        <div style={{ ...arcHint, marginBottom: 14 }}>
           Naming it once helps the coach call it out when it shows up.
         </div>
 
         <div style={{ marginBottom: 6 }}>
-          <label style={lbl}>On a bad day, what still counts as proof? (optional)</label>
+          <label style={arcLbl}>On a bad day, what still counts as proof? (optional)</label>
           <input
             value={minimumProof}
             onChange={(e) => setMinimumProof(e.target.value.slice(0, 150))}
@@ -237,12 +250,12 @@ export default function ArcSetupSheet({ onClose, onCreated, userId, existingHabi
             style={{ ...inp, fontSize: 15 }}
           />
         </div>
-        <div style={{ fontSize: 11, color: T.hint, lineHeight: 1.5, marginBottom: 18 }}>
+        <div style={{ ...arcHint, marginBottom: 18 }}>
           The bare minimum the coach falls back to on rough days.
         </div>
 
         <div style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: T.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6 }}>
+          <div style={arcLbl}>
             Pick your proof actions
           </div>
           <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.55, marginBottom: 12 }}>

@@ -464,7 +464,7 @@ export function InsightsScreen({
 
   const noWeekLogs = !anyHabitLoggedThisWeek;
   const weekRangeLabel = fmtWeekRange(thisWeekStart);
-  const showStatsCollapse = hasFreshBrief && anyHabitLoggedThisWeek;
+  const showStatsCollapse = hasFreshBrief;
   const showMomentumBlock = hasFreshBrief && momentumSignals.length > 0;
   const showLocalMomentum = !hasFreshBrief && !isFetching && totalDaysLogged >= 7 && localMomentumSignals.length > 0;
   const showHabitGrid = anyHabitLoggedThisWeek;
@@ -479,32 +479,6 @@ export function InsightsScreen({
   const briefHeadline = arcActive
     ? `Arc Review · Week ${arcWeekN} of 8`
     : "What actually moved this week";
-
-  if (noWeekLogs) {
-    return (
-      <div style={{ overflowX:"hidden", maxWidth:"100%", minWidth:0, boxSizing:"border-box" }}>
-        <div style={{ padding:"16px 18px 10px", display:"flex", flexWrap:"wrap", alignItems:"flex-end", justifyContent:"space-between", gap:12, maxWidth:"100%" }}>
-          <div style={{ minWidth:0, flex:"1 1 200px" }}>
-            <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:6 }}>Insights</div>
-            <div style={{ fontFamily:T.serif, fontSize:30, color:T.text, letterSpacing:"-0.03em", lineHeight:1.05 }}>Forge report</div>
-            {firstLogLabel && (
-              <div style={{ fontSize:11, color:T.muted, marginTop:8, lineHeight:1.45 }}>Tracking since <span style={{ color:T.sub, fontWeight:600 }}>{firstLogLabel}</span></div>
-            )}
-          </div>
-          {onShare && (
-            <button type="button" onClick={onShare} style={{ flexShrink:0, display:"flex", alignItems:"center", gap:6, padding:"8px 14px", borderRadius:T.rsm, background:"rgba(200,144,42,0.12)", border:"none", color:T.gold, fontSize:12, fontWeight:600, cursor:"pointer", marginBottom:4 }}>
-              📤 Share
-            </button>
-          )}
-        </div>
-        <div style={{ padding:"48px 20px 56px", textAlign:"center", maxWidth:360, margin:"0 auto" }}>
-          <div style={{ fontSize:15, color:T.muted, lineHeight:1.7 }}>
-            Log some habits this week and come back for your brief.
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div style={{ overflowX:"hidden", maxWidth:"100%", minWidth:0, boxSizing:"border-box" }}>
@@ -610,6 +584,11 @@ export function InsightsScreen({
         <div style={{ fontSize:12, color:T.muted, lineHeight:1.6, marginBottom:14, maxWidth:360, fontWeight:450 }}>
           Plain-language read on what held, what slipped, and what deserves attention. <strong style={{ color:T.sub, fontWeight:600 }}>Uses AI</strong> — capped so it stays sustainable.
         </div>
+        {noWeekLogs && !hasFreshBrief && (
+          <div style={{ fontSize:12, color:T.sub, lineHeight:1.55, marginBottom:14, padding:"10px 12px", borderRadius:T.rsm, background:"rgba(0,0,0,0.2)", border:`0.5px solid ${T.border}` }}>
+            No logs yet this week — your brief will sharpen once you log on Today. Activity and streaks below still reflect your history.
+          </div>
+        )}
         {isPro && briefQuota && hasFreshBrief && (
           <div style={{
             fontSize:11, color: briefQuota.can_generate ? T.sub : T.amber, marginBottom:14,

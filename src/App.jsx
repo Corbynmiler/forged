@@ -76,6 +76,7 @@ import { TodayScreen, CoachGreeting } from "./screens/TodayScreen.jsx";
 import { JournalScreen, BetaModal } from "./screens/JournalScreen.jsx";
 import { InsightsScreen } from "./screens/InsightsScreen.jsx";
 import ArcSetupSheet from "./screens/ArcSetupSheet.jsx";
+import ArcCoachSheet from "./screens/ArcCoachSheet.jsx";
 import {
   SocialScreen,
   AddGoalModal,
@@ -165,6 +166,7 @@ export default function App() {
   const [activeBlock, setActiveBlock] = useState(null);
   /** Latest completed Arc (for Insights end-of-Arc review display). */
   const [completedArcBlock, setCompletedArcBlock] = useState(null);
+  const [showArcCoach, setShowArcCoach] = useState(false);
   const [showArcSetup, setShowArcSetup] = useState(false);
   const [screen,      setScreen]     = useState("today");
   const [xp,          setXp]         = useState(0);
@@ -3614,7 +3616,7 @@ export default function App() {
             >×</button>
           </div>
         )}
-        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} activeBlock={activeBlock} onStartArc={() => setShowArcSetup(true)} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} coachEverOpened={coachEverOpened} onOpenCoachMic={() => openCoachWithMode("mic")} onOpenCoachWithDraft={openCoachWithDraft} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} hideFloatingAdd onOpenGoalDetail={id => setOpenGoalId(id)} onOpenInsights={() => setScreen("insights")} todayJournalEntry={journalEntries.find(e => e.date === todayStr()) ?? null} onGenerateReceipt={handleGenerateReceipt} generatingReceipt={generatingReceipt} onOpenJournal={() => { setJournalOpenTab("journal"); setScreen("journal"); }} yesterdayJournalEntry={journalEntries.find(e => e.date === daysAgo(1)) ?? null} onLowerBudget={handleLowerBudget} tasks={tasks} onAddTask={handleAddTask} onCompleteTask={handleCompleteTask} onPinTask={handlePinTask} onDeleteTask={handleDeleteTask}/>}
+        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} activeBlock={activeBlock} onStartArc={() => setShowArcCoach(true)} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} coachEverOpened={coachEverOpened} onOpenCoachMic={() => openCoachWithMode("mic")} onOpenCoachWithDraft={openCoachWithDraft} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} hideFloatingAdd onOpenGoalDetail={id => setOpenGoalId(id)} onOpenInsights={() => setScreen("insights")} todayJournalEntry={journalEntries.find(e => e.date === todayStr()) ?? null} onGenerateReceipt={handleGenerateReceipt} generatingReceipt={generatingReceipt} onOpenJournal={() => { setJournalOpenTab("journal"); setScreen("journal"); }} yesterdayJournalEntry={journalEntries.find(e => e.date === daysAgo(1)) ?? null} onLowerBudget={handleLowerBudget} tasks={tasks} onAddTask={handleAddTask} onCompleteTask={handleCompleteTask} onPinTask={handlePinTask} onDeleteTask={handleDeleteTask}/>}
         {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} journalEntries={journalEntries} onSaveJournalEntry={handleSaveJournalEntry} onJournalGenerated={handleJournalGenerated} initialTab={showJournalCompose ? "journal" : journalOpenTab ?? undefined} onInitialComposeDone={() => { setShowJournalCompose(false); setJournalOpenTab(null); }} userName={user.name || ""} coachName={coachName}/>}
         {screen === "insights" && <InsightsScreen habits={habits} goals={goals} journalEntries={journalEntries} activeBlock={activeBlock} completedArcBlock={completedArcBlock} onArcReviewComplete={() => reloadForgeBlocks(sessionUserId)} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} userId={sessionUserId} userName={user.name || ""}/>}
         {screen === "social"   && <SocialScreen
@@ -3950,6 +3952,23 @@ export default function App() {
       </div>
 
       {/* Modals */}
+      {showArcCoach && (
+        <ArcCoachSheet
+          onClose={() => setShowArcCoach(false)}
+          onUseFormInstead={() => { setShowArcCoach(false); setShowArcSetup(true); }}
+          onCreated={async () => {
+            setShowArcCoach(false);
+            await reloadForgeBlocks();
+            addToast("✓ Arc started");
+          }}
+          userId={sessionUserId}
+          existingHabits={habits}
+          coachName={coachName}
+          coachIcon={coachIcon}
+          name={user.name || "there"}
+          supabase={supabase}
+        />
+      )}
       {showArcSetup && (
         <ArcSetupSheet
           onClose={() => setShowArcSetup(false)}
