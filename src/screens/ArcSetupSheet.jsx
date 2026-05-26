@@ -85,7 +85,16 @@ function HabitPickRow({ habit, selected, onToggle }) {
   );
 }
 
-export default function ArcSetupSheet({ onClose, onCreated, onSyncStart, userId, existingHabits, supabase }) {
+export default function ArcSetupSheet({
+  onClose,
+  onCancelToChat,
+  onCreated,
+  onSyncStart,
+  userId,
+  existingHabits,
+  supabase,
+  openedFromCoach = false,
+}) {
   const [identity, setIdentity] = useState("");
   const [why, setWhy] = useState("");
   const [oldPattern, setOldPattern] = useState("");
@@ -176,8 +185,13 @@ export default function ArcSetupSheet({ onClose, onCreated, onSyncStart, userId,
   };
   const arcHint = { fontSize: 12, color: T.muted, lineHeight: 1.5 };
 
+  function handleCancel() {
+    if (openedFromCoach && onCancelToChat) onCancelToChat();
+    else onClose();
+  }
+
   return (
-    <Modal onClose={onClose}>
+    <Modal onClose={handleCancel}>
       <div style={{ paddingBottom: 10 }}>
         <div style={{ fontSize: 10, fontWeight: 800, color: T.accent, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 6 }}>
           8-WEEK ARC
@@ -190,7 +204,7 @@ export default function ArcSetupSheet({ onClose, onCreated, onSyncStart, userId,
         </div>
 
         <div style={{ marginBottom: 10 }}>
-          <label style={arcLbl}>Who are you becoming?</label>
+          <label style={arcLbl}>Eight weeks from now, what feels different?</label>
           <textarea
             autoFocus
             value={identity}
@@ -317,7 +331,7 @@ export default function ArcSetupSheet({ onClose, onCreated, onSyncStart, userId,
 
         <button
           type="button"
-          onClick={onClose}
+          onClick={handleCancel}
           style={{
             width: "100%",
             marginTop: 10,
@@ -332,7 +346,7 @@ export default function ArcSetupSheet({ onClose, onCreated, onSyncStart, userId,
             textDecorationColor: "rgba(168,164,156,0.35)",
           }}
         >
-          Cancel
+          {openedFromCoach ? "Back to chat" : "Cancel"}
         </button>
       </div>
     </Modal>

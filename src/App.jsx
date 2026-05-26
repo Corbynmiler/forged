@@ -170,6 +170,8 @@ export default function App() {
   const [showArcCoach, setShowArcCoach] = useState(false);
   const [arcCoachMode, setArcCoachMode] = useState("create");
   const [showArcSetup, setShowArcSetup] = useState(false);
+  /** Arc form opened from ArcCoachSheet — Cancel returns to chat, not full dismiss. */
+  const [arcSetupFromCoach, setArcSetupFromCoach] = useState(false);
   /** True while Arc proof habits are being linked/created — suppresses empty proof CTA on Today. */
   const [arcProofSyncing, setArcProofSyncing] = useState(false);
   const [screen,      setScreen]     = useState("today");
@@ -4010,8 +4012,16 @@ onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} o
         <ArcCoachSheet
           mode={arcCoachMode}
           activeBlock={arcCoachMode === "edit" ? activeBlock : null}
-          onClose={() => { setArcProofSyncing(false); setShowArcCoach(false); }}
-          onUseFormInstead={() => { setArcProofSyncing(false); setShowArcCoach(false); setShowArcSetup(true); }}
+          onClose={() => {
+            setArcProofSyncing(false);
+            setShowArcCoach(false);
+            setArcSetupFromCoach(false);
+            setShowArcSetup(false);
+          }}
+          onUseFormInstead={() => {
+            setArcSetupFromCoach(true);
+            setShowArcSetup(true);
+          }}
           onSyncStart={() => setArcProofSyncing(true)}
           onCreated={(payload) => handleArcCoachCreated(
             payload,
@@ -4027,7 +4037,16 @@ onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} o
       )}
       {showArcSetup && (
         <ArcSetupSheet
-          onClose={() => { setArcProofSyncing(false); setShowArcSetup(false); }}
+          openedFromCoach={arcSetupFromCoach}
+          onClose={() => {
+            setArcProofSyncing(false);
+            setShowArcSetup(false);
+            setArcSetupFromCoach(false);
+          }}
+          onCancelToChat={arcSetupFromCoach ? () => {
+            setShowArcSetup(false);
+            setArcSetupFromCoach(false);
+          } : undefined}
           onSyncStart={() => setArcProofSyncing(true)}
           onCreated={async (payload) => {
             const blockRow = payload?.block ?? payload;
@@ -4042,6 +4061,8 @@ onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} o
             }
             setArcProofSyncing(false);
             setShowArcSetup(false);
+            setArcSetupFromCoach(false);
+            setShowArcCoach(false);
             addToast("✓ Arc started");
             void reloadForgeBlocks();
           }}

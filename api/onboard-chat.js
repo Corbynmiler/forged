@@ -138,11 +138,27 @@ ${arcContextBlock}${existingHabitsBlock}
 
 WHAT YOU ARE GATHERING (these become the Arc draft below):
 1. title — short Arc name, 1–3 words max (e.g. "Fuel Arc", "Clean Fuel", "Builder Arc"). Punchy, not a sentence. Never use "Someone who…" or the full identity as the title.
-2. identity — who they're becoming (one sentence, concrete)
+2. identity — their direction over 8 weeks (one concrete sentence — what feels different, what they're doing more/less of). You may say "who you're becoming" later, but do NOT lead with that phrase as the first question.
 3. why — why it matters to them right now
 4. oldPattern — the pattern they're trying to weaken (the thing that keeps tripping them up)
 5. minimumProof — what still counts as proof on a bad day
 6. proofActions — 3 to 5 short habit names that prove this Arc (e.g. "Eat breakfast", "Limit nicotine before lunch", "Build for 30 minutes")
+
+FIRST QUESTION FRAMING (critical):
+- Do NOT open with "Who are you becoming?" as the main question.
+- Start with an 8-week visualisation: picture themselves eight weeks from now — what feels different in an ideal world? What are they doing more of, less of, or getting under control?
+- ${isExistingUser === true && !isEditMode
+    ? `Existing-user opener tone: "Let's build your 8-week Arc. You've already got habits tracked, so we'll use those as raw material. Picture yourself eight weeks from now…"`
+    : isEditMode !== true
+      ? `New-user opener tone: "Let's build your first 8-week Arc. Picture yourself eight weeks from now…"`
+      : `Edit mode: they already have an Arc — ask what they want to change.`}
+
+WHEN THEY ASK FOR EXAMPLES ("give examples", "show examples", similar):
+- Reply with 3–5 short, concrete sample answers in plain language (bullet-style lines are fine).
+- Vision examples: eating breakfast most days + fewer pouches; training 3x/week + sleeping better; saving for a trip; building a side business without burning out after work.
+- Why examples: health, money, confidence, family, performance at work.
+- Minimum examples: one proof habit logged; 10-minute walk; one meal; one limit still respected.
+- Keep it practical — not profound, not therapy.
 
 CONVERSATION RULES (most important):
 - Max ${maxAssistantTurns} assistant questions total across the whole chat. Already used: ${priorAssistantTurns}.
@@ -175,8 +191,8 @@ WHEN YOU EMIT THE DRAFT, write 1–2 short sentences BEFORE the block to introdu
 After the draft, the app shows a "Use this Arc" button. Do NOT tell them to type anything more.
 
 ${isOpener
-  ? `THIS IS YOUR OPENING MESSAGE. Welcome ${name || "them"} by name. ${arcCtx.identity ? `Reference what they already wrote ("${arcCtx.identity}") and ask one sharp follow-up to fill in the biggest missing piece.` : "Ask ONE specific question to start filling the Arc — not 'what are your goals?'"} Do NOT emit a draft on the opener unless ALL five fields are already obvious from the ARC CONTEXT.`
-  : `Respond to what they just said. If you have enough, emit the draft. Otherwise ask the single next most useful question.`}`;
+  ? `THIS IS YOUR OPENING MESSAGE. Welcome ${name || "them"} by name. ${arcCtx.identity ? `Reference what they already wrote ("${arcCtx.identity}") and ask one sharp follow-up — still frame it as eight weeks from now / what feels different, not "who are you becoming?"` : `Use the FIRST QUESTION FRAMING above. ONE question only. Not "what are your goals?"`} Do NOT emit a draft on the opener unless ALL fields are already obvious from ARC CONTEXT.`
+  : `Respond to what they just said. If they asked for examples, give examples (see above). If you have enough, emit the draft. Otherwise ask the single next most useful question.`}`;
 
   // For the opener, use a neutral trigger so the assistant goes first.
   // For follow-ups, the caller sends the alternating conversation history,

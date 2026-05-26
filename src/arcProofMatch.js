@@ -212,15 +212,15 @@ export function resolveArcTitle(title, identity) {
   return fallbackArcTitleFromIdentity(identity);
 }
 
-/** Short subtitle for the Today Arc header (~50–70 chars). */
+/** Short subtitle for the Today Arc header (shown with 2-line clamp in UI). */
 export function arcHeaderSubtitle(block) {
   if (!block) return "";
   const why = String(block.whyStatement || "").trim();
-  if (why) return why.length > 70 ? `${why.slice(0, 67)}…` : why;
+  if (why) return why.length > 140 ? `${why.slice(0, 137)}…` : why;
   let id = String(block.identity || "").trim();
   id = id.replace(/^someone who\s+/i, "").replace(/^i\s+want\s+to\s+be\s+/i, "").trim();
   if (!id) return "";
-  return id.length > 70 ? `${id.slice(0, 67)}…` : id;
+  return id.length > 140 ? `${id.slice(0, 137)}…` : id;
 }
 
 /**

@@ -1,7 +1,7 @@
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
-import { useMemo, useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { T, COACH_ICON_OPTIONS } from "../theme.js";
-import { todayStr, daysAgo, parseLocal, isSatisfiedForTodayRing, getLevel, getStreak, analyzeDeepInsights } from "../utils.js";
+import { todayStr, daysAgo, parseLocal, isSatisfiedForTodayRing, getLevel, getStreak } from "../utils.js";
 import { Ring, SLabel, Modal, GBtn } from "../components/ui.jsx";
 import {
   DailyCard, WeeklyCard, ProjectCard, LimitCard, LogCard,
@@ -516,7 +516,16 @@ function ArcStrip({ activeBlock, onEditArc }) {
         {arcTitle}
       </div>
       {subtitle ? (
-        <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.45, marginBottom: 10 }}>
+        <div style={{
+          fontSize: 13,
+          color: T.sub,
+          lineHeight: 1.45,
+          marginBottom: 10,
+          display: "-webkit-box",
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: "vertical",
+          overflow: "hidden",
+        }}>
           {subtitle}
         </div>
       ) : null}
@@ -586,18 +595,6 @@ export function TodayScreen({
   onLinkProofHabit = null,
 }) {
   const [showProofPicker, setShowProofPicker] = useState(false);
-  const [briefPreview, setBriefPreview] = useState(null);
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem("forged_brief_preview");
-      if (!raw) return;
-      const p = JSON.parse(raw);
-      if (!p?.text || !p?.week_start) return;
-      const todayISO = new Date().toISOString().slice(0, 10);
-      const weekEnd = new Date(new Date(p.week_start).getTime() + 6 * 864e5).toISOString().slice(0, 10);
-      if (todayISO >= p.week_start && todayISO <= weekEnd) setBriefPreview(p);
-    } catch (_) {}
-  }, []);
 
   const activeGoals    = goals.filter(g => g.status !== "completed");
   const trackHabits    = habits.filter(h => h.habitType !== "log");
@@ -692,25 +689,8 @@ export function TodayScreen({
     </div>
   );
 
-  // Pattern insight — first cross-habit theme from written logs, shown once enough data exists
-  const patternInsight = useMemo(() => {
-    if (habits.length === 0) return null;
-    const deep = analyzeDeepInsights(habits, goals);
-    if (deep.needsMoreData || !deep.crossHabitLinks?.length) return null;
-    return deep.crossHabitLinks[0];
-  }, [habits, goals]);
-
-  // Show a brief-prompt card once the user has 7+ logged days and hasn't used their free brief
-  const uniqueLoggedDays = (() => {
-    const days = new Set();
-    habits.forEach(h => h.logs.forEach(l => {
-      if (l.value !== "quicknote" && l.value !== "skip") days.add(l.date);
-    }));
-    return days.size;
-  })();
-  const showBriefHook = !!onOpenBrief && uniqueLoggedDays >= 7;
-
   const showCoachNudge = habits.length > 0 && !coachEverOpened;
+  // TODO: Arc completion should eventually be based on proof actions across 56 days, not XP tiers alone.
   return (
     <div>
       {!activeBlock && habits.length > 0 && typeof onStartArc === "function" && (
@@ -740,7 +720,7 @@ export function TodayScreen({
                 Start your first Arc
               </div>
               <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.55 }}>
-                Define who you&apos;re becoming. Turn your habits into proof. The coach takes it from there.
+                Picture eight weeks from now — then turn your habits into proof. The coach takes it from there.
               </div>
             </div>
             <div style={{ flexShrink: 0, alignSelf: "center", fontSize: 12, fontWeight: 700, color: T.gold }}>
@@ -773,52 +753,6 @@ export function TodayScreen({
       )}
       {onOpenCoachMic && !arcActive && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic} habitCompletionPercentage={pct} habitsLoggedTodayCount={loggedCount} totalTrackables={totalTrackables}/>}
       {loggedCount === 0 && !arcActive && <YesterdayReceiptCard entry={yesterdayJournalEntry} />}
-      {showBriefHook && (
-        <button type="button" onClick={onOpenBrief}
-          style={{ display:"flex", alignItems:"center", gap:12, width:"calc(100% - 28px)", margin:"8px 14px 0", padding:"12px 14px", background:"linear-gradient(90deg, rgba(200,144,42,0.12), rgba(200,144,42,0.04))", border:"0.5px solid rgba(200,144,42,0.4)", borderRadius:T.rsm, cursor:"pointer", textAlign:"left", fontFamily:T.font, boxSizing:"border-box" }}>
-          <div style={{ fontSize:20, flexShrink:0, lineHeight:1 }}>✨</div>
-          <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ fontSize:13, fontWeight:600, color:T.gold, marginBottom:2 }}>Your coach noticed something</div>
-            <div style={{ fontSize:12, color:T.sub, lineHeight:1.4 }}>You have {uniqueLoggedDays} days of data — get your first weekly brief free.</div>
-          </div>
-          <div style={{ fontSize:14, color:T.gold, flexShrink:0 }}>→</div>
-        </button>
-      )}
-      {patternInsight && !!onOpenBrief && (
-        <button type="button" onClick={onOpenBrief}
-          style={{ display:"flex", alignItems:"center", gap:12, width:"calc(100% - 28px)", margin:"8px 14px 0", padding:"12px 14px", background:"linear-gradient(90deg, rgba(200,144,42,0.08), rgba(200,144,42,0.02))", border:"0.5px solid rgba(200,144,42,0.3)", borderRadius:T.rsm, cursor:"pointer", textAlign:"left", fontFamily:T.font, boxSizing:"border-box" }}>
-          <div style={{ fontSize:18, flexShrink:0, lineHeight:1 }}>🔗</div>
-          <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ fontSize:13, fontWeight:600, color:T.gold, marginBottom:2 }}>Pattern spotted in your writing</div>
-            <div style={{ fontSize:12, color:T.sub, lineHeight:1.4 }}>
-              "{patternInsight.term}" keeps showing up across {patternInsight.habitLabels.slice(0,2).join(" and ")} — see what it means.
-            </div>
-          </div>
-          <div style={{ fontSize:14, color:T.gold, flexShrink:0 }}>→</div>
-        </button>
-      )}
-      {briefPreview && onOpenInsights && (
-        <button
-          type="button"
-          onClick={onOpenInsights}
-          style={{
-            display:"block", width:"calc(100% - 28px)", margin:"8px 14px 0", padding:"12px 14px",
-            background:"rgba(200,144,42,0.08)", border:"0.5px solid rgba(200,144,42,0.45)",
-            borderRadius:T.r, cursor:"pointer", textAlign:"left", fontFamily:T.font, boxSizing:"border-box",
-          }}
-        >
-          <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.12em", marginBottom:6 }}>
-            YOUR WEEKLY BRIEF IS READY
-          </div>
-          <div style={{ fontSize:13, color:T.sub, lineHeight:1.6, fontWeight:450 }}>
-            {briefPreview.signal || briefPreview.text.split(/\n/)[0].slice(0, 120)}
-            {!briefPreview.signal && briefPreview.text.length > 120 ? "…" : ""}
-          </div>
-          <div style={{ fontSize:11, color:T.gold, fontWeight:700, marginTop:8 }}>
-            Read full brief →
-          </div>
-        </button>
-      )}
       {showMinimumHint && (
         <div style={{ margin:"0 14px 8px", padding:"11px 14px", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:T.surface }}>
           <div style={{ fontSize:13, color:T.sub, lineHeight:1.5 }}>
@@ -834,7 +768,9 @@ export function TodayScreen({
           </div>
           <div style={{ fontSize:13, color:T.muted }}>{ringSummary || " "}</div>
           <button onClick={onXPInfo} style={{ marginTop:10, display:"inline-flex", alignItems:"center", gap:5, fontSize:11, fontWeight:500, padding:"3px 10px", borderRadius:12, background:"rgba(200,144,42,0.15)", color:T.gold, border:"none", cursor:"pointer" }}>
-            {xp === 0 ? "⚡ Log a habit to earn XP" : `⚡ ${xp} xp · ${level.label}`}
+            {arcActive
+              ? (xp === 0 ? `⚡ Day ${arcDayX} of ${ARC_DURATION_DAYS}` : `⚡ Day ${arcDayX} · ${xp} xp`)
+              : (xp === 0 ? "⚡ Log a habit to earn XP" : `⚡ ${xp} xp · ${level.label}`)}
           </button>
           {doneTasksCount > 0 && (
             <div style={{ marginTop:6, fontSize:11, color:T.muted, fontWeight:500 }}>

@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { T, COLORS, HABIT_TYPES } from "../theme.js";
 import { resolveArcTitle } from "../arcProofMatch.js";
+import ArcSuggestionPills from "../components/ArcSuggestionPills.jsx";
+import {
+  inferArcCoachStage,
+  getArcSuggestionPills,
+  onboardingArcOpener,
+} from "../arcCoachSuggestions.js";
 import { supabase } from "../supabase.js";
 import { todayStr, daysAgo, isLegacyProgressType, inferProgressDirection, getStreak, isSatisfiedForTodayRing } from "../utils.js";
 import { Modal, GBtn, PBtn, Ring } from "../components/ui.jsx";
@@ -83,8 +89,8 @@ const ONBOARD_STEPS = [
   // is left blank, onboarding falls back to legacy behaviour and no Arc is created.
   {
     id:"arc-becoming",
-    title:"Who are you becoming?",
-    sub:"Over the next 8 weeks. One or two sentences. Honest, not aspirational.",
+    title:"Eight weeks from now",
+    sub:"What feels different in an ideal world? One or two sentences — honest, not aspirational.",
     body:null,
     cta:"Next",
   },
@@ -262,55 +268,12 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
   const NOTIF_STEP = ONBOARD_STEPS.length + 3;   // virtual: enable notifications
   const COACH_INTRO_STEP = ONBOARD_STEPS.length + 4; // templated coach message before final screen
 
-  // Fetch the onboarding chat opener when the chat screen first appears.
+  // Local Arc coach opener (8-week visualisation framing — not "who are you becoming?").
   useEffect(() => {
     if (step !== COACH_INTRO_STEP || builtHabits.length === 0 || onboardMsgs.length > 0) return;
-    const firstHabit = pickFirstHabit(builtHabits);
     setCoachIntroLoading(true);
-    (async () => {
-      try {
-        // onboard-chat now requires a real Supabase user JWT (api/onboard-chat.js
-        // validates via auth.getUser). The previous anon-key fallback would 401
-        // under the new gate — if the session isn't ready yet, skip the opener
-        // and let the user start the conversation manually. The catch path
-        // below already handles "chat stays empty until user types".
-        const { data: { session } } = await supabase.auth.getSession();
-        const token = session?.access_token;
-        if (!token) {
-          setCoachIntroLoading(false);
-          return;
-        }
-        const ctrl = new AbortController();
-        const tid = setTimeout(() => ctrl.abort(), 6000);
-        const res = await fetch("/api/onboard-chat", {
-          method: "POST", signal: ctrl.signal,
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-          body: JSON.stringify({
-            name: name.trim() || "there",
-            coachName: coachNameInput.trim() || "Coach",
-            habitName: firstHabit.name,
-            habitType: firstHabit.habitType,
-            messages: [],
-            arc: {
-              identity:     arcIdentity.trim(),
-              why:          arcWhy.trim(),
-              oldPattern:   arcOldPattern.trim(),
-              minimumProof: arcMinimumProof.trim(),
-            },
-          }),
-        });
-        clearTimeout(tid);
-        if (res.ok) {
-          const j = await res.json();
-          if (j.reply) {
-            const { prose, draft } = parseArcDraftFromText(j.reply);
-            setOnboardMsgs([{ role: "assistant", content: prose || j.reply }]);
-            if (draft) setArcDraft(draft);
-          }
-        }
-      } catch { /* fall through — chat just stays empty until user types */ }
-      setCoachIntroLoading(false);
-    })();
+    setOnboardMsgs([{ role: "assistant", content: onboardingArcOpener(arcIdentity) }]);
+    setCoachIntroLoading(false);
   }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-scroll to bottom when messages change
@@ -513,12 +476,24 @@ How to handle this conversation:
 After creating, tell them they can log from Today and chat with you anytime.`;
   }
 
-  async function sendOnboardMessage() {
-    const inputText = onboardInput.trim();
-    if (!inputText || onboardSending) return;
+  function handleOnboardSuggestionPill(pill) {
+    if (!pill || onboardSending || arcDraft) return;
+    if (pill.mode === "insert") {
+      setOnboardInput(pill.text);
+      textareaRef.current?.focus();
+      return;
+    }
+    sendOnboardMessage(pill.text);
+  }
+
+  async function sendOnboardMessage(overrideText) {
+    const inputText = String(overrideText ?? onboardInput).trim();
+    if (!inputText || onboardSending || arcDraft) return;
     if (speech.listening) speech.stopListening?.();
-    setOnboardInput("");
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
+    if (!overrideText) {
+      setOnboardInput("");
+      if (textareaRef.current) textareaRef.current.style.height = "auto";
+    }
 
     const firstHabit = builtHabits.length > 0 ? pickFirstHabit(builtHabits) : null;
     const prev = onboardMsgs.filter(m => m.id !== ONBOARD_STREAM_ID);
@@ -552,9 +527,10 @@ After creating, tell them they can log from Today and chat with you anytime.`;
           habitType: firstHabit?.habitType || "daily",
           messages: apiMessages,
           arc: {
-            identity:     arcIdentity.trim(),
-            why:          arcWhy.trim(),
-            oldPattern:   arcOldPattern.trim(),
+            title: arcDraft?.title || "",
+            identity: arcIdentity.trim(),
+            why: arcWhy.trim(),
+            oldPattern: arcOldPattern.trim(),
             minimumProof: arcMinimumProof.trim(),
           },
         }),
@@ -827,7 +803,23 @@ After creating, tell them they can log from Today and chat with you anytime.`;
   if ((step === FIRST_STEP || step === COACH_INTRO_STEP) && builtHabits.length > 0) {
     const coachDisplay  = coachNameInput.trim() || "Coach";
     const isStreaming   = onboardMsgs.some(m => m.id === ONBOARD_STREAM_ID);
-    const canSend       = onboardInput.trim() && !onboardSending && !isStreaming;
+    const canSend       = onboardInput.trim() && !onboardSending && !isStreaming && !arcDraft;
+    const onboardArcPayload = {
+      title: arcDraft?.title || "",
+      identity: arcIdentity.trim(),
+      why: arcWhy.trim(),
+      oldPattern: arcOldPattern.trim(),
+      minimumProof: arcMinimumProof.trim(),
+    };
+    const onboardCoachStage = inferArcCoachStage({
+      msgs: onboardMsgs,
+      arcPayload: onboardArcPayload,
+      isEdit: false,
+      priorTurns: onboardMsgs.filter(m => m.role === "assistant").length,
+    });
+    const onboardSuggestionPills = !arcDraft && !onboardSending && !coachIntroLoading
+      ? getArcSuggestionPills(onboardCoachStage)
+      : [];
 
     return (
       // position:fixed + inset:0 prevents iOS from zooming/scrolling the page when the keyboard opens
@@ -988,6 +980,11 @@ After creating, tell them they can log from Today and chat with you anytime.`;
 
         {/* Input bar — matches AICoach layout: mic · textarea · send */}
         <div style={{ flexShrink:0, borderTop:`0.5px solid ${T.border}`, padding:"10px 14px", background:T.bg }}>
+          <ArcSuggestionPills
+            pills={onboardSuggestionPills}
+            onPill={handleOnboardSuggestionPill}
+            disabled={onboardSending || coachIntroLoading || !!arcDraft}
+          />
           <div style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
             {speech.supported && (
               <div style={{ flexShrink:0, alignSelf:"flex-end", marginBottom:1 }}>

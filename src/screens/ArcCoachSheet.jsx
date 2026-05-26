@@ -9,6 +9,13 @@ import {
   resolveArcTitle,
 } from "../arcProofMatch.js";
 import { parseArcDraftFromText } from "./OnboardingScreen.jsx";
+import ArcSuggestionPills from "../components/ArcSuggestionPills.jsx";
+import {
+  ARC_OPENER_EXISTING,
+  ARC_EDIT_OPENER,
+  inferArcCoachStage,
+  getArcSuggestionPills,
+} from "../arcCoachSuggestions.js";
 
 const MAX_QUESTIONS = 6;
 
@@ -155,6 +162,7 @@ export default function ArcCoachSheet({
   const [priorTurns, setPriorTurns] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [showViewArc, setShowViewArc] = useState(false);
 
   const chatEndRef = useRef(null);
   const textareaRef = useRef(null);
@@ -164,6 +172,23 @@ export default function ArcCoachSheet({
   const avatar = (coachIcon || "").trim() || "🤖";
   const canSend = input.trim() && !sending && !arcDraft;
 
+  const coachStage = inferArcCoachStage({
+    msgs,
+    arcPayload,
+    isEdit,
+    priorTurns,
+  });
+  const suggestionPills = !arcDraft && !loadingOpener && !sending
+    ? getArcSuggestionPills(coachStage)
+    : [];
+
+  const proofHabitsForView = useMemo(
+    () => (existingHabits || []).filter(
+      h => h?.isProofAction && h.blockId === activeBlock?.id,
+    ),
+    [existingHabits, activeBlock?.id],
+  );
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs, sending, arcDraft]);
@@ -172,40 +197,12 @@ export default function ArcCoachSheet({
     if (openerFetched.current) return;
     openerFetched.current = true;
     if (isEdit) {
-      setMsgs([{
-        role: "assistant",
-        content: "Want to adjust the title, identity, proof actions, or bad-day minimum?",
-      }]);
+      setMsgs([{ role: "assistant", content: ARC_EDIT_OPENER }]);
       setLoadingOpener(false);
       return;
     }
-    (async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const token = session?.access_token;
-        if (!token) {
-          setLoadingOpener(false);
-          return;
-        }
-        const res = await fetch("/api/onboard-chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify(buildRequestBody({
-            name, coachName: coachDisplay, messages: [], existingHabits, arc: arcPayload,
-          })),
-        });
-        if (res.ok) {
-          const j = await res.json();
-          if (j.reply) {
-            const { prose, draft } = parseArcDraftFromText(j.reply);
-            setMsgs([{ role: "assistant", content: formatCoachChatDisplay(prose || j.reply) }]);
-            if (draft) setArcDraft(draft);
-          }
-          if (typeof j.prior_assistant_turns === "number") setPriorTurns(j.prior_assistant_turns);
-        }
-      } catch { /* user can still text */ }
-      setLoadingOpener(false);
-    })();
+    setMsgs([{ role: "assistant", content: ARC_OPENER_EXISTING }]);
+    setLoadingOpener(false);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function postChat(nextMsgs) {
@@ -232,11 +229,23 @@ export default function ArcCoachSheet({
     return res.json();
   }
 
-  async function sendMessage() {
-    const text = input.trim();
+  function handleSuggestionPill(pill) {
+    if (!pill || sending || arcDraft) return;
+    if (pill.mode === "insert") {
+      setInput(pill.text);
+      textareaRef.current?.focus();
+      return;
+    }
+    sendMessage(pill.text);
+  }
+
+  async function sendMessage(overrideText) {
+    const text = String(overrideText ?? input).trim();
     if (!text || sending || arcDraft) return;
-    setInput("");
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
+    if (!overrideText) {
+      setInput("");
+      if (textareaRef.current) textareaRef.current.style.height = "auto";
+    }
     setSaveError("");
 
     const withUser = [...msgs, { role: "user", content: text }];
@@ -368,6 +377,19 @@ export default function ArcCoachSheet({
           <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>{coachDisplay}</div>
           <div style={{ fontSize: 11, color: T.gold, marginTop: 1 }}>{isEdit ? "Edit your Arc" : "8-week Arc setup"}</div>
         </div>
+        {isEdit && activeBlock ? (
+          <button
+            type="button"
+            onClick={() => setShowViewArc(v => !v)}
+            style={{
+              flexShrink: 0, padding: "6px 10px", borderRadius: T.rsm,
+              border: `0.5px solid rgba(200,144,42,0.45)`, background: showViewArc ? "rgba(200,144,42,0.18)" : "rgba(200,144,42,0.08)",
+              color: T.gold, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: T.font,
+            }}
+          >
+            {showViewArc ? "Hide" : "View Arc"}
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onClose}
@@ -377,6 +399,48 @@ export default function ArcCoachSheet({
           ×
         </button>
       </div>
+
+      {showViewArc && isEdit && activeBlock ? (
+        <div style={{
+          flexShrink: 0, margin: "0 16px", padding: "12px 14px", borderRadius: T.rsm,
+          border: `0.5px solid rgba(200,144,42,0.35)`, background: "rgba(200,144,42,0.06)",
+          maxHeight: 200, overflowY: "auto",
+        }}>
+          <div style={{ fontFamily: T.serif, fontSize: 18, color: T.text, marginBottom: 8 }}>
+            {resolveArcTitle(activeBlock.title, activeBlock.identity)}
+          </div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: T.hint, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 3 }}>Direction</div>
+          <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.5, marginBottom: 10 }}>{activeBlock.identity}</div>
+          {activeBlock.whyStatement ? (
+            <>
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.hint, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 3 }}>Why</div>
+              <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.5, marginBottom: 10 }}>{activeBlock.whyStatement}</div>
+            </>
+          ) : null}
+          {activeBlock.oldPattern ? (
+            <>
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.hint, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 3 }}>Old pattern</div>
+              <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.5, marginBottom: 10 }}>{activeBlock.oldPattern}</div>
+            </>
+          ) : null}
+          {activeBlock.minimumProof ? (
+            <>
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.hint, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 3 }}>Bad-day minimum</div>
+              <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.5, marginBottom: 10 }}>{activeBlock.minimumProof}</div>
+            </>
+          ) : null}
+          {proofHabitsForView.length > 0 ? (
+            <>
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.hint, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>Proof actions</div>
+              {proofHabitsForView.map(h => (
+                <div key={h.id} style={{ fontSize: 13, color: T.text, marginBottom: 4 }}>
+                  {h.emoji ? `${h.emoji} ` : ""}{h.name}
+                </div>
+              ))}
+            </>
+          ) : null}
+        </div>
+      ) : null}
 
       <div style={{ flex: 1, overflowY: "auto", padding: "20px 16px 8px", display: "flex", flexDirection: "column", gap: 12 }}>
         {loadingOpener && msgs.length === 0 && (
@@ -427,6 +491,11 @@ export default function ArcCoachSheet({
             Question {questionNum} of up to {MAX_QUESTIONS}
           </div>
         )}
+        <ArcSuggestionPills
+          pills={suggestionPills}
+          onPill={handleSuggestionPill}
+          disabled={sending || loadingOpener || !!arcDraft}
+        />
         <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
           <div style={{ flex: 1, position: "relative" }}>
             <textarea
@@ -505,7 +574,7 @@ export default function ArcCoachSheet({
               color: T.muted, fontSize: 14, cursor: "pointer", fontFamily: T.font,
             }}
           >
-            Cancel
+            Cancel Arc setup
           </button>
         )}
         {!isEdit && onUseFormInstead && (
