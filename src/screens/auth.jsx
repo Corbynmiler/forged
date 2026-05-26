@@ -474,7 +474,7 @@ export function BetaPaywallModal({ onClose }) {
           Unlock Forged Pro.
         </h2>
         <p style={{ fontSize:14, color:T.sub, lineHeight:1.75, margin:"0 0 28px" }}>
-          Unlimited AI coaching, unlimited habits, friend nudges, voice logging, and full history — <strong style={{ color:T.text }}>$4.99/month</strong>. Cancel anytime.
+          Forged Pro is Arc power mode — more coach, voice dumps, weekly Arc Reviews, full Arc history, Arc-aware reminders, and friend nudges — <strong style={{ color:T.text }}>$4.99/month</strong>. Cancel anytime.
         </p>
         {error && <div style={{ fontSize:13, color:T.accent, marginBottom:12 }}>{error}</div>}
         <button onClick={handleCheckout} disabled={loading}
@@ -500,7 +500,7 @@ export function WelcomeModal({ onContinue }) {
         <div style={{ fontSize:11, fontWeight:600, color:"#C8902A", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:10 }}>Forged Pro unlocked</div>
         <h2 style={{ fontFamily:"'DM Serif Display',Georgia,serif", fontSize:28, color:"#F0EDE6", margin:"0 0 14px", lineHeight:1.2 }}>You&apos;re in</h2>
         <p style={{ fontSize:14, color:"#A8A49C", lineHeight:1.75, margin:"0 0 28px" }}>
-          Forged Pro is fully unlocked — unlimited AI coaching, full history, friend nudges, and everything we ship next. Now go build the thing.
+          Forged Pro is fully unlocked — more Arc coach, voice dumps, weekly Arc Reviews, full history, and everything we ship next. Now go build the thing.
         </p>
         <button
           onClick={onContinue}
@@ -648,14 +648,14 @@ export function PaywallScreen({ onPaid }) {
           </div>
 
           <h1 style={{ fontFamily:T.serif, fontSize:26, color:T.text, margin:"0 0 14px", lineHeight:1.2 }}>
-            Your AI coach. Unlimited.
+            Arc power mode.
           </h1>
 
           <p style={{ fontSize:14, color:T.sub, lineHeight:1.7, margin:"0 0 8px" }}>
-            The coach reads your real logs and reflections to tell you why things aren't sticking — and what to do next.
+            More Arc coach, voice dumps, weekly Arc Reviews, and Arc-aware reminders — built around your proof actions, not generic tracking.
           </p>
           <p style={{ fontSize:13, color:T.muted, lineHeight:1.6, margin:"0 0 24px" }}>
-            Unlimited AI coaching, full history, friend nudges, and voice logging — <strong style={{ color:T.text }}>$4.99/month</strong>.
+            Full Arc and habit history, deeper insights, friend nudges — <strong style={{ color:T.text }}>$4.99/month</strong>.
           </p>
 
           <button

@@ -744,7 +744,7 @@ export function MicBtn({ speech, color = T.accent, size = 28, prominent = false,
   const supported = !!speech.supported;
   const blocked = !!speech.micBlocked;
   const c = !supported ? T.muted : (speech.listening ? color : blocked ? T.muted : locked ? T.gold : prominent ? color : T.hint);
-  const label = !supported ? "Voice input unavailable" : (locked ? "Voice logging is a Pro feature" : speech.listening ? "Stop dictation" : blocked ? "Microphone blocked" : "Start dictation");
+  const label = !supported ? "Voice input unavailable" : (locked ? "Voice dumps are a Pro feature" : speech.listening ? "Stop dictation" : blocked ? "Microphone blocked" : "Start dictation");
   const idleBorder = locked ? "rgba(200,144,42,0.45)" : blocked ? T.border : prominent ? `${color}55` : T.border;
   const idleBg = locked ? "rgba(200,144,42,0.10)" : blocked ? "transparent" : prominent ? `${color}16` : "transparent";
   function handleActivate() {
@@ -763,7 +763,7 @@ export function MicBtn({ speech, color = T.accent, size = 28, prominent = false,
     <button
       type="button"
       aria-label={label}
-      title={locked ? "Voice logging — tap to unlock with Pro" : speech.listening ? "Tap to stop" : blocked ? "Microphone blocked" : "Tap to dictate"}
+      title={locked ? "Voice dumps — tap to unlock with Pro" : speech.listening ? "Tap to stop" : blocked ? "Microphone blocked" : "Tap to dictate"}
       onPointerDown={(e) => {
         if (e.button !== 0) return;
         if (e.pointerType === "touch") return;

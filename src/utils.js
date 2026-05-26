@@ -24,6 +24,10 @@ export function fmtDate(d = new Date()) {
 export function fmtDateLong(d = new Date()) {
   return d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 }
+/** Strip "Title:" prefix from generated journal/receipt first lines (display only). */
+export function stripJournalTitleLine(line) {
+  return String(line || "").replace(/^Title:\s*/i, "").trim();
+}
 /** Goal deadline chip: "May 31" or "Jan 15, 2027" if not this calendar year */
 export function fmtGoalDueHuman(dateStr) {
   if (!dateStr) return "";

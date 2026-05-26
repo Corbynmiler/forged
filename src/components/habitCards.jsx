@@ -1556,7 +1556,8 @@ export function HistoryModal({ habits, onClose, isPro, onUpgrade }) {
           </div>
           <div style={{ position:"absolute", inset:0, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:8, background:"rgba(14,14,14,0.75)", backdropFilter:"blur(2px)", borderRadius:T.rsm, padding:"0 20px" }}>
             <div style={{ fontSize:20 }}>🔒</div>
-            <div style={{ fontSize:13, color:T.text, fontWeight:500, textAlign:"center" }}>Full history is part of Forged Pro</div>
+            <div style={{ fontSize:13, color:T.text, fontWeight:500, textAlign:"center" }}>Arc history is part of Forged Pro</div>
+            <div style={{ fontSize:12, color:T.muted, textAlign:"center", lineHeight:1.5, marginTop:4 }}>Full Arc and habit history included in Pro.</div>
             <div style={{ fontSize:12, color:T.muted, textAlign:"center" }}>You have {habit.logs.filter(l => l.date < cutoff).length} older logs waiting</div>
             <button onClick={onUpgrade} style={{ marginTop:6, padding:"9px 20px", borderRadius:T.rsm, border:"none", background:T.gold, color:"#0F0F0D", fontSize:13, fontWeight:700, cursor:"pointer" }}>Unlock Forged Pro →</button>
           </div>

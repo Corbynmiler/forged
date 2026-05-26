@@ -139,14 +139,14 @@ export function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
   const spotsPct  = spots !== null ? Math.min(100, (spots / 100) * 100) : 0;
 
   const features = [
-    { icon:"∞",  label:"Unlimited habits",    free:"Up to 5",      pro:"No limit",               live:true },
-    { icon:"🤖", label:"AI coach messages",    free:`${FREE_DAILY_LIMIT} per day`,   pro:"Unlimited",              live:true },
-    { icon:"🎙️", label:"Voice logging",         free:"—",            pro:"Talk to log & reflect",  live:true },
-    { icon:"💪", label:"Nudge a friend",       free:"—",            pro:"Keep each other honest", live:true },
-    { icon:"📜", label:"Full history",         free:"Last 7 days",  pro:"Every entry, forever",   live:true },
-    { icon:"📅", label:"Monthly calendar",     free:"—",            pro:"Spot gaps at a glance",  live:true },
-    { icon:"🔔", label:"Smart reminders",      free:"—",            pro:"Daily push nudges",      live:true },
-    { icon:"📊", label:"Pattern detection",    free:"Streaks + 28d", pro:"AI pattern analysis",    live:true },
+    { icon:"🔥", label:"Arc coach",           free:`${FREE_DAILY_LIMIT}/day`, pro:"Unlimited",              live:true },
+    { icon:"🎙️", label:"Voice dumps",         free:"—",            pro:"Hands-free logging",     live:true },
+    { icon:"📊", label:"Weekly Arc Review",   free:"One trial",    pro:"Fresh each week",        live:true },
+    { icon:"📜", label:"Arc + habit history", free:"Last 7 days",  pro:"Every entry, forever",   live:true },
+    { icon:"🔔", label:"Arc-aware reminders", free:"Basic",        pro:"Smart evening nudges",   live:true },
+    { icon:"💪", label:"Friend nudges",       free:"—",            pro:"Keep each other honest", live:true },
+    { icon:"∞",  label:"Habit capacity",      free:"Up to 5",      pro:"No limit",               live:true },
+    { icon:"📅", label:"Monthly calendar",    free:"—",            pro:"Spot gaps at a glance",  live:true },
   ];
 
   return (
@@ -651,7 +651,7 @@ export function ProfileScreen({ user, xp, habits, isPro, isCoach, stripeCustomer
         <div style={{ padding:"4px 16px 16px" }}>
           {isPro ? (
             <div style={{ fontSize:14, color:T.text, lineHeight:1.6 }}>
-              You're on Forged Pro — unlimited AI coaching, full history, and everything we ship next. 🙌<br/>
+              You're on Forged Pro — Arc power mode: more coach, voice dumps, weekly Arc Reviews, and full history. 🙌<br/>
               <span style={{ fontSize:12, color:T.muted }}>AI coach, voice logging, friend nudges, and full history are all unlocked.</span>
               {stripeCustomerId ? (
                 <button
@@ -704,13 +704,13 @@ export function ProfileScreen({ user, xp, habits, isPro, isCoach, stripeCustomer
             <>
               <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14 }}>
                 {[
-                  { label:"Unlimited habits",            status:"pro" },
-                  { label:"Unlimited AI coach messages", status:"pro" },
-                  { label:"Voice logging",               status:"pro" },
+                  { label:"Unlimited Arc coach",           status:"pro" },
+                  { label:"Voice dumps",                     status:"pro" },
+                  { label:"Weekly Arc Reviews",              status:"pro" },
                   { label:"Nudge friends to stay on track", status:"pro" },
-                  { label:"Full history & monthly calendar", status:"pro" },
-                  { label:"AI pattern detection",        status:"pro" },
-                  { label:"Push notification reminders", status:"pro" },
+                  { label:"Full Arc + habit history",        status:"pro" },
+                  { label:"Arc-aware reminders",             status:"pro" },
+                  { label:"Expanded habit capacity",         status:"pro" },
                 ].map((f, i) => (
                   <div key={i} style={{ display:"flex", alignItems:"center", gap:8 }}>
                     <div style={{ width:18, height:18, borderRadius:"50%", background:f.status==="soon"?T.surface:"rgba(200,144,42,0.15)", border:`1px solid ${f.status==="soon"?T.border:"rgba(200,144,42,0.4)"}`, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>

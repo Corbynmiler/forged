@@ -6,7 +6,7 @@ import {
   weekStartFor, getStreak, isSatisfiedForTodayRing,
   todayLogs, isLoggedToday, getProjectStats, formatWithUnit,
   mergedLast7, fmtWeekRange, truncateText,
-  loadJournalMissedMap, saveJournalMissedMap,
+  loadJournalMissedMap, saveJournalMissedMap, stripJournalTitleLine,
 } from "../utils.js";
 import { Modal, GBtn, PBtn, FG, lbl, inp, Ring } from "../components/ui.jsx";
 import { useScrollLock } from "../hooks/useScrollLock.js";
@@ -68,7 +68,7 @@ export function BetaModal({ onClose }) {
     <Modal onClose={onClose}>
       <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:10 }}>Interested in Forged Pro?</div>
       <div style={{ fontSize:13, color:T.muted, lineHeight:1.8, marginBottom:20 }}>
-        Forged Pro is <strong style={{ color:T.text }}>$4.99/month</strong> — unlimited AI coaching, full history, friend nudges, and voice logging.
+        Forged Pro is Arc power mode — more coach, voice dumps, weekly Arc Reviews, full history, and Arc-aware reminders. <strong style={{ color:T.text }}>$4.99/month</strong> during beta.
         <br/><br/>
         Leave your email and I'll reach out directly. Early users shape what gets built next.
       </div>
@@ -549,18 +549,27 @@ function JournalComposeSheet({ initialContent = "", date, onSave, onClose }) {
 }
 
 // ─── JOURNAL SCREEN ───────────────────────────────────────────────────────────
-export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, journalUserId, isPro, onUpgrade, journalEntries = [], onSaveJournalEntry, onJournalGenerated, initialTab, onInitialComposeDone, userName = "", coachName = "" }) {
+export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, journalUserId, isPro, onUpgrade, journalEntries = [], onSaveJournalEntry, onJournalGenerated, initialTab, onInitialComposeDone, autoGenerateOnMount = false, userName = "", coachName = "" }) {
   // "activity" = habit/goal log history (existing), "journal" = pure journal entries
-  const [mainTab, setMainTab]   = useState(initialTab === "journal" ? "journal" : "activity");
-  const [composeDate, setComposeDate] = useState(initialTab === "journal" ? todayStr() : null); // null = closed, "YYYY-MM-DD" = open
+  const [mainTab, setMainTab]   = useState(initialTab === "journal" || initialTab === "compose" ? "journal" : "activity");
+  const [composeDate, setComposeDate] = useState(initialTab === "compose" ? todayStr() : null); // null = closed, "YYYY-MM-DD" = open
 
   // When navigating here from AddActionSheet "Write in journal", auto-open compose.
   // Once the sheet closes, clear the trigger so subsequent navigations don't re-open.
   useEffect(() => {
-    if (initialTab === "journal" && composeDate === null) {
+    if (initialTab === "compose" && composeDate === null) {
       onInitialComposeDone?.();
     }
   }, [composeDate]);
+
+  // Coach "Wrap today" — generate entry if none exists yet.
+  useEffect(() => {
+    if (!autoGenerateOnMount) return;
+    onInitialComposeDone?.();
+    const todayEntry = journalEntries.find(e => e.date === todayStr());
+    if (todayEntry?.content?.trim()) return;
+    generateEntry(todayStr(), { background: false });
+  }, [autoGenerateOnMount]); // eslint-disable-line react-hooks/exhaustive-deps
   const [filter, setFilter] = useState("all");
   const [viewMode, setViewMode] = useState("day"); // "day" | "week" | "month"
   const [monthOffset, setMonthOffset] = useState(0);
@@ -646,7 +655,7 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
     if (!KEYWORDS.some(k => content.includes(k))) return null;
     const lines = content.split("\n").map(l => l.trim()).filter(Boolean);
     if (lines.length < 3) return null;
-    const title = stripMarkdown(lines[0]);
+    const title = stripJournalTitleLine(stripMarkdown(lines[0]));
     let i = 1;
     const narrativeLines = [];
     while (i < lines.length && !KEYWORDS.some(k => lines[i].startsWith(k))) {
@@ -1020,7 +1029,7 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
                 const parsed = tryParseEntry(entry.content);
                 const d = parseLocal(entry.date);
                 const label = `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
-                const previewTitle = parsed?.title || entry.content.split("\n")[0].slice(0, 55);
+                const previewTitle = stripJournalTitleLine(parsed?.title || entry.content.split("\n")[0].slice(0, 55));
                 const previewLine = (() => {
                   if (!parsed?.narrative) return null;
                   const first = parsed.narrative.split(/[.!?]/)[0].trim();
@@ -1162,8 +1171,8 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
           {/* Lock overlay */}
           <div style={{ position:"absolute", inset:0, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:8, padding:"0 24px", textAlign:"center", background:"rgba(14,14,14,0.80)", backdropFilter:"blur(2px)", borderRadius:T.r }}>
             <div style={{ fontSize:22 }}>🔒</div>
-            <div style={{ fontSize:14, fontWeight:500, color:T.text }}>Full history is part of Forged Pro</div>
-            <div style={{ fontSize:12, color:T.muted, lineHeight:1.6 }}>Core logging is free. Full history and the calendar view are included in Forged Pro.</div>
+            <div style={{ fontSize:14, fontWeight:500, color:T.text }}>Arc history is part of Forged Pro</div>
+            <div style={{ fontSize:12, color:T.muted, lineHeight:1.6 }}>Core logging is free. Full Arc and habit history plus the calendar view are included in Pro.</div>
             <button onClick={onUpgrade}
               style={{ marginTop:6, padding:"10px 22px", borderRadius:T.rsm, border:"none", background:T.gold, color:"#0F0F0D", fontSize:13, fontWeight:700, cursor:"pointer" }}>
               Unlock Forged Pro →

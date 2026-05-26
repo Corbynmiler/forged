@@ -675,7 +675,7 @@ export function InsightsScreen({
                 </div>
                 {!isPro && onUpgrade && (
                   <button type="button" onClick={onUpgrade} style={{ padding:"11px 18px", borderRadius:T.rsm, border:`1px solid rgba(200,144,42,0.5)`, background:"rgba(200,144,42,0.18)", color:T.gold, fontSize:13, fontWeight:700, cursor:"pointer", letterSpacing:"0.02em" }}>
-                    Get Pro for weekly briefs →
+                    {arcActive ? "Get Pro for weekly Arc Reviews →" : "Get Pro for weekly reviews →"}
                   </button>
                 )}
                 {showQuotaNote && (
@@ -688,7 +688,7 @@ export function InsightsScreen({
               <>
                 {onUpgrade && (
                   <button type="button" onClick={onUpgrade} style={{ padding:"11px 18px", borderRadius:T.rsm, border:`1px solid rgba(200,144,42,0.5)`, background:"rgba(200,144,42,0.18)", color:T.gold, fontSize:13, fontWeight:700, cursor:"pointer", letterSpacing:"0.02em" }}>
-                    Unlock with Pro →
+                    {arcActive ? "Unlock weekly Arc Reviews →" : "Unlock with Pro →"}
                   </button>
                 )}
               </>
@@ -708,11 +708,13 @@ export function InsightsScreen({
                     opacity:isGenerating ? 0.55 : 1,
                   }}
                 >
-                  {!isPro && freeBrief === true ? "Generate your first brief — free ✨" : "Generate this week’s brief"}
+                  {!isPro && freeBrief === true
+                    ? (arcActive ? "Generate your first Arc Review — free ✨" : "Generate your first review — free ✨")
+                    : (arcActive ? "Generate this week's Arc Review" : "Generate this week's review")}
                 </button>
                 {!isPro && freeBrief === true && (
                   <div style={{ fontSize:11, color:T.hint, textAlign:"center", lineHeight:1.5, maxWidth:280 }}>
-                    One on us. Upgrade to Pro for a fresh brief every week.
+                    One on us. Pro gets a fresh {arcActive ? "Arc Review" : "review"} every week.
                   </div>
                 )}
               </div>
@@ -847,7 +849,7 @@ export function InsightsScreen({
       <SectionTitle
         label="Activity"
         hint="By the numbers"
-        explainer="Streaks, completion bars, and heatmaps live below — support for your weekly brief."
+        explainer={arcActive ? "Streaks, completion bars, and heatmaps below — support for your Arc Review." : "Streaks, completion bars, and heatmaps below — support for your weekly review."}
       />
 
       <div data-tour="insights-streaks" style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:14 }}>

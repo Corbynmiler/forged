@@ -476,7 +476,7 @@ function BetaModal({ onClose }) {
     <Modal onClose={onClose}>
       <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, marginBottom:10 }}>Interested in Forged Pro?</div>
       <div style={{ fontSize:13, color:T.muted, lineHeight:1.8, marginBottom:20 }}>
-        Forged Pro is <strong style={{ color:T.text }}>$4.99/month</strong> — unlimited AI coaching, full history, friend nudges, and voice logging.
+        Forged Pro is Arc power mode — more coach, voice dumps, weekly Arc Reviews, and full history. <strong style={{ color:T.text }}>$4.99/month</strong> during beta.
         <br/><br/>
         Leave your email and I'll reach out directly. Early users shape what gets built next.
       </div>
@@ -1949,13 +1949,16 @@ When one message mentions multiple habits, events, or outcomes — scan the ENTI
 Tools already ran. Your reply is conversational only — the app will append a truthful "Saved this turn" checklist after your text, so do **not** write your own bullet list of what was saved (avoid duplicate or fake inventories).
 
 **RESPONSE ORDER — this is the most important rule in this section:**
-1. Respond to the PERSON and what they actually said — always first. If they shared something personal, emotional, or gave a big brain dump: acknowledge that substance before anything else. Show you heard it.
-2. Any clarifying question (e.g. "how many minutes?") comes LAST — one sentence, natural, after your human response.
-3. Never open with logging status language. Words like "saved", "logged", "locked in", "journal saved", "got it", "done" should never be the first thing you say. The receipt chips handle the admin — your job is to sound like a person.
+1. Acknowledge what happened in plain English — what you logged and what stood out in their dump (always first).
+2. If they have an active Arc, connect it lightly once — which proof moved, or what gap matters for the Arc. One line, not a lecture.
+3. End with **one optional** follow-up for extra journal context — e.g. "Anything else worth saving for today's receipt before you wrap it?" If they already gave rich detail, shorten to: "Anything else worth remembering from today?"
+4. If they answer that follow-up, call add_daily_note only — do not invent new habits.
+5. Never open with logging status language ("saved", "logged", "got it", "done"). Receipt chips handle admin.
+6. Any clarifying question about ambiguous data comes last — one sentence only.
 
 - Quick tap-in with no personal content: 1–2 sentences.
-- Bigger day / mixed dump: 3–5 sentences that show you heard the substance. Then any clarifying question at the very end.
-- Heavy or emotionally loaded dump: lead with 2–3 real sentences meeting the content. No therapy script. Then ask what you need — briefly, at the end.
+- Bigger day / mixed dump: 3–5 sentences — acknowledge, light Arc tie-in if active, one follow-up at the end.
+- Heavy or emotional dump: meet the content first (2–3 sentences), then follow-up. No therapy script, no motivational fluff.
 - If any tool returned success:false, weave that in naturally — don't ignore it, but don't let it open your reply.
 
 ─── WHEN TO ACT vs ASK ───
@@ -2003,6 +2006,13 @@ Use add_daily_note for personal/emotional/narrative content — feelings, contex
 In mixed messages, habit tools capture the scoreboard; add_daily_note captures the story. Both in one turn when the message contains both.
 Keep notes short (1–3 sentences) — the journal generator handles polishing. First person, their own words.
 When user says "add this to my journal", "remember this for today", or shares personal context: call add_daily_note. Say something like "Got it — I'll fold that into today's journal." Do NOT say the full journal has been written.
+${(() => {
+  const todayEntry = journalEntries.find(e => e.date === today);
+  const notes = Array.isArray(todayEntry?.daily_context) ? todayEntry.daily_context.filter(Boolean) : [];
+  if (!notes.length) return "";
+  return `Today's notes saved for the receipt (do not repeat verbatim — use for context):
+${notes.map((n, i) => `- ${String(n).slice(0, 300)}`).join("\n")}`;
+})()}
 ${journalEntries.length ? `Recent journal entries (for context — do not repeat these back verbatim):
 ${journalEntries.slice(0, 5).map(e => `[${e.date}] "${e.content.slice(0, 200)}${e.content.length > 200 ? "…" : ""}"`).join("\n")}` : ""}
 
@@ -2242,11 +2252,9 @@ function formatCoachMsgTime(ts) {
 function buildNormalCoachOpener({ name, activeBlock = null }) {
   const who = name && String(name).trim() ? String(name).trim() : "";
   const hi = who ? `Hey ${who}` : "Hey";
-  let line = `${hi}. Chuck the day in here — typed or voice note. Tell me what happened, what you did, what you skipped, or what you want to sort out.`;
+  let line = `${hi}. Dump a long text or voice note here — ramble about your day. I'll pull out anything that matches your habits, goals, proof actions, and notes for today's receipt.`;
   if (activeBlock?.id) {
-    line += " If you mention habits, goals, notes, or Arc proof actions, I'll try to log the useful bits. I can see your Arc too, so I'll keep your proof actions in mind.";
-  } else {
-    line += " If you mention habits, goals, or notes, I'll try to log the useful bits.";
+    line += " I've got your Arc loaded, so proof actions come first.";
   }
   return line;
 }
@@ -2706,7 +2714,7 @@ function GoalPlanPreview({ plan, onConfirm, onDismiss }) {
   );
 }
 
-export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, coachIcon, coachAccentColor, currentScreen, onHabitCreated, onGoalCreated, onCoachLogsApplied, onHabitRenamed, onGoalPlanConfirm, onJournalLogged, journalEntries = [], openInputMode = null, pendingMessage = null, onNavigateTo = null, activeBlock = null, onOpenEditArc = null, previewNormalCoachGreeting = false }) {
+export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, coachIcon, coachAccentColor, currentScreen, onHabitCreated, onGoalCreated, onCoachLogsApplied, onHabitRenamed, onGoalPlanConfirm, onJournalLogged, journalEntries = [], openInputMode = null, pendingMessage = null, onNavigateTo = null, activeBlock = null, onOpenEditArc = null, previewNormalCoachGreeting = false, onWrapToday = null }) {
   useScrollLock(true);
   const cName = coachName || "Coach";
   const isCreatorUser = user?.id === CREATOR_ID;
@@ -2725,6 +2733,7 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
       : buildCoachGreeting({ name: user?.name, habits, goals, activeBlock });
   }
   const greeting = greetingRef.current;
+  const [wrapActionForMsgId, setWrapActionForMsgId] = useState(null);
   const [messages, setMessages] = useState(() => {
     const uid = user?.id;
     if (!uid) return [];
@@ -3042,9 +3051,12 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
                 const doneDay = todayStr();
                 coachPersistDayRef.current = doneDay;
                 // Finalise — remove stream id marker; append server truth receipt (never model-invented)
+                const hadDumpActions = !!(evt.logged?.length || evt.noted?.length);
                 setMessages(prev => {
-                  const nextMsgs = prev.map(m => m.id === COACH_STREAM_ID ? { role: "assistant", content: finalContent || fullText, ts: m.ts ?? Date.now() } : m);
+                  const finalizedId = COACH_STREAM_ID;
+                  const nextMsgs = prev.map(m => m.id === COACH_STREAM_ID ? { role: "assistant", content: finalContent || fullText, ts: m.ts ?? Date.now(), id: finalizedId } : m);
                   if (user?.id) saveCoachDayMessages(user.id, doneDay, nextMsgs);
+                  if (hadDumpActions) setWrapActionForMsgId(finalizedId);
                   return nextMsgs;
                 });
 
@@ -3291,6 +3303,14 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
                           />
                         </div>
                       ) : null}
+                      {wrapActionForMsgId && (m.id === wrapActionForMsgId || (m.id === COACH_STREAM_ID && wrapActionForMsgId === COACH_STREAM_ID)) && onWrapToday ? (
+                        <div style={{ marginTop:10, display:"flex", flexWrap:"wrap", gap:6 }}>
+                          <button type="button" onClick={() => { setWrapActionForMsgId(null); onWrapToday(); }}
+                            style={{ padding:"7px 12px", borderRadius:16, border:`0.5px solid ${T.accent}55`, background:"rgba(192,57,43,0.12)", color:T.accent, fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:T.font }}>
+                            Generate today&apos;s entry →
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                   {parsed && (
@@ -3344,7 +3364,7 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
           {atFreeCap ? (
             <div style={{ padding:"4px 2px 6px" }}>
               <div style={{ fontSize:13, color:T.sub, lineHeight:1.5 }}>
-                Daily limit reached — resets tomorrow
+                Daily coach limit reached — resets tomorrow
               </div>
               <button
                 type="button"
@@ -3354,7 +3374,7 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
                   fontSize:12, color:T.gold, fontWeight:600,
                 }}
               >
-                Upgrade for unlimited →
+                Upgrade for Arc power mode →
               </button>
             </div>
           ) : speech.listening ? (

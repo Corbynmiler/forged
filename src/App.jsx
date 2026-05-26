@@ -200,6 +200,7 @@ export default function App() {
   const [showJournalCompose,setShowJournalCompose]= useState(false);
   const [generatingReceipt, setGeneratingReceipt] = useState(false);
   const [journalOpenTab,    setJournalOpenTab]    = useState(null);
+  const [journalAutoGenerate, setJournalAutoGenerate] = useState(false);
   const [logGoalId,      setLogGoalId]      = useState(null);
   const [editGoalId,     setEditGoalId]     = useState(null);
   const [openGoalId,     setOpenGoalId]     = useState(null);
@@ -1556,7 +1557,7 @@ export default function App() {
   async function handleJournalGenerated() {
     const uid = userIdRef.current;
     if (!uid) return;
-    supabase.from("journal_entries").select("id, date, content, is_ai_generated, manually_edited, created_at, updated_at")
+    supabase.from("journal_entries").select("id, date, content, daily_context, is_ai_generated, manually_edited, created_at, updated_at")
       .eq("user_id", uid).order("date", { ascending: false })
       .then(({ data: jRows }) => { if (jRows) setJournalEntries(jRows); });
   }
@@ -1633,7 +1634,7 @@ export default function App() {
         );
 
         // Load journal entries (non-fatal — failure doesn't block the app)
-        supabase.from("journal_entries").select("id, date, content, is_ai_generated, manually_edited, created_at, updated_at")
+        supabase.from("journal_entries").select("id, date, content, daily_context, is_ai_generated, manually_edited, created_at, updated_at")
           .eq("user_id", uid).order("date", { ascending: false })
           .then(({ data: jRows }) => {
             if (jRows) setJournalEntries(jRows);
@@ -4004,8 +4005,8 @@ export default function App() {
         )}
         {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} activeBlock={activeBlock} todayArcScore={todayArcScore} arcLedgerRows={arcLedgerRows} arcProofSyncing={arcProofSyncing} onStartArc={openArcCoachCreate}
 onEditArc={openArcCoachEdit}
-onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} coachEverOpened={coachEverOpened} onOpenCoachMic={() => openCoachWithMode("mic")} onOpenCoachWithDraft={openCoachWithDraft} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} hideFloatingAdd onOpenGoalDetail={id => setOpenGoalId(id)} onOpenInsights={() => setScreen("insights")} todayJournalEntry={journalEntries.find(e => e.date === todayStr()) ?? null} onGenerateReceipt={handleGenerateReceipt} generatingReceipt={generatingReceipt} onOpenJournal={() => { setJournalOpenTab("journal"); setScreen("journal"); }} yesterdayJournalEntry={journalEntries.find(e => e.date === daysAgo(1)) ?? null} onLowerBudget={handleLowerBudget} tasks={tasks} onAddTask={handleAddTask} onCompleteTask={handleCompleteTask} onPinTask={handlePinTask} onDeleteTask={handleDeleteTask}/>}
-        {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} journalEntries={journalEntries} onSaveJournalEntry={handleSaveJournalEntry} onJournalGenerated={handleJournalGenerated} initialTab={showJournalCompose ? "journal" : journalOpenTab ?? undefined} onInitialComposeDone={() => { setShowJournalCompose(false); setJournalOpenTab(null); }} userName={user.name || ""} coachName={coachName}/>}
+onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} coachEverOpened={coachEverOpened} onOpenCoachMic={() => openCoachWithMode("mic")} onOpenCoachWithDraft={openCoachWithDraft} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} hideFloatingAdd onOpenGoalDetail={id => setOpenGoalId(id)} onOpenInsights={() => setScreen("insights")} todayJournalEntry={journalEntries.find(e => e.date === todayStr()) ?? null} onGenerateReceipt={handleGenerateReceipt} generatingReceipt={generatingReceipt} onOpenJournal={() => { setJournalOpenTab("journal"); setJournalAutoGenerate(false); setScreen("journal"); }} yesterdayJournalEntry={journalEntries.find(e => e.date === daysAgo(1)) ?? null} onLowerBudget={handleLowerBudget} tasks={tasks} onAddTask={handleAddTask} onCompleteTask={handleCompleteTask} onPinTask={handlePinTask} onDeleteTask={handleDeleteTask}/>}
+        {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} journalEntries={journalEntries} onSaveJournalEntry={handleSaveJournalEntry} onJournalGenerated={handleJournalGenerated} initialTab={showJournalCompose ? "compose" : journalOpenTab ?? undefined} autoGenerateOnMount={journalAutoGenerate} onInitialComposeDone={() => { setShowJournalCompose(false); setJournalOpenTab(null); setJournalAutoGenerate(false); }} userName={user.name || ""} coachName={coachName}/>}
         {screen === "insights" && <InsightsScreen habits={habits} goals={goals} journalEntries={journalEntries} activeBlock={activeBlock} completedArcBlock={completedArcBlock} onArcReviewComplete={() => reloadForgeBlocks(sessionUserId)} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} userId={sessionUserId} userName={user.name || ""}/>}
         {screen === "social"   && <SocialScreen
           user={user} xp={xp} habits={habits}
@@ -4429,7 +4430,7 @@ onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} o
         // going through the Add action sheet instead of the Habits tab.
         if (!isPro && habits.length >= 5) setShowUpgrade(true);
         else setShowAdd(true);
-      }} onAddGoal={() => { setShowAddChoice(false); setShowAddGoal(true); }} onAddLog={() => { setShowAddChoice(false); setScreen("journal"); setShowJournalCompose(true); }} onClose={() => setShowAddChoice(false)}/>}
+      }} onAddGoal={() => { setShowAddChoice(false); setShowAddGoal(true); }} onAddLog={() => { setShowAddChoice(false); setJournalAutoGenerate(false); setScreen("journal"); setShowJournalCompose(true); }} onClose={() => setShowAddChoice(false)}/>}
       {showCoachTeaser && <CoachComingSoonSheet onClose={() => setShowCoachTeaser(false)} coachName={coachName} context={screen}/>}
       {logGoalId     && (() => { const g = resolveGoalForModal(logGoalId, goals, habits); return g ? <LogGoalModal goal={g} onClose={() => setLogGoalId(null)} onLog={(id, val, note) => { handleLogGoal(id, val, note); setLogGoalId(null); }}/> : null; })()}
       {editGoalId    && (() => { const g = resolveGoalForModal(editGoalId, goals, habits); return g ? <EditGoalModal goal={g} onClose={() => setEditGoalId(null)} onSave={handleEditGoalSave}/> : null; })()}
@@ -4461,10 +4462,19 @@ onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} o
             // Re-fetch journal entries after AI writes so the Journal tab reflects it immediately
             const uid = userIdRef.current;
             if (uid) {
-              supabase.from("journal_entries").select("id, date, content, is_ai_generated, manually_edited, created_at, updated_at")
+              supabase.from("journal_entries").select("id, date, content, daily_context, is_ai_generated, manually_edited, created_at, updated_at")
                 .eq("user_id", uid).order("date", { ascending: false })
                 .then(({ data: jRows }) => { if (jRows) setJournalEntries(jRows); });
             }
+          }}
+          onWrapToday={() => {
+            setShowCoach(false);
+            setCoachOpenMode(null);
+            setCoachPendingMsg(null);
+            setCoachDraftInput(null);
+            setJournalOpenTab("journal");
+            setJournalAutoGenerate(true);
+            setScreen("journal");
           }}
         />}
       {showUpgrade && <BetaPaywallModal onClose={() => setShowUpgrade(false)}/>}

@@ -778,6 +778,7 @@ export function SocialScreen({ user, xp, habits, friends, friendRequests, sentRe
           </div>
           <div style={{ fontSize: 10, fontWeight: 600, color: T.hint, letterSpacing: "0.04em", textTransform: "uppercase" }}>
             Top 10 · Lifetime XP
+            <span style={{ display:"block", fontSize:10, fontWeight:500, color:T.hint, marginTop:2, letterSpacing:0 }}>Activity metric — not Arc rank</span>
           </div>
         </div>
 

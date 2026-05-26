@@ -1,7 +1,7 @@
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
 import { useState, useEffect, useRef } from "react";
 import { T, COACH_ICON_OPTIONS } from "../theme.js";
-import { todayStr, daysAgo, parseLocal, isSatisfiedForTodayRing, getLevel, getStreak } from "../utils.js";
+import { todayStr, daysAgo, parseLocal, isSatisfiedForTodayRing, getLevel, getStreak, stripJournalTitleLine } from "../utils.js";
 import { Ring, SLabel, Modal, GBtn } from "../components/ui.jsx";
 import {
   DailyCard, WeeklyCard, ProjectCard, LimitCard, LogCard,
@@ -188,7 +188,7 @@ function parseReceiptFields(content) {
   if (!content) return null;
   const lines = content.split("\n").map(l => l.trim()).filter(Boolean);
   if (!lines.length) return null;
-  const title = lines[0];
+  const title = stripJournalTitleLine(lines[0]);
   let pattern = null, tomorrow = null, missed = null;
   for (const l of lines) {
     if (!pattern  && l.startsWith("Pattern:"))  pattern  = l.slice("Pattern:".length).trim();
