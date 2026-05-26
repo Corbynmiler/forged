@@ -3952,7 +3952,7 @@ export default function App() {
       {showCoach   && <AICoach key={sessionUserId || "anon"} openInputMode={coachOpenMode}
           pendingMessage={coachPendingMsg}
           draftInput={coachDraftInput}
-          habits={habits} goals={goals} user={user} isPro={isPro}
+          habits={habits} goals={goals} user={user} isPro={isPro} activeBlock={activeBlock}
           onClose={() => { setShowCoach(false); setCoachOpenMode(null); setCoachPendingMsg(null); setCoachDraftInput(null); }}
           onUpgrade={() => setShowUpgrade(true)} coachName={coachName}
           coachIcon={coachIcon}

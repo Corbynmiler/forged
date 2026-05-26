@@ -1703,11 +1703,36 @@ function weeklyBriefBlocks(text) {
 
 
 
-function buildCoachSystemPrompt(user, habits, coachName, screen, goals = [], journalEntries = []) {
+function buildArcSystemBlock(activeBlock, habits) {
+  if (!activeBlock?.id) return "";
+  const today = todayStr();
+  const daysElapsed = Math.floor((parseLocal(today) - parseLocal(activeBlock.startDate)) / 86400000);
+  const trackHabits = habits.filter(h => h.habitType !== "log");
+  const proofHabits = trackHabits.filter(h => h.isProofAction === true && h.blockId === activeBlock.id);
+  const proofDone = proofHabits.filter(h => isSatisfiedForTodayRing(h)).length;
+  const proofTotal = proofHabits.length;
+  const dash = "—";
+  return `─── ACTIVE ARC ───
+You are ${daysElapsed} days into an 8-week Arc this person defined themselves on ${activeBlock.startDate}.
+They said they are becoming: ${activeBlock.identity}
+Why it matters to them: ${(activeBlock.whyStatement || "").trim() || dash}
+The old pattern they are trying to weaken: ${(activeBlock.oldPattern || "").trim() || dash}
+On bad days, the bare minimum still counts as proof: ${(activeBlock.minimumProof || "").trim() || dash}
+Proof actions today: ${proofDone} of ${proofTotal}.
+
+Use this with restraint. When they win, name once — lightly — what version of them that proves. When they drift, name the pattern they're trying to weaken once, no preaching, no lectures. When they ask what to do or have a clearly rough day, set tomorrow's minimum in one concrete sentence.
+
+NEVER say: "future you", "the warrior in you", "the elite version", "your journey", "stay strong king/queen", or any motivational-guru phrasing. Stay in the existing grounded tone.
+
+`;
+}
+
+function buildCoachSystemPrompt(user, habits, coachName, screen, goals = [], journalEntries = [], activeBlock = null) {
   const name = user?.name || "there";
   const coach = coachName || "Coach";
   const today = todayStr();
   const isCreator = user?.id === CREATOR_ID;
+  const arcBlock = buildArcSystemBlock(activeBlock, habits);
 
   const habitSummaries = habits.map(h => {
     const type  = HABIT_TYPES[h.habitType]?.label || h.habitType;
@@ -1831,7 +1856,7 @@ When they mention "Forged", "the build", "the app", "shipping something", or "wo
 
   return `You are ${coach}, talking with ${name} inside the Forged habit app.
 
-Today: ${today} | Screen: ${screenCtx[screen] || "app"}
+${arcBlock}Today: ${today} | Screen: ${screenCtx[screen] || "app"}
 
 Habits:
 ${habitSummaries || "None yet."}
@@ -2711,7 +2736,7 @@ function GoalPlanPreview({ plan, onConfirm, onDismiss }) {
   );
 }
 
-export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, coachIcon, coachAccentColor, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onGoalLogged, onHabitRenamed, onGoalPlanConfirm, onJournalLogged, journalEntries = [], openInputMode = null, pendingMessage = null, onNavigateTo = null }) {
+export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, coachIcon, coachAccentColor, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onGoalLogged, onHabitRenamed, onGoalPlanConfirm, onJournalLogged, journalEntries = [], openInputMode = null, pendingMessage = null, onNavigateTo = null, activeBlock = null }) {
   useScrollLock(true);
   const cName = coachName || "Coach";
   const isCreatorUser = user?.id === CREATOR_ID;
@@ -2952,7 +2977,7 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
           ...(token ? { "Authorization": `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
-          system:   buildCoachSystemPrompt(user, habits, cName, currentScreen, goals, journalEntries),
+          system:   buildCoachSystemPrompt(user, habits, cName, currentScreen, goals, journalEntries, activeBlock),
           // Match server cap (api/chat.js slice -12): token-safe, full day kept in localStorage only.
           messages: next.map(m => ({ role: m.role, content: m.content })).slice(-COACH_API_MESSAGE_CAP),
           // Send the user's actual local date (YYYY-MM-DD) so AI logs land on

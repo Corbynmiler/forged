@@ -39,7 +39,7 @@ async function handler(req, res) {
     return res.status(401).json({ error: "Invalid token" });
   }
 
-  const { name, coachName, habitName, habitType, messages = [] } = req.body || {};
+  const { name, coachName, habitName, habitType, messages = [], arcIdentity } = req.body || {};
 
   // Defense-in-depth: cap the incoming message history. Onboarding never needs
   // more than a handful of turns; this stops a malicious payload from billing
@@ -50,7 +50,7 @@ async function handler(req, res) {
 
   const isOpener = trimmedMessages.length === 0;
 
-  const system = `You are ${coachName || "a habit coach"} — the AI coach inside Forged, a personal habit tracking app. You are meeting ${name || "someone"} for the very first time.
+  let system = `You are ${coachName || "a habit coach"} — the AI coach inside Forged, a personal habit tracking app. You are meeting ${name || "someone"} for the very first time.
 
 They just chose to track: ${habitName || "a habit"} (${habitType || "daily"} type).
 
@@ -64,6 +64,11 @@ Rules:
 - ${isOpener
     ? `This is your opening message. Welcome ${name || "them"} by name, reference ${habitName} specifically, and end with ONE targeted question — something that actually tells you useful information about their relationship with this habit. Not "what are your goals?" — something more specific and interesting.`
     : `Respond to what they actually said. Don't always ask another question. Sometimes just say something real and direct. Keep the conversation moving forward.`}`;
+
+  const arcIdentityTrimmed = typeof arcIdentity === "string" ? arcIdentity.trim() : "";
+  if (arcIdentityTrimmed) {
+    system += `\n\nThis person just defined an 8-week Arc — they said they're becoming: ${arcIdentityTrimmed}. Reference it naturally in your opener.`;
+  }
 
   // For the opener, use a neutral trigger so the assistant goes first.
   // For follow-ups, the caller sends the alternating conversation history,

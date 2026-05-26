@@ -245,6 +245,7 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
             habitName: firstHabit.name,
             habitType: firstHabit.habitType,
             messages: [],
+            ...(arcIdentity.trim() ? { arcIdentity: arcIdentity.trim() } : {}),
           }),
         });
         clearTimeout(tid);
@@ -460,6 +461,7 @@ After creating, tell them they can log from Today and chat with you anytime.`;
           habitName: firstHabit?.name || "",
           habitType: firstHabit?.habitType || "daily",
           messages: apiMessages,
+          ...(arcIdentity.trim() ? { arcIdentity: arcIdentity.trim() } : {}),
         }),
       });
 
