@@ -55,6 +55,7 @@ async function handler(req, res) {
     arc,
     existingHabits = [],
     isExistingUser = false,
+    isEditMode = false,
   } = req.body || {};
 
   // Defense-in-depth: cap the incoming message history. Onboarding never needs
@@ -123,9 +124,11 @@ Fields filled so far: ${filledCount} of 4.`;
     ? `\nYOU HAVE HIT YOUR QUESTION LIMIT. You MUST emit an <arc_draft> block this turn — no more questions, no exceptions. If a field is genuinely missing, fill it with the most reasonable inference from what they've already told you.`
     : `\nQuestions remaining: ${turnsRemaining}. If you can already infer the five fields with confidence, emit the <arc_draft> block now instead of asking another question. Don't drag this out.`;
 
-  const meetLine = isExistingUser === true
-    ? `You're helping ${name || "someone"} start a new 8-week Arc. They already use Forged — treat their existing habits as real.`
-    : `You're meeting ${name || "someone"} for the first time.`;
+  const meetLine = isEditMode === true
+    ? `You're helping ${name || "someone"} adjust their active 8-week Arc. They already use Forged — treat their existing habits as real. Do not suggest deleting or archiving habits.`
+    : isExistingUser === true
+      ? `You're helping ${name || "someone"} start a new 8-week Arc. They already use Forged — treat their existing habits as real.`
+      : `You're meeting ${name || "someone"} for the first time.`;
 
   const system = `You are ${coachName || "a habit coach"} — the AI coach inside Forged. ${meetLine} Your one job in this conversation is to help them build their 8-week Arc and then HAND OFF with a draft they can confirm.
 

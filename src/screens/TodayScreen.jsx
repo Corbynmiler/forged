@@ -433,7 +433,59 @@ function isProofForArc(habit, blockId) {
 }
 
 // ── Arc strip + detail modal ───────────────────────────────────────────────
-function ArcStrip({ activeBlock }) {
+function AddProofActionSheet({ activeBlock, habits, onClose, onSelectHabit, onCreateNew }) {
+  const linkable = (habits || []).filter(
+    h => h.habitType !== "log" && !(h.isProofAction === true && h.blockId === activeBlock.id),
+  );
+
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ fontFamily: T.serif, fontSize: 20, color: T.text, marginBottom: 8 }}>Add proof action</div>
+      <div style={{ fontSize: 13, color: T.muted, lineHeight: 1.6, marginBottom: 16 }}>
+        Pick an existing habit to count toward this Arc, or create a new one.
+      </div>
+      {linkable.length > 0 ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+          {linkable.map(h => (
+            <button
+              key={h.id}
+              type="button"
+              onClick={() => onSelectHabit(h.id)}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", gap: 12,
+                padding: "11px 12px", borderRadius: T.rsm, border: `0.5px solid ${T.border}`,
+                background: T.surface, cursor: "pointer", textAlign: "left", fontFamily: T.font,
+              }}
+            >
+              <span style={{ fontSize: 16, flexShrink: 0 }}>{h.emoji || "•"}</span>
+              <span style={{ fontSize: 14, color: T.text, fontWeight: 500, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {h.name}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div style={{ fontSize: 13, color: T.muted, lineHeight: 1.55, marginBottom: 14, padding: "10px 12px", borderRadius: T.rsm, border: `0.5px dashed ${T.border}`, background: T.surface }}>
+          No other habits to link yet.
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={onCreateNew}
+        style={{
+          width: "100%", padding: 13, borderRadius: T.rsm, border: "none",
+          background: T.accent, color: "#fff", fontSize: 14, fontWeight: 600,
+          cursor: "pointer", fontFamily: T.font, marginBottom: 8,
+        }}
+      >
+        Create new habit
+      </button>
+      <GBtn onClick={onClose}>Cancel</GBtn>
+    </Modal>
+  );
+}
+
+function ArcStrip({ activeBlock, onEditArc }) {
   const [open, setOpen] = useState(false);
   const { dayX, week, progress } = arcDayInfo(activeBlock);
 
@@ -488,7 +540,19 @@ function ArcStrip({ activeBlock }) {
               <div style={{ fontSize:14, color:T.sub, lineHeight:1.6 }}>{activeBlock.minimumProof}</div>
             </div>
           ) : null}
-          <div style={{ fontSize:12, color:T.hint, marginBottom:8 }}>Tap to edit (soon)</div>
+          {onEditArc ? (
+            <button
+              type="button"
+              onClick={() => { setOpen(false); onEditArc(); }}
+              style={{
+                width: "100%", padding: 12, borderRadius: T.rsm, border: `0.5px solid ${T.border}`,
+                background: "rgba(200,144,42,0.12)", color: T.gold, fontSize: 14, fontWeight: 600,
+                cursor: "pointer", fontFamily: T.font, marginBottom: 8,
+              }}
+            >
+              Edit my Arc →
+            </button>
+          ) : null}
           <GBtn onClick={() => setOpen(false)}>Close</GBtn>
         </Modal>
       )}
@@ -551,7 +615,10 @@ export function TodayScreen({
   activeBlock = null,
   arcProofSyncing = false,
   onStartArc = null,
+  onEditArc = null,
+  onLinkProofHabit = null,
 }) {
+  const [showProofPicker, setShowProofPicker] = useState(false);
   const [briefPreview, setBriefPreview] = useState(null);
   useEffect(() => {
     try {
@@ -724,7 +791,19 @@ export function TodayScreen({
           </span>
         </button>
       )}
-      {arcActive && <ArcStrip activeBlock={activeBlock} />}
+      {arcActive && <ArcStrip activeBlock={activeBlock} onEditArc={onEditArc} />}
+      {showProofPicker && activeBlock && (
+        <AddProofActionSheet
+          activeBlock={activeBlock}
+          habits={habits}
+          onClose={() => setShowProofPicker(false)}
+          onSelectHabit={async (id) => {
+            setShowProofPicker(false);
+            if (onLinkProofHabit) await onLinkProofHabit(id);
+          }}
+          onCreateNew={() => { setShowProofPicker(false); onAdd?.(); }}
+        />
+      )}
       {onOpenCoachMic && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic} habitCompletionPercentage={pct} habitsLoggedTodayCount={loggedCount} totalTrackables={totalTrackables}/>}
       {loggedCount === 0 && !arcActive && <YesterdayReceiptCard entry={yesterdayJournalEntry} />}
       {showBriefHook && (
@@ -883,8 +962,11 @@ export function TodayScreen({
         );
 
         const proofEmptyCard = arcActive && proofTotal === 0 && !arcProofSyncing && (
-          <button type="button" onClick={onAdd}
-            style={{ display:"flex", alignItems:"center", gap:14, margin:"0 14px 10px", width:"calc(100% - 28px)", padding:"14px 16px", borderRadius:T.r, border:`0.5px dashed ${T.borderStrong}`, background:T.surface, cursor:"pointer", textAlign:"left", fontFamily:T.font }}>
+          <button
+            type="button"
+            onClick={() => (onLinkProofHabit ? setShowProofPicker(true) : onAdd?.())}
+            style={{ display:"flex", alignItems:"center", gap:14, margin:"0 14px 10px", width:"calc(100% - 28px)", padding:"14px 16px", borderRadius:T.r, border:`0.5px dashed ${T.borderStrong}`, background:T.surface, cursor:"pointer", textAlign:"left", fontFamily:T.font }}
+          >
             <div style={{ flex:1 }}>
               <div style={{ fontSize:14, fontWeight:500, color:T.text, marginBottom:2 }}>Add proof actions to make this Arc active</div>
               <div style={{ fontSize:12, color:T.muted, lineHeight:1.5 }}>Pick three to five habits that prove who you&apos;re becoming.</div>
@@ -902,6 +984,21 @@ export function TodayScreen({
                 {proofLimit.map(h => <LimitCard key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} onLowerBudget={onLowerBudget} onOpenCoachWithDraft={onOpenCoachWithDraft}/>)}
                 {proofWeekly.map(h => <WeeklyCard key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id}/>)}
                 {proofProject.map(h => <ProjectCard key={h.id} habit={h} onOpenLog={onOpenLog} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id}/>)}
+                {onLinkProofHabit && (
+                  <button
+                    type="button"
+                    onClick={() => setShowProofPicker(true)}
+                    style={{
+                      display: "block", width: "calc(100% - 28px)", margin: "0 14px 12px",
+                      padding: "10px 14px", borderRadius: T.rsm,
+                      border: `0.5px dashed rgba(200,144,42,0.4)`,
+                      background: "rgba(200,144,42,0.06)", cursor: "pointer",
+                      fontFamily: T.font, textAlign: "left", boxSizing: "border-box",
+                    }}
+                  >
+                    <span style={{ fontSize: 13, fontWeight: 600, color: T.gold }}>+ Add proof action</span>
+                  </button>
+                )}
               </>
         );
 
@@ -926,19 +1023,32 @@ export function TodayScreen({
         );
       })()}
       {onAddTask && (
-        <LooseEndsSection
-          tasks={tasks}
-          today={today}
-          onAdd={onAddTask}
-          onComplete={onCompleteTask}
-          onPin={onPinTask}
-          onDelete={onDeleteTask}
-        />
+        arcActive ? (
+          <SectionCollapsible label="Loose ends" defaultOpen={false}>
+            <LooseEndsSection
+              tasks={tasks}
+              today={today}
+              onAdd={onAddTask}
+              onComplete={onCompleteTask}
+              onPin={onPinTask}
+              onDelete={onDeleteTask}
+            />
+          </SectionCollapsible>
+        ) : (
+          <LooseEndsSection
+            tasks={tasks}
+            today={today}
+            onAdd={onAddTask}
+            onComplete={onCompleteTask}
+            onPin={onPinTask}
+            onDelete={onDeleteTask}
+          />
+        )
       )}
       <div style={{ height:16 }}/>
       {!hideFloatingAdd && (trackHabits.length > 0 || activeGoals.length > 0 || logHabits.length > 0) && onAdd && (
         <button type="button" onClick={onAdd} aria-label="Add habit or goal" title="Add habit or goal"
-          style={{ position:"fixed", bottom:276, right:18, height:52, padding:"0 18px 0 16px", borderRadius:26, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:700, lineHeight:1, cursor:"pointer", zIndex:99, boxShadow:"0 4px 16px rgba(192,57,43,0.35)", display:"flex", alignItems:"center", justifyContent:"center", gap:7, fontFamily:T.font }}>
+          style={{ position:"fixed", bottom: arcActive ? 288 : 276, right:18, height:52, padding:"0 18px 0 16px", borderRadius:26, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:700, lineHeight:1, cursor:"pointer", zIndex:99, boxShadow:"0 4px 16px rgba(192,57,43,0.35)", display:"flex", alignItems:"center", justifyContent:"center", gap:7, fontFamily:T.font }}>
           <span style={{ fontSize:22, fontWeight:700, lineHeight:1, marginTop:1 }} aria-hidden>+</span>
           <span>Add habit</span>
         </button>

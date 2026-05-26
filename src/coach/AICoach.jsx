@@ -132,7 +132,16 @@ export function CoachBar({
         transition:"box-shadow 0.2s, border-top-color 0.2s",
       }}
     >
-      <div style={{ flex:1, display:"flex", justifyContent:"flex-start", alignItems:"center", minWidth:0 }}>
+      <button
+        type="button"
+        onClick={() => onOpenText?.()}
+        aria-label={`Open chat with ${coachLabelRaw}`}
+        title="Open chat"
+        style={{
+          flex:1, display:"flex", justifyContent:"flex-start", alignItems:"center", minWidth:0,
+          background:"none", border:"none", cursor:"pointer", padding:0, fontFamily:T.font, textAlign:"left",
+        }}
+      >
         {/* Fixed-width column: icon left-aligned above left-aligned wrapped name. */}
         <div style={{
           display:"flex", flexDirection:"column", alignItems:"flex-start", gap:4,
@@ -175,7 +184,7 @@ export function CoachBar({
             "{listeningInterim}"
           </span>
         )}
-      </div>
+      </button>
       <button
         type="button"
         onPointerDown={(e) => {
@@ -231,12 +240,12 @@ export function CoachBar({
           </svg>
         )}
       </button>
-      <div style={{ flex:1, display:"flex", justifyContent:"flex-end", alignItems:"center" }}>
+      <div style={{ flex:1, display:"flex", flexDirection:"column", justifyContent:"center", alignItems:"flex-end", gap:3, minWidth:44 }}>
         <button
           type="button"
-          onClick={onOpenText}
-          aria-label={`${coachLabelRaw} — type`}
-          title="Type"
+          onClick={() => onOpenText?.()}
+          aria-label={`${coachLabelRaw} — open chat`}
+          title="Open chat"
           style={{
             width:32, height:32, borderRadius:10,
             border:`0.5px solid ${T.borderStrong}`,
@@ -251,6 +260,7 @@ export function CoachBar({
             <path d="M8 10h8M8 14h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
           </svg>
         </button>
+        <span style={{ fontSize:9, fontWeight:600, color:T.muted, letterSpacing:"0.04em", lineHeight:1 }}>Chat</span>
       </div>
     </div>
     </div>
@@ -2736,7 +2746,7 @@ function GoalPlanPreview({ plan, onConfirm, onDismiss }) {
   );
 }
 
-export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, coachIcon, coachAccentColor, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onGoalLogged, onHabitRenamed, onGoalPlanConfirm, onJournalLogged, journalEntries = [], openInputMode = null, pendingMessage = null, onNavigateTo = null, activeBlock = null }) {
+export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, coachIcon, coachAccentColor, currentScreen, onHabitCreated, onGoalCreated, onHabitLogged, onGoalLogged, onHabitRenamed, onGoalPlanConfirm, onJournalLogged, journalEntries = [], openInputMode = null, pendingMessage = null, onNavigateTo = null, activeBlock = null, onOpenEditArc = null }) {
   useScrollLock(true);
   const cName = coachName || "Coach";
   const isCreatorUser = user?.id === CREATOR_ID;
@@ -3196,6 +3206,9 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
                 const hasGoals  = (goals || []).some(g => g.status !== "completed");
                 const firstHabit = habits[0];
                 const starters = [];
+                if (activeBlock?.id && onOpenEditArc) {
+                  starters.push("Edit my Arc");
+                }
                 // Goal planning first when the user has no goals — most impactful action
                 if (!hasGoals) {
                   starters.push("Help me set a goal");
@@ -3223,7 +3236,13 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
                         <button
                           key={i}
                           type="button"
-                          onClick={() => send(s)}
+                          onClick={() => {
+                            if (s === "Edit my Arc" && onOpenEditArc) {
+                              onOpenEditArc();
+                              return;
+                            }
+                            send(s);
+                          }}
                           disabled={loading || atFreeCap}
                           style={{
                             padding:"7px 12px",

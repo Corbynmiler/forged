@@ -27,14 +27,14 @@ function apiMessagesFromUi(msgs) {
   return trimmed;
 }
 
-function buildRequestBody({ name, coachName, messages, existingHabits }) {
+function buildRequestBody({ name, coachName, messages, existingHabits, arc, isEditMode }) {
   return {
     name: name || "there",
     coachName: coachName || "Coach",
     habitName: "",
     habitType: "daily",
     messages,
-    arc: { identity: "", why: "", oldPattern: "", minimumProof: "" },
+    arc: arc || { identity: "", why: "", oldPattern: "", minimumProof: "" },
     existingHabits: (existingHabits || []).map(h => ({
       id: h.id,
       name: h.name,
@@ -43,6 +43,7 @@ function buildRequestBody({ name, coachName, messages, existingHabits }) {
       isProofAction: !!h.isProofAction,
     })),
     isExistingUser: true,
+    isEditMode: !!isEditMode,
   };
 }
 
@@ -128,7 +129,18 @@ export default function ArcCoachSheet({
   coachIcon,
   name,
   supabase,
+  mode = "create",
+  activeBlock = null,
 }) {
+  const isEdit = mode === "edit" && !!activeBlock?.id;
+  const arcPayload = isEdit
+    ? {
+        identity: activeBlock.identity || "",
+        why: activeBlock.whyStatement || "",
+        oldPattern: activeBlock.oldPattern || "",
+        minimumProof: activeBlock.minimumProof || "",
+      }
+    : { identity: "", why: "", oldPattern: "", minimumProof: "" };
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -153,6 +165,14 @@ export default function ArcCoachSheet({
   useEffect(() => {
     if (openerFetched.current) return;
     openerFetched.current = true;
+    if (isEdit) {
+      setMsgs([{
+        role: "assistant",
+        content: "Want to adjust the identity, the proof actions, or the bad-day minimum?",
+      }]);
+      setLoadingOpener(false);
+      return;
+    }
     (async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -164,7 +184,9 @@ export default function ArcCoachSheet({
         const res = await fetch("/api/onboard-chat", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify(buildRequestBody({ name, coachName: coachDisplay, messages: [], existingHabits })),
+          body: JSON.stringify(buildRequestBody({
+            name, coachName: coachDisplay, messages: [], existingHabits, arc: arcPayload,
+          })),
         });
         if (res.ok) {
           const j = await res.json();
@@ -175,7 +197,7 @@ export default function ArcCoachSheet({
           }
           if (typeof j.prior_assistant_turns === "number") setPriorTurns(j.prior_assistant_turns);
         }
-      } catch { /* user can still type */ }
+      } catch { /* user can still text */ }
       setLoadingOpener(false);
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -193,6 +215,8 @@ export default function ArcCoachSheet({
         coachName: coachDisplay,
         messages: apiMessagesFromUi(nextMsgs),
         existingHabits,
+        arc: arcPayload,
+        isEditMode: isEdit,
       })),
     });
     if (!res.ok) {
@@ -228,69 +252,93 @@ export default function ArcCoachSheet({
     }
   }
 
-  async function useArc() {
+  async function applyProofActionsFromDraft(blockId, nowIso) {
+    const { matched, unmatched } = resolveProofActionHabits(arcDraft.proofActions || [], existingHabits);
+    const habitsPatch = [];
+    const toLink = matched.filter(m => !(m.habit.blockId === blockId && m.habit.isProofAction));
+    const matchedIds = toLink.map(m => m.habit.id);
+
+    if (matchedIds.length > 0) {
+      const { error: updErr } = await supabase
+        .from("habits")
+        .update({ block_id: blockId, is_proof_action: true, updated_at: nowIso })
+        .eq("user_id", userId)
+        .in("id", matchedIds);
+      if (updErr) throw updErr;
+      for (const { habit } of toLink) {
+        habitsPatch.push({ ...habit, blockId, isProofAction: true });
+      }
+    }
+
+    for (const proofName of unmatched) {
+      const draftHabit = buildNewProofHabit(proofName, blockId);
+      const { data: row, error: createErr } = await supabase
+        .from("habits")
+        .insert(habitToRow(draftHabit, userId))
+        .select("*")
+        .single();
+      if (createErr) throw createErr;
+      habitsPatch.push(rowToHabit(row));
+    }
+    return habitsPatch;
+  }
+
+  async function confirmArc() {
     if (!arcDraft?.identity?.trim() || !userId || !supabase || saving) return;
     setSaving(true);
     setSaveError("");
     onSyncStart?.();
 
     try {
-      const startDate = todayStr();
-      const endDate = addDaysLocalYmd(startDate, 56);
       const nowIso = new Date().toISOString();
+      let blockRow;
 
-      const { data: blockRow, error: insErr } = await supabase
-        .from("forge_blocks")
-        .insert({
-          user_id: userId,
-          identity: arcDraft.identity.trim(),
-          why_statement: (arcDraft.why || "").trim() || null,
-          old_pattern: (arcDraft.oldPattern || "").trim() || null,
-          minimum_proof: (arcDraft.minimumProof || "").trim() || null,
-          start_date: startDate,
-          end_date: endDate,
-          status: "active",
-          duration_days: 56,
-          updated_at: nowIso,
-        })
-        .select("*")
-        .single();
-
-      if (insErr) throw insErr;
-      if (!blockRow?.id) throw new Error("Arc insert failed");
-
-      const blockId = blockRow.id;
-      const { matched, unmatched } = resolveProofActionHabits(arcDraft.proofActions || [], existingHabits);
-      const habitsPatch = [];
-
-      const matchedIds = matched.map(m => m.habit.id);
-      if (matchedIds.length > 0) {
-        const { error: updErr } = await supabase
-          .from("habits")
-          .update({ block_id: blockId, is_proof_action: true, updated_at: nowIso })
+      if (isEdit) {
+        const { data, error: updErr } = await supabase
+          .from("forge_blocks")
+          .update({
+            identity: arcDraft.identity.trim(),
+            why_statement: (arcDraft.why || "").trim() || null,
+            old_pattern: (arcDraft.oldPattern || "").trim() || null,
+            minimum_proof: (arcDraft.minimumProof || "").trim() || null,
+            updated_at: nowIso,
+          })
+          .eq("id", activeBlock.id)
           .eq("user_id", userId)
-          .in("id", matchedIds);
-        if (updErr) throw updErr;
-        for (const { habit } of matched) {
-          habitsPatch.push({ ...habit, blockId, isProofAction: true });
-        }
-      }
-
-      for (const proofName of unmatched) {
-        const draftHabit = buildNewProofHabit(proofName, blockId);
-        const { data: row, error: createErr } = await supabase
-          .from("habits")
-          .insert(habitToRow(draftHabit, userId))
           .select("*")
           .single();
-        if (createErr) throw createErr;
-        habitsPatch.push(rowToHabit(row));
+        if (updErr) throw updErr;
+        if (!data?.id) throw new Error("Arc update failed");
+        blockRow = data;
+      } else {
+        const startDate = todayStr();
+        const endDate = addDaysLocalYmd(startDate, 56);
+        const { data, error: insErr } = await supabase
+          .from("forge_blocks")
+          .insert({
+            user_id: userId,
+            identity: arcDraft.identity.trim(),
+            why_statement: (arcDraft.why || "").trim() || null,
+            old_pattern: (arcDraft.oldPattern || "").trim() || null,
+            minimum_proof: (arcDraft.minimumProof || "").trim() || null,
+            start_date: startDate,
+            end_date: endDate,
+            status: "active",
+            duration_days: 56,
+            updated_at: nowIso,
+          })
+          .select("*")
+          .single();
+        if (insErr) throw insErr;
+        if (!data?.id) throw new Error("Arc insert failed");
+        blockRow = data;
       }
 
+      const habitsPatch = await applyProofActionsFromDraft(blockRow.id, nowIso);
       if (onCreated) await onCreated({ block: blockRow, habitsPatch });
       onClose();
     } catch (e) {
-      setSaveError(e?.message || "Could not start Arc");
+      setSaveError(e?.message || (isEdit ? "Could not update Arc" : "Could not start Arc"));
     } finally {
       setSaving(false);
     }
@@ -309,7 +357,7 @@ export default function ArcCoachSheet({
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>{coachDisplay}</div>
-          <div style={{ fontSize: 11, color: T.gold, marginTop: 1 }}>8-week Arc setup</div>
+          <div style={{ fontSize: 11, color: T.gold, marginTop: 1 }}>{isEdit ? "Edit your Arc" : "8-week Arc setup"}</div>
         </div>
         <button
           type="button"
@@ -415,17 +463,17 @@ export default function ArcCoachSheet({
           <>
             <button
               type="button"
-              onClick={useArc}
-              disabled={saving}
-              style={{
-                width: "100%", padding: 15, borderRadius: T.rsm, border: "none",
-                background: T.gold, color: "#0F0F0D",
-                fontSize: 16, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer",
-                opacity: saving ? 0.7 : 1, fontFamily: T.font,
-              }}
-            >
-              {saving ? "Starting Arc…" : "Use this Arc →"}
-            </button>
+                onClick={confirmArc}
+                disabled={saving}
+                style={{
+                  width: "100%", padding: 15, borderRadius: T.rsm, border: "none",
+                  background: T.gold, color: "#0F0F0D",
+                  fontSize: 16, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer",
+                  opacity: saving ? 0.7 : 1, fontFamily: T.font,
+                }}
+              >
+                {saving ? (isEdit ? "Saving…" : "Starting Arc…") : (isEdit ? "Save changes →" : "Use this Arc →")}
+              </button>
             <button
               type="button"
               onClick={() => { setArcDraft(null); setSaveError(""); }}
@@ -451,7 +499,7 @@ export default function ArcCoachSheet({
             Cancel
           </button>
         )}
-        {onUseFormInstead && (
+        {!isEdit && onUseFormInstead && (
           <button
             type="button"
             onClick={onUseFormInstead}
