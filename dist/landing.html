@@ -3,7 +3,11 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Forged — Track the why. Not just the what.</title>
+<title>Forged — Become a slightly different person in 8 weeks</title>
+<meta name="description" content="Define your Arc. Show daily proof. An AI coach that remembers who you said you're becoming."/>
+<meta property="og:title" content="Forged — Become a slightly different person in 8 weeks"/>
+<meta property="og:description" content="Define your Arc. Show daily proof. An AI coach that remembers who you said you're becoming."/>
+<meta property="og:image" content="/icon-512.png"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 <style>
@@ -298,6 +302,28 @@ h1.hero-head em { font-style: italic; color: var(--accent); }
 .cta-btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-bottom: 14px; }
 .cta-note { font-size: 12px; color: var(--muted); }
 
+/* ── ARC EXAMPLE ── */
+.arc-example-section { padding: 0 28px 56px; }
+.arc-example-card {
+  background: var(--raised); border: 0.5px solid var(--border2);
+  border-radius: 16px; padding: 22px 24px; max-width: 640px;
+}
+.arc-example-label {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--gold); margin-bottom: 16px;
+}
+.arc-example-row { margin-bottom: 14px; }
+.arc-example-row:last-child { margin-bottom: 0; }
+.arc-example-k {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 4px;
+}
+.arc-example-v { font-size: 14px; color: var(--text); line-height: 1.55; }
+.arc-example-progress {
+  margin-top: 16px; padding-top: 14px; border-top: 0.5px solid var(--border);
+  font-family: var(--mono); font-size: 12px; color: var(--sub); letter-spacing: 0.02em;
+}
+
 /* ── FOOTER ── */
 footer {
   padding: 32px 28px;
@@ -318,7 +344,7 @@ footer {
 @media (max-width: 640px) {
   nav { padding: 14px 18px; }
   .hero { padding: 56px 20px 64px; }
-  .how-section, .why-section, .cta-section { padding-left: 20px; padding-right: 20px; }
+  .how-section, .why-section, .cta-section, .arc-example-section { padding-left: 20px; padding-right: 20px; }
   .pwa-section { padding-left: 20px; padding-right: 20px; }
   .pwa-grid { grid-template-columns: 1fr; }
   .why-cols { grid-template-columns: 1fr; }
@@ -345,21 +371,21 @@ footer {
   <div class="hero-glow"></div>
   <div class="hero-glow-2"></div>
 
-  <p class="hero-eyebrow">Habit tracker · AI coach · Daily journal</p>
-  <h1 class="hero-head">Track the <em>why.</em><br/>Not just the what.</h1>
-  <p class="hero-sub">Log your day by typing or talking. Forged turns it into habits, a journal, and real patterns — so you finally understand why you keep slipping.</p>
+  <p class="hero-eyebrow">8-week Arcs · Proof actions · AI coach</p>
+  <h1 class="hero-head">Become a slightly different <em>person</em><br/>in 8 weeks.</h1>
+  <p class="hero-sub">Define your Arc — who you're becoming and why. Show one piece of proof a day. An AI coach that remembers what you said.</p>
 
   <div class="hero-actions">
-    <a href="https://forged-sage.vercel.app?signup" class="btn-primary">Join the beta — no card needed →</a>
+    <a href="https://forged-sage.vercel.app?signup" class="btn-primary">Start your first Arc — free →</a>
     <a href="#how" class="btn-ghost">See how it works ↓</a>
   </div>
-  <p class="hero-note">No card required · Takes 60 seconds to set up</p>
+  <p class="hero-note">No card required · 60 seconds to set up</p>
 </section>
 
 <!-- HOW IT WORKS -->
 <section class="how-section" id="how">
   <p class="section-label gold reveal">How it works</p>
-  <h2 class="section-head reveal">Sixty seconds a day</h2>
+  <h2 class="section-head reveal">How an Arc works</h2>
 
   <div class="how-cards">
 
@@ -367,8 +393,8 @@ footer {
     <div class="how-card reveal">
       <div class="how-card-label">
         <div class="how-card-num">01</div>
-        <div class="how-card-title">Just talk. Or type. Whatever.</div>
-        <p class="how-card-desc">Hit the mic, ramble about your day — the AI coach sorts it into your habits and logs for you. No tapping required.</p>
+        <div class="how-card-title">Define your Arc</div>
+        <p class="how-card-desc">Who you're becoming. Why it matters. The bare minimum on bad days.</p>
       </div>
       <div class="phone-frame">
         <div class="phone-notch"></div>
@@ -382,8 +408,8 @@ footer {
     <div class="how-card reveal">
       <div class="how-card-label">
         <div class="how-card-num">02</div>
-        <div class="how-card-title">Your journal writes itself</div>
-        <p class="how-card-desc">Log habits, chat to your coach, add notes — then tap once and your entry is written.</p>
+        <div class="how-card-title">Show proof daily</div>
+        <p class="how-card-desc">Three to five proof actions. Logged by voice, type, or tap.</p>
       </div>
       <div class="phone-frame">
         <div class="phone-notch"></div>
@@ -397,8 +423,8 @@ footer {
     <div class="how-card reveal">
       <div class="how-card-label">
         <div class="how-card-num">03</div>
-        <div class="how-card-title">See what's really happening</div>
-        <p class="how-card-desc">Wins, patterns, what to try tomorrow — found in your own words, not generic stats.</p>
+        <div class="how-card-title">Coach + review</div>
+        <p class="how-card-desc">An AI coach that remembers, and a weekly Arc Review.</p>
       </div>
       <div class="phone-frame">
         <div class="phone-notch"></div>
@@ -414,25 +440,25 @@ footer {
 <!-- WHY DIFFERENT -->
 <section class="why-section">
   <p class="section-label reveal">Why it's different</p>
-  <h2 class="section-head reveal">Most apps track.<br/>Forged <em>explains</em></h2>
+  <h2 class="section-head reveal">Trackers run forever.<br/>An <em>Arc</em> doesn't.</h2>
 
   <div class="why-cols reveal">
     <div class="why-col">
-      <div class="why-col-label normal">Normal habit tracker</div>
+      <div class="why-col-label normal">Habit tracker</div>
       <ul class="why-list">
-        <li>Missed habit</li>
-        <li>Broken streak</li>
-        <li>Generic stats</li>
-        <li>No idea why</li>
+        <li>Perpetual</li>
+        <li>Numbers only</li>
+        <li>No end, no review</li>
+        <li>Just another streak</li>
       </ul>
     </div>
     <div class="why-col forged">
       <div class="why-col-label forged-l">Forged</div>
       <ul class="why-list">
-        <li>Logs the context</li>
-        <li>Writes your journal</li>
-        <li>Finds the pattern</li>
-        <li>Tells you why</li>
+        <li>8-week Arc with a real end</li>
+        <li>Proof actions tied to identity</li>
+        <li>AI coach that remembers</li>
+        <li>Arc Review every Sunday</li>
       </ul>
     </div>
   </div>
@@ -511,13 +537,29 @@ footer {
   </div>
 </div>
 
+<!-- ARC EXAMPLE -->
+<section class="arc-example-section">
+  <div class="arc-example-card reveal">
+    <div class="arc-example-label">An Arc looks like this</div>
+    <div class="arc-example-row">
+      <div class="arc-example-k">Identity</div>
+      <div class="arc-example-v">Fitter, sharper, building income outside my job.</div>
+    </div>
+    <div class="arc-example-row">
+      <div class="arc-example-k">Proof actions</div>
+      <div class="arc-example-v">Workout · Build · Eat properly · Limit weed</div>
+    </div>
+    <div class="arc-example-progress">Day 17 of 56 — 12 of 17 days showed proof</div>
+  </div>
+</section>
+
 <!-- BETA CTA -->
 <section class="cta-section">
   <p class="cta-eyebrow reveal">Early beta</p>
   <h2 class="cta-head reveal">Free to start.<br/><em>Help shape it</em></h2>
   <p class="cta-sub reveal">Join a small group building Forged from the ground up. No card, no pressure.</p>
   <div class="cta-btns reveal">
-    <a href="https://forged-sage.vercel.app?signup" class="btn-primary lg">Join the beta →</a>
+    <a href="https://forged-sage.vercel.app?signup" class="btn-primary lg">Start your first 8-week Arc — free →</a>
     <a href="https://forged-sage.vercel.app" class="btn-gold">Sign in</a>
   </div>
   <p class="cta-note reveal">No card required · Free during beta · Pro plan coming soon</p>
