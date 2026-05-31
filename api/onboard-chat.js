@@ -5,7 +5,7 @@ import { withSentry } from "./_lib/sentry.js";
 const SUPABASE_URL = "https://apdmvbzfjuvxworjepze.supabase.co";
 // Anon key is public — safe to hardcode (matches src/supabase.js).
 const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFwZG12YnpmanV2eHdvcmplcHplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MzU4MzAsImV4cCI6MjA5MDIxMTgzMH0.s3O-0m7eN9dLTmCagjezHP4Wwn8fdtlCyXITkI82bPU";
+  "sb_publishable_GdMepnUv2W4VRiOuV23xiA_O4J11RMl";
 
 // Cap message history sent to Anthropic. Mirrors api/chat.js (messages.slice(-12))
 // so a single onboarding session can't be abused into an unbounded thread.

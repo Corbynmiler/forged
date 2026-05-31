@@ -42,7 +42,7 @@ async function handler(req, res) {
 
   // Anon key — safe to use server-side; RLS policy allows public inserts on beta_signups
   const supabaseUrl = "https://apdmvbzfjuvxworjepze.supabase.co";
-  const anonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFwZG12YnpmanV2eHdvcmplcHplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MzU4MzAsImV4cCI6MjA5MDIxMTgzMH0.s3O-0m7eN9dLTmCagjezHP4Wwn8fdtlCyXITkI82bPU";
+  const anonKey = "sb_publishable_GdMepnUv2W4VRiOuV23xiA_O4J11RMl";
 
   const clientBearer = (req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
   const bearer = clientBearer || anonKey;

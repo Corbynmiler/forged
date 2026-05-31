@@ -6,7 +6,7 @@ const SUPABASE_URL = "https://apdmvbzfjuvxworjepze.supabase.co";
 
 /** Same public anon key as `src/supabase.js` — JWT auth still required; allows API to work if Vercel env omits anon key. */
 const PUBLIC_ANON_FALLBACK =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFwZG12YnpmanV2eHdvcmplcHplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MzU4MzAsImV4cCI6MjA5MDIxMTgzMH0.s3O-0m7eN9dLTmCagjezHP4Wwn8fdtlCyXITkI82bPU";
+  "sb_publishable_GdMepnUv2W4VRiOuV23xiA_O4J11RMl";
 
 const anonKey =
   process.env.SUPABASE_ANON_KEY ||
