@@ -1781,12 +1781,44 @@ NEVER say: "future you", "the warrior in you", "the elite version", "your journe
 `;
 }
 
+function isHabitLoggedToday(h, today) {
+  return (h.logs || []).some(l => l.date === today && (
+    l.value === true || (typeof l.value === "number") || (l.value?.minutes > 0) || l.value === "skip"
+  ));
+}
+
+function buildTodaySnapshot(habits, goals, today) {
+  const trackable = (habits || []).filter(h => h.habitType !== "log");
+  const logged = [];
+  const pending = [];
+  for (const h of trackable) {
+    const label = `${h.emoji ? h.emoji + " " : ""}${h.name}`;
+    (isHabitLoggedToday(h, today) ? logged : pending).push(label);
+  }
+  for (const g of (goals || [])) {
+    const hit = (g.logs || []).some(l => l.date === today && typeof l.value === "number");
+    if (hit) logged.push(`${g.emoji ? g.emoji + " " : ""}${g.name} (goal)`);
+  }
+  // Phrase the snapshot so the model treats it as authoritative over any
+  // greeting/history language about "days since" or "silent" gaps — those
+  // strings can persist in the message thread after the user logs.
+  const loggedLine = logged.length ? `Logged today: ${logged.join(", ")}` : "Logged today: nothing yet";
+  const pendingLine = pending.length ? `Not yet today: ${pending.join(", ")}` : "";
+  return [
+    "─── LOGGED TODAY (snapshot at this message, authoritative) ───",
+    loggedLine,
+    pendingLine,
+    "If anything earlier in this thread implies a longer silent gap, the snapshot above is the current truth — use it.",
+  ].filter(Boolean).join("\n");
+}
+
 function buildCoachSystemPrompt(user, habits, coachName, screen, goals = [], journalEntries = [], activeBlock = null) {
   const name = user?.name || "there";
   const coach = coachName || "Coach";
   const today = todayStr();
   const isCreator = user?.id === CREATOR_ID;
   const arcBlock = buildArcSystemBlock(activeBlock, habits);
+  const todaySnapshot = buildTodaySnapshot(habits, goals, today);
 
   const habitSummaries = habits.map(h => {
     const type  = HABIT_TYPES[h.habitType]?.label || h.habitType;
@@ -1914,6 +1946,8 @@ When they mention "Forged", "the build", "the app", "shipping something", or "wo
   return `You are ${coach}, talking with ${name} inside the Forged habit app.
 
 ${arcBlock}Today: ${today} | Screen: ${screenCtx[screen] || "app"}
+
+${todaySnapshot}
 
 Habits:
 ${habitSummaries || "None yet."}
@@ -2948,8 +2982,9 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
       const used = applyCoachRemainingFromServer(serverRemaining);
       setFreeCoachMsgsToday(used != null ? used : bumpCoachMsgCountInStorage());
     };
-    // Do NOT clear input here — only clear after a successful completed response.
-    // This preserves the user's message for retry if the request fails.
+    // Clear input optimistically on submit — modern chat UX. The catch block
+    // restores the trimmed text via setInput(trimmed) on request failure, so
+    // nothing is lost if the network call doesn't complete.
     setError(null);
     const sendDay = todayStr();
     let baseMessages = messages;
@@ -2966,6 +3001,7 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
       : [...baseMessages, userMsg];
     setMessages(next);
     if (user?.id) saveCoachDayMessages(user.id, sendDay, next);
+    setInput("");
     setLoading(true);
     setIsExecutingAction(false);
     try {
@@ -3038,10 +3074,8 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
                 bottomRef.current?.scrollIntoView({ behavior: "smooth" });
               }
               if (evt.done) {
-                // Always clear input on done — whether success or partial-success.
-                // Tools may have already saved data; clearing prevents accidental re-send.
-                setInput("");
-
+                // Input was cleared optimistically on submit; do NOT clear here —
+                // streams can be long, and the user may have started typing the next message.
                 if (!evt.error) bumpAfterSuccess(evt.remaining);
 
                 const receiptBlock = evt.receipt && String(evt.receipt).trim()
@@ -3053,7 +3087,13 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
                 // Finalise — remove stream id marker; append server truth receipt (never model-invented)
                 const hadDumpActions = !!(evt.logged?.length || evt.noted?.length);
                 setMessages(prev => {
-                  const finalizedId = COACH_STREAM_ID;
+                  // Stamp a stream-unique id so the next send's streaming message
+                  // (also COACH_STREAM_ID) can't accidentally update this finalized
+                  // bubble via the chunk-handler's prev.map(m.id === COACH_STREAM_ID)
+                  // — that match was the source of the "prior message morphs/duplicates"
+                  // bug. saveCoachDayMessages also filters out COACH_STREAM_ID, so a
+                  // unique id is what lets the assistant turn persist to localStorage.
+                  const finalizedId = `coach_msg_${streamTs}`;
                   const nextMsgs = prev.map(m => m.id === COACH_STREAM_ID ? { role: "assistant", content: finalContent || fullText, ts: m.ts ?? Date.now(), id: finalizedId } : m);
                   if (user?.id) saveCoachDayMessages(user.id, doneDay, nextMsgs);
                   if (hadDumpActions) setWrapActionForMsgId(finalizedId);
@@ -3303,7 +3343,7 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
                           />
                         </div>
                       ) : null}
-                      {wrapActionForMsgId && (m.id === wrapActionForMsgId || (m.id === COACH_STREAM_ID && wrapActionForMsgId === COACH_STREAM_ID)) && onWrapToday ? (
+                      {wrapActionForMsgId && m.id === wrapActionForMsgId && onWrapToday ? (
                         <div style={{ marginTop:10, display:"flex", flexWrap:"wrap", gap:6 }}>
                           <button type="button" onClick={() => { setWrapActionForMsgId(null); onWrapToday(); }}
                             style={{ padding:"7px 12px", borderRadius:16, border:`0.5px solid ${T.accent}55`, background:"rgba(192,57,43,0.12)", color:T.accent, fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:T.font }}>
