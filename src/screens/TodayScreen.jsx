@@ -198,22 +198,104 @@ function parseReceiptFields(content) {
   return { title, pattern, tomorrow, missed };
 }
 
-function TodayReceiptCard({ entry, loggedCount, generating, onGenerate, onOpenJournal, onOpenCoachWithDraft }) {
+// ── First Proof micro-moment ──────────────────────────────────────────────
+// Fires once per day when the user logs their first proof action. Identity-bound
+// when an Arc is active. Localstorage-flagged so it shows only once per day.
+function FirstProofMicroMoment({ arcActive, activeBlock, loggedCount }) {
+  const [show, setShow] = useState(false);
+  const firedRef = useRef(false);
+
+  useEffect(() => {
+    if (!arcActive) return;
+    if (firedRef.current) return;
+    if (loggedCount < 1) return;
+    let alreadySeen = false;
+    try {
+      const today = todayStr();
+      const flag = `forged_first_proof_${today}`;
+      alreadySeen = localStorage.getItem(flag) === "1";
+      if (!alreadySeen) localStorage.setItem(flag, "1");
+    } catch (_) { /* ignore */ }
+    firedRef.current = true;
+    if (alreadySeen) return;
+    setShow(true);
+    const t = setTimeout(() => setShow(false), 5000);
+    return () => clearTimeout(t);
+  }, [loggedCount, arcActive]);
+
+  if (!show) return null;
+
+  const identity = String(activeBlock?.identity || "").trim();
+  const identityNoun = identity
+    ? identity.split(/[.,—!?]/)[0].trim()
+    : "";
+  const cleanNoun = identityNoun && identityNoun.length <= 50
+    ? identityNoun.charAt(0).toUpperCase() + identityNoun.slice(1)
+    : "";
+  const line = cleanNoun
+    ? `First proof in. ${cleanNoun} showed up today.`
+    : "First proof in. Today counts.";
+
+  return (
+    <div style={{
+      margin: "8px 14px 0",
+      padding: "10px 14px",
+      borderRadius: T.rsm,
+      background: "linear-gradient(90deg, rgba(39,174,96,0.18), rgba(200,144,42,0.10))",
+      border: "0.5px solid rgba(39,174,96,0.35)",
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      fontFamily: T.font,
+    }}>
+      <span aria-hidden style={{ fontSize: 14, lineHeight: 1, color: T.green, fontWeight: 700 }}>✓</span>
+      <div style={{ fontSize: 13, color: T.text, fontWeight: 500, lineHeight: 1.4, flex: 1 }}>
+        {line}
+      </div>
+    </div>
+  );
+}
+
+// TodayReceiptCard: when an Arc is active and we're past 7pm, this reframes as
+// a Night Verdict — identity line at top, bad-day-min row, "Tomorrow's first
+// proof" phrasing. Same underlying journal-generate data; no API change.
+function TodayReceiptCard({ entry, loggedCount, generating, onGenerate, onOpenJournal, onOpenCoachWithDraft, activeBlock = null, hourNow = 0 }) {
   if (loggedCount === 0) return null;
+  const arcActive = !!activeBlock?.id;
+  const isNight = hourNow >= 19;
+  const identity = arcActive ? String(activeBlock.identity || "").trim().slice(0, 110) : "";
+  const minimum = arcActive ? String(activeBlock.minimumProof || "").trim() : "";
+  const minHit = arcActive && loggedCount > 0 && !!minimum; // simple heuristic; refined in Phase 2
+  const eyebrowLabel = arcActive ? (isNight ? "Night verdict" : "Today's verdict") : "Today's receipt";
+  const eyebrowColor = arcActive ? T.gold : T.hint;
+  const borderColor = arcActive ? "rgba(200,144,42,0.4)" : T.border;
+
   if (entry) {
     const parsed = parseReceiptFields(entry.content);
     if (!parsed) return null;
-    // Show "add context" nudge when there are real missed habits (not "none", not "not tracked")
     const missedStr = (parsed.missed || "").toLowerCase().trim();
     const hasMissed = missedStr && missedStr !== "none" && !missedStr.startsWith("not tracked");
     const contextDraft = hasMissed
       ? `I want to add some context on today — ${parsed.missed} didn't make it in. Here's why:`
       : null;
     return (
-      <div style={{ margin:"0 14px 10px", borderRadius:T.r, border:`0.5px solid ${T.border}`, background:T.raised, overflow:"hidden" }}>
+      <div style={{ margin:"0 14px 10px", borderRadius:T.r, border:`0.5px solid ${borderColor}`, background:T.raised, overflow:"hidden" }}>
         <div style={{ padding:"14px 16px 12px" }}>
-          <div style={{ fontSize:10, fontWeight:700, color:T.hint, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:8 }}>Today's receipt</div>
-          <div style={{ fontSize:15, fontWeight:500, color:T.text, fontFamily:T.serif, marginBottom:parsed.pattern||parsed.tomorrow||hasMissed?10:0, lineHeight:1.35 }}>{parsed.title}</div>
+          <div style={{ fontSize:10, fontWeight:700, color:eyebrowColor, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:8 }}>{eyebrowLabel}</div>
+          {arcActive && identity ? (
+            <div style={{ fontSize:13, color:T.sub, fontStyle:"italic", fontFamily:T.serif, marginBottom:10, lineHeight:1.4 }}>
+              {identity}
+            </div>
+          ) : null}
+          <div style={{ fontSize:15, fontWeight:500, color:T.text, fontFamily:T.serif, marginBottom:(parsed.pattern||parsed.tomorrow||hasMissed||minimum)?10:0, lineHeight:1.35 }}>{parsed.title}</div>
+          {arcActive && minimum && (
+            <div style={{ display:"flex", gap:6, marginBottom:6, alignItems:"flex-start" }}>
+              <span style={{ fontSize:11, color: minHit ? T.green : T.amber, fontWeight:700, marginTop:2, flexShrink:0 }}>{minHit ? "✓" : "·"}</span>
+              <div style={{ fontSize:13, color:T.sub, lineHeight:1.5 }}>
+                <span style={{ color:T.muted, marginRight:4 }}>Bad-day min:</span>{minimum}
+              </div>
+            </div>
+          )}
           {parsed.pattern && (
             <div style={{ display:"flex", gap:6, marginBottom:6, alignItems:"flex-start" }}>
               <span style={{ fontSize:11, color:T.accent, fontWeight:700, marginTop:2, flexShrink:0 }}>◎</span>
@@ -226,7 +308,7 @@ function TodayReceiptCard({ entry, loggedCount, generating, onGenerate, onOpenJo
             <div style={{ display:"flex", gap:6, marginBottom:hasMissed?8:0, alignItems:"flex-start" }}>
               <span style={{ fontSize:11, color:T.green, fontWeight:700, marginTop:2, flexShrink:0 }}>↑</span>
               <div style={{ fontSize:13, color:T.sub, lineHeight:1.5 }}>
-                <span style={{ color:T.muted, marginRight:4 }}>Tomorrow:</span>{parsed.tomorrow}
+                <span style={{ color:T.muted, marginRight:4 }}>{arcActive ? "Tomorrow's first proof:" : "Tomorrow:"}</span>{parsed.tomorrow}
               </div>
             </div>
           )}
@@ -241,7 +323,7 @@ function TodayReceiptCard({ entry, loggedCount, generating, onGenerate, onOpenJo
         <div style={{ display:"flex", borderTop:`0.5px solid ${T.border}` }}>
           <button type="button" onClick={onOpenJournal}
             style={{ flex:1, padding:"10px 0", background:"none", border:"none", fontSize:12, color:T.accent, fontWeight:500, cursor:"pointer", borderRight:`0.5px solid ${T.border}`, fontFamily:T.font }}>
-            Full entry →
+            {arcActive ? "Full receipt →" : "Full entry →"}
           </button>
           <button type="button" onClick={onGenerate} disabled={generating}
             style={{ flex:1, padding:"10px 0", background:"none", border:"none", fontSize:12, color:generating?T.hint:T.muted, cursor:generating?"not-allowed":"pointer", fontFamily:T.font }}>
@@ -251,17 +333,21 @@ function TodayReceiptCard({ entry, loggedCount, generating, onGenerate, onOpenJo
       </div>
     );
   }
+  const ctaTitle = generating
+    ? (arcActive ? "Writing tonight's verdict…" : "Writing today's receipt…")
+    : (arcActive ? (isNight ? "Get tonight's verdict" : "Wrap today") : "Wrap today");
+  const ctaSub = arcActive
+    ? "Your coach reads the day and calls it — what counted, what slipped, what's next."
+    : "Your coach writes up the day from your logs and notes";
   return (
     <div style={{ margin:"0 14px 10px" }}>
       <button type="button" onClick={onGenerate} disabled={generating}
-        style={{ width:"100%", padding:"12px 16px", borderRadius:T.r, border:`0.5px dashed ${T.borderStrong}`, background:"none", cursor:generating?"not-allowed":"pointer", fontFamily:T.font, display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, boxSizing:"border-box" }}>
+        style={{ width:"100%", padding:"12px 16px", borderRadius:T.r, border:`0.5px dashed ${arcActive ? "rgba(200,144,42,0.4)" : T.borderStrong}`, background:"none", cursor:generating?"not-allowed":"pointer", fontFamily:T.font, display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, boxSizing:"border-box" }}>
         <div style={{ textAlign:"left" }}>
-          <div style={{ fontSize:13, fontWeight:500, color:generating?T.hint:T.text }}>
-            {generating ? "Writing today's receipt…" : "Wrap today"}
-          </div>
-          <div style={{ fontSize:11, color:T.muted, marginTop:2 }}>Your coach writes up the day from your logs and notes</div>
+          <div style={{ fontSize:13, fontWeight:500, color:generating?T.hint:T.text }}>{ctaTitle}</div>
+          <div style={{ fontSize:11, color:T.muted, marginTop:2 }}>{ctaSub}</div>
         </div>
-        {!generating && <span style={{ fontSize:14, color:T.muted, flexShrink:0 }}>→</span>}
+        {!generating && <span style={{ fontSize:14, color:arcActive ? T.gold : T.muted, flexShrink:0 }}>→</span>}
       </button>
     </div>
   );
@@ -598,6 +684,7 @@ export function TodayScreen({
   onStartArc = null,
   onEditArc = null,
   onLinkProofHabit = null,
+  onOpenHub = null,
 }) {
   const [showProofPicker, setShowProofPicker] = useState(false);
 
@@ -746,7 +833,7 @@ export function TodayScreen({
           </div>
         </button>
       )}
-      {showCoachNudge && (
+      {showCoachNudge && !arcActive && (
         <button type="button" onClick={onOpenCoachMic}
           style={{ display:"flex", alignItems:"center", gap:8, width:"calc(100% - 28px)", margin:"6px 14px 0", padding:"9px 12px", background:"linear-gradient(90deg, rgba(200,144,42,0.14), rgba(200,144,42,0.04))", border:"0.5px solid rgba(200,144,42,0.35)", borderRadius:T.rsm, color:T.gold, fontSize:12, fontWeight:600, cursor:"pointer", textAlign:"left", fontFamily:T.font }}>
           <span aria-hidden style={{ fontSize:14, lineHeight:1 }}>✨</span>
@@ -777,13 +864,20 @@ export function TodayScreen({
           </div>
         </div>
       )}
+      {arcActive && (
+        <FirstProofMicroMoment arcActive={arcActive} activeBlock={activeBlock} loggedCount={loggedCount} />
+      )}
       <div data-tour="today-summary" style={{ margin:"6px 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:"18px 20px", display:"flex", alignItems:"center", gap:18 }}>
         <Ring pct={pct} centerMain={ringCenterMain} centerSub={ringCenterSub}/>
-        <div style={{ flex:1 }}>
-          <div style={{ fontFamily:T.serif, fontSize:20, color:T.text, marginBottom:4 }}>
-            {!arcActive && pct === 100 && totalTrackables > 0 ? "Forged for today" : greeting}
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontFamily:T.serif, fontSize:arcActive && activeBlock?.identity ? 18 : 20, color:T.text, marginBottom:4, lineHeight:1.25 }}>
+            {arcActive && activeBlock?.identity
+              ? String(activeBlock.identity).trim().slice(0, 90)
+              : (!arcActive && pct === 100 && totalTrackables > 0 ? "Forged for today" : greeting)}
           </div>
-          <div style={{ fontSize:13, color:T.muted }}>{ringSummary || " "}</div>
+          <div style={{ fontSize:13, color:T.muted }}>
+            {arcActive ? `Day ${arcDayX} · ${ringSummary || "show proof"}` : (ringSummary || " ")}
+          </div>
           {arcActive && proofTotal > 0 && (
             <div style={{ fontSize:11, color:T.hint, marginTop:5, fontVariantNumeric:"tabular-nums" }}>
               Arc XP today: {arcXpToday} / {ARC_DAILY_XP_CAP}
@@ -811,6 +905,8 @@ export function TodayScreen({
           onGenerate={onGenerateReceipt}
           onOpenJournal={onOpenJournal}
           onOpenCoachWithDraft={onOpenCoachWithDraft}
+          activeBlock={activeBlock}
+          hourNow={hr}
         />
       )}
       {(() => {
@@ -941,36 +1037,49 @@ export function TodayScreen({
           project.length > 0 && <><SLabel>Build</SLabel>{project.map(h => <ProjectCard key={h.id} habit={h} onOpenLog={onOpenLog} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id}/>)}</>,
         ].filter(Boolean) : [];
 
+        // Arc Takeover: when an Arc is active, Today shows ONLY proof + logs.
+        // Other Habits, Goals, and Loose Ends are hidden from Today and live on
+        // the Hub screen (accessed via the link below). Data is intact — only
+        // the rendering is gated.
         const sections = arcActive
-          ? [proofSection, otherWrapped, goalsSection, logsSection].filter(Boolean)
+          ? [proofSection, logsSection].filter(Boolean)
           : [goalsSection, ...legacyHabitSections, logsSection].filter(Boolean);
 
         return sections.map((sec, i) =>
           i === 0 ? <div key={i} data-tour="today-first-section">{sec}</div> : <div key={i}>{sec}</div>
         );
       })()}
-      {onAddTask && (
-        arcActive ? (
-          <SectionCollapsible label="Loose ends" defaultOpen={false}>
-            <LooseEndsSection
-              tasks={tasks}
-              today={today}
-              onAdd={onAddTask}
-              onComplete={onCompleteTask}
-              onPin={onPinTask}
-              onDelete={onDeleteTask}
-            />
-          </SectionCollapsible>
-        ) : (
-          <LooseEndsSection
-            tasks={tasks}
-            today={today}
-            onAdd={onAddTask}
-            onComplete={onCompleteTask}
-            onPin={onPinTask}
-            onDelete={onDeleteTask}
-          />
-        )
+      {/* Loose Ends only when no Arc is active. With an Arc, tasks live on Hub. */}
+      {onAddTask && !arcActive && (
+        <LooseEndsSection
+          tasks={tasks}
+          today={today}
+          onAdd={onAddTask}
+          onComplete={onCompleteTask}
+          onPin={onPinTask}
+          onDelete={onDeleteTask}
+        />
+      )}
+      {/* Hub link — appears when an Arc is active so the user can still reach
+          their other habits, goals, and loose ends. Quiet by design. */}
+      {arcActive && onOpenHub && (
+        <button
+          type="button"
+          onClick={onOpenHub}
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            width: "calc(100% - 28px)", margin: "8px 14px 0",
+            padding: "11px 14px", borderRadius: T.rsm,
+            background: "rgba(255,255,255,0.025)", border: `0.5px solid ${T.border}`,
+            cursor: "pointer", fontFamily: T.font, textAlign: "left", boxSizing: "border-box",
+          }}
+          aria-label="Open Hub — all habits, goals, and loose ends"
+        >
+          <span style={{ fontSize: 12, color: T.muted, fontWeight: 500 }}>
+            All habits & goals
+          </span>
+          <span style={{ fontSize: 12, color: T.sub, fontWeight: 600 }}>→</span>
+        </button>
       )}
       <div style={{ height:16 }}/>
       {!hideFloatingAdd && (trackHabits.length > 0 || activeGoals.length > 0 || logHabits.length > 0) && onAdd && (
