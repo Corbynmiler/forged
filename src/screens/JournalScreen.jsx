@@ -549,7 +549,8 @@ function JournalComposeSheet({ initialContent = "", date, onSave, onClose }) {
 }
 
 // ─── JOURNAL SCREEN ───────────────────────────────────────────────────────────
-export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, journalUserId, isPro, onUpgrade, journalEntries = [], onSaveJournalEntry, onJournalGenerated, initialTab, onInitialComposeDone, autoGenerateOnMount = false, userName = "", coachName = "" }) {
+export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLog, journalUserId, isPro, onUpgrade, journalEntries = [], onSaveJournalEntry, onJournalGenerated, initialTab, onInitialComposeDone, autoGenerateOnMount = false, userName = "", coachName = "", activeBlock = null }) {
+  const arcActiveJournal = !!activeBlock?.id;
   // "activity" = habit/goal log history (existing), "journal" = pure journal entries
   const [mainTab, setMainTab]   = useState(initialTab === "journal" || initialTab === "compose" ? "journal" : "activity");
   const [composeDate, setComposeDate] = useState(initialTab === "compose" ? todayStr() : null); // null = closed, "YYYY-MM-DD" = open
@@ -872,17 +873,38 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
       {/* Header */}
       <div style={{ padding:"16px 18px 10px", display:"flex", alignItems:"flex-end", justifyContent:"space-between", flexWrap:"wrap", gap:8 }}>
         <div>
-          <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>Journal</div>
-          <div style={{ fontSize:13, color:T.muted, marginTop:3 }}>
-            {mainTab === "activity" ? (
-              <>
-                {loggedDaysCount} days logged
-                {missedMarkedCount > 0 ? <span> · {missedMarkedCount} missed</span> : null}
-              </>
-            ) : (
-              <>{sortedJournalEntries.length > 0 ? `${sortedJournalEntries.length} ${sortedJournalEntries.length === 1 ? "entry" : "entries"}` : "Your daily story, written by Forged"}</>
-            )}
-          </div>
+          {arcActiveJournal ? (
+            <>
+              <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:6 }}>Evidence</div>
+              <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>
+                {String(activeBlock?.identity || "Your Arc").trim().slice(0, 60)}
+              </div>
+              <div style={{ fontSize:13, color:T.muted, marginTop:3 }}>
+                {mainTab === "activity" ? (
+                  <>
+                    {loggedDaysCount} days logged
+                    {missedMarkedCount > 0 ? <span> · {missedMarkedCount} missed</span> : null}
+                  </>
+                ) : (
+                  <>{sortedJournalEntries.length > 0 ? `${sortedJournalEntries.length} ${sortedJournalEntries.length === 1 ? "receipt" : "receipts"} so far` : "Proof of who you said you'd become"}</>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>Journal</div>
+              <div style={{ fontSize:13, color:T.muted, marginTop:3 }}>
+                {mainTab === "activity" ? (
+                  <>
+                    {loggedDaysCount} days logged
+                    {missedMarkedCount > 0 ? <span> · {missedMarkedCount} missed</span> : null}
+                  </>
+                ) : (
+                  <>{sortedJournalEntries.length > 0 ? `${sortedJournalEntries.length} ${sortedJournalEntries.length === 1 ? "entry" : "entries"}` : "Your daily story, written by Forged"}</>
+                )}
+              </div>
+            </>
+          )}
         </div>
         {mainTab === "activity" ? (
           <div data-tour="journal-viewmode" style={{ display:"flex", background:T.surface, borderRadius:T.rsm, padding:3, gap:2 }}>
@@ -900,7 +922,7 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
 
       {/* Tab bar */}
       <div style={{ display:"flex", gap:0, padding:"0 18px 14px" }}>
-        {[["activity","Activity"],["journal","Journal"]].map(([tab, label]) => (
+        {[["activity","Activity"],["journal", arcActiveJournal ? "Receipts" : "Journal"]].map(([tab, label]) => (
           <button key={tab} type="button" onClick={() => setMainTab(tab)}
             style={{ padding:"6px 16px", borderRadius:0, border:"none", cursor:"pointer", fontSize:12, fontWeight:500,
               background: mainTab === tab ? T.accent + "22" : "none",

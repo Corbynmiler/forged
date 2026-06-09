@@ -327,23 +327,20 @@ async function handler(req, res) {
   const weekStart = weekStartFromClientYmd(anchor);
   if (!weekStart) return res.status(400).json({ error: "Invalid client_date" });
 
-  // Non-Pro users get one free lifetime brief, tracked via the usage table.
+  // Free users now get 1 Arc Review per ISO week (not 1 ever).
+  // The Arc loop is the core product — free users must be able to feel the
+  // weekly verdict for the current week. Pro keeps multi-regen + history.
   if (!isPro) {
-    const { data: allUsage } = await db
+    const { data: thisWeekRow } = await db
       .from("weekly_brief_generation_usage")
-      .select("generation_count")
-      .eq("user_id", userId);
-    const totalEver = (allUsage || []).reduce((s, r) => s + (r.generation_count || 0), 0);
-    const freeTrialUsed = totalEver >= 1;
+      .select("generation_count, brief_text, brief_generated_at")
+      .eq("user_id", userId)
+      .eq("week_start", weekStart)
+      .maybeSingle();
+    const thisWeekUsed = typeof thisWeekRow?.generation_count === "number" ? thisWeekRow.generation_count : 0;
+    const usedThisWeek = thisWeekUsed >= 1;
 
     if (req.method === "GET") {
-      // Return this week's stored brief if any (matches Pro path shape).
-      const { data: thisWeekRow } = await db
-        .from("weekly_brief_generation_usage")
-        .select("brief_text, brief_generated_at")
-        .eq("user_id", userId)
-        .eq("week_start", weekStart)
-        .maybeSingle();
       const { data: momentumRow, error: momentumReadErr } = await db
         .from("weekly_briefs")
         .select("momentum_signals")
@@ -357,24 +354,24 @@ async function handler(req, res) {
         !momentumReadErr && Array.isArray(momentumRow?.momentum_signals) ? momentumRow.momentum_signals : [];
       return res.json({
         free_trial: true,
-        free_trial_used: freeTrialUsed,
+        free_trial_used: usedThisWeek,
         limit: 1,
-        used: freeTrialUsed ? 1 : 0,
+        used: usedThisWeek ? 1 : 0,
         week_start: weekStart,
-        can_generate: !freeTrialUsed,
+        can_generate: !usedThisWeek,
         text: thisWeekRow?.brief_text || null,
         generated_at: thisWeekRow?.brief_generated_at || null,
         momentum_signals: momentumOut,
       });
     }
 
-    if (freeTrialUsed) {
+    if (usedThisWeek) {
       return res.status(403).json({
-        error: "Your free brief has been used. Upgrade to Pro for weekly briefs.",
+        error: "You've already generated this week's Arc Review. Your next free Arc Review is available Monday.",
         free_trial_used: true,
       });
     }
-    // Free trial available — fall through to generation with used=0
+    // This week's free review unused — fall through to generation with used=0
   }
 
   // Pro: read this week’s quota + stored brief

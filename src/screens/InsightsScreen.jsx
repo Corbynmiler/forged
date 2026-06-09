@@ -485,11 +485,19 @@ export function InsightsScreen({
       {/* Header */}
       <div style={{ padding:"16px 18px 10px", display:"flex", flexWrap:"wrap", alignItems:"flex-end", justifyContent:"space-between", gap:12, maxWidth:"100%" }}>
         <div style={{ minWidth:0, flex:"1 1 200px" }}>
-          <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:6 }}>Insights</div>
-          <div style={{ fontFamily:T.serif, fontSize:30, color:T.text, letterSpacing:"-0.03em", lineHeight:1.05 }}>Forge report</div>
-          {firstLogLabel && (
+          <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:6 }}>
+            {arcActive ? "Arc Review" : "Insights"}
+          </div>
+          <div style={{ fontFamily:T.serif, fontSize:30, color:T.text, letterSpacing:"-0.03em", lineHeight:1.05 }}>
+            {arcActive ? `Week ${arcWeekN} of 8` : "Forge report"}
+          </div>
+          {arcActive && activeBlock?.identity ? (
+            <div style={{ fontSize:12, color:T.sub, fontStyle:"italic", fontFamily:T.serif, marginTop:8, lineHeight:1.45, maxWidth:340 }}>
+              {String(activeBlock.identity).trim()}
+            </div>
+          ) : firstLogLabel ? (
             <div style={{ fontSize:11, color:T.muted, marginTop:8, lineHeight:1.45 }}>Tracking since <span style={{ color:T.sub, fontWeight:600 }}>{firstLogLabel}</span></div>
-          )}
+          ) : null}
         </div>
         {onShare && (
           <button type="button" onClick={onShare} style={{ flexShrink:0, display:"flex", alignItems:"center", gap:6, padding:"8px 14px", borderRadius:T.rsm, background:"rgba(200,144,42,0.12)", border:"none", color:T.gold, fontSize:12, fontWeight:600, cursor:"pointer", marginBottom:4 }}>
@@ -675,7 +683,7 @@ export function InsightsScreen({
                 </div>
                 {!isPro && onUpgrade && (
                   <button type="button" onClick={onUpgrade} style={{ padding:"11px 18px", borderRadius:T.rsm, border:`1px solid rgba(200,144,42,0.5)`, background:"rgba(200,144,42,0.18)", color:T.gold, fontSize:13, fontWeight:700, cursor:"pointer", letterSpacing:"0.02em" }}>
-                    {arcActive ? "Get Pro for weekly Arc Reviews →" : "Get Pro for weekly reviews →"}
+                    {arcActive ? "Get Pro for regens + Arc history →" : "Get Pro for regens + history →"}
                   </button>
                 )}
                 {showQuotaNote && (
@@ -686,9 +694,12 @@ export function InsightsScreen({
               </>
             ) : !isPro && freeBrief === false ? (
               <>
+                <div style={{ fontSize:13, color:T.sub, lineHeight:1.55, marginBottom:12 }}>
+                  This week&apos;s {arcActive ? "Arc Review" : "review"} is done. Next free one: <span style={{ color:T.text, fontWeight:600 }}>{fmtNextMondayShort(todayStr())}</span>.
+                </div>
                 {onUpgrade && (
                   <button type="button" onClick={onUpgrade} style={{ padding:"11px 18px", borderRadius:T.rsm, border:`1px solid rgba(200,144,42,0.5)`, background:"rgba(200,144,42,0.18)", color:T.gold, fontSize:13, fontWeight:700, cursor:"pointer", letterSpacing:"0.02em" }}>
-                    {arcActive ? "Unlock weekly Arc Reviews →" : "Unlock with Pro →"}
+                    {arcActive ? "Get Pro for regens this week →" : "Unlock regens this week →"}
                   </button>
                 )}
               </>
@@ -709,12 +720,12 @@ export function InsightsScreen({
                   }}
                 >
                   {!isPro && freeBrief === true
-                    ? (arcActive ? "Generate your first Arc Review — free ✨" : "Generate your first review — free ✨")
+                    ? (arcActive ? "Generate this week's Arc Review — free ✨" : "Generate this week's review — free ✨")
                     : (arcActive ? "Generate this week's Arc Review" : "Generate this week's review")}
                 </button>
                 {!isPro && freeBrief === true && (
                   <div style={{ fontSize:11, color:T.hint, textAlign:"center", lineHeight:1.5, maxWidth:280 }}>
-                    One on us. Pro gets a fresh {arcActive ? "Arc Review" : "review"} every week.
+                    Free includes one {arcActive ? "Arc Review" : "review"} every week. Pro unlocks regens + history.
                   </div>
                 )}
               </div>
