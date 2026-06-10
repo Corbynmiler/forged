@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { T, COACH_ICON_OPTIONS, PROFILE_DISPLAY_NAME_MAX, PROFILE_COACH_NAME_MAX, clampProfileDisplayName, clampProfileCoachName, FREE_DAILY_LIMIT } from "../theme.js";
+import { T, COACH_ICON_OPTIONS, COACH_VOICE_OPTIONS, TTS_MONTHLY_CHAR_LIMIT, PRO_PRICING, PROFILE_DISPLAY_NAME_MAX, PROFILE_COACH_NAME_MAX, clampProfileDisplayName, clampProfileCoachName, FREE_DAILY_LIMIT } from "../theme.js";
 import { supabase } from "../supabase.js";
 import {
   getLevel, nextLevel, getStreak, getBestStreak,
@@ -270,7 +270,7 @@ export function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
     </div>
   );
 }
-export function ProfileScreen({ user, xp, habits, isPro, isCoach, stripeCustomerId, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onReplayPageGuides, onPreviewCoach, previewNormalCoachGreeting = false, onTogglePreviewNormalCoachGreeting, onSignOut, onShowTour, onUpgrade, coachName, coachIcon, onSaveCoach, notifEnabled, notifTime, notifLoading, notifPermission, dailyRemindersEnabled, nudgesEnabled, invitesEnabled, onNotifToggle, onNotifTimeChange, onNotifCategoryChange, onOpenSocial = null, onOpenHub = null }) {
+export function ProfileScreen({ user, xp, habits, isPro, isCoach, stripeCustomerId, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onReplayPageGuides, onPreviewCoach, previewNormalCoachGreeting = false, onTogglePreviewNormalCoachGreeting, onSignOut, onShowTour, onUpgrade, coachName, coachIcon, onSaveCoach, voiceRepliesEnabled = false, coachVoiceId = null, onSaveVoicePrefs, notifEnabled, notifTime, notifLoading, notifPermission, dailyRemindersEnabled, nudgesEnabled, invitesEnabled, onNotifToggle, onNotifTimeChange, onNotifCategoryChange, onOpenSocial = null, onOpenHub = null }) {
   const [editingName,    setEditingName]    = useState(false);
   const [nameVal,        setNameVal]        = useState(user.name);
   const [showCoachSheet, setShowCoachSheet] = useState(false);
@@ -407,11 +407,9 @@ export function ProfileScreen({ user, xp, habits, isPro, isCoach, stripeCustomer
             <button type="button" onClick={() => setEditingName(true)} style={{ fontSize:12, color:T.muted, background:"none", border:"none", cursor:"pointer", flexShrink:0, marginTop:4 }}>Edit</button>
           </div>
         )}
-        <div style={{ fontSize:13, color:level.color, fontWeight:500, marginBottom:16 }}>⚡ {level.label} · {xp} xp</div>
-        <div data-tour="xp-bar" style={{ height:4, background:T.surface, borderRadius:2, overflow:"hidden", marginBottom:4 }}>
-          <div style={{ height:"100%", borderRadius:2, background:level.color, width:`${pct}%`, transition:"width 0.6s ease" }}/>
+        <div style={{ fontSize:13, color:T.muted, marginBottom:20, lineHeight:1.5 }}>
+          Your account — coach, notifications, and Arc history live here.
         </div>
-        <div style={{ fontSize:11, color:T.hint, marginBottom:24 }}>{next ? `${next.min - xp} xp to ${next.label}` : "Max level reached"}</div>
       </div>
 
       {/* Stats */}
@@ -477,6 +475,40 @@ export function ProfileScreen({ user, xp, habits, isPro, isCoach, stripeCustomer
       {/* Join a coach — shown when not yet linked */}
       {!user.coachId && (
         <JoinCoachSection onLinked={(coachId, coachName) => onUpdateUser({ coachId, linkedCoachName: coachName })} />
+      )}
+
+
+      {/* Spoken replies — Pro only */}
+      {isPro && onSaveVoicePrefs && (
+        <div style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, overflow:"hidden" }}>
+          <div style={{ padding:"10px 16px 6px", fontSize:10, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em" }}>Coach voice</div>
+          <div style={{ padding:"12px 16px 14px", borderBottom:`0.5px solid ${T.border}` }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:14, color:T.text }}>Spoken replies</div>
+                <div style={{ fontSize:12, color:T.muted, marginTop:2, lineHeight:1.45 }}>Coach reads replies aloud after you speak</div>
+              </div>
+              <ToggleSwitch on={voiceRepliesEnabled} onClick={() => onSaveVoicePrefs({ voiceRepliesEnabled: !voiceRepliesEnabled, coachVoiceId })} ariaLabel="Spoken coach replies" />
+            </div>
+            <div style={{ fontSize:11, color:T.hint, marginTop:8, lineHeight:1.45 }}>
+              ~{Math.round(TTS_MONTHLY_CHAR_LIMIT / 1000)}k characters/month included. Audio is generated server-side — only reply text is sent.
+            </div>
+          </div>
+          {voiceRepliesEnabled && (
+            <div style={{ padding:"8px 10px 12px" }}>
+              {COACH_VOICE_OPTIONS.map(v => {
+                const active = (coachVoiceId || COACH_VOICE_OPTIONS[0].id) === v.id;
+                return (
+                  <button key={v.id} type="button" onClick={() => onSaveVoicePrefs({ voiceRepliesEnabled: true, coachVoiceId: v.id })}
+                    style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 12px", marginBottom:6, borderRadius:T.rsm, border:`0.5px solid ${active ? "rgba(200,144,42,0.55)" : T.border}`, background:active ? "rgba(200,144,42,0.1)" : T.surface, cursor:"pointer", fontFamily:T.font }}>
+                    <div style={{ fontSize:14, fontWeight:600, color:T.text }}>{v.label}</div>
+                    <div style={{ fontSize:12, color:T.muted }}>{v.desc}</div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
       )}
 
       {/* Account */}

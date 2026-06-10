@@ -81,6 +81,29 @@ export const WEEKLY_SUMMARY_TTL_MS  = 24 * 60 * 60 * 1000; // generated summary 
 export const CREATOR_ID = "5e9b4ba7-bf15-4e94-ab05-fe3306496973";
 export const FREE_DAILY_LIMIT = 5;
 
+/** ElevenLabs premade voices — Pro spoken replies only. */
+export const COACH_VOICE_OPTIONS = [
+  { id: "pNInz6obpgDQGcFmaJgB", label: "Adam",   desc: "Warm, direct" },
+  { id: "EXAVITQu4vr4xnSDxMaL", label: "Sarah",  desc: "Calm, clear" },
+  { id: "onwK4e9ZLuTAKqWW03F9", label: "Daniel", desc: "Measured, steady" },
+  { id: "21m00Tcm4TlvDq8ikWAM", label: "Rachel", desc: "Grounded, friendly" },
+];
+
+/** ~50k chars/mo ≈ $2.50 COGS at Flash pricing — enforced server-side in api/tts.js */
+export const TTS_MONTHLY_CHAR_LIMIT = 50000;
+
+/**
+ * Live Stripe prices stay on env price IDs ($4.99/mo today).
+ * Future pricing is wired but inactive until PRO_PRICING.useFuturePricing = true.
+ */
+export const PRO_PRICING = {
+  monthlyCents: 499,
+  annualCents: 3999,
+  futureMonthlyCents: 799,
+  futureAnnualCents: 5999,
+  useFuturePricing: false,
+};
+
 // ─── COACH PAGE NUDGES ────────────────────────────────────────────────────────
 export const COACH_PAGE_NUDGES = {
   today: "Need help logging today quickly?",

@@ -17,6 +17,7 @@ import {
   isLegacyProgressType,
   splitCoachReceipt, parseGoalPlan, stripPartialGoalPlan,
 } from "../utils.js";
+import { useCoachTts } from "../hooks/useCoachTts.jsx";
 import {
   useSpeechInput, MicBtn, mergeDictationIntoText, polishInterimDisplay,
   speechUnsupportedHelpMessage, shouldDeferCoachMicAutoStart, copyForgedUrlToClipboard,
@@ -1379,7 +1380,7 @@ function GoalPlanPreview({ plan, onConfirm, onDismiss }) {
   );
 }
 
-export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, coachIcon, coachAccentColor, currentScreen, onHabitCreated, onGoalCreated, onCoachLogsApplied, onHabitRenamed, onGoalPlanConfirm, onJournalLogged, journalEntries = [], openInputMode = null, pendingMessage = null, onNavigateTo = null, activeBlock = null, onOpenEditArc = null, previewNormalCoachGreeting = false, onWrapToday = null, coachMemory = null }) {
+export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachName, coachIcon, coachAccentColor, currentScreen, onHabitCreated, onGoalCreated, onCoachLogsApplied, onHabitRenamed, onGoalPlanConfirm, onJournalLogged, journalEntries = [], openInputMode = null, pendingMessage = null, onNavigateTo = null, activeBlock = null, onOpenEditArc = null, previewNormalCoachGreeting = false, onWrapToday = null, coachMemory = null, voiceRepliesEnabled = false, coachVoiceId = null }) {
   useScrollLock(true);
   const cName = coachName || "Coach";
   const isCreatorUser = user?.id === CREATOR_ID;
@@ -1398,6 +1399,11 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
       : buildCoachGreeting({ name: user?.name, habits, goals, activeBlock });
   }
   const greeting = greetingRef.current;
+  const coachTts = useCoachTts({
+    enabled: voiceRepliesEnabled === true,
+    isPro,
+    voiceId: coachVoiceId,
+  });
   const [wrapActionForMsgId, setWrapActionForMsgId] = useState(null);
   const [messages, setMessages] = useState(() => {
     const uid = user?.id;
@@ -1602,6 +1608,7 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
     // Clear input optimistically on submit — modern chat UX. The catch block
     // restores the trimmed text via setInput(trimmed) on request failure, so
     // nothing is lost if the network call doesn't complete.
+    coachTts.primeAudio?.();
     setError(null);
     const sendDay = todayStr();
     let baseMessages = messages;
@@ -1726,6 +1733,10 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
                   if (hadDumpActions) setWrapActionForMsgId(finalizedId);
                   return nextMsgs;
                 });
+
+                if (voiceRepliesEnabled && isPro && finalContent) {
+                  coachTts.speak(finalContent);
+                }
 
                 // ── Created ───────────────────────────────────────────────────
                 if (evt.created) {
@@ -2058,7 +2069,7 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
                     e.target.style.height = Math.min(e.target.scrollHeight, 88) + "px";
                   }}
                   onKeyDown={handleKey}
-                  placeholder="Ask anything about your habits…"
+                  placeholder="Say your day — or type here…"
                   style={{
                     width:"100%", boxSizing:"border-box",
                     background:T.surface, border:`0.5px solid ${T.borderStrong}`,
