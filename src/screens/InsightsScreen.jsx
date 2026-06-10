@@ -73,11 +73,13 @@ function weeklyBriefBlocks(text) {
   return blocks.length ? blocks : [trimmed];
 }
 
-/** Per-habit weekly counts from local logs — no API. */
-function arcWeekOf8(activeBlock, clientDate = todayStr()) {
-  if (!activeBlock?.startDate) return 1;
+/** Current Arc week + total weeks from the block's actual duration (no 8-week assumption). */
+function arcWeekInfo(activeBlock, clientDate = todayStr()) {
+  const duration = Math.max(1, activeBlock?.durationDays || 56);
+  const totalWeeks = Math.max(1, Math.ceil(duration / 7));
+  if (!activeBlock?.startDate) return { week: 1, totalWeeks };
   const daysElapsed = Math.floor((parseLocal(clientDate) - parseLocal(activeBlock.startDate)) / 86400000);
-  return Math.min(8, Math.ceil((daysElapsed + 1) / 7));
+  return { week: Math.min(totalWeeks, Math.max(1, Math.ceil((daysElapsed + 1) / 7))), totalWeeks };
 }
 
 function ymdAddDays(ymd, delta) {
@@ -472,12 +474,12 @@ export function InsightsScreen({
   const hiddenHabitGridCount = habits.length > 6 && !habitGridExpanded ? habits.length - 6 : 0;
   const canTapRefresh = hasFreshBrief && !isGenerating && !isFetching && !!briefQuota?.can_generate;
   const arcActive = !!activeBlock?.id && activeBlock.status === "active";
-  const arcWeekN = arcActive ? arcWeekOf8(activeBlock) : null;
+  const { week: arcWeekN, totalWeeks: arcWeeksTotal } = arcActive ? arcWeekInfo(activeBlock) : { week: null, totalWeeks: null };
   const arcReviewText = localCompletedArc?.review?.text || null;
   const showArcReviewGenerate = arcActive && todayYmd >= ymdAddDays(activeBlock.endDate, -3) && !arcReviewText;
-  const briefEyebrow = arcActive ? "YOUR ARC REVIEW" : "YOUR WEEKLY BRIEF";
+  const briefEyebrow = arcActive ? "YOUR ARC REVIEW" : "YOUR WEEKLY REVIEW";
   const briefHeadline = arcActive
-    ? `Arc Review · Week ${arcWeekN} of 8`
+    ? `Arc Review · Week ${arcWeekN} of ${arcWeeksTotal}`
     : "What actually moved this week";
 
   return (
@@ -486,10 +488,10 @@ export function InsightsScreen({
       <div style={{ padding:"16px 18px 10px", display:"flex", flexWrap:"wrap", alignItems:"flex-end", justifyContent:"space-between", gap:12, maxWidth:"100%" }}>
         <div style={{ minWidth:0, flex:"1 1 200px" }}>
           <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:6 }}>
-            {arcActive ? "Arc Review" : "Insights"}
+            {arcActive ? "Arc Review" : "Reviews"}
           </div>
           <div style={{ fontFamily:T.serif, fontSize:30, color:T.text, letterSpacing:"-0.03em", lineHeight:1.05 }}>
-            {arcActive ? `Week ${arcWeekN} of 8` : "Forge report"}
+            {arcActive ? `Week ${arcWeekN} of ${arcWeeksTotal}` : "Forge report"}
           </div>
           {arcActive && activeBlock?.identity ? (
             <div style={{ fontSize:12, color:T.sub, fontStyle:"italic", fontFamily:T.serif, marginTop:8, lineHeight:1.45, maxWidth:340 }}>

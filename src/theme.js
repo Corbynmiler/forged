@@ -90,7 +90,7 @@ export const COACH_PAGE_NUDGES = {
 };
 
 // ─── FIRST-TIME AI PAGE GUIDE ─────────────────────────────────────────────────
-export const PAGE_GUIDE_PAGES = ["today", "journal", "insights", "social"];
+export const PAGE_GUIDE_PAGES = ["today", "arc", "social"];
 
 // ─── CSS ──────────────────────────────────────────────────────────────────────
 export const CSS = `

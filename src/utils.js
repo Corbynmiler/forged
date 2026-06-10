@@ -1824,20 +1824,12 @@ export function buildPageGuideMessage(page, { name, habits = [], goals = [] } = 
       return `${hi}this is your Today page. Tap a row to log, hold to note, and keep the streak alive.${tail}`;
     }
 
-    case "journal": {
+    case "arc": {
       if (!hasRichHistory) {
-        return `${hi}this is your Journal. Activity fills in as you log — that's your trail for the day. When you're ready, open the Journal tab and turn it into a written daily entry.`;
+        return `${hi}this is your Arc — your current season of change. Evidence fills in as you log proof, and each week you get an honest Review. Everything you do lands here.`;
       }
-      const tail = personalBit ? ` Great place to check how ${personalBit} has been going lately.` : "";
-      return `${hi}Activity shows what you logged; the Journal tab is your daily story. Use filters and the day/week/month switch to scan the trail.${tail}`;
-    }
-
-    case "insights": {
-      if (!hasRichHistory) {
-        return `${hi}Insights is where patterns show up. Right now it'll feel quiet — keep logging for a week or two and streaks, heatmaps, and your best day of the week start to mean something.`;
-      }
-      const tail = personalBit ? ` Worth checking which days you actually show up for ${personalBit}.` : "";
-      return `${hi}this is Insights. Streaks, 28-day rates, and deeper patterns live here.${tail} More signal the more you log.`;
+      const tail = personalBit ? ` Worth scanning how ${personalBit} has been going lately.` : "";
+      return `${hi}this is your Arc. Evidence is your trail of proof; Reviews is where the week gets judged honestly.${tail}`;
     }
 
     case "social": {

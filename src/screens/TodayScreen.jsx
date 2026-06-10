@@ -1,14 +1,13 @@
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
 import { T, COACH_ICON_OPTIONS } from "../theme.js";
-import { todayStr, daysAgo, parseLocal, isSatisfiedForTodayRing, getLevel, getStreak, stripJournalTitleLine } from "../utils.js";
+import { todayStr, daysAgo, parseLocal, isSatisfiedForTodayRing, getStreak, stripJournalTitleLine } from "../utils.js";
 import { Ring, SLabel, Modal, GBtn } from "../components/ui.jsx";
 import {
   DailyCard, WeeklyCard, ProjectCard, LimitCard, LogCard,
   TodayGoalCard,
 } from "../components/habitCards.jsx";
 import { resolveArcTitle, arcHeaderSubtitle, arcDurationWeeksLabel } from "../arcProofMatch.js";
-import { getArcRankDisplay, getArcDayNumber, ARC_DAILY_XP_CAP } from "../arcProgress.js";
 
 // ── Coach greeting helpers (deterministic, no AI) ──────────────────────────
 function coachGreetingDaysLeft(targetYmd) {
@@ -139,50 +138,6 @@ export function CoachGreeting({ coachName, coachIcon, habits, goals, habitAccent
   );
 }
 
-// ── Yesterday callback card ────────────────────────────────────────────────
-function YesterdayReceiptCard({ entry }) {
-  const [dismissed, setDismissed] = useState(() => {
-    try { return localStorage.getItem("forged_yesterday_dismissed") === todayStr(); }
-    catch { return false; }
-  });
-
-  if (dismissed || !entry) return null;
-
-  const parsed = parseReceiptFields(entry.content);
-  // Only render when there's something genuinely useful to carry forward
-  if (!parsed || (!parsed.pattern && !parsed.tomorrow)) return null;
-
-  function dismiss() {
-    try { localStorage.setItem("forged_yesterday_dismissed", todayStr()); } catch (_) {}
-    setDismissed(true);
-  }
-
-  return (
-    <div style={{ position:"relative", margin:"8px 14px 0", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:T.surface, padding:"11px 40px 11px 14px" }}>
-      <button type="button" onClick={dismiss} aria-label="Dismiss yesterday card"
-        style={{ position:"absolute", top:8, right:10, background:"none", border:"none", cursor:"pointer", padding:4, color:T.hint, fontSize:13, lineHeight:1, fontFamily:T.font }}>
-        ✕
-      </button>
-      <div style={{ fontSize:10, fontWeight:700, color:T.hint, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:6 }}>Yesterday</div>
-      <div style={{ fontSize:13, fontWeight:500, color:T.sub, lineHeight:1.4, marginBottom:parsed.pattern||parsed.tomorrow?7:0 }}>{parsed.title}</div>
-      {parsed.pattern && (
-        <div style={{ display:"flex", gap:6, marginBottom:parsed.tomorrow?4:0, alignItems:"flex-start" }}>
-          <span style={{ fontSize:10, color:T.accent, fontWeight:700, marginTop:2, flexShrink:0 }}>◎</span>
-          <div style={{ fontSize:12, color:T.muted, lineHeight:1.5 }}>{parsed.pattern}</div>
-        </div>
-      )}
-      {parsed.tomorrow && (
-        <div style={{ display:"flex", gap:6, alignItems:"flex-start" }}>
-          <span style={{ fontSize:10, color:T.green, fontWeight:700, marginTop:2, flexShrink:0 }}>↑</span>
-          <div style={{ fontSize:12, color:T.muted, lineHeight:1.5 }}>
-            <span style={{ color:T.hint, marginRight:3 }}>Today's win:</span>{parsed.tomorrow}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Daily Receipt ──────────────────────────────────────────────────────────
 function parseReceiptFields(content) {
   if (!content) return null;
@@ -196,64 +151,6 @@ function parseReceiptFields(content) {
     if (!missed   && l.startsWith("Missed:"))   missed   = l.slice("Missed:".length).trim();
   }
   return { title, pattern, tomorrow, missed };
-}
-
-// ── First Proof micro-moment ──────────────────────────────────────────────
-// Fires once per day when the user logs their first proof action. Identity-bound
-// when an Arc is active. Localstorage-flagged so it shows only once per day.
-function FirstProofMicroMoment({ arcActive, activeBlock, loggedCount }) {
-  const [show, setShow] = useState(false);
-  const firedRef = useRef(false);
-
-  useEffect(() => {
-    if (!arcActive) return;
-    if (firedRef.current) return;
-    if (loggedCount < 1) return;
-    let alreadySeen = false;
-    try {
-      const today = todayStr();
-      const flag = `forged_first_proof_${today}`;
-      alreadySeen = localStorage.getItem(flag) === "1";
-      if (!alreadySeen) localStorage.setItem(flag, "1");
-    } catch (_) { /* ignore */ }
-    firedRef.current = true;
-    if (alreadySeen) return;
-    setShow(true);
-    const t = setTimeout(() => setShow(false), 5000);
-    return () => clearTimeout(t);
-  }, [loggedCount, arcActive]);
-
-  if (!show) return null;
-
-  const identity = String(activeBlock?.identity || "").trim();
-  const identityNoun = identity
-    ? identity.split(/[.,—!?]/)[0].trim()
-    : "";
-  const cleanNoun = identityNoun && identityNoun.length <= 50
-    ? identityNoun.charAt(0).toUpperCase() + identityNoun.slice(1)
-    : "";
-  const line = cleanNoun
-    ? `First proof in. ${cleanNoun} showed up today.`
-    : "First proof in. Today counts.";
-
-  return (
-    <div style={{
-      margin: "8px 14px 0",
-      padding: "10px 14px",
-      borderRadius: T.rsm,
-      background: "linear-gradient(90deg, rgba(39,174,96,0.18), rgba(200,144,42,0.10))",
-      border: "0.5px solid rgba(39,174,96,0.35)",
-      display: "flex",
-      alignItems: "center",
-      gap: 10,
-      fontFamily: T.font,
-    }}>
-      <span aria-hidden style={{ fontSize: 14, lineHeight: 1, color: T.green, fontWeight: 700 }}>✓</span>
-      <div style={{ fontSize: 13, color: T.text, fontWeight: 500, lineHeight: 1.4, flex: 1 }}>
-        {line}
-      </div>
-    </div>
-  );
 }
 
 // TodayReceiptCard: when an Arc is active and we're past 7pm, this reframes as
@@ -656,21 +553,18 @@ function GoalsCollapsible({ children, defaultOpen = false }) {
 
 // ── TodayScreen ────────────────────────────────────────────────────────────
 export function TodayScreen({
-  habits, goals = [], xp,
+  habits, goals = [],
   onTap, onUndo, onSkip, onAddNote, onLogZero, onOpenLog,
   onOpenGoalLog, onEditGoal, onCompleteGoal, onDeleteGoal, onShareGoal,
   onEditHabit, onDeleteHabit, onShareHabit, sharingHabitId,
-  onXPInfo, onAdd, onSaveLogEntry, hideFloatingAdd,
-  coachEverOpened = true, onOpenCoachMic, onOpenCoachWithDraft,
+  onAdd, onSaveLogEntry,
+  onOpenCoachMic, onOpenCoachWithDraft,
   coachName, coachIcon, coachHabitColor, onOpenGoalDetail,
   onLowerBudget = null,
-  onOpenBrief = null,
-  onOpenInsights = null,
   todayJournalEntry = null,
   onGenerateReceipt = null,
   generatingReceipt = false,
   onOpenJournal = null,
-  yesterdayJournalEntry = null,
   // Loose Ends
   tasks = [],
   onAddTask = null,
@@ -719,19 +613,6 @@ export function TodayScreen({
     : pct < 50  ? "Building momentum."
     : pct < 100 ? "More than halfway."
     : timeGreeting;
-  const level = getLevel(xp);
-  const arcDayNum = arcActive ? getArcDayNumber(activeBlock) : 1;
-  const arcRankLabel = arcActive
-    ? getArcRankDisplay(
-        activeBlock.completionScore,
-        arcLedgerRows.length > 0 || proofTotal > 0,
-        {
-          proofDoneToday: proofDone,
-          priorLedgerDays: arcLedgerRows.filter(r => r.date !== todayStr()).length,
-        },
-      ).label
-    : "";
-  const arcXpToday = todayArcScore?.arcXpAwarded ?? 0;
   const habitsForSections = arcActive ? otherTrackHabits : habits;
   const daily   = habitsForSections.filter(h => h.habitType === "daily");
   const limit   = habitsForSections.filter(h => h.habitType === "limit");
@@ -793,8 +674,6 @@ export function TodayScreen({
     </div>
   );
 
-  const showCoachNudge = habits.length > 0 && !coachEverOpened;
-  // TODO: Arc completion should eventually be based on proof actions across 56 days, not XP tiers alone.
   return (
     <div>
       {!activeBlock && habits.length > 0 && typeof onStartArc === "function" && (
@@ -816,7 +695,7 @@ export function TodayScreen({
           }}
         >
           <div style={{ fontSize: 10, fontWeight: 800, color: T.accent, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 8 }}>
-            8-WEEK ARC
+            YOUR FIRST ARC
           </div>
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -824,22 +703,13 @@ export function TodayScreen({
                 Start your first Arc
               </div>
               <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.55 }}>
-                Picture eight weeks from now — then turn your habits into proof. The coach takes it from there.
+                A few focused weeks with a direction — turn your habits into proof. The coach takes it from there.
               </div>
             </div>
             <div style={{ flexShrink: 0, alignSelf: "center", fontSize: 12, fontWeight: 700, color: T.gold }}>
               Start your first Arc →
             </div>
           </div>
-        </button>
-      )}
-      {showCoachNudge && !arcActive && (
-        <button type="button" onClick={onOpenCoachMic}
-          style={{ display:"flex", alignItems:"center", gap:8, width:"calc(100% - 28px)", margin:"6px 14px 0", padding:"9px 12px", background:"linear-gradient(90deg, rgba(200,144,42,0.14), rgba(200,144,42,0.04))", border:"0.5px solid rgba(200,144,42,0.35)", borderRadius:T.rsm, color:T.gold, fontSize:12, fontWeight:600, cursor:"pointer", textAlign:"left", fontFamily:T.font }}>
-          <span aria-hidden style={{ fontSize:14, lineHeight:1 }}>✨</span>
-          <span style={{ color:T.sub, fontWeight:500, flex:1, lineHeight:1.35 }}>
-            Your coach reads your logs and notes — <span style={{ color:T.gold, fontWeight:700 }}>tap to ask</span> what it's already noticed.
-          </span>
         </button>
       )}
       {arcActive && <ArcStrip activeBlock={activeBlock} onEditArc={onEditArc} />}
@@ -856,16 +726,12 @@ export function TodayScreen({
         />
       )}
       {onOpenCoachMic && !arcActive && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic} habitCompletionPercentage={pct} habitsLoggedTodayCount={loggedCount} totalTrackables={totalTrackables}/>}
-      {loggedCount === 0 && !arcActive && <YesterdayReceiptCard entry={yesterdayJournalEntry} />}
       {showMinimumHint && (
         <div style={{ margin:"0 14px 8px", padding:"11px 14px", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:T.surface }}>
           <div style={{ fontSize:13, color:T.sub, lineHeight:1.5 }}>
             Bad day? Minimum is: <span style={{ color:T.text, fontWeight:500 }}>{activeBlock.minimumProof.trim()}</span>
           </div>
         </div>
-      )}
-      {arcActive && (
-        <FirstProofMicroMoment arcActive={arcActive} activeBlock={activeBlock} loggedCount={loggedCount} />
       )}
       <div data-tour="today-summary" style={{ margin:"6px 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:"18px 20px", display:"flex", alignItems:"center", gap:18 }}>
         <Ring pct={pct} centerMain={ringCenterMain} centerSub={ringCenterSub}/>
@@ -878,18 +744,6 @@ export function TodayScreen({
           <div style={{ fontSize:13, color:T.muted }}>
             {arcActive ? `Day ${arcDayX} · ${ringSummary || "show proof"}` : (ringSummary || " ")}
           </div>
-          {arcActive && proofTotal > 0 && (
-            <div style={{ fontSize:11, color:T.hint, marginTop:5, fontVariantNumeric:"tabular-nums" }}>
-              Arc XP today: {arcXpToday} / {ARC_DAILY_XP_CAP}
-            </div>
-          )}
-          <button onClick={onXPInfo} style={{ marginTop:10, display:"inline-flex", alignItems:"center", gap:5, fontSize:11, fontWeight:500, padding:"3px 10px", borderRadius:12, background:"rgba(200,144,42,0.15)", color:T.gold, border:"none", cursor:"pointer" }}>
-            {arcActive
-              ? (proofTotal > 0
-                ? `⚡ ${arcRankLabel} · ${proofDone}/${proofTotal}`
-                : `⚡ Day ${arcDayNum} · add proof`)
-              : (xp === 0 ? "⚡ Log a habit to earn XP" : `⚡ ${xp} xp · ${level.label}`)}
-          </button>
           {doneTasksCount > 0 && (
             <div style={{ marginTop:6, fontSize:11, color:T.muted, fontWeight:500 }}>
               ✓ {doneTasksCount}{totalTasksCount > doneTasksCount ? ` of ${totalTasksCount}` : ""} loose end{doneTasksCount === 1 ? "" : "s"} cleared
@@ -1082,13 +936,6 @@ export function TodayScreen({
         </button>
       )}
       <div style={{ height:16 }}/>
-      {!hideFloatingAdd && (trackHabits.length > 0 || activeGoals.length > 0 || logHabits.length > 0) && onAdd && (
-        <button type="button" onClick={onAdd} aria-label="Add habit or goal" title="Add habit or goal"
-          style={{ position:"fixed", bottom: arcActive ? 288 : 276, right:18, height:52, padding:"0 18px 0 16px", borderRadius:26, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:700, lineHeight:1, cursor:"pointer", zIndex:99, boxShadow:"0 4px 16px rgba(192,57,43,0.35)", display:"flex", alignItems:"center", justifyContent:"center", gap:7, fontFamily:T.font }}>
-          <span style={{ fontSize:22, fontWeight:700, lineHeight:1, marginTop:1 }} aria-hidden>+</span>
-          <span>Add habit</span>
-        </button>
-      )}
     </div>
   );
 }

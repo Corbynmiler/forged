@@ -270,7 +270,7 @@ export function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
     </div>
   );
 }
-export function ProfileScreen({ user, xp, habits, isPro, isCoach, stripeCustomerId, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onReplayPageGuides, onPreviewCoach, previewNormalCoachGreeting = false, onTogglePreviewNormalCoachGreeting, onSignOut, onShowTour, onUpgrade, coachName, coachIcon, onSaveCoach, notifEnabled, notifTime, notifLoading, notifPermission, dailyRemindersEnabled, nudgesEnabled, invitesEnabled, onNotifToggle, onNotifTimeChange, onNotifCategoryChange }) {
+export function ProfileScreen({ user, xp, habits, isPro, isCoach, stripeCustomerId, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onReplayPageGuides, onPreviewCoach, previewNormalCoachGreeting = false, onTogglePreviewNormalCoachGreeting, onSignOut, onShowTour, onUpgrade, coachName, coachIcon, onSaveCoach, notifEnabled, notifTime, notifLoading, notifPermission, dailyRemindersEnabled, nudgesEnabled, invitesEnabled, onNotifToggle, onNotifTimeChange, onNotifCategoryChange, onOpenSocial = null, onOpenHub = null }) {
   const [editingName,    setEditingName]    = useState(false);
   const [nameVal,        setNameVal]        = useState(user.name);
   const [showCoachSheet, setShowCoachSheet] = useState(false);
@@ -420,6 +420,32 @@ export function ProfileScreen({ user, xp, habits, isPro, isCoach, stripeCustomer
         <Stat label="reflections"  value={totalReflections}    color="#8E44AD"/>
         <Stat label="best streak"  value={`${bestStreak}d`}    color={T.gold}/>
       </div>
+
+      {/* Spaces — demoted surfaces still reachable from You */}
+      {(onOpenSocial || onOpenHub) && (
+        <div style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, overflow:"hidden" }}>
+          {onOpenSocial && (
+            <button type="button" onClick={onOpenSocial} style={{ display:"flex", alignItems:"center", width:"100%", background:"none", border:"none", borderBottom: onOpenHub ? `0.5px solid ${T.border}` : "none", cursor:"pointer", gap:10, padding:"13px 16px", fontFamily:T.font }}>
+              <div style={{ fontSize:18, flexShrink:0 }}>👥</div>
+              <div style={{ flex:1, textAlign:"left", minWidth:0 }}>
+                <div style={{ fontSize:14, color:T.text }}>Friends & shared goals</div>
+                <div style={{ fontSize:12, color:T.muted, marginTop:1 }}>Streaks, nudges, leaderboard</div>
+              </div>
+              <span style={{ fontSize:18, color:T.hint }}>›</span>
+            </button>
+          )}
+          {onOpenHub && (
+            <button type="button" onClick={onOpenHub} style={{ display:"flex", alignItems:"center", width:"100%", background:"none", border:"none", cursor:"pointer", gap:10, padding:"13px 16px", fontFamily:T.font }}>
+              <div style={{ fontSize:18, flexShrink:0 }}>🗂️</div>
+              <div style={{ flex:1, textAlign:"left", minWidth:0 }}>
+                <div style={{ fontSize:14, color:T.text }}>All habits & goals</div>
+                <div style={{ fontSize:12, color:T.muted, marginTop:1 }}>Everything tracked, beyond your Arc</div>
+              </div>
+              <span style={{ fontSize:18, color:T.hint }}>›</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Coaching — only shown when this account is linked to a coach */}
       {user.coachId && (

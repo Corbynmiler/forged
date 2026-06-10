@@ -78,14 +78,13 @@ import {
   NoteStrip, DailyCard, WeeklyCard, ProjectCard, LimitCard,
   LogCard, TodayGoalCard, GoalDetailSheet, LinkHabitsSheet,
   LogProjectModal, ReflectModal, EditModal, AddModal, AddLogModal,
-  XPModal, HabitGrid, HistoryModal, TYPE_META, cardStyle,
+  HabitGrid, HistoryModal, TYPE_META, cardStyle,
   GLOBAL_TOUR, PAGE_TOURS,
 } from "./components/habitCards.jsx";
 
 // Screens
 import { TodayScreen, CoachGreeting } from "./screens/TodayScreen.jsx";
-import { JournalScreen, BetaModal } from "./screens/JournalScreen.jsx";
-import { InsightsScreen } from "./screens/InsightsScreen.jsx";
+import { ArcScreen } from "./screens/ArcScreen.jsx";
 import { HubScreen } from "./screens/HubScreen.jsx";
 import ArcSetupSheet from "./screens/ArcSetupSheet.jsx";
 import ArcCoachSheet from "./screens/ArcCoachSheet.jsx";
@@ -97,7 +96,7 @@ import {
   AddActionSheet,
   CoachComingSoonSheet,
 } from "./screens/SocialScreen.jsx";
-import { ProfileScreen, UpgradeModal, ShareCardModal } from "./screens/ProfileScreen.jsx";
+import { ProfileScreen, ShareCardModal } from "./screens/ProfileScreen.jsx";
 import {
   AuthScreen,
   SetPasswordScreen,
@@ -188,6 +187,8 @@ export default function App() {
   const [arcLedgerRows, setArcLedgerRows] = useState([]);
   const [todayArcScore, setTodayArcScore] = useState(null);
   const [screen,      setScreen]     = useState("today");
+  /** Active section inside the Arc screen: "arc" | "evidence" | "reviews". */
+  const [arcTab,      setArcTab]     = useState("arc");
   const [xp,          setXp]         = useState(0);
   const [particles,   setParticles]  = useState([]);
   const [flashes,     setFlashes]    = useState([]);
@@ -207,7 +208,6 @@ export default function App() {
   const [logGoalId,      setLogGoalId]      = useState(null);
   const [editGoalId,     setEditGoalId]     = useState(null);
   const [openGoalId,     setOpenGoalId]     = useState(null);
-  const [showXP,      setShowXP]     = useState(false);
   const [showHistory, setShowHistory]= useState(false);
   const [showCoach,   setShowCoach]  = useState(false);
   /** How the coach sheet should prime input after open: voice vs keyboard. */
@@ -2982,10 +2982,8 @@ export default function App() {
     const demoGetStarted = () => { setDemoMode(false); setHabits([]); shownDemoRef.current = true; setDemoCoachOpen(false); setAuthScreen(true); };
     const DEMO_NAV = [
       { id:"today",    label:"Today",    icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.5"/><path d="M10 6v4l2.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
-      { id:"journal",  label:"Journal",  icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="4" y="3" width="12" height="14" rx="2" stroke="currentColor" strokeWidth="1.5"/><path d="M7 7h6M7 10h6M7 13h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg> },
-      { id:"insights", label:"Insights", icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 15l4-5 3 3 4-6 3 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg> },
-      { id:"social",   label:"Social",   icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="7.5" cy="7" r="2.5" stroke="currentColor" strokeWidth="1.5"/><path d="M3 16.5c0-2.5 2-4.5 4.5-4.5s4.5 2 4.5 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><circle cx="14.5" cy="6.5" r="2" stroke="currentColor" strokeWidth="1.5"/><path d="M11 16.5c0-1.7 1.1-3.1 2.6-3.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
-      { id:"profile",  label:"Profile",  icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="7" r="3" stroke="currentColor" strokeWidth="1.5"/><path d="M4 17c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
+      { id:"arc",      label:"Arc",      icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 15a7 7 0 0 1 14 0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><path d="M10 3.5v2M4.6 5.6l1.4 1.4M15.4 5.6L14 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
+      { id:"profile",  label:"You",      icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="7" r="3" stroke="currentColor" strokeWidth="1.5"/><path d="M4 17c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
     ];
     return (
       <>
@@ -3004,7 +3002,7 @@ export default function App() {
               ⚡ 420 xp
             </button>
           </div>
-          <TodayScreen habits={habits} goals={goals} xp={0} activeBlock={activeBlock} onTap={handleTap} onUndo={() => {}} onSkip={() => {}} onAddNote={() => demoBounce()} onLogZero={() => demoBounce()} onOpenLog={() => demoBounce()} onOpenGoalLog={() => demoBounce()} onEditGoal={openEditGoal} onCompleteGoal={() => demoBounce()} onDeleteGoal={() => demoBounce()} onShareGoal={() => {}} onEditHabit={openEditHabit} onDeleteHabit={() => demoBounce()} onShareHabit={() => {}} sharingHabitId={null} onXPInfo={() => {}} onAdd={() => demoBounce()} onSaveLogEntry={async () => { demoBounce(); return false; }} hideFloatingAdd coachEverOpened={false} onOpenCoachMic={() => setDemoCoachOpen(true)} coachName="Dr. No Excuses" coachIcon="🧘" coachHabitColor={T.accent}/>
+          <TodayScreen habits={habits} goals={goals} activeBlock={activeBlock} onTap={handleTap} onUndo={() => {}} onSkip={() => {}} onAddNote={() => demoBounce()} onLogZero={() => demoBounce()} onOpenLog={() => demoBounce()} onOpenGoalLog={() => demoBounce()} onEditGoal={openEditGoal} onCompleteGoal={() => demoBounce()} onDeleteGoal={() => demoBounce()} onShareGoal={() => {}} onEditHabit={openEditHabit} onDeleteHabit={() => demoBounce()} onShareHabit={() => {}} sharingHabitId={null} onAdd={() => demoBounce()} onSaveLogEntry={async () => { demoBounce(); return false; }} onOpenCoachMic={() => setDemoCoachOpen(true)} coachName="Dr. No Excuses" coachIcon="🧘" coachHabitColor={T.accent}/>
           {/* CoachBar — visible, tapping opens demo preview modal (no API calls) */}
           <div style={{ position:"fixed", left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:430, bottom:60, zIndex:101, padding:"0 10px", boxSizing:"border-box" }}>
             <CoachBar
@@ -4001,12 +3999,21 @@ export default function App() {
     );
   }
 
+  // Primary navigation is Today · Arc · You. Journal ("Evidence") and Insights
+  // ("Reviews") live inside the Arc screen; Social and Hub are reachable from
+  // the You screen. navigateTo maps legacy screen ids onto the new structure so
+  // older deep links (coach receipts, notifications) keep working.
+  function navigateTo(target) {
+    if (target === "journal" || target === "evidence") { setArcTab("evidence"); setScreen("arc"); return; }
+    if (target === "insights" || target === "reviews") { setArcTab("reviews");  setScreen("arc"); return; }
+    if (target === "arc") { setArcTab("arc"); setScreen("arc"); return; }
+    setScreen(target);
+  }
+
   const NAV = [
     { id:"today",    label:"Today",    icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.5"/><path d="M10 6v4l2.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
-    { id:"journal",  label:"Journal",  icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="4" y="3" width="12" height="14" rx="2" stroke="currentColor" strokeWidth="1.5"/><path d="M7 7h6M7 10h6M7 13h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg> },
-    { id:"insights", label:"Insights", icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 15l4-5 3 3 4-6 3 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg> },
-    { id:"social",   label:"Social",   icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden><circle cx="7.5" cy="7" r="2.5" stroke="currentColor" strokeWidth="1.5"/><path d="M3 16.5c0-2.5 2-4.5 4.5-4.5s4.5 2 4.5 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><circle cx="14.5" cy="6.5" r="2" stroke="currentColor" strokeWidth="1.5"/><path d="M11 16.5c0-1.7 1.1-3.1 2.6-3.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
-    { id:"profile",  label:"Profile",  icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="7" r="3" stroke="currentColor" strokeWidth="1.5"/><path d="M4 17c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
+    { id:"arc",      label:"Arc",      icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 15a7 7 0 0 1 14 0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><path d="M10 3.5v2M4.6 5.6l1.4 1.4M15.4 5.6L14 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
+    { id:"profile",  label:"You",      icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="7" r="3" stroke="currentColor" strokeWidth="1.5"/><path d="M4 17c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
   ];
 
   return (
@@ -4025,12 +4032,11 @@ export default function App() {
               {screen === "today"
                 ? fmtDateLong()
                 : screen === "profile" ? user.name
+                : screen === "arc" ? "Your Arc"
+                : screen === "hub" ? "All tracked items"
                 : screen.charAt(0).toUpperCase()+screen.slice(1)}
             </div>
           </div>
-          <button onClick={() => setShowXP(true)} style={{ display:"flex", alignItems:"center", gap:6, background:"rgba(200,144,42,0.12)", borderRadius:20, padding:"6px 13px", fontSize:13, fontWeight:500, color:T.gold, border:"none", cursor:"pointer" }}>
-            ⚡ {xp} xp
-          </button>
         </div>
 
         {/* Notification nudge banner — shown on Today screen when not enabled */}
@@ -4054,7 +4060,7 @@ export default function App() {
         )}
         {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} activeBlock={activeBlock} todayArcScore={todayArcScore} arcLedgerRows={arcLedgerRows} arcProofSyncing={arcProofSyncing} onStartArc={openArcCoachCreate}
 onEditArc={openArcCoachEdit}
-onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onXPInfo={() => setShowXP(true)} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} coachEverOpened={coachEverOpened} onOpenCoachMic={() => openCoachWithMode("mic")} onOpenCoachWithDraft={openCoachWithDraft} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} hideFloatingAdd onOpenGoalDetail={id => setOpenGoalId(id)} onOpenInsights={() => setScreen("insights")} todayJournalEntry={journalEntries.find(e => e.date === todayStr()) ?? null} onGenerateReceipt={handleGenerateReceipt} generatingReceipt={generatingReceipt} onOpenJournal={() => { setJournalOpenTab("journal"); setJournalAutoGenerate(false); setScreen("journal"); }} yesterdayJournalEntry={journalEntries.find(e => e.date === daysAgo(1)) ?? null} onLowerBudget={handleLowerBudget} tasks={tasks} onAddTask={handleAddTask} onCompleteTask={handleCompleteTask} onPinTask={handlePinTask} onDeleteTask={handleDeleteTask} onOpenHub={() => setScreen("hub")}/>}
+onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} onOpenCoachMic={() => openCoachWithMode("mic")} onOpenCoachWithDraft={openCoachWithDraft} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} onOpenGoalDetail={id => setOpenGoalId(id)} todayJournalEntry={journalEntries.find(e => e.date === todayStr()) ?? null} onGenerateReceipt={handleGenerateReceipt} generatingReceipt={generatingReceipt} onOpenJournal={() => { setJournalOpenTab("journal"); setJournalAutoGenerate(false); navigateTo("evidence"); }} onLowerBudget={handleLowerBudget} tasks={tasks} onAddTask={handleAddTask} onCompleteTask={handleCompleteTask} onPinTask={handlePinTask} onDeleteTask={handleDeleteTask} onOpenHub={() => setScreen("hub")}/>}
         {screen === "hub"      && <HubScreen
           habits={habits} goals={goals} tasks={tasks} activeBlock={activeBlock}
           onBack={() => setScreen("today")}
@@ -4071,8 +4077,21 @@ onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} o
           onAddTask={handleAddTask} onCompleteTask={handleCompleteTask}
           onPinTask={handlePinTask} onDeleteTask={handleDeleteTask}
         />}
-        {screen === "journal"  && <JournalScreen habits={habits} goals={goals} onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry} journalUserId={sessionUserId} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} journalEntries={journalEntries} onSaveJournalEntry={handleSaveJournalEntry} onJournalGenerated={handleJournalGenerated} initialTab={showJournalCompose ? "compose" : journalOpenTab ?? undefined} autoGenerateOnMount={journalAutoGenerate} onInitialComposeDone={() => { setShowJournalCompose(false); setJournalOpenTab(null); setJournalAutoGenerate(false); }} userName={user.name || ""} coachName={coachName} activeBlock={activeBlock}/>}
-        {screen === "insights" && <InsightsScreen habits={habits} goals={goals} journalEntries={journalEntries} activeBlock={activeBlock} completedArcBlock={completedArcBlock} onArcReviewComplete={() => reloadForgeBlocks(sessionUserId)} onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} userId={sessionUserId} userName={user.name || ""}/>}
+        {screen === "arc" && <ArcScreen
+          tab={arcTab} onTabChange={setArcTab}
+          activeBlock={activeBlock} habits={habits} goals={goals} journalEntries={journalEntries}
+          isPro={isPro} onUpgrade={() => setShowUpgrade(true)}
+          userId={sessionUserId} userName={user.name || ""} coachName={coachName}
+          onStartArc={openArcCoachCreate} onEditArc={openArcCoachEdit}
+          onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry}
+          onSaveJournalEntry={handleSaveJournalEntry} onJournalGenerated={handleJournalGenerated}
+          journalInitialTab={showJournalCompose ? "compose" : journalOpenTab ?? undefined}
+          journalAutoGenerate={journalAutoGenerate}
+          onJournalInitialComposeDone={() => { setShowJournalCompose(false); setJournalOpenTab(null); setJournalAutoGenerate(false); }}
+          completedArcBlock={completedArcBlock}
+          onArcReviewComplete={() => reloadForgeBlocks(sessionUserId)}
+          onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)}
+        />}
         {screen === "social"   && <SocialScreen
           user={user} xp={xp} habits={habits}
           friends={friends} friendRequests={friendRequests} sentRequests={sentRequests} friendsLoading={friendsLoading}
@@ -4155,7 +4174,7 @@ onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} o
             setPageGuide(null);
             setScreen("today");
             setPageGuideReplayTick(t => t + 1);
-            addToast("AI page tour reset — visit Today, Journal, Insights, Social");
+            addToast("AI page tour reset — visit Today, Arc, Social");
           }}
           onSignOut={handleSignOut}
           onShowTour={() => { setScreen("today"); setTimeout(() => { setTourSteps(GLOBAL_TOUR); setTourIdx(0); }, 120); }}
@@ -4174,18 +4193,24 @@ onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} o
           invitesEnabled={invitesEnabled}
           onNotifToggle={handleNotifToggle}
           onNotifCategoryChange={handleNotifCategoryChange}
+          onOpenSocial={() => setScreen("social")}
+          onOpenHub={() => setScreen("hub")}
         />}
 
         {/* Coach bar above nav (+ page guide / nudge / Today add). Hidden on Profile and while coach sheet open. */}
         {screen !== "profile" && (() => {
           const coachLabelRaw = (coachName ?? "").trim() || "Coach";
           const coachLabelShort = coachLabelRaw.length > 13 ? `${coachLabelRaw.slice(0, 12)}…` : coachLabelRaw;
+          // Floating add only when no Arc is running — with an active Arc the
+          // Arc-first surfaces own creation (proof actions on Today, Hub for
+          // everything else). Avoids the global "Add habit" framing.
           const showTodayAdd =
             screen === "today" &&
+            !activeBlock?.id &&
             (habits.length > 0 || goals.some(g => g.status !== "completed"));
           const habitColor = habits.find(h => h.habitType !== "log")?.color || T.accent;
           const showCoachBar =
-            !showCoach && ["today", "journal", "insights", "social", "hub"].includes(screen);
+            !showCoach && ["today", "arc", "social", "hub"].includes(screen);
           const safeBottom = "env(safe-area-inset-bottom, 0px)";
           const aboveNav = `calc(62px + ${safeBottom})`;
           const showPageSpeechMicIssue =
@@ -4326,7 +4351,7 @@ onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} o
                   }}
                 >
                   <span style={{ fontSize:18, fontWeight:700, lineHeight:1, marginTop:1 }} aria-hidden>+</span>
-                  <span>Add habit</span>
+                  <span>Add</span>
                 </button>
               )}
               {showCoachBar ? (
@@ -4494,12 +4519,11 @@ onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} o
         // going through the Add action sheet instead of the Habits tab.
         if (!isPro && habits.length >= 5) setShowUpgrade(true);
         else setShowAdd(true);
-      }} onAddGoal={() => { setShowAddChoice(false); setShowAddGoal(true); }} onAddLog={() => { setShowAddChoice(false); setJournalAutoGenerate(false); setScreen("journal"); setShowJournalCompose(true); }} onClose={() => setShowAddChoice(false)}/>}
+      }} onAddGoal={() => { setShowAddChoice(false); setShowAddGoal(true); }} onAddLog={() => { setShowAddChoice(false); setJournalAutoGenerate(false); setShowJournalCompose(true); navigateTo("evidence"); }} onClose={() => setShowAddChoice(false)}/>}
       {showCoachTeaser && <CoachComingSoonSheet onClose={() => setShowCoachTeaser(false)} coachName={coachName} context={screen}/>}
       {logGoalId     && (() => { const g = resolveGoalForModal(logGoalId, goals, habits); return g ? <LogGoalModal goal={g} onClose={() => setLogGoalId(null)} onLog={(id, val, note) => { handleLogGoal(id, val, note); setLogGoalId(null); }}/> : null; })()}
       {editGoalId    && (() => { const g = resolveGoalForModal(editGoalId, goals, habits); return g ? <EditGoalModal goal={g} onClose={() => setEditGoalId(null)} onSave={handleEditGoalSave}/> : null; })()}
       {openGoalId    && (() => { const g = resolveGoalForModal(openGoalId, goals, habits); return g ? <GoalDetailSheet goal={g} habits={habits} onClose={() => setOpenGoalId(null)} onLog={id => { setOpenGoalId(null); setLogGoalId(id); }} onEdit={id => { setOpenGoalId(null); openEditGoal(id); }} onComplete={handleCompleteGoal} onDelete={id => { handleDeleteGoal(id); setOpenGoalId(null); }} onCheckin={handleGoalCheckin} onLinkHabits={handleGoalLinkHabits}/> : null; })()}
-      {showXP        && <XPModal       xp={xp} activeBlock={activeBlock} todayArcScore={todayArcScore} arcLedgerRows={arcLedgerRows} habits={habits} onClose={() => setShowXP(false)}/>}
       {showHistory   && <HistoryModal  habits={habits} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onClose={() => setShowHistory(false)}/>}
       {reflectId     && <ReflectModal  habit={reflectHabit}                  onClose={() => setReflectId(null)} onSave={handleSaveReflection} hasCoach={!!user.coachId}/>}
       {editId && !editGoalId && editHabit && !isGoalLikeHabitType(editHabit) && <EditModal habit={editHabit} onClose={() => setEditId(null)} onSave={handleEditSave}/>}
@@ -4514,7 +4538,7 @@ onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} o
           coachIcon={coachIcon}
           coachAccentColor={habits.find(h => h.habitType !== "log")?.color || T.accent}
           currentScreen={screen}
-          onNavigateTo={(s) => setScreen(s)}
+          onNavigateTo={navigateTo}
           onHabitCreated={h  => setHabits(p => p.some(x => String(x.id) === String(h.id)) ? p.map(x => String(x.id) === String(h.id) ? h : x) : [...p, h])}
           onGoalCreated={g   => setGoals(p  => p.some(x => String(x.id) === String(g.id)) ? p.map(x => String(x.id) === String(g.id) ? g : x) : [...p, g])}
           previewNormalCoachGreeting={previewNormalCoachGreeting}
@@ -4544,7 +4568,7 @@ onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} o
             setCoachDraftInput(null);
             setJournalOpenTab("journal");
             setJournalAutoGenerate(true);
-            setScreen("journal");
+            navigateTo("evidence");
           }}
         />}
       {showUpgrade && <BetaPaywallModal onClose={() => setShowUpgrade(false)}/>}
