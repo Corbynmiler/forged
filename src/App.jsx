@@ -88,6 +88,7 @@ import { ArcScreen } from "./screens/ArcScreen.jsx";
 import { HubScreen } from "./screens/HubScreen.jsx";
 import ArcSetupSheet from "./screens/ArcSetupSheet.jsx";
 import ArcCoachSheet from "./screens/ArcCoachSheet.jsx";
+import { ArcCompletedSheet, hasDecidedArc, markArcDecided } from "./components/ArcCompletedSheet.jsx";
 import {
   SocialScreen,
   AddGoalModal,
@@ -106,7 +107,6 @@ import {
   BetaPaywallModal,
   WelcomeModal,
   ProThankYouModal,
-  PaywallScreen,
 } from "./screens/auth.jsx";
 import { OnboardingScreen, buildDemoHabits } from "./screens/OnboardingScreen.jsx";
 
@@ -201,6 +201,8 @@ export default function App() {
   const [journalEntries,    setJournalEntries]    = useState([]);
   /** Layered coach memory: { content, recentSummaries: [{date, summary}] } (oldest first). */
   const [coachMemory,       setCoachMemory]       = useState(null);
+  const [voiceRepliesEnabled, setVoiceRepliesEnabled] = useState(false);
+  const [coachVoiceId,        setCoachVoiceId]        = useState(null);
   const [showJournalCompose,setShowJournalCompose]= useState(false);
   const [generatingReceipt, setGeneratingReceipt] = useState(false);
   const [journalOpenTab,    setJournalOpenTab]    = useState(null);
@@ -1764,6 +1766,8 @@ export default function App() {
         setStripeCustomerId(profile.stripe_customer_id ?? null);
         setCoachName(profile.coach_name || "Coach");
         setCoachIcon((profile.coach_icon && String(profile.coach_icon).trim()) || "");
+        setVoiceRepliesEnabled(profile.voice_replies_enabled === true);
+        setCoachVoiceId(profile.coach_voice_id || null);
         isOnboarded = profile.onboarded ?? false;
         if (!isOnboarded && profile.name && profile.name.trim()) {
           isOnboarded = true;
@@ -1841,6 +1845,61 @@ export default function App() {
     setShowArcCoach(false);
     addToast(toastMsg);
     void reloadForgeBlocks();
+  }
+
+
+  async function handleArcStoryGenerated(blockRow) {
+    if (blockRow) setCompletedArcBlock(rowToForgeBlock(blockRow));
+    else await reloadForgeBlocks();
+  }
+
+  async function handleArcContinue(completedBlock) {
+    const uid = userIdRef.current;
+    if (!uid || !completedBlock?.id) return;
+    markArcDecided(completedBlock.id);
+    const startDate = todayStr();
+    const durationDays = normalizeArcDuration(completedBlock.durationDays);
+    const t = new Date();
+    const end = new Date(t.getFullYear(), t.getMonth(), t.getDate() + durationDays);
+    const endDate = `${end.getFullYear()}-${String(end.getMonth()+1).padStart(2,"0")}-${String(end.getDate()).padStart(2,"0")}`;
+    const { data: blockRow, error } = await supabase.from("forge_blocks").insert({
+      user_id: uid,
+      title: completedBlock.title || resolveArcTitle("", completedBlock.identity),
+      identity: completedBlock.identity,
+      why_statement: (completedBlock.whyStatement || "").trim() || null,
+      old_pattern: (completedBlock.oldPattern || "").trim() || null,
+      minimum_proof: (completedBlock.minimumProof || "").trim() || null,
+      start_date: startDate,
+      end_date: endDate,
+      status: "active",
+      duration_days: durationDays,
+    }).select().single();
+    if (error) {
+      addToast("Could not start the next Arc — try again");
+      return;
+    }
+    const proofIds = habits.filter(h => h.blockId === completedBlock.id && h.isProofAction).map(h => h.id);
+    if (blockRow?.id && proofIds.length) {
+      await supabase.from("habits").update({
+        block_id: blockRow.id,
+        is_proof_action: true,
+        updated_at: new Date().toISOString(),
+      }).in("id", proofIds);
+      setHabits(prev => prev.map(h => proofIds.includes(h.id) ? { ...h, blockId: blockRow.id, isProofAction: true } : h));
+    }
+    setCompletedArcBlock(null);
+    addToast("Arc restarted");
+    await reloadForgeBlocks(uid);
+  }
+
+  function handleArcEvolve(completedBlock) {
+    if (completedBlock?.id) markArcDecided(completedBlock.id);
+    setCompletedArcBlock(null);
+    openArcCoachCreate();
+  }
+
+  function handleArcClose(completedBlock) {
+    if (completedBlock?.id) markArcDecided(completedBlock.id);
   }
 
   function openArcCoachCreate() {
@@ -2035,6 +2094,26 @@ export default function App() {
       }
       if (blockRow) {
         const block = rowToForgeBlock(blockRow);
+        // Automatically recognise an Arc reaching its end: an "active" block
+        // whose end_date has passed gets marked completed, then falls through
+        // to the completed-Arc branch (Arc Story + continue/evolve/close).
+        if (block.endDate && block.endDate < todayStr()) {
+          const { data: closedRow, error: closeErr } = await supabase
+            .from("forge_blocks")
+            .update({ status: "completed", updated_at: new Date().toISOString() })
+            .eq("id", block.id)
+            .eq("user_id", uid)
+            .select()
+            .single();
+          if (!closeErr && closedRow) {
+            setArcLedgerRows([]);
+            setTodayArcScore(null);
+            setActiveBlock(null);
+            setCompletedArcBlock(rowToForgeBlock(closedRow));
+            return;
+          }
+          // If the close failed (offline etc.), keep treating it as active.
+        }
         setActiveBlock(block);
         setCompletedArcBlock(null);
         void loadArcLedgerForBlock(block.id);
@@ -4197,6 +4276,13 @@ onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} o
           onShowTour={() => { setScreen("today"); setTimeout(() => { setTourSteps(GLOBAL_TOUR); setTourIdx(0); }, 120); }}
           coachName={coachName}
           coachIcon={coachIcon}
+          voiceRepliesEnabled={voiceRepliesEnabled}
+          coachVoiceId={coachVoiceId}
+          onSaveVoicePrefs={({ voiceRepliesEnabled: vre, coachVoiceId: cvid }) => {
+            setVoiceRepliesEnabled(!!vre);
+            setCoachVoiceId(cvid || null);
+            syncProfile({ voice_replies_enabled: !!vre, coach_voice_id: cvid || null });
+          }}
           onSaveCoach={({ name, icon }) => {
             setCoachName(name);
             setCoachIcon(icon);
@@ -4563,6 +4649,8 @@ onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} o
           onHabitRenamed={(id, name) => setHabits(p => p.map(h => String(h.id) === String(id) ? { ...h, name } : h))}
           onGoalPlanConfirm={handleGoalPlanConfirm}
           journalEntries={journalEntries}
+          voiceRepliesEnabled={voiceRepliesEnabled}
+          coachVoiceId={coachVoiceId}
           coachMemory={coachMemory ? {
             content: coachMemory.content,
             // Free: current-Arc depth (last 3 days). Pro: full 7-day window
@@ -4588,6 +4676,17 @@ onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} o
             navigateTo("evidence");
           }}
         />}
+
+      {completedArcBlock?.id && !activeBlock?.id && !hasDecidedArc(completedArcBlock.id) && (
+        <ArcCompletedSheet
+          block={completedArcBlock}
+          userName={user.name || ""}
+          onStoryGenerated={(blockRow) => handleArcStoryGenerated(blockRow)}
+          onContinue={() => handleArcContinue(completedArcBlock)}
+          onEvolve={() => handleArcEvolve(completedArcBlock)}
+          onClose={() => handleArcClose(completedArcBlock)}
+        />
+      )}
       {showUpgrade && <BetaPaywallModal onClose={() => setShowUpgrade(false)}/>}
       {showShare && <ShareCardModal user={user} habits={habits} xp={xp} onClose={() => setShowShare(false)}/>}
       {showWelcome && (

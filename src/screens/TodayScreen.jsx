@@ -641,12 +641,12 @@ export function TodayScreen({
       {onOpenCoachMic && !arcActive && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic} habitCompletionPercentage={pct} habitsLoggedTodayCount={loggedCount} totalTrackables={totalTrackables}/>}
       <div style={{ padding:"40px 28px 32px", textAlign:"center" }}>
         <div style={{ fontSize:48, marginBottom:16 }}>⚒️</div>
-        <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, marginBottom:10 }}>Nothing forged yet</div>
+        <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, marginBottom:10 }}>Start with an Arc</div>
         <div style={{ fontSize:14, color:T.muted, lineHeight:1.75, marginBottom:28 }}>
-          Add a habit to track daily, or tell the coach what outcome you're working toward — it will help you build a plan.
+          Tell your coach what's changing in your life — it will shape a short Arc with proof actions you can speak about each day.
         </div>
         <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:0 }}>
-          <button onClick={onAdd} style={{ padding:"13px 24px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer" }}>Add your first habit</button>
+          <button onClick={onOpenCoachMic || onAdd} style={{ padding:"13px 24px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer" }}>Talk to your coach</button>
           {onOpenCoachWithDraft && (
             <button
               type="button"

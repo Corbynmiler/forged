@@ -386,7 +386,7 @@ export default function ArcCoachSheet({
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>{coachDisplay}</div>
-          <div style={{ fontSize: 11, color: T.gold, marginTop: 1 }}>{isEdit ? "Edit your Arc" : "8-week Arc setup"}</div>
+          <div style={{ fontSize: 11, color: T.gold, marginTop: 1 }}>{isEdit ? "Edit your Arc" : "Arc setup"}</div>
         </div>
         {isEdit && activeBlock ? (
           <button
