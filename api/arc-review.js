@@ -112,7 +112,7 @@ function buildArcReviewContext({ block, habits, weeklyBriefs, journalEntries, na
 }
 
 function buildArcReviewUserPrompt(context) {
-  return `Here is everything logged during this person's 8-week Arc:
+  return `Here is everything logged during this person's Arc:
 
 ${context}
 
@@ -218,8 +218,9 @@ async function handler(req, res) {
     todayYmd,
   });
 
+  const durationDays = block.duration_days || 56;
   const system =
-    "You write a 6-8 sentence end-of-Arc review. Compare the identity they wrote on day 1 to the proof they actually showed across 56 days. Name what changed. Name what stayed. End with one honest recommendation: continue, evolve, or start a new Arc. Plain text only, no markdown.";
+    `You write a 6-8 sentence end-of-Arc review — the "Arc Story". Compare the identity they wrote on day 1 to the proof they actually showed across the ${durationDays} days. Name what changed. Name what stayed. End with one honest recommendation: continue this Arc, evolve it into something new, or close it and rest. Plain text only, no markdown.`;
 
   const client = new Anthropic({ apiKey: apiKey.trim() });
   let reviewText = "";

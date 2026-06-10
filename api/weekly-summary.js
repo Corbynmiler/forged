@@ -65,11 +65,13 @@ function parseLocalYmd(ymd) {
 function arcDayAndWeek(activeBlock, clientDate) {
   const today = (clientDate && DATE_RE.test(clientDate)) ? clientDate : new Date().toISOString().slice(0, 10);
   const start = activeBlock?.startDate;
-  if (!start || !DATE_RE.test(start)) return { dayX: 1, weekN: 1 };
+  const duration = Math.max(1, activeBlock?.durationDays || 56);
+  const totalWeeks = Math.max(1, Math.ceil(duration / 7));
+  if (!start || !DATE_RE.test(start)) return { dayX: 1, weekN: 1, duration, totalWeeks };
   const daysElapsed = Math.floor((parseLocalYmd(today) - parseLocalYmd(start)) / 86400000);
-  const dayX = Math.min(56, Math.max(1, daysElapsed + 1));
-  const weekN = Math.min(8, Math.ceil((daysElapsed + 1) / 7));
-  return { dayX, weekN };
+  const dayX = Math.min(duration, Math.max(1, daysElapsed + 1));
+  const weekN = Math.min(totalWeeks, Math.max(1, Math.ceil((daysElapsed + 1) / 7)));
+  return { dayX, weekN, duration, totalWeeks };
 }
 
 function proofActionsWeekLines(habits, activeBlock, weekStart, weekEnd) {
@@ -98,13 +100,13 @@ function proofActionsWeekLines(habits, activeBlock, weekStart, weekEnd) {
 }
 
 function buildArcContextSection(activeBlock, habits, clientDate, weekStart, weekEnd) {
-  const { dayX } = arcDayAndWeek(activeBlock, clientDate);
+  const { dayX, duration } = arcDayAndWeek(activeBlock, clientDate);
   const dash = "—";
   const lines = [
     "Active Arc:",
     `- They said they are becoming: ${activeBlock.identity || dash}`,
     `- Why it matters: ${(activeBlock.whyStatement || "").trim() || dash}`,
-    `- Day ${dayX} of 56 (Arc started ${activeBlock.startDate})`,
+    `- Day ${dayX} of ${duration} (Arc started ${activeBlock.startDate})`,
     `- Old pattern they're weakening: ${(activeBlock.oldPattern || "").trim() || dash}`,
     "Proof actions logged this week:",
     ...proofActionsWeekLines(habits, activeBlock, weekStart, weekEnd),
@@ -255,20 +257,20 @@ ${habitNamesForSignals.map((n) => `- ${n}`).join("\n")}
 No active habits listed — output SIGNALS_JSON as an empty array: [] between the markers.
 `;
 
-  return `You are writing a Weekly Arc Review for someone using Forged — comparing what they actually did this week against the identity they chose at the start of their 8-week Arc.
+  return `You are writing a Weekly Arc Review for someone using Forged — comparing what they actually did this week against the identity they chose at the start of their Arc.
 
 ${context}
 ---
 ${namesBlock}
-Write them a 4–6 sentence Arc Review. Be specific to their actual data — habit names, real numbers, what they wrote.
+Write them a SHORT Review — at most 8 lines total, not a report. Be specific to their actual data.
 
-Your job:
-1. Compare this week's proof and habits to who they said they are becoming (identity on day 1 of the Arc).
-2. Name what they showed up for — tie wins lightly to that identity, once, without guru language.
-3. If the data shows drift, name the old pattern they're trying to weaken once — no preaching, no lectures.
-4. End with one specific, concrete thing to lean into next week (one habit, one action, or one boundary).
+Format (follow this structure):
+VERDICT: one honest sentence — did this week move them toward their Arc identity or not?
+PROOF: 1–2 sentences on what actually showed up (name habits/numbers).
+PATTERN: 1 sentence on what keeps derailing them, if visible in the data — or what trade-off showed up.
+NEXT: one concrete instruction for next week (one action, one boundary, or one proof to protect).
 
-Tone: direct, grounded, like a coach who's been watching. Not cheerleader energy. Not corporate wellness. No "future you", "your journey", "warrior", or motivational-guru phrasing. Short sentences. Do not start with "This week".
+Tone: direct, grounded, like someone who's been watching. Not cheerleader energy. No "future you", "your journey", "warrior", or motivational-guru phrasing. Do not start with "This week".
 
 After the prose only, output momentum signals on separate lines exactly like this:
 
