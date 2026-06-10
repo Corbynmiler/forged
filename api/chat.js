@@ -129,14 +129,42 @@ const COACH_TOOLS = [
       },
       required: ["note"],
     },
-    // Prompt caching: marking the LAST tool with cache_control caches the
-    // entire tools array (~700+ tokens of stable JSON) for ~5 minutes. Repeat
-    // chat turns within that window pay ~10% of the normal input price for
-    // this prefix. Saves a large fraction of our Anthropic spend on chat.js
-    // because the tools schema is identical on every call.
-    cache_control: { type: "ephemeral" },
   },
 ];
+
+// Pro-only read tool: lets the coach pull older context (past daily summaries
+// and evidence entries) when the current message references something outside
+// the recent window. Results are returned to the model in a follow-up pass.
+const RECALL_TOOL = {
+  name: "recall",
+  description:
+    "Searches the user's PAST daily summaries and evidence entries (older than the recent days already in your context). " +
+    "Use ONLY when the user's message clearly references something from further back — 'that week I was sick', 'when did I last...', 'how did the launch go last month'. " +
+    "Do not use it for anything already visible in your context. When you call this tool, write at most a brief lead-in sentence first — the app will give you the results and let you finish your reply.",
+  input_schema: {
+    type: "object",
+    properties: {
+      query:      { type: "string", description: "2–5 keywords to search for (e.g. 'sick week gym')." },
+      date_from:  { type: "string", description: "Optional YYYY-MM-DD lower bound." },
+      date_to:    { type: "string", description: "Optional YYYY-MM-DD upper bound." },
+    },
+    required: ["query"],
+  },
+};
+
+/**
+ * Tools array for this request. Pro users get the recall tool appended.
+ * Prompt caching: cache_control on the LAST tool caches the entire tools
+ * array (~700+ tokens of stable JSON) for ~5 minutes — repeat turns pay ~10%
+ * of normal input price for this prefix. Free and Pro produce two distinct
+ * (but each internally stable) cache prefixes.
+ */
+function buildCoachTools(isPro) {
+  const base = isPro ? [...COACH_TOOLS, RECALL_TOOL] : [...COACH_TOOLS];
+  return base.map((t, i) =>
+    i === base.length - 1 ? { ...t, cache_control: { type: "ephemeral" } } : t
+  );
+}
 
 // ── System prompt blocks ───────────────────────────────────────────────────────
 // The client sends the prompt split into two parts:
@@ -166,18 +194,21 @@ function buildSystemBlocks(systemStable, systemVolatile, legacySystem) {
  * emitted tools without any reply text. The user has already seen whatever
  * text streamed before the tools, so this writes an addendum, not a reply.
  */
-function followupSystemBlocks(systemStable, systemVolatile, legacySystem, hadStreamedText) {
+function followupSystemBlocks(systemStable, systemVolatile, legacySystem, hadStreamedText, recallRan = false) {
   const base = buildSystemBlocks(systemStable, systemVolatile, legacySystem);
   const blocks = Array.isArray(base) ? [...base] : [];
   blocks.push({
     type: "text",
     text:
       "THIS TURN ONLY: tool results are in the next message.\n" +
+      (recallRan
+        ? "Your recall results are in the tool results. Use them to answer the user's actual question — specific dates and events, plain language. If recall found nothing, say so honestly.\n"
+        : "") +
       (hadStreamedText
-        ? "The user has ALREADY SEEN the reply text you wrote before the tools ran. Do NOT repeat or rephrase it. Write only a short addendum (1–2 sentences) covering what genuinely needs saying — usually that something couldn't be captured and what you need to fix it.\n"
+        ? "The user has ALREADY SEEN the reply text you wrote before the tools ran. Do NOT repeat or rephrase it. Continue from where it left off — write only what genuinely needs adding.\n"
         : "You called tools without writing a reply. Write the reply now — respond to the person first, specific and human, 1–4 short sentences.\n") +
       "Never open with logging status language ('saved', 'logged', 'got it', 'done'). The app shows its own quiet capture line.\n" +
-      "If a tool_result has success:false, say plainly what didn't get captured and ask the one thing you need — nothing dramatic.\n" +
+      "If a write tool_result has success:false, say plainly what didn't get captured and ask the one thing you need — nothing dramatic.\n" +
       "No new tool calls.",
   });
   return blocks;
@@ -562,6 +593,47 @@ async function executeAddDailyNote(input, userId, db, clientDate) {
   }
 }
 
+/** Pro-only read: search older daily summaries + evidence entries. Never writes. */
+async function executeRecall(input, userId, db) {
+  const rawQuery = String(input?.query || "").trim();
+  if (!rawQuery) throw new Error("recall needs a query.");
+  const terms = rawQuery
+    .split(/\s+/)
+    .map(t => t.replace(/[%_,]/g, "").trim())
+    .filter(t => t.length >= 3)
+    .slice(0, 5);
+
+  const from = DATE_RE.test(input?.date_from || "") ? input.date_from : null;
+  const to = DATE_RE.test(input?.date_to || "") ? input.date_to : null;
+
+  function applyRange(q) {
+    if (from) q = q.gte("date", from);
+    if (to) q = q.lte("date", to);
+    return q;
+  }
+
+  // ILIKE-OR across terms; capped result count keeps the follow-up prompt small.
+  const orExpr = cols => terms.map(t => cols.map(c => `${c}.ilike.%${t}%`).join(",")).join(",");
+
+  let sumQ = db.from("daily_summaries").select("date, summary").eq("user_id", userId)
+    .order("date", { ascending: false }).limit(6);
+  let jQ = db.from("journal_entries").select("date, content").eq("user_id", userId)
+    .neq("content", "").order("date", { ascending: false }).limit(4);
+  sumQ = applyRange(sumQ);
+  jQ = applyRange(jQ);
+  if (terms.length) {
+    sumQ = sumQ.or(orExpr(["summary"]));
+    jQ = jQ.or(orExpr(["content"]));
+  }
+
+  const [{ data: sums }, { data: entries }] = await Promise.all([sumQ, jQ]);
+  const lines = [];
+  for (const s of sums || []) lines.push(`[${s.date}] ${s.summary}`);
+  for (const e of entries || []) lines.push(`[${e.date}] evidence: ${String(e.content).slice(0, 280)}`);
+  lines.sort();
+  return { results: lines.length ? lines.join("\n") : "No matching past context found." };
+}
+
 // ── SSE helper ─────────────────────────────────────────────────────────────────
 function sse(res, data) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
@@ -659,7 +731,7 @@ async function handler(req, res) {
   }
 
   const client = new Anthropic({ apiKey: apiKey.trim() });
-  const tools  = COACH_TOOLS;
+  const tools  = buildCoachTools(isPro);
 
   // Cost control: cap history at last 12 messages (6 turns)
   const trimmedMessages = messages.slice(-12);
@@ -766,6 +838,9 @@ async function handler(req, res) {
       // (e.g. Drink Water logged twice). The second call is silently skipped so
       // the DB entry isn't double-written and the receipt shows one pill.
       const loggedHabitIds = new Set();
+      // recall is a READ — its results go back to the model in a follow-up
+      // pass, and it never appears in the Captured line.
+      let recallRan = false;
       for (const tb of toolBlocks) {
         let result;
         try {
@@ -804,21 +879,35 @@ async function handler(req, res) {
             actions.noted.push(r);
             result = { success: true, date: r.date, mode: r.mode };
             outcomes.push({ tool: "add_daily_note", success: true, date: r.date, mode: r.mode });
+          } else if (tb.name === "recall") {
+            if (!isPro) {
+              result = { success: false, error: "Recall is a Pro feature — answer from the context you already have." };
+            } else {
+              const r = await executeRecall(tb.input, userId, db);
+              recallRan = true;
+              result = { success: true, results: r.results };
+            }
+            // No outcomes push — read-only, never part of the Captured line.
           } else {
             result = { success: false, error: "Unknown tool — action was NOT performed." };
             outcomes.push({ tool: tb.name, success: false, error: result.error });
           }
         } catch (err) {
           result = { success: false, error: err.message };
-          const fail = {
-            tool: tb.name,
-            success: false,
-            error: err.message,
-            habit_name: tb.input?.habit_name,
-          };
-          if (tb.name === "add_daily_note") delete fail.habit_name;
-          if (tb.name === "create_habit") fail.name = tb.input?.name;
-          outcomes.push(fail);
+          if (tb.name === "recall") {
+            // Failed read — surface to the model via the follow-up, never the receipt.
+            recallRan = true;
+          } else {
+            const fail = {
+              tool: tb.name,
+              success: false,
+              error: err.message,
+              habit_name: tb.input?.habit_name,
+            };
+            if (tb.name === "add_daily_note") delete fail.habit_name;
+            if (tb.name === "create_habit") fail.name = tb.input?.name;
+            outcomes.push(fail);
+          }
         }
         // Per-tool trace so we can pinpoint failures in Vercel logs without
         // leaking sensitive data (no notes / reflection text).
@@ -857,11 +946,11 @@ async function handler(req, res) {
       // happens only if (a) a tool failed in a way the user must hear about,
       // or (b) the model emitted tools without writing any reply text.
       const hadFailure = outcomes.some(o => !o.success);
-      if (hadFailure || !textEmitted) {
+      if (hadFailure || !textEmitted || recallRan) {
         try {
           const followStream = client.messages.stream({
-            model: "claude-haiku-4-5", max_tokens: 500,
-            system: followupSystemBlocks(systemStable, systemVolatile, system, textEmitted),
+            model: "claude-haiku-4-5", max_tokens: recallRan ? 800 : 500,
+            system: followupSystemBlocks(systemStable, systemVolatile, system, textEmitted, recallRan),
             tools, // keep the tools prefix identical so the prompt cache still hits
             messages: [
               ...trimmedMessages,

@@ -198,6 +198,8 @@ export default function App() {
   const [showAddLog,        setShowAddLog]        = useState(false);
   const [tasks,             setTasks]             = useState([]);
   const [journalEntries,    setJournalEntries]    = useState([]);
+  /** Layered coach memory: { content, recentSummaries: [{date, summary}] } (oldest first). */
+  const [coachMemory,       setCoachMemory]       = useState(null);
   const [showJournalCompose,setShowJournalCompose]= useState(false);
   const [generatingReceipt, setGeneratingReceipt] = useState(false);
   const [journalOpenTab,    setJournalOpenTab]    = useState(null);
@@ -1597,6 +1599,47 @@ export default function App() {
   }
 
   /** @returns {Promise<boolean>} true if profile/habits were loaded and applied; false on hard failure */
+  /** Rolling memory + recent day summaries for the coach prompt (non-fatal). */
+  async function loadCoachMemory(uid) {
+    try {
+      const [{ data: mem }, { data: sums }] = await Promise.all([
+        supabase.from("coach_memory").select("content, updated_at").eq("user_id", uid).maybeSingle(),
+        supabase.from("daily_summaries").select("date, summary").eq("user_id", uid)
+          .order("date", { ascending: false }).limit(7),
+      ]);
+      setCoachMemory({
+        content: mem?.content || "",
+        recentSummaries: (sums || []).slice().reverse(), // oldest first for the prompt
+      });
+    } catch { /* non-fatal — coach works without memory */ }
+  }
+
+  /**
+   * Lazy day-rollover: once per local day, ask the server to summarize any
+   * recent finished days and refresh the rolling memory. Cheap (one Haiku
+   * call, max 2 days) and fire-and-forget.
+   */
+  async function maybeRunMemoryRollover(uid) {
+    const key = `forged_memory_rollover:${uid}`;
+    const today = todayStr();
+    try { if (localStorage.getItem(key) === today) return; } catch { /* ignore */ }
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+      const res = await fetch("/api/memory-rollover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ client_date: today }),
+      });
+      if (res.ok) {
+        try { localStorage.setItem(key, today); } catch { /* ignore */ }
+        const json = await res.json().catch(() => null);
+        if (json?.updated) loadCoachMemory(uid);
+      }
+    } catch { /* non-fatal */ }
+  }
+
   async function loadUserData(uid) {
     // Mutex: skip if already loading this uid
     if (loadingUidRef.current === uid) return false;
@@ -1640,6 +1683,11 @@ export default function App() {
           .then(({ data: jRows }) => {
             if (jRows) setJournalEntries(jRows);
           });
+
+        // Coach memory + recent day summaries; also kicks the once-per-day
+        // rollover summarizer (both non-fatal)
+        loadCoachMemory(uid);
+        maybeRunMemoryRollover(uid);
 
         // Load tasks: today's tasks + pinned undone carry-overs from previous days (non-fatal)
         const todayIso = new Date().toISOString().slice(0, 10);
@@ -4474,6 +4522,12 @@ onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} o
           onHabitRenamed={(id, name) => setHabits(p => p.map(h => String(h.id) === String(id) ? { ...h, name } : h))}
           onGoalPlanConfirm={handleGoalPlanConfirm}
           journalEntries={journalEntries}
+          coachMemory={coachMemory ? {
+            content: coachMemory.content,
+            // Free: current-Arc depth (last 3 days). Pro: full 7-day window
+            // (plus the recall tool server-side for older context).
+            recentSummaries: (coachMemory.recentSummaries || []).slice(isPro ? -7 : -3),
+          } : null}
           onJournalLogged={entries => {
             // Re-fetch journal entries after AI writes so the Journal tab reflects it immediately
             const uid = userIdRef.current;
