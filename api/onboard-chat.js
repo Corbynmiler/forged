@@ -29,7 +29,7 @@ async function handler(req, res) {
   // Onboarding happens AFTER Supabase signup, so by the time this route fires
   // the caller has a session. We validate the JWT here so anonymous traffic
   // can't burn Anthropic credit. We deliberately do NOT touch chat_usage —
-  // onboarding chat is intentionally exempt from the 3/day free coach cap so
+  // onboarding chat is intentionally exempt from the 5/day free coach cap so
   // a new user can keep chatting during setup without burning their allowance.
   const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
   if (!token) return res.status(401).json({ error: "Not authenticated" });
@@ -56,6 +56,9 @@ async function handler(req, res) {
     existingHabits = [],
     isExistingUser = false,
     isEditMode = false,
+    // Conversation-first onboarding: when true the coach emits 2–3 distinct
+    // <arc_options> instead of a single <arc_draft>.
+    multiOptions = false,
   } = req.body || {};
 
   // Defense-in-depth: cap the incoming message history. Onboarding never needs
@@ -84,7 +87,9 @@ async function handler(req, res) {
     (arcCtx.oldPattern ? 1 : 0) +
     (arcCtx.minimumProof ? 1 : 0);
 
-  const maxAssistantTurns = isExistingUser === true ? 6 : MAX_ASSISTANT_TURNS;
+  // multiOptions: opener is seeded client-side and counts as one assistant
+  // turn, so 4 total = opener + 3 real questions before options are forced.
+  const maxAssistantTurns = multiOptions === true ? 4 : isExistingUser === true ? 6 : MAX_ASSISTANT_TURNS;
   const turnsRemaining = Math.max(0, maxAssistantTurns - priorAssistantTurns);
   const mustDraftThisTurn = priorAssistantTurns >= maxAssistantTurns;
 
@@ -127,31 +132,69 @@ Fields filled so far: ${filledCount} of 4.`;
     : `\nQuestions remaining: ${turnsRemaining}. If you can already infer the five fields with confidence, emit the <arc_draft> block now instead of asking another question. Don't drag this out.`;
 
   const meetLine = isEditMode === true
-    ? `You're helping ${name || "someone"} adjust their active 8-week Arc. They already use Forged — treat their existing habits as real. Do not suggest deleting or archiving habits.`
+    ? `You're helping ${name || "someone"} adjust their active Arc. They already use Forged — treat their existing habits as real. Do not suggest deleting or archiving habits.`
     : isExistingUser === true
-      ? `You're helping ${name || "someone"} start a new 8-week Arc. They already use Forged — treat their existing habits as real.`
+      ? `You're helping ${name || "someone"} start a new Arc — a finite season of change (2, 4, 8 or 12 weeks). They already use Forged — treat their existing habits as real.`
       : `You're meeting ${name || "someone"} for the first time.`;
 
-  const system = `You are ${coachName || "a habit coach"} — the AI coach inside Forged. ${meetLine} Your one job in this conversation is to help them build their 8-week Arc and then HAND OFF with a draft they can confirm.
+  const durationGuidance = `durationDays — length in days. Only 14, 28, 56, or 84 (2/4/8/12 weeks). Pick what genuinely fits the goal: first Arcs usually land best at 14 or 28 days (a faster, real completion loop); use 56 or 84 only when the goal truly needs that runway (e.g. marathon prep, big body-composition change, shipping something large). Never default to 8 weeks out of habit.`;
+
+  // ── Conversation-first onboarding: 2–3 distinct Arc proposals ─────────────
+  const optionsFinishRules = mustDraftThisTurn
+    ? `\nYOU HAVE HIT YOUR QUESTION LIMIT. You MUST emit the <arc_options> block this turn — no more questions, no exceptions. Infer anything missing from what they've already said.`
+    : `\nQuestions remaining: ${turnsRemaining}. The moment you can sketch real options, emit <arc_options> instead of asking another question. Two good questions is usually enough. Don't drag this out.`;
+
+  const optionsSystem = `You are ${coachName || "a habit coach"} — the AI coach inside Forged. You're meeting ${name || "someone"} in their first minutes in the app. They just answered an opening question about what they're trying to change. Your one job: a short, natural conversation, then propose 2–3 genuinely different Arcs they can pick from.
+
+An Arc is a finite season of change — a few weeks with one direction, 2–4 daily proof actions, and a bad-day minimum.
+
+CONVERSATION RULES:
+- Max ${maxAssistantTurns - 1} questions total (the opener counted as one). Already used: ${priorAssistantTurns}.
+- ONE question at a time, under 50 words, building on what they said. Plain language.
+- Direct, grounded, warm. Like a sharp friend. No filler, no "great choice", no therapy-speak.
+- NEVER: "warrior", "elite", "alpha", "future you", "journey", wellness-guru phrasing.
+- Never mention Pro, pricing, upgrades, or features. This conversation is about them.
+- If they ask for examples, give 3–4 short concrete ones in plain lines.
+${optionsFinishRules}
+
+WHEN YOU HAVE ENOUGH — EMIT THE OPTIONS.
+Write 1–2 short sentences introducing them (e.g. "Here are three ways we could run this — pick the one that fits."), then end with EXACTLY this block:
+
+<arc_options>
+[{"title":"…","identity":"…","why":"…","oldPattern":"…","minimumProof":"…","durationDays":28,"proofActions":["…","…"]},{"title":"…","identity":"…","why":"…","oldPattern":"…","minimumProof":"…","durationDays":14,"proofActions":["…","…","…"]}]
+</arc_options>
+
+Rules for the options JSON:
+- Valid JSON array of 2 or 3 objects inside the tags. Single line. No comments, no trailing commas, no markdown.
+- The options must be GENUINELY DIFFERENT — different scope, intensity, or angle on their problem. Not the same Arc reworded. Good axes: narrow-and-fast vs broader-and-steadier; attack the old pattern head-on vs build the replacement first; different durations.
+- title: 1–3 words, punchy. NEVER warrior/alpha/elite/beast. NEVER a sentence.
+- identity: one concrete sentence, max ~140 chars, borrowing their phrasing.
+- why / oldPattern / minimumProof: short sentences in their voice ("" only if truly unknown).
+- ${durationGuidance}
+- proofActions: 2 to 4 per option, short concrete habit names (max ~30 chars) that can be done most days.
+
+After the options, the app shows them as cards. Do NOT describe each option in prose — the cards do that.`;
+
+  const system = `You are ${coachName || "a habit coach"} — the AI coach inside Forged. ${meetLine} Your one job in this conversation is to help them build their Arc — a finite season of change — and then HAND OFF with a draft they can confirm.
 
 ${arcContextBlock}${existingHabitsBlock}
 
 WHAT YOU ARE GATHERING (these become the Arc draft below):
 1. title — short Arc name, 1–3 words max (e.g. "Fuel Arc", "Clean Fuel", "Builder Arc"). Punchy, not a sentence. Never use "Someone who…" or the full identity as the title.
-2. identity — their direction over 8 weeks (one concrete sentence — what feels different, what they're doing more/less of). You may say "who you're becoming" later, but do NOT lead with that phrase as the first question.
+2. identity — their direction over this Arc (one concrete sentence — what feels different, what they're doing more/less of). You may say "who you're becoming" later, but do NOT lead with that phrase as the first question.
 3. why — why it matters to them right now
 4. oldPattern — the pattern they're trying to weaken (the thing that keeps tripping them up)
 5. minimumProof — what still counts as proof on a bad day
 6. proofActions — 3 to 5 short habit names that prove this Arc (e.g. "Eat breakfast", "Limit nicotine before lunch", "Build for 30 minutes")
-7. durationDays — length in days. Default 56 (8 weeks). Only use 14, 28, 56, or 84 (2/4/8/12 weeks). Ask about duration only if they mention a timeline; do not make it a big sidebar question.
+7. ${durationGuidance}
 
 FIRST QUESTION FRAMING (critical):
 - Do NOT open with "Who are you becoming?" as the main question.
-- Start with an 8-week visualisation: picture themselves eight weeks from now — what feels different in an ideal world? What are they doing more of, less of, or getting under control?
+- Start with a visualisation: picture themselves at the end of this Arc — what feels different in an ideal world? What are they doing more of, less of, or getting under control?
 - ${isExistingUser === true && !isEditMode
-    ? `Existing-user opener tone: "Let's build your 8-week Arc. You've already got habits tracked, so we'll use those as raw material. Picture yourself eight weeks from now…"`
+    ? `Existing-user opener tone: "Let's build your next Arc. You've already got habits tracked, so we'll use those as raw material. Picture yourself a few weeks from now…"`
     : isEditMode !== true
-      ? `New-user opener tone: "Let's build your first 8-week Arc. Picture yourself eight weeks from now…"`
+      ? `New-user opener tone: "Let's build your first Arc. Picture yourself a few weeks from now…"`
       : `Edit mode: they already have an Arc — ask what they want to change.`}
 
 WHEN THEY ASK FOR EXAMPLES ("give examples", "show examples", similar):
@@ -176,7 +219,7 @@ WHEN YOU HAVE ENOUGH (or hit the limit) — EMIT THE DRAFT.
 End your reply with a structured block on its own lines, EXACTLY in this format:
 
 <arc_draft>
-{"title":"…","identity":"…","why":"…","oldPattern":"…","minimumProof":"…","durationDays":56,"proofActions":["…","…","…"]}
+{"title":"…","identity":"…","why":"…","oldPattern":"…","minimumProof":"…","durationDays":28,"proofActions":["…","…","…"]}
 </arc_draft>
 
 Rules for the draft JSON:
@@ -184,7 +227,7 @@ Rules for the draft JSON:
 - title: 1–3 words. Natural and branded. "Arc" optional. NEVER warrior/alpha/elite/beast/grindset. NEVER a full sentence or "Someone who…". If they ask to rename, use their exact short title or suggest 3 options in prose before the draft.
 - identity: concrete, one sentence, max ~140 chars. Borrow their phrasing.
 - why, oldPattern, minimumProof: short sentences in their voice. Empty string "" is allowed only if you truly have nothing.
-- durationDays: one of 14, 28, 56, 84. Default 56 unless they clearly want 2/4/12 weeks.
+- durationDays: one of 14, 28, 56, 84 — pick what fits the goal (see duration guidance above).
 - proofActions: 3 to 5 short habit names, max ~30 chars each. ${showExistingHabitsBlock ? "Use EXACT names from EXISTING HABITS when reusing — do not paraphrase into a duplicate label." : "Prefer habits the user mentioned."} When it makes sense, the first one should be the habit they already picked (${habitName || "their picked habit"}).
 
 WHEN YOU EMIT THE DRAFT, write 1–2 short sentences BEFORE the block to introduce it. Examples:
@@ -208,11 +251,10 @@ ${isOpener
     const client = new Anthropic({ apiKey: apiKey.trim() });
     const resp = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
-      // Bumped from 130 → 500 so the draft JSON fits alongside the
-      // conversational intro. A plain question reply is still ~50-100 tokens;
-      // this only costs more on the turn that actually emits the draft.
-      max_tokens: 500,
-      system,
+      // Plain question replies are ~50-100 tokens; the higher cap only costs
+      // more on the turn that actually emits the draft / options JSON.
+      max_tokens: multiOptions === true ? 1100 : 500,
+      system: multiOptions === true ? optionsSystem : system,
       messages: apiMessages,
     });
     const reply = resp.content?.[0]?.text?.trim() || "";

@@ -3066,7 +3066,7 @@ export default function App() {
       <><style>{CSS}</style>
       <OnboardingScreen
         onComplete={completeOnboarding}
-        onSaveProgress={async ({ name, habits, coachName, emailUpdatesOptIn, arc }) => {
+        onSaveProgress={async ({ name, habits, coachName, emailUpdatesOptIn, arc, firstEvidence }) => {
           const uid = userIdRef.current;
           if (typeof emailUpdatesOptIn === "boolean") {
             writeForgedBetaEmailOptIn(uid, emailUpdatesOptIn);
@@ -3078,6 +3078,23 @@ export default function App() {
           });
           const hRows = habits.map(h => habitToRow(h, uid));
           if (hRows.length > 0) await supabase.from("habits").upsert(hRows);
+
+          // First evidence from onboarding — saved as the user's first journal
+          // entry so it shows up in Evidence immediately. Non-fatal on error.
+          const evidence = (firstEvidence || "").trim();
+          if (evidence) {
+            try {
+              const { data: jRow } = await supabase.from("journal_entries").insert({
+                user_id: uid,
+                date: todayStr(),
+                content: evidence,
+                is_ai_generated: false,
+              }).select().single();
+              if (jRow) setJournalEntries(prev => [jRow, ...prev.filter(e => e.id !== jRow.id)]);
+            } catch (err) {
+              console.warn("[Forged] first evidence save failed:", err?.message || err);
+            }
+          }
 
           // ── Create the user's first Arc (forge_block) if they filled identity ──
           // Skipped entirely when identity is blank, so onboarding remains usable

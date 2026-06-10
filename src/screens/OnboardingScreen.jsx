@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { T, COLORS, HABIT_TYPES } from "../theme.js";
+import { T } from "../theme.js";
 import {
   resolveArcTitle,
   normalizeArcDuration,
@@ -11,14 +11,11 @@ import ArcSuggestionPills from "../components/ArcSuggestionPills.jsx";
 import {
   inferArcCoachStage,
   getArcSuggestionPills,
-  onboardingArcOpener,
+  onboardingConversationOpener,
 } from "../arcCoachSuggestions.js";
 import { supabase } from "../supabase.js";
-import { todayStr, daysAgo, isLegacyProgressType, inferProgressDirection, getStreak, isSatisfiedForTodayRing } from "../utils.js";
-import { Modal, GBtn, PBtn, Ring } from "../components/ui.jsx";
+import { todayStr, daysAgo } from "../utils.js";
 import { useSpeechInput, MicBtn } from "../hooks/useSpeechInput.jsx";
-
-const ONBOARD_STREAM_ID = "__ob_stream__";
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 function cssPadXSafe(basePx) {
@@ -28,107 +25,107 @@ function cssPadXSafe(basePx) {
   };
 }
 
-// ─── ARC DRAFT PARSING ────────────────────────────────────────────────────────
-// onboard-chat ends its reply with <arc_draft>{json}</arc_draft> once it has
-// enough info. This splits the bubble text from the structured draft so the
-// chat doesn't show raw JSON, and validates the shape before we trust it.
+// ─── ARC DRAFT / OPTIONS PARSING ──────────────────────────────────────────────
+// onboard-chat ends its reply with <arc_draft>{json}</arc_draft> (single, used
+// by the in-app ArcCoachSheet) or <arc_options>[{…},{…}]</arc_options> (2–3
+// proposals, used by conversation-first onboarding). These split the bubble
+// prose from the structured payload and validate shapes before trusting them.
 const ARC_DRAFT_RE = /<arc_draft>([\s\S]*?)<\/arc_draft>/i;
+const ARC_OPTIONS_RE = /<arc_options>([\s\S]*?)<\/arc_options>/i;
+
+function sanitizeArcDraftObject(parsed) {
+  if (!parsed || typeof parsed !== "object") return null;
+  const identity = String(parsed.identity ?? "").trim();
+  if (!identity) return null;
+  const proofActions = Array.isArray(parsed.proofActions)
+    ? parsed.proofActions
+        .filter(x => typeof x === "string" && x.trim())
+        .map(x => x.trim().slice(0, 60))
+        .slice(0, 5)
+    : [];
+  return {
+    title:        resolveArcTitle(String(parsed.title ?? "").trim(), identity),
+    durationDays: normalizeArcDuration(parsed.durationDays ?? parsed.duration_days),
+    identity:     identity.slice(0, 250),
+    why:          String(parsed.why ?? "").trim().slice(0, 250),
+    oldPattern:   String(parsed.oldPattern ?? "").trim().slice(0, 200),
+    minimumProof: String(parsed.minimumProof ?? "").trim().slice(0, 150),
+    proofActions,
+  };
+}
+
 export function parseArcDraftFromText(text) {
   if (!text) return { prose: "", draft: null };
   const m = String(text).match(ARC_DRAFT_RE);
   if (!m) return { prose: String(text), draft: null };
   const prose = String(text).replace(ARC_DRAFT_RE, "").trim();
   try {
-    const parsed = JSON.parse(m[1].trim());
-    if (!parsed || typeof parsed !== "object") return { prose, draft: null };
-    const proofActions = Array.isArray(parsed.proofActions)
-      ? parsed.proofActions
-          .filter(x => typeof x === "string" && x.trim())
-          .map(x => x.trim().slice(0, 60))
-          .slice(0, 5)
-      : [];
-    const identity = String(parsed.identity ?? "").trim();
-    if (!identity) return { prose, draft: null };
-    const title = resolveArcTitle(String(parsed.title ?? "").trim(), identity);
-    const durationDays = normalizeArcDuration(parsed.durationDays ?? parsed.duration_days);
-    return {
-      prose,
-      draft: {
-        title,
-        durationDays,
-        identity:     identity.slice(0, 250),
-        why:          String(parsed.why ?? "").trim().slice(0, 250),
-        oldPattern:   String(parsed.oldPattern ?? "").trim().slice(0, 200),
-        minimumProof: String(parsed.minimumProof ?? "").trim().slice(0, 150),
-        proofActions,
-      },
-    };
+    return { prose, draft: sanitizeArcDraftObject(JSON.parse(m[1].trim())) };
   } catch {
     return { prose, draft: null };
   }
 }
 
-// ─── CONSTANTS ────────────────────────────────────────────────────────────────
-const ONBOARD_STEPS = [
-  {
-    id:"welcome",
-    title:"Forged.",
-    sub:"An 8-week system for becoming the next version of yourself.",
-    body:"You define who you're becoming, pick the daily proof that backs it up, and an AI coach helps you stay honest about whether you're actually showing up. Eight weeks. One Arc.",
-    cta:"Let's begin",
-  },
-  {
-    id:"name",
-    title:"First — who are you?",
-    sub:"Your name. That's it.",
-    body:null,
-    cta:"That's me",
-  },
-  {
-    id:"coach",
-    title:"Meet your AI coach",
-    sub:"It remembers what you said you're becoming — and reflects your actions back through that lens.",
-    body:null,
-    cta:"Continue",
-  },
-  // ─── Arc setup (the new product spine) ────────────────────────────────────────
-  // These three steps capture the user-facing "Arc" — internally a forge_block.
-  // Identity is required to create an Arc; the others are optional. If identity
-  // is left blank, onboarding falls back to legacy behaviour and no Arc is created.
-  {
-    id:"arc-becoming",
-    title:"Eight weeks from now",
-    sub:"What feels different in an ideal world? One or two sentences — honest, not aspirational.",
-    body:null,
-    cta:"Next",
-  },
-  {
-    id:"arc-why",
-    title:"Why does this matter right now?",
-    sub:"What is this Arc actually for? Skip if you'd rather not say.",
-    body:null,
-    cta:"Next",
-  },
-  {
-    id:"arc-bad-day",
-    title:"On bad days, what counts?",
-    sub:"The pattern you're trying to weaken, and the bare minimum that still counts as proof. Both optional.",
-    body:null,
-    cta:"Next",
-  },
-  {
-    id:"focus",
-    title:"Pick your first proof action",
-    sub:"One action that shows up regularly to prove this Arc. You can add more once you're in.",
-    body:null,
-    cta:"Start forging",
-  },
-];
+export function parseArcOptionsFromText(text) {
+  if (!text) return { prose: "", options: null };
+  const m = String(text).match(ARC_OPTIONS_RE);
+  if (!m) {
+    // Model occasionally falls back to a single draft — accept it as one option.
+    const single = parseArcDraftFromText(text);
+    return { prose: single.prose, options: single.draft ? [single.draft] : null };
+  }
+  const prose = String(text).replace(ARC_OPTIONS_RE, "").trim();
+  try {
+    const arr = JSON.parse(m[1].trim());
+    if (!Array.isArray(arr)) return { prose, options: null };
+    const options = arr.map(sanitizeArcDraftObject).filter(Boolean).slice(0, 3);
+    return { prose, options: options.length ? options : null };
+  } catch {
+    return { prose, options: null };
+  }
+}
 
-// Concrete identity examples surfaced under the Arc identity textarea. Tap-to-fill,
-// then the user is expected to edit. Specific > vague: numbers, named habits, and
-// real friction land better than "more consistent." Kept grounded — no "warrior",
-// no "elite", no aspirational wellness language.
+// ─── PROOF ACTIONS → HABITS ──────────────────────────────────────────────────
+// The selected Arc proposal's proofActions become real daily habits so the
+// evidence loop works from day one. Everything starts as a simple daily habit
+// (binary "did it / didn't"), which is the cleanest first loop — the coach can
+// evolve types later.
+const PROOF_COLORS = ["#C0392B", "#27AE60", "#2980B9", "#8E44AD", "#E67E22"];
+
+function emojiForProofAction(name) {
+  const n = String(name || "").toLowerCase();
+  if (/gym|lift|strength|train|workout|push.?up/.test(n)) return "🏋️";
+  if (/run|jog|cardio|walk|steps/.test(n)) return "🏃";
+  if (/eat|meal|breakfast|lunch|dinner|protein|cook/.test(n)) return "🥗";
+  if (/water|hydrat/.test(n)) return "💧";
+  if (/sleep|bed|wake/.test(n)) return "🌙";
+  if (/read|book|pages/.test(n)) return "📚";
+  if (/write|journal|note/.test(n)) return "✍️";
+  if (/build|ship|code|project|create|work on/.test(n)) return "⚒️";
+  if (/meditat|breath|stretch|yoga/.test(n)) return "🧘";
+  if (/limit|less|fewer|no |quit|cut|reduce|nicotine|alcohol|vape|smoke|pouch/.test(n)) return "🎯";
+  if (/money|save|budget|spend/.test(n)) return "💰";
+  return "🔨";
+}
+
+export function habitsFromProofActions(proofActions) {
+  return (proofActions || []).map((nameRaw, i) => {
+    const name = String(nameRaw).trim().slice(0, 40);
+    return {
+      id: `${Date.now()}-${i}-${Math.random()}`,
+      name,
+      emoji: emojiForProofAction(name),
+      habitType: "daily",
+      color: PROOF_COLORS[i % PROOF_COLORS.length],
+      reflection: true,
+      reflectionPrompt: "How did it go today?",
+      streak: 0, bestStreak: 0, logs: [],
+    };
+  });
+}
+
+// ─── EXPORTS KEPT FOR OTHER SCREENS ──────────────────────────────────────────
+// Concrete identity examples — used by ArcSetupSheet's manual form.
 export const ARC_IDENTITY_EXAMPLES = [
   "Gain 3kg without skipping breakfast.",
   "Build income outside work.",
@@ -136,17 +133,6 @@ export const ARC_IDENTITY_EXAMPLES = [
   "Get back to football fitness.",
   "Stretch every morning before work.",
   "Stop relying on old crutches.",
-];
-
-const FOCUS_OPTIONS = [
-  { label:"Getting stronger",     emoji:"🏋️", habitType:"weekly",   name:"Gym",         weeklyTarget:3, color:"#C0392B", reflectionPrompt:"What felt strong? What needs work?" },
-  { label:"Eating better",        emoji:"🥗", habitType:"daily",    name:"Eat better",  color:"#27AE60", reflectionPrompt:"What did you actually eat today?" },
-  { label:"Building something",   emoji:"⚒️", habitType:"project",  name:"My project",  color:"#2980B9", reflectionPrompt:"What did you build? Any wins or blockers?" },
-  { label:"Daily movement",       emoji:"🏃", habitType:"daily",    name:"Move daily",  color:"#8E44AD", reflectionPrompt:"How did your body feel?" },
-  { label:"Hitting a weight goal",emoji:"⚖️", habitType:"progress", name:"Weight goal", startValue:0, targetValue:0, unit:"kg", color:"#E67E22", reflectionPrompt:"How many meals today? Energy levels?" },
-  { label:"Reading more",         emoji:"📚", habitType:"daily",    name:"Read",        color:"#C8902A", reflectionPrompt:"What's one idea worth keeping?" },
-  { label:"Reducing something",   emoji:"🎯", habitType:"limit",    name:"Limit",       dailyBudget:60, unit:"min", color:"#8E44AD", reflectionPrompt:"What triggered the urge?" },
-  { label:"Something else",       emoji:"✨", habitType:"daily",    name:"My habit",    color:"#C0392B", reflectionPrompt:"How did it go today?" },
 ];
 
 export function buildDemoHabits() {
@@ -203,432 +189,170 @@ export function buildDemoHabits() {
     },
   ];
 }
+// ─── ONBOARDING SCREEN ────────────────────────────────────────────────────────
+// Conversation-first flow:
+//   welcome → name → conversation (coach asks, user talks, 2–3 Arc proposals,
+//   pick + edit one) → first evidence (voice/text) → notifications → final.
+// No Pro upsell anywhere in onboarding. Admin preview renders this same
+// component with a no-op onSaveProgress.
+const STEP_WELCOME  = "welcome";
+const STEP_NAME     = "name";
+const STEP_CHAT     = "chat";
+const STEP_EVIDENCE = "evidence";
+const STEP_NOTIF    = "notif";
+const STEP_FINAL    = "final";
 
-const HABIT_ANNOTATIONS = {
-  daily: "Daily habits work best when you attach them to something you already do — morning coffee, after lunch, before bed. The streak counter tracks consecutive completed days (or protected rest days).",
-  weekly: "Weekly targets give you flexibility without losing accountability. You have a target number of sessions to hit each week. Log each one after it happens. Missing a day doesn't break anything — missing a week resets the streak.",
-  progress: "Progress habits track a number over time — you log where you actually are today, not where you 'should' be. The trend line shows the real picture. Consistency of logging matters more than the direction of the number.",
-  project: "Build habits track time spent and what you got from it. Log your minutes, a win, and what was hard. Set a daily minute target (default 60) — streaks count days you hit it, and crossing it can earn bonus XP.",
-  limit: "Limit habits track what you're reducing. Each tap logs one unit against your daily budget. Streaks increase only on days you log and stay at or under your limit.",
-};
+const STEP_NUMBERS = { [STEP_WELCOME]:1, [STEP_NAME]:2, [STEP_CHAT]:3, [STEP_EVIDENCE]:4, [STEP_NOTIF]:5, [STEP_FINAL]:6 };
+const DISPLAY_TOTAL = 5; // final screen isn't a "step"
 
 export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, notifEnabled, notifLoading, notifPermission, onNotifToggle, isCoachClient = false }) {
-  const [step,            setStep]            = useState(0);
-  const [name,            setName]            = useState("");
-  const [coachNameInput,  setCoachNameInput]  = useState("");
-  // ── Arc setup state (user-facing "Arc" = forge_block internally) ──
-  // Only `arcIdentity` is required to create an Arc; the rest are optional.
-  // If `arcIdentity` is blank at submit time, onboarding falls back to the
-  // legacy flow and no forge_block is created.
-  const [arcIdentity,     setArcIdentity]     = useState("");
-  const [arcWhy,          setArcWhy]          = useState("");
-  const [arcOldPattern,   setArcOldPattern]   = useState("");
-  const [arcMinimumProof, setArcMinimumProof] = useState("");
-  const [selected,        setSelected]        = useState([]);
-  const [weightGoal,      setWeightGoal]      = useState({ start:"", target:"", unit:"kg" });
-  const [limitBudget,     setLimitBudget]     = useState({ budget:"60", unit:"min", name:"" });
-  const [builtHabits,     setBuiltHabits]     = useState([]);
-  const [firstLogDone,    setFirstLogDone]    = useState(false);
-  const [firstLogValue,   setFirstLogValue]   = useState("");
-  const [showingFinal,    setShowingFinal]    = useState(false);
-  const [checkoutLoading, setCheckoutLoading] = useState(false);
-  const [checkoutError,   setCheckoutError]   = useState(null);
-  const [enteringApp,     setEnteringApp]     = useState(false);
-  // Final-screen "weekly updates by email" opt-in. Default ON; persisted to
-  // profiles.weekly_updates_email_opt_in (+ _at) and localStorage (same key as
-  // ProThankYouModal so both surfaces stay aligned).
+  const [step, setStep] = useState(STEP_WELCOME);
+  const [name, setName] = useState("");
+
+  // ── Conversation state ──
+  const [msgs,        setMsgs]        = useState([]);
+  const [input,       setInput]       = useState("");
+  const [sending,     setSending]     = useState(false);
+  const [arcOptions,  setArcOptions]  = useState(null);   // [{…}, {…}, {…}] | null
+  const [selectedIdx, setSelectedIdx] = useState(null);   // which option is open
+  const [editedArc,   setEditedArc]   = useState(null);   // editable copy of the pick
+  const [editingArc,  setEditingArc]  = useState(false);  // confirm card edit mode
+  const [skipConfirmVisible, setSkipConfirmVisible] = useState(false);
+
+  // ── Evidence + final state ──
+  const [evidenceText,      setEvidenceText]      = useState("");
+  const [enteringApp,       setEnteringApp]       = useState(false);
   const [emailUpdatesOptIn, setEmailUpdatesOptIn] = useState(true);
-  const [coachIntroMsg,     setCoachIntroMsg]     = useState(null);
-  const [coachIntroLoading, setCoachIntroLoading] = useState(false);
-  // Onboarding chat state
-  const [onboardMsgs,        setOnboardMsgs]        = useState([]);
-  const [onboardInput,       setOnboardInput]        = useState("");
-  const [onboardSending,     setOnboardSending]      = useState(false);
-  const [habitCreatedInChat, setHabitCreatedInChat]  = useState(false);
-  const [skipConfirmVisible, setSkipConfirmVisible]  = useState(false);
-  // Arc draft emitted by the coach once enough info is gathered. Parsed from
-  // <arc_draft>…</arc_draft> JSON in an assistant message. When set, the CTA
-  // swaps from "Skip for now" to "Use this Arc →".
-  const [arcDraft,           setArcDraft]            = useState(null);
+
   const chatEndRef  = useRef(null);
   const textareaRef = useRef(null);
+  const evidenceRef = useRef(null);
 
   const speech = useSpeechInput({
     onTranscript: (text, isFinal) => {
-      if (isFinal) setOnboardInput(prev => (prev + " " + text).trim());
+      if (!isFinal) return;
+      if (step === STEP_EVIDENCE) setEvidenceText(prev => (prev + " " + text).trim());
+      else setInput(prev => (prev + " " + text).trim());
     },
   });
 
-  const current   = ONBOARD_STEPS[step];
-  const isLast    = step === ONBOARD_STEPS.length - 1;
-  const FOCUS_STEP = ONBOARD_STEPS.findIndex(s => s.id === "focus");
-  const COACH_STEP = ONBOARD_STEPS.findIndex(s => s.id === "coach");
-  // Arc step indices (resolved by id so reordering inside ONBOARD_STEPS is safe).
-  const ARC_BECOMING_STEP = ONBOARD_STEPS.findIndex(s => s.id === "arc-becoming");
-  const ARC_WHY_STEP      = ONBOARD_STEPS.findIndex(s => s.id === "arc-why");
-  const ARC_BAD_DAY_STEP  = ONBOARD_STEPS.findIndex(s => s.id === "arc-bad-day");
-  const INTER_STEP = ONBOARD_STEPS.length;       // virtual step 5 (transition)
-  // After the interstitial we now run Home → Notifs → First-log so that the
-  // very last action inside onboarding is the user actually logging a habit —
-  // a direct handoff into the real app rather than ending on a setup screen.
-  const FIRST_STEP = ONBOARD_STEPS.length + 1;   // virtual: log first habit
-  const HOME_STEP  = ONBOARD_STEPS.length + 2;   // virtual: add to home screen
-  const NOTIF_STEP = ONBOARD_STEPS.length + 3;   // virtual: enable notifications
-  const COACH_INTRO_STEP = ONBOARD_STEPS.length + 4; // templated coach message before final screen
-
-  // Local Arc coach opener (8-week visualisation framing — not "who are you becoming?").
+  // Seed the coach's opening question locally (no API cost) on entering chat.
   useEffect(() => {
-    if (step !== COACH_INTRO_STEP || builtHabits.length === 0 || onboardMsgs.length > 0) return;
-    setCoachIntroLoading(true);
-    setOnboardMsgs([{ role: "assistant", content: onboardingArcOpener(arcIdentity) }]);
-    setCoachIntroLoading(false);
+    if (step !== STEP_CHAT || msgs.length > 0) return;
+    setMsgs([{ role: "assistant", content: onboardingConversationOpener(name) }]);
   }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-scroll to bottom when messages change
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [onboardMsgs, onboardSending]);
+  }, [msgs, sending, arcOptions, selectedIdx]);
 
-  const isVirtual = step >= ONBOARD_STEPS.length;
-
-  // Canonical 1-based step number for the progress header. The three Arc
-  // sub-screens share number 4 ("Your Arc"), focus becomes 5 ("Proof actions"),
-  // and the final coach-chat handoff is 6. Notif + interstitial sit under 5.
-  const DISPLAY_TOTAL = 6;
-  function displayStepNumber(s) {
-    // 0 welcome, 1 name, 2 coach → 1, 2, 3
-    if (s === 0) return 1;
-    if (s === 1) return 2;
-    if (s === COACH_STEP) return 3;
-    // Arc sub-screens
-    if (s === ARC_BECOMING_STEP || s === ARC_WHY_STEP || s === ARC_BAD_DAY_STEP) return 4;
-    // Focus / interstitial / notif all live in the "Proof actions" block
-    if (s === FOCUS_STEP) return 5;
-    if (s === INTER_STEP) return 5;
-    if (s === NOTIF_STEP) return 5;
-    // Final coach handoff
-    if (s === FIRST_STEP) return 6;
-    if (s === COACH_INTRO_STEP) return 6;
-    return Math.min(s + 1, DISPLAY_TOTAL);
-  }
-  const progressNumber = displayStepNumber(step);
-
-  function toggleFocus(label) {
-    setSelected(prev => prev.includes(label) ? prev.filter(l => l !== label) : [...prev, label]);
-  }
-
-  // ── One-tap focus picker ─────────────────────────────────────────────────────
-  // Tapping a focus tile now:
-  //   1. (If we haven't already built a starter habit this session) builds one
-  //      synchronously from the tile's own per-tile defaults via
-  //      buildHabitFromOption — preserves habitType (weekly/project/limit/etc),
-  //      emoji, color, and reflectionPrompt. No DB write here; the habit is
-  //      committed atomically with the rest of onboarding via onSaveProgress
-  //      at the very end, so a user who bails out of onboarding doesn't leave
-  //      orphan rows behind.
-  //   2. Marks the tile as selected (drives the existing checkmark UI) and
-  //      runs a brief confirm-pulse so the tap feels acknowledged.
-  //   3. Advances to INTER_STEP after a short beat.
-  // If a starter habit already exists in builtHabits (e.g. user navigated back
-  // to FOCUS_STEP somehow), we skip the build and just advance.
-  const [tappedFocus, setTappedFocus] = useState(null);
-  const [advancing,   setAdvancing]   = useState(false);
-  function pickFocusAndAdvance(opt) {
-    if (advancing) return; // guard against double-tap
-    if (builtHabits.length === 0) {
-      const habit = buildHabitFromOption(opt, weightGoal, limitBudget);
-      setBuiltHabits([habit]);
-    }
-    setSelected([opt.label]);
-    setTappedFocus(opt.label);
-    setAdvancing(true);
-    setTimeout(() => setStep(INTER_STEP), 280);
-  }
-
-  function buildHabitFromOption(opt, wg, lb) {
-    const base = {
-      id: Date.now() + Math.random() + "",
-      name:opt.name, emoji:opt.emoji, habitType:opt.habitType,
-      color:opt.color, reflection:true, reflectionPrompt:opt.reflectionPrompt,
-      streak:0, bestStreak:0, logs:[],
-    };
-    if (opt.habitType === "weekly")   return { ...base, weeklyTarget:opt.weeklyTarget || 3 };
-    if (isLegacyProgressType(opt.habitType)) {
-      const start = parseFloat(wg.start)||70;
-      const target = parseFloat(wg.target)||80;
-      return { ...base, startValue:start, targetValue:target, direction:inferProgressDirection(start, target), unit:wg.unit||"kg" };
-    }
-    if (opt.habitType === "limit")    return { ...base, name:lb.name||opt.name, dailyBudget:parseInt(lb.budget)||60, unit:lb.unit||"min" };
-    if (opt.habitType === "project")  return { ...base, dailyTargetMinutes: 60 };
-    return base;
-  }
-
-  // Pick the most interesting habit to feature first
-  function pickFirstHabit(habits) {
-    const priority = ["progress","project","weekly","limit","daily"];
-    for (const type of priority) {
-      const found = habits.find(h => h.habitType === type);
-      if (found) return found;
-    }
-    return habits[0];
-  }
-
-  function handleContinue() {
-    if (step === 1 && !name.trim()) return;
-    if (isLast) {
-      // Build habits and move to virtual interstitial step
-      const selectedOptions = FOCUS_OPTIONS.filter(o => selected.includes(o.label));
-      const habits = selectedOptions.map(opt => buildHabitFromOption(opt, weightGoal, limitBudget));
-      setBuiltHabits(habits);
-      setStep(INTER_STEP);
-      return;
-    }
-    setStep(s => s + 1);
-  }
-
-  function habitsSaved() {
-    // Build the log entry if the user filled it in during FIRST_STEP
-    if (builtHabits.length === 0) return builtHabits;
-    const firstHabit = pickFirstHabit(builtHabits);
-    if (!firstLogDone) return builtHabits;
-    const logEntry = buildFirstLog(firstHabit, firstLogValue);
-    return builtHabits.map(h => h.id === firstHabit.id ? { ...h, logs:[logEntry] } : h);
-  }
-
-  // Bundle the Arc payload once so handleEnterApp + handleGoPro stay aligned.
-  // identity is the only field that gates Arc creation server-side.
-  function arcPayload() {
-    return {
-      identity:     arcIdentity.trim(),
-      why:          arcWhy.trim(),
-      oldPattern:   arcOldPattern.trim(),
-      minimumProof: arcMinimumProof.trim(),
-    };
-  }
-
-  async function handleEnterApp() {
-    if (enteringApp) return;
-    setEnteringApp(true);
-    try {
-      await Promise.race([
-        onSaveProgress({ name:name.trim()||"You", habits:habitsSaved(), coachName:coachNameInput.trim()||"Coach", emailUpdatesOptIn, arc: arcPayload() }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 4000)),
-      ]);
-      onComplete();
-    } catch {
-      onComplete();
-    }
-  }
-
-  // Confirm-and-create from the coach's <arc_draft>. Bypasses arcPayload() so
-  // the new values are used immediately without waiting for state to flush.
-  // The Arc fields are also mirrored to local state in case the user backs
-  // out before submit (cosmetic). Existing handleEnterApp is reused via
-  // onSaveProgress shape — it's the same code path as the manual flow.
-  async function useArcDraft() {
-    if (!arcDraft || enteringApp) return;
-    setEnteringApp(true);
-    setArcIdentity(arcDraft.identity || "");
-    setArcWhy(arcDraft.why || "");
-    setArcOldPattern(arcDraft.oldPattern || "");
-    setArcMinimumProof(arcDraft.minimumProof || "");
-    try {
-      await Promise.race([
-        onSaveProgress({
-          name: name.trim() || "You",
-          habits: habitsSaved(),
-          coachName: coachNameInput.trim() || "Coach",
-          emailUpdatesOptIn,
-          arc: {
-            title:        arcDraft.title || resolveArcTitle("", arcDraft.identity),
-            durationDays: arcDraft.durationDays || 56,
-            identity:     (arcDraft.identity || "").trim(),
-            why:          (arcDraft.why || "").trim(),
-            oldPattern:   (arcDraft.oldPattern || "").trim(),
-            minimumProof: (arcDraft.minimumProof || "").trim(),
-          },
-        }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 4000)),
-      ]);
-      onComplete();
-    } catch {
-      onComplete();
-    }
-  }
-
-  async function handleGoPro() {
-    setCheckoutLoading(true);
-    setCheckoutError(null);
-    try {
-      await onSaveProgress({ name:name.trim()||"You", habits:habitsSaved(), coachName:coachNameInput.trim()||"Coach", emailUpdatesOptIn, arc: arcPayload() });
-      await onCheckout();
-    } catch(err) {
-      setCheckoutError(err.message || "Something went wrong. Try again.");
-      setCheckoutLoading(false);
-    }
-  }
-
-  function buildOnboardingSystem(firstName, habitName, habitType, coachName) {
-    return `You are ${coachName || "Coach"}, the AI coach inside Forged — a personal habit tracking app. You are having your first conversation with ${firstName || "someone new"}.
-
-They've chosen to track: ${habitName || "a habit"} (${habitType || "daily"} type).
-
-CRITICAL RULE: You must call create_habit or create_goal within 2-3 messages. Do NOT keep asking questions. Ask ONE clarifying question if you need it, then just make something reasonable and create it. You can always adjust later — done is better than perfect here.
-
-How to handle this conversation:
-- If you have enough info after their first reply → create the habit/goal immediately, then confirm what you set up
-- If you need one more detail → ask exactly one question, then create on the next turn no matter what
-- NEVER ask more than one question before creating something
-- Keep every message under 55 words — direct, warm, no filler
-- Sound like a coach, not a wellness chatbot
-
-After creating, tell them they can log from Today and chat with you anytime.`;
-  }
-
-  function handleOnboardSuggestionPill(pill) {
-    if (!pill || onboardSending || arcDraft) return;
-    if (pill.mode === "insert") {
-      setOnboardInput(pill.text);
-      textareaRef.current?.focus();
-      return;
-    }
-    sendOnboardMessage(pill.text);
-  }
-
-  async function sendOnboardMessage(overrideText) {
+  // ── Send a chat message ────────────────────────────────────────────────────
+  async function sendMessage(overrideText) {
     const inputText = overrideText !== undefined
       ? normalizeChatInput(overrideText)
-      : normalizeChatInput(onboardInput);
-    if (!inputText || onboardSending || arcDraft) return;
+      : normalizeChatInput(input);
+    if (!inputText || sending) return;
     if (speech.listening) speech.stopListening?.();
     if (!overrideText) {
-      setOnboardInput("");
+      setInput("");
       if (textareaRef.current) textareaRef.current.style.height = "auto";
     }
 
-    const firstHabit = builtHabits.length > 0 ? pickFirstHabit(builtHabits) : null;
-    const prev = onboardMsgs.filter(m => m.id !== ONBOARD_STREAM_ID);
-    const withUser = [...prev, { role: "user", content: inputText }];
-    setOnboardMsgs(withUser);
-    setOnboardSending(true);
+    const withUser = [...msgs, { role: "user", content: inputText }];
+    setMsgs(withUser);
+    setSending(true);
+    // A new message invalidates previously shown options.
+    setArcOptions(null);
+    setSelectedIdx(null);
 
     try {
-      // Prepend the hidden opener trigger so the API sees a valid alternating sequence:
-      // user:"." → assistant:opener → user:msg1 → assistant:reply1 → user:msg2 …
+      // Hidden "." trigger keeps the alternating sequence valid:
+      // user:"." → assistant:opener → user:msg1 → …
       const apiMessages = [{ role: "user", content: "." }, ...withUser];
-
-      // Route onboarding chat through /api/onboard-chat. The route now requires
-      // a real Supabase user JWT (no anon-key fallback), but is still exempt
-      // from the 3/day chat_usage cap so it doesn't burn the user's free daily
-      // coach limit during setup.
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
       if (!token) throw new Error("No session");
 
       const res = await fetch("/api/onboard-chat", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
-        },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
         body: JSON.stringify({
           name: name.trim() || "there",
-          coachName: coachNameInput.trim() || "Coach",
-          habitName: firstHabit?.name || "",
-          habitType: firstHabit?.habitType || "daily",
+          coachName: "Coach",
           messages: apiMessages,
-          arc: {
-            title: arcDraft?.title || "",
-            identity: arcIdentity.trim(),
-            why: arcWhy.trim(),
-            oldPattern: arcOldPattern.trim(),
-            minimumProof: arcMinimumProof.trim(),
-          },
+          multiOptions: true,
         }),
       });
-
       if (!res.ok) throw new Error("Request failed");
-
-      const contentType = res.headers.get("content-type") || "";
-      if (contentType.includes("text/event-stream")) {
-        const streamTs = Date.now();
-        setOnboardMsgs(p => [...p, { role: "assistant", content: "", id: ONBOARD_STREAM_ID, ts: streamTs }]);
-        setOnboardSending(false);
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let fullText = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop();
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            try {
-              const evt = JSON.parse(line.slice(6));
-              if (evt.text) {
-                fullText += evt.text;
-                const snap = fullText;
-                setOnboardMsgs(p => p.map(m => m.id === ONBOARD_STREAM_ID ? { ...m, content: snap } : m));
-                chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-              }
-              if (evt.done) {
-                const receipt = evt.receipt && String(evt.receipt).trim()
-                  ? `\n\n${String(evt.receipt).trim()}` : "";
-                const final = (fullText.trim() || "") + receipt;
-                setOnboardMsgs(p => p.map(m =>
-                  m.id === ONBOARD_STREAM_ID ? { role: "assistant", content: final || fullText, ts: m.ts } : m
-                ));
-                if (evt.created || evt.edited?.length) setHabitCreatedInChat(true);
-              }
-            } catch { /* malformed line */ }
-          }
-        }
-      } else {
-        const data = await res.json();
-        setOnboardSending(false);
-        const raw = data.reply || "";
-        const { prose, draft } = parseArcDraftFromText(raw);
-        setOnboardMsgs(p => [...p, { role: "assistant", content: prose || raw }]);
-        if (draft) setArcDraft(draft);
-      }
+      const data = await res.json();
+      setSending(false);
+      const raw = data.reply || "";
+      const { prose, options } = parseArcOptionsFromText(raw);
+      setMsgs(p => [...p, { role: "assistant", content: prose || raw }]);
+      if (options?.length) setArcOptions(options);
     } catch {
-      setOnboardSending(false);
-      setOnboardMsgs(p => [
-        ...p.filter(m => m.id !== ONBOARD_STREAM_ID),
-        { role: "assistant", content: "Something went wrong on my end. Let's keep going." },
+      setSending(false);
+      setMsgs(p => [...p, { role: "assistant", content: "Something went wrong on my end — say that again?" }]);
+    }
+  }
+
+  function handleSuggestionPill(pill) {
+    if (!pill || sending) return;
+    if (pill.mode === "insert") {
+      setInput(pill.text);
+      textareaRef.current?.focus();
+      return;
+    }
+    sendMessage(pill.text);
+  }
+
+  function pickOption(idx) {
+    const opt = arcOptions?.[idx];
+    if (!opt) return;
+    setSelectedIdx(idx);
+    setEditedArc({ ...opt, proofActions: [...(opt.proofActions || [])] });
+    setEditingArc(false);
+  }
+
+  function confirmArc() {
+    if (!editedArc?.identity?.trim()) return;
+    setStep(STEP_EVIDENCE);
+  }
+
+  // ── Save everything and enter the app ──────────────────────────────────────
+  async function finishOnboarding() {
+    if (enteringApp) return;
+    setEnteringApp(true);
+    const habits = editedArc ? habitsFromProofActions(editedArc.proofActions) : [];
+    try {
+      await Promise.race([
+        onSaveProgress({
+          name: name.trim() || "You",
+          habits,
+          coachName: "Coach",
+          emailUpdatesOptIn,
+          arc: editedArc ? {
+            title:        editedArc.title || resolveArcTitle("", editedArc.identity),
+            durationDays: normalizeArcDuration(editedArc.durationDays),
+            identity:     (editedArc.identity || "").trim(),
+            why:          (editedArc.why || "").trim(),
+            oldPattern:   (editedArc.oldPattern || "").trim(),
+            minimumProof: (editedArc.minimumProof || "").trim(),
+          } : { identity: "" },
+          firstEvidence: evidenceText.trim() || null,
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 6000)),
       ]);
+      onComplete();
+    } catch {
+      onComplete();
     }
   }
-
-  function buildFirstLog(habit, rawVal) {
-    const today = todayStr();
-    if (habit.habitType === "daily" || habit.habitType === "weekly") {
-      return { date:today, value:true, note:"" };
-    }
-    if (isLegacyProgressType(habit.habitType)) {
-      return { date:today, value:parseFloat(rawVal) || (habit.startValue || 0), note:"" };
-    }
-    if (habit.habitType === "project") {
-      return { date:today, value:{ minutes:parseInt(rawVal)||30, win:null, hardPart:null }, note:"" };
-    }
-    if (habit.habitType === "limit") {
-      return { date:today, value:parseInt(rawVal)||1, note:"" };
-    }
-    return { date:today, value:true, note:"" };
-  }
-
-  const hasWeight = selected.includes("Hitting a weight goal");
-  const hasLimit  = selected.includes("Reducing something");
 
   const styleInp = {
     width:"100%", border:`0.5px solid ${T.borderStrong}`, borderRadius:T.rsm,
     background:T.surface, padding:"10px 12px", fontSize:16, color:T.text,
-    outline:"none", boxSizing:"border-box",
+    outline:"none", boxSizing:"border-box", fontFamily:T.font,
   };
 
   const wrap = {
@@ -636,8 +360,6 @@ After creating, tell them they can log from Today and chat with you anytime.`;
     paddingTop: "env(safe-area-inset-top, 0px)",
   };
 
-  // Shared progress header — slim bar + "Step X of Y" label. Replaces the red
-  // dot row that used to feel opaque. `currentNum` is 1-based.
   function ProgressHeader({ currentNum, total = DISPLAY_TOTAL }) {
     const pct = Math.max(0, Math.min(100, Math.round((currentNum / total) * 100)));
     return (
@@ -646,9 +368,7 @@ After creating, tell them they can log from Today and chat with you anytime.`;
           <div style={{ fontSize:10, fontWeight:600, color:T.muted, textTransform:"uppercase", letterSpacing:"0.12em" }}>
             Step {currentNum} of {total}
           </div>
-          <div style={{ fontSize:10, fontWeight:500, color:T.hint, letterSpacing:"0.04em" }}>
-            {pct}%
-          </div>
+          <div style={{ fontSize:10, fontWeight:500, color:T.hint, letterSpacing:"0.04em" }}>{pct}%</div>
         </div>
         <div style={{ height:3, width:"100%", background:T.surface, borderRadius:2, overflow:"hidden" }}>
           <div style={{ height:"100%", width:`${pct}%`, background:T.accent, borderRadius:2, transition:"width 0.35s cubic-bezier(0.22,1,0.36,1)" }}/>
@@ -657,8 +377,8 @@ After creating, tell them they can log from Today and chat with you anytime.`;
     );
   }
 
-  // ── Final screen: you're in ──────────────────────────────────────────────────
-  if (showingFinal) {
+  // ── FINAL: you're in (no Pro upsell) ───────────────────────────────────────
+  if (step === STEP_FINAL) {
     return (
       <div style={wrap}>
         <style>{`
@@ -667,28 +387,25 @@ After creating, tell them they can log from Today and chat with you anytime.`;
         `}</style>
         <div style={{ flex:1, display:"flex", flexDirection:"column", justifyContent:"center", padding:"48px 24px 32px", overflowY:"auto" }}>
           <div style={{ width:"100%", maxWidth:360, margin:"0 auto", textAlign:"center" }}>
-            {/* Hero */}
             <div style={{ animation:"finalHeroIn 0.6s cubic-bezier(0.22,1,0.36,1) both" }}>
               <div style={{ position:"relative", display:"inline-block", marginBottom:22 }}>
                 <div style={{ position:"absolute", inset:-18, background:"radial-gradient(circle, rgba(200,144,42,0.22) 0%, rgba(200,144,42,0) 70%)", borderRadius:"50%", zIndex:0, pointerEvents:"none" }}/>
                 <div style={{ position:"relative", fontSize:56, lineHeight:1, zIndex:1 }}>⚒️</div>
               </div>
               <div style={{ fontSize:11, fontWeight:600, color:T.gold, textTransform:"uppercase", letterSpacing:"0.14em", marginBottom:12 }}>
-                You&apos;re forged in
+                {editedArc ? "Your Arc is live" : "You're in"}
               </div>
               <div style={{ fontFamily:T.serif, fontSize:30, color:T.text, marginBottom:12, lineHeight:1.15, letterSpacing:"-0.005em" }}>
                 Let&apos;s build, {name.trim() || "you"}.
               </div>
-              <div style={{ fontSize:14, color:T.muted, lineHeight:1.7, maxWidth:300, margin:"0 auto 16px" }}>
-                Your habits are ready. Log consistently, reflect when it matters, and let the patterns show you what&apos;s working.
-              </div>
-              <div style={{ fontSize:12, color:T.hint, lineHeight:1.5, maxWidth:260, margin:"0 auto 28px" }}>
-                Start with this one. Add more when the loop is real.
+              <div style={{ fontSize:14, color:T.muted, lineHeight:1.7, maxWidth:300, margin:"0 auto 28px" }}>
+                {editedArc
+                  ? <>“{editedArc.title || "Your Arc"}” — {arcDurationWeeksLabel(editedArc.durationDays)}, starting today. Show proof, talk to your coach, and let the weekly Review tell you the truth.</>
+                  : "Track what matters, talk to your coach, and start an Arc whenever you're ready."}
               </div>
             </div>
 
-            {/* Coach client: skip paywall, show "full access included" card */}
-            {isCoachClient ? (
+            {isCoachClient && (
               <div style={{
                 position:"relative",
                 background:"linear-gradient(145deg, rgba(39,174,96,0.13) 0%, rgba(39,174,96,0.04) 100%)",
@@ -697,7 +414,6 @@ After creating, tell them they can log from Today and chat with you anytime.`;
                 padding:"18px 18px 16px",
                 marginBottom:16,
                 textAlign:"left",
-                boxShadow:"0 8px 28px rgba(39,174,96,0.08)",
                 animation:"finalItemIn 0.55s 0.15s cubic-bezier(0.22,1,0.36,1) both",
               }}>
                 <div style={{ position:"absolute", top:-10, left:14, background:"#27AE60", color:"#fff", fontSize:10, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase", padding:"3px 9px", borderRadius:6 }}>
@@ -705,73 +421,23 @@ After creating, tell them they can log from Today and chat with you anytime.`;
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10, marginTop:4 }}>
                   <div style={{ fontSize:22 }}>⚡</div>
-                  <div style={{ fontFamily:T.serif, fontSize:18, color:T.text, lineHeight:1.2 }}>
-                    Forged Pro — Free
-                  </div>
-                  <div style={{ marginLeft:"auto", fontSize:12, color:"#27AE60", fontWeight:600 }}>
-                    $0/mo
-                  </div>
+                  <div style={{ fontFamily:T.serif, fontSize:18, color:T.text, lineHeight:1.2 }}>Forged Pro — Free</div>
+                  <div style={{ marginLeft:"auto", fontSize:12, color:"#27AE60", fontWeight:600 }}>$0/mo</div>
                 </div>
                 <div style={{ fontSize:12, color:T.sub, lineHeight:1.65 }}>
-                  Your coach has unlocked full access for you — unlimited habits, AI coaching, voice logging, and complete history.
+                  Your coach has unlocked full access for you — unlimited coaching, spoken replies, and complete history.
                 </div>
-              </div>
-            ) : (
-              /* Pro upsell card — clearly the premium path, not a footnote. */
-              <div style={{
-                position:"relative",
-                background:"linear-gradient(145deg, rgba(200,144,42,0.12) 0%, rgba(200,144,42,0.04) 100%)",
-                border:"1px solid rgba(200,144,42,0.45)",
-                borderRadius:18,
-                padding:"18px 18px 16px",
-                marginBottom:16,
-                textAlign:"left",
-                boxShadow:"0 8px 28px rgba(200,144,42,0.08)",
-                animation:"finalItemIn 0.55s 0.15s cubic-bezier(0.22,1,0.36,1) both",
-              }}>
-                <div style={{ position:"absolute", top:-10, left:14, background:T.gold, color:"#0F0F0D", fontSize:10, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase", padding:"3px 9px", borderRadius:6 }}>
-                  Recommended
-                </div>
-                <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10, marginTop:4 }}>
-                  <div style={{ fontSize:22 }}>⚡</div>
-                  <div style={{ fontFamily:T.serif, fontSize:18, color:T.text, lineHeight:1.2 }}>
-                    Forged Pro
-                  </div>
-                  <div style={{ marginLeft:"auto", fontSize:12, color:T.gold, fontWeight:600 }}>
-                    $4.99/mo
-                  </div>
-                </div>
-                <div style={{ fontSize:12, color:T.sub, lineHeight:1.65, marginBottom:12 }}>
-                  Unlimited AI coaching, unlimited habits, voice logging, friend nudges, and full history — everything you need to actually understand your patterns.
-                </div>
-                <button
-                  onClick={handleGoPro}
-                  disabled={checkoutLoading}
-                  style={{
-                    width:"100%", padding:"13px 0", borderRadius:12, border:"none",
-                    background:T.gold, color:"#0F0F0D",
-                    fontSize:14, fontWeight:700, letterSpacing:"0.01em",
-                    cursor:checkoutLoading?"not-allowed":"pointer",
-                    opacity:checkoutLoading?0.7:1,
-                    fontFamily:T.font,
-                    transition:"opacity 0.15s",
-                  }}
-                >
-                  {checkoutLoading ? "Opening checkout…" : "Unlock Forged Pro →"}
-                </button>
-                {checkoutError && <p style={{ fontSize:12, color:"#e05c5c", marginTop:10, lineHeight:1.5 }}>{checkoutError}</p>}
               </div>
             )}
 
-            {/* Primary CTA — enter app */}
             <button
-              onClick={handleEnterApp}
+              onClick={finishOnboarding}
               disabled={enteringApp}
               style={{
                 width:"100%", padding:"15px 0", borderRadius:12,
-                border:`1.5px solid ${isCoachClient ? "#27AE60" : T.accent}`,
-                background: enteringApp ? T.raised : isCoachClient ? "rgba(39,174,96,0.12)" : T.raised,
-                color: enteringApp ? T.muted : T.text,
+                border:"none",
+                background: enteringApp ? T.raised : T.accent,
+                color: enteringApp ? T.muted : "#fff",
                 fontSize:15, fontWeight:600,
                 cursor: enteringApp ? "not-allowed" : "pointer",
                 fontFamily:T.font,
@@ -784,7 +450,6 @@ After creating, tell them they can log from Today and chat with you anytime.`;
               {enteringApp ? "Setting up…" : "Start using Forged →"}
             </button>
 
-            {/* Email updates opt-in — pre-checked; profiles + forged_beta_email_opt_in */}
             <label style={{
               display:"flex", alignItems:"flex-start", gap:10,
               padding:"11px 13px", borderRadius:12,
@@ -810,320 +475,30 @@ After creating, tell them they can log from Today and chat with you anytime.`;
     );
   }
 
-  // ── Virtual step: onboarding chat — first real interaction with the coach ─────
-  if ((step === FIRST_STEP || step === COACH_INTRO_STEP) && builtHabits.length > 0) {
-    const coachDisplay  = coachNameInput.trim() || "Coach";
-    const isStreaming   = onboardMsgs.some(m => m.id === ONBOARD_STREAM_ID);
-    const canSend       = onboardInput.trim() && !onboardSending && !isStreaming && !arcDraft;
-    const onboardArcPayload = {
-      title: arcDraft?.title || "",
-      identity: arcIdentity.trim(),
-      why: arcWhy.trim(),
-      oldPattern: arcOldPattern.trim(),
-      minimumProof: arcMinimumProof.trim(),
-    };
-    const onboardCoachStage = inferArcCoachStage({
-      msgs: onboardMsgs,
-      arcPayload: onboardArcPayload,
-      isEdit: false,
-      priorTurns: onboardMsgs.filter(m => m.role === "assistant").length,
-    });
-    const onboardSuggestionPills = !arcDraft && !onboardSending && !coachIntroLoading
-      ? getArcSuggestionPills(onboardCoachStage)
-      : [];
-
-    return (
-      // position:fixed + inset:0 prevents iOS from zooming/scrolling the page when the keyboard opens
-      <div style={{ position:"fixed", inset:0, background:T.bg, display:"flex", flexDirection:"column", fontFamily:T.font, maxWidth:430, margin:"0 auto" }}>
-        <style>{`@keyframes obDot{0%,60%,100%{opacity:.2;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}`}</style>
-
-        {/* Skip confirmation modal */}
-        {skipConfirmVisible && (
-          <div
-            style={{ position:"absolute", inset:0, zIndex:200, background:"rgba(0,0,0,0.72)", display:"flex", alignItems:"center", justifyContent:"center", padding:24 }}
-            onClick={() => setSkipConfirmVisible(false)}
-          >
-            <div style={{ background:T.raised, borderRadius:T.r, padding:24, maxWidth:320, width:"100%", boxShadow:"0 8px 32px rgba(0,0,0,0.4)" }}
-              onClick={e => e.stopPropagation()}>
-              <div style={{ fontSize:17, fontWeight:700, color:T.text, marginBottom:10 }}>Skip this step?</div>
-              <div style={{ fontSize:13, color:T.sub, lineHeight:1.65, marginBottom:22 }}>
-                This is where you set up your first goal with your coach. Skipping means starting without any habits or goals — you can always add them later, but it's easier to do it now.
-              </div>
-              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                <button
-                  onClick={() => {
-                    setSkipConfirmVisible(false);
-                    setTimeout(() => textareaRef.current?.focus(), 80);
-                  }}
-                  style={{ padding:13, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer" }}
-                >
-                  Let me chat with my coach
-                </button>
-                <button
-                  onClick={() => { setSkipConfirmVisible(false); setShowingFinal(true); }}
-                  style={{ padding:13, borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:"none", color:T.muted, fontSize:13, cursor:"pointer" }}
-                >
-                  Skip anyway
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Header */}
-        <div style={{ flexShrink:0, paddingTop:"max(16px, env(safe-area-inset-top, 16px))", paddingBottom:12, paddingLeft:20, paddingRight:20, borderBottom:`0.5px solid ${T.border}`, display:"flex", alignItems:"center", gap:12, background:T.bg }}>
-          <div style={{ width:40, height:40, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>🤖</div>
-          <div style={{ flex:1 }}>
-            <div style={{ fontSize:14, fontWeight:600, color:T.text }}>{coachDisplay}</div>
-            <div style={{ fontSize:11, color:T.gold, marginTop:1 }}>Forged AI Coach · Step 5 of 5</div>
-          </div>
-          <div style={{ width:56, height:3, background:T.surface, borderRadius:2, overflow:"hidden", flexShrink:0 }}>
-            <div style={{ width:"100%", height:"100%", background:T.accent, borderRadius:2 }}/>
-          </div>
-        </div>
-
-        {/* Messages area */}
-        <div style={{ flex:1, overflowY:"auto", padding:"20px 16px 8px", display:"flex", flexDirection:"column", gap:12 }}>
-
-          {/* Opener loading */}
-          {coachIntroLoading && onboardMsgs.length === 0 && (
-            <div style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
-              <div style={{ width:28, height:28, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, flexShrink:0 }}>🤖</div>
-              <div style={{ padding:"10px 16px", background:T.surface, borderRadius:"14px 14px 14px 3px", display:"flex", gap:5, alignItems:"center" }}>
-                {[0,1,2].map(i => <div key={i} style={{ width:6, height:6, borderRadius:"50%", background:T.muted, animation:`obDot 1.2s ease-in-out ${i*0.2}s infinite` }}/>)}
-              </div>
-            </div>
-          )}
-
-          {/* All messages */}
-          {onboardMsgs.map((msg, i) =>
-            msg.role === "assistant" ? (
-              <div key={i} style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
-                <div style={{ width:28, height:28, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, flexShrink:0 }}>🤖</div>
-                <div style={{ background:T.surface, borderRadius:"14px 14px 14px 3px", padding:"10px 16px", fontSize:15, color:T.text, lineHeight:1.65, maxWidth:"82%", whiteSpace:"pre-wrap" }}>
-                  {msg.id === ONBOARD_STREAM_ID && !msg.content ? (
-                    <div style={{ display:"flex", gap:5 }}>{[0,1,2].map(i => <div key={i} style={{ width:6, height:6, borderRadius:"50%", background:T.muted, animation:`obDot 1.2s ease-in-out ${i*0.2}s infinite` }}/>)}</div>
-                  ) : bubbleContentForDisplay(msg.content)}
-                </div>
-              </div>
-            ) : (
-              <div key={i} style={{ display:"flex", justifyContent:"flex-end" }}>
-                <div style={{ background:T.accent, borderRadius:"14px 14px 3px 14px", padding:"10px 16px", fontSize:15, color:"#fff", lineHeight:1.65, maxWidth:"82%", whiteSpace:"pre-wrap" }}>
-                  {bubbleContentForDisplay(msg.content)}
-                </div>
-              </div>
-            )
-          )}
-
-          {/* Typing indicator (waiting for stream to start) */}
-          {onboardSending && !isStreaming && (
-            <div style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
-              <div style={{ width:28, height:28, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, flexShrink:0 }}>🤖</div>
-              <div style={{ padding:"10px 16px", background:T.surface, borderRadius:"14px 14px 14px 3px", display:"flex", gap:5, alignItems:"center" }}>
-                {[0,1,2].map(i => <div key={i} style={{ width:6, height:6, borderRadius:"50%", background:T.muted, animation:`obDot 1.2s ease-in-out ${i*0.2}s infinite` }}/>)}
-              </div>
-            </div>
-          )}
-
-          {/* Arc draft preview — appears when the coach emits <arc_draft>. */}
-          {arcDraft && (
-            <div style={{
-              margin:"4px 0 6px",
-              padding:"14px 16px",
-              borderRadius:T.r,
-              border:"0.5px solid rgba(200,144,42,0.45)",
-              background:"linear-gradient(180deg, rgba(200,144,42,0.10), rgba(26,26,22,0.96))",
-            }}>
-              <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:8 }}>
-                Arc draft
-              </div>
-              <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, lineHeight:1.2, marginBottom:6 }}>
-                {arcDraft.title || resolveArcTitle("", arcDraft.identity)}
-              </div>
-              <div style={{ fontSize:11, color:T.muted, marginBottom:12 }}>
-                {arcDurationWeeksLabel(arcDraft.durationDays)} · {arcDraft.durationDays || 56} days
-              </div>
-              <div style={{ fontSize:11, fontWeight:700, color:T.hint, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:4 }}>
-                You're becoming
-              </div>
-              <div style={{ fontSize:14, color:T.sub, lineHeight:1.5, marginBottom:14 }}>
-                {arcDraft.identity}
-              </div>
-              {arcDraft.why ? (
-                <div style={{ marginBottom:10 }}>
-                  <div style={{ fontSize:10, fontWeight:700, color:T.hint, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:3 }}>Why</div>
-                  <div style={{ fontSize:13, color:T.sub, lineHeight:1.55 }}>{arcDraft.why}</div>
-                </div>
-              ) : null}
-              {arcDraft.oldPattern ? (
-                <div style={{ marginBottom:10 }}>
-                  <div style={{ fontSize:10, fontWeight:700, color:T.hint, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:3 }}>Old pattern</div>
-                  <div style={{ fontSize:13, color:T.sub, lineHeight:1.55 }}>{arcDraft.oldPattern}</div>
-                </div>
-              ) : null}
-              {arcDraft.minimumProof ? (
-                <div style={{ marginBottom:10 }}>
-                  <div style={{ fontSize:10, fontWeight:700, color:T.hint, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:3 }}>Bad-day minimum</div>
-                  <div style={{ fontSize:13, color:T.sub, lineHeight:1.55 }}>{arcDraft.minimumProof}</div>
-                </div>
-              ) : null}
-              {arcDraft.proofActions?.length > 0 ? (
-                <div style={{ marginBottom:4 }}>
-                  <div style={{ fontSize:10, fontWeight:700, color:T.hint, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:6 }}>
-                    Suggested proof actions
-                  </div>
-                  <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
-                    {arcDraft.proofActions.map((p, i) => (
-                      <div key={`${p}-${i}`} style={{ display:"flex", gap:8, alignItems:"flex-start" }}>
-                        <span style={{ fontSize:11, color:T.gold, fontWeight:700, marginTop:2, flexShrink:0 }}>·</span>
-                        <span style={{ fontSize:13, color:T.text, lineHeight:1.45 }}>{p}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{ fontSize:11, color:T.hint, marginTop:10, lineHeight:1.5 }}>
-                    Add any that aren&apos;t already in your habits from Today, after you start.
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          )}
-
-          <div ref={chatEndRef}/>
-        </div>
-
-        {/* Input bar — matches AICoach layout: mic · textarea · send */}
-        <div style={{ flexShrink:0, borderTop:`0.5px solid ${T.border}`, padding:"10px 14px", background:T.bg }}>
-          <ArcSuggestionPills
-            pills={onboardSuggestionPills}
-            onPill={handleOnboardSuggestionPill}
-            disabled={onboardSending || coachIntroLoading || !!arcDraft}
-          />
-          <div style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
-            {speech.supported && (
-              <div style={{ flexShrink:0, alignSelf:"flex-end", marginBottom:1 }}>
-                <MicBtn speech={speech} color={T.gold} size={44} prominent/>
-              </div>
-            )}
-            <div style={{ flex:1, position:"relative" }}>
-              <textarea
-                ref={textareaRef}
-                value={onboardInput}
-                onChange={e => setOnboardInput(e.target.value)}
-                onInput={e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 88) + "px"; }}
-                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendOnboardMessage(); } }}
-                placeholder={coachIntroLoading ? "Coach is typing…" : "Tell your coach about yourself…"}
-                disabled={onboardSending || isStreaming}
-                style={{
-                  width:"100%", boxSizing:"border-box",
-                  background:T.surface, border:`0.5px solid ${T.borderStrong}`,
-                  borderRadius:T.rsm, padding:"10px 14px",
-                  // font-size 16px prevents iOS from zooming in when the field is focused
-                  fontSize:16, color:T.text, resize:"none",
-                  fontFamily:T.font, lineHeight:1.5, outline:"none",
-                  minHeight:"42px", maxHeight:"88px", overflowY:"auto", height:"auto",
-                }}
-              />
-            </div>
-            <button
-              type="button"
-              onClick={() => sendOnboardMessage()}
-              disabled={!canSend}
-              style={{
-                width:36, height:36, borderRadius:"50%", border:`0.5px solid ${T.border}`,
-                flexShrink:0, alignSelf:"flex-end",
-                background:canSend ? T.gold : T.surface,
-                cursor:canSend ? "pointer" : "default",
-                display:"flex", alignItems:"center", justifyContent:"center",
-                transition:"background 0.2s",
-              }}
-            >
-              <svg width="15" height="15" viewBox="0 0 18 18" fill="none">
-                <path d="M2 9h14M9 2l7 7-7 7" stroke={canSend ? "#1a1a16" : T.hint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </button>
-          </div>
-        </div>
-
-        {/* CTA — promotes to "Use this Arc" once the coach emits a draft. */}
-        <div style={{ flexShrink:0, padding:"8px 16px", paddingBottom:"max(28px, env(safe-area-inset-bottom, 28px))", background:T.bg }}>
-          {arcDraft ? (
-            <>
-              <button
-                type="button"
-                onClick={useArcDraft}
-                disabled={enteringApp}
-                style={{
-                  width:"100%", padding:15, borderRadius:T.rsm, border:"none",
-                  background:T.gold, color:"#0F0F0D",
-                  fontSize:16, fontWeight:700, cursor: enteringApp ? "not-allowed" : "pointer",
-                  opacity: enteringApp ? 0.7 : 1,
-                  fontFamily:T.font,
-                }}
-              >
-                {enteringApp ? "Starting Arc…" : "Use this Arc →"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setArcDraft(null)}
-                disabled={enteringApp}
-                style={{
-                  width:"100%", marginTop:8, padding:10, background:"none", border:"none",
-                  color:T.muted, fontSize:12, cursor: enteringApp ? "default" : "pointer",
-                  fontFamily:T.font,
-                }}
-              >
-                Keep chatting first
-              </button>
-            </>
-          ) : habitCreatedInChat ? (
-            <button
-              type="button"
-              onClick={() => setShowingFinal(true)}
-              style={{ width:"100%", padding:15, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:600, cursor:"pointer" }}
-            >
-              Start Forged →
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setSkipConfirmVisible(true)}
-              style={{ width:"100%", padding:14, borderRadius:T.rsm, border:"none", background:"rgba(255,255,255,0.05)", color:T.muted, fontSize:14, cursor:"pointer" }}
-            >
-              Skip for now
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // ── Virtual step 5: enable notifications ────────────────────────────────────
-  if (step === NOTIF_STEP) {
+  // ── NOTIFICATIONS — asked only after the Arc + first evidence exist ────────
+  if (step === STEP_NOTIF) {
     const blocked = notifPermission === "denied";
     const already = notifEnabled;
+    const goNext = () => setStep(STEP_FINAL);
 
     return (
       <div style={wrap}>
-        {/* Progress dots */}
-        <ProgressHeader currentNum={progressNumber} />
-
+        <ProgressHeader currentNum={STEP_NUMBERS[STEP_NOTIF]} />
         <div style={{ flex:1, padding:"40px 24px 16px", overflowY:"auto", display:"flex", flexDirection:"column", justifyContent:"center" }}>
-          {/* Hero */}
           <div style={{ textAlign:"center", marginBottom:28 }}>
             <div style={{ fontSize:52, marginBottom:14, lineHeight:1 }}>🔔</div>
             <div style={{ fontFamily:T.serif, fontSize:26, color:T.text, lineHeight:1.2, marginBottom:10 }}>
-              Stay on track
+              Protect the Arc
             </div>
             <div style={{ fontSize:14, color:T.muted, lineHeight:1.6, maxWidth:300, margin:"0 auto" }}>
-              One reminder a day. We send it when it matters most — at the end of the day, when you still have time to log.
+              One reminder a day, sent when you still have time to show proof. That&apos;s it — no spam.
             </div>
           </div>
 
-          {/* Benefit rows */}
           <div style={{ display:"flex", flexDirection:"column", gap:12, marginBottom:28 }}>
             {[
-              { icon:"🔥", title:"Streak protection", desc:"Get nudged before your streak breaks." },
-              { icon:"🎯", title:"Goal countdowns", desc:"Know when a deadline is approaching." },
+              { icon:"🔥", title:"Evidence protection", desc:"A nudge before the day closes empty." },
+              { icon:"🗓️", title:"Weekly Review", desc:"Know when your Review is ready." },
               { icon:"✅", title:"Daily check-in", desc:"A quick tap to log and close the day." },
             ].map(({ icon, title, desc }) => (
               <div key={title} style={{ display:"flex", alignItems:"center", gap:14, background:T.raised, border:`0.5px solid ${T.border}`, borderRadius:T.rsm, padding:"14px 16px" }}>
@@ -1147,28 +522,20 @@ After creating, tell them they can log from Today and chat with you anytime.`;
 
         <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
           {already ? (
-            <button
-              onClick={() => builtHabits.length > 0 ? setStep(COACH_INTRO_STEP) : setShowingFinal(true)}
-              style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:600, cursor:"pointer", marginBottom:10 }}
-            >
-              Reminders on — let's go ✓
+            <button onClick={goNext}
+              style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:600, cursor:"pointer", marginBottom:10 }}>
+              Reminders on — let&apos;s go ✓
             </button>
           ) : (
             <button
-              onClick={async () => {
-                if (onNotifToggle) await onNotifToggle();
-                if (builtHabits.length > 0) setStep(COACH_INTRO_STEP); else setShowingFinal(true);
-              }}
+              onClick={async () => { if (onNotifToggle) await onNotifToggle(); goNext(); }}
               disabled={notifLoading || blocked}
-              style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:blocked?T.surface:T.gold, color:blocked?T.muted:"#0F0F0D", fontSize:16, fontWeight:600, cursor:blocked?"not-allowed":"pointer", opacity:(notifLoading||blocked)?0.7:1, marginBottom:10, transition:"opacity 0.15s" }}
-            >
+              style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:blocked?T.surface:T.gold, color:blocked?T.muted:"#0F0F0D", fontSize:16, fontWeight:600, cursor:blocked?"not-allowed":"pointer", opacity:(notifLoading||blocked)?0.7:1, marginBottom:10, transition:"opacity 0.15s" }}>
               {notifLoading ? "Enabling…" : blocked ? "Notifications blocked" : "Enable daily reminders 🔔"}
             </button>
           )}
-          <button
-            onClick={() => builtHabits.length > 0 ? setStep(COACH_INTRO_STEP) : setShowingFinal(true)}
-            style={{ width:"100%", padding:12, background:"none", border:"none", color:T.hint, fontSize:13, cursor:"pointer" }}
-          >
+          <button onClick={goNext}
+            style={{ width:"100%", padding:12, background:"none", border:"none", color:T.hint, fontSize:13, cursor:"pointer" }}>
             Skip notifications
           </button>
         </div>
@@ -1176,237 +543,406 @@ After creating, tell them they can log from Today and chat with you anytime.`;
     );
   }
 
-  // ── Virtual step 5: interstitial ─────────────────────────────────────────────
-  if (step === INTER_STEP) {
-    const count = builtHabits.length;
-    const firstName = name.trim() || "Hey";
-    const firstHabit = builtHabits.length > 0 ? pickFirstHabit(builtHabits) : null;
-
+  // ── FIRST EVIDENCE — say one true thing before entering the app ────────────
+  if (step === STEP_EVIDENCE) {
+    const identityShort = (editedArc?.identity || "").trim();
+    const canContinue = evidenceText.trim().length > 0;
     return (
       <div style={wrap}>
-        <ProgressHeader currentNum={progressNumber} />
-
-        <div style={{ flex:1, padding:"48px 24px 16px", display:"flex", flexDirection:"column", justifyContent:"center" }}>
-          <div style={{ background:"rgba(200,144,42,0.07)", border:`0.5px solid rgba(200,144,42,0.2)`, borderRadius:T.r, padding:"20px 20px 16px", marginBottom:24 }}>
-            <div style={{ display:"flex", gap:12, alignItems:"center", marginBottom:14 }}>
-              <div style={{ width:40, height:40, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>🤖</div>
-              <div style={{ fontSize:13, fontWeight:500, color:T.text }}>{coachNameInput.trim() || "Coach"}</div>
-            </div>
-            <div style={{ background:T.surface, borderRadius:"12px 12px 12px 3px", padding:"12px 16px", fontSize:14, color:T.text, lineHeight:1.7, borderLeft:`2px solid rgba(200,144,42,0.35)` }}>
-              {firstName}, I've set up {count} habit{count !== 1 ? "s" : ""} based on what you picked. I'll explain what each one means as you go. Let's look at your first one.
+        <ProgressHeader currentNum={STEP_NUMBERS[STEP_EVIDENCE]} />
+        <div style={{ flex:1, padding:"36px 24px 16px", overflowY:"auto", display:"flex", flexDirection:"column" }}>
+          <div style={{ display:"flex", gap:10, alignItems:"flex-start", marginBottom:22 }}>
+            <div style={{ width:34, height:34, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:17, flexShrink:0 }}>🤖</div>
+            <div style={{ background:T.surface, borderRadius:"14px 14px 14px 3px", padding:"12px 16px", fontSize:14.5, color:T.text, lineHeight:1.65 }}>
+              Locked in. Before we go — what&apos;s one thing you&apos;ve already done today, or yesterday, that counts toward
+              {identityShort ? <> &ldquo;{identityShort.slice(0, 80)}&rdquo;</> : " this"}?
+              Even something small. Say it out loud or type it — that&apos;s your first piece of evidence.
             </div>
           </div>
 
-          {firstHabit && (
-            <div style={{ background:T.raised, borderRadius:T.rsm, padding:"14px 16px", border:`0.5px solid ${T.border}`, display:"flex", alignItems:"center", gap:12, opacity:0.7 }}>
-              <div style={{ fontSize:24 }}>{firstHabit.emoji}</div>
-              <div>
-                <div style={{ fontSize:14, fontWeight:500, color:T.text }}>{firstHabit.name}</div>
-                <div style={{ fontSize:12, color:T.muted }}>{HABIT_TYPES[firstHabit.habitType]?.label}</div>
+          <div style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
+            {speech.supported && (
+              <div style={{ flexShrink:0, alignSelf:"flex-end", marginBottom:1 }}>
+                <MicBtn speech={speech} color={T.gold} size={44} prominent/>
               </div>
-            </div>
-          )}
+            )}
+            <textarea
+              ref={evidenceRef}
+              value={evidenceText}
+              onChange={e => setEvidenceText(e.target.value)}
+              onInput={e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 130) + "px"; }}
+              placeholder="e.g. Made breakfast instead of skipping it…"
+              style={{
+                ...styleInp, resize:"none", minHeight:64, maxHeight:130,
+                lineHeight:1.55, fontSize:16,
+              }}
+            />
+          </div>
+          <div style={{ fontSize:11, color:T.hint, marginTop:12, lineHeight:1.55 }}>
+            This gets saved as the first entry in your Evidence — the trail your weekly Review is built from.
+          </div>
         </div>
 
         <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
-          <button onClick={() => setStep(NOTIF_STEP)}
-            style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:500, cursor:"pointer" }}>
-            Let's go →
+          <button
+            onClick={() => setStep(STEP_NOTIF)}
+            disabled={!canContinue}
+            style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:canContinue?T.accent:T.surface, color:canContinue?"#fff":T.muted, fontSize:16, fontWeight:600, cursor:canContinue?"pointer":"default", marginBottom:10, transition:"background 0.15s" }}>
+            Save my first evidence →
+          </button>
+          <button
+            onClick={() => { setEvidenceText(""); setStep(STEP_NOTIF); }}
+            style={{ width:"100%", padding:12, background:"none", border:"none", color:T.hint, fontSize:13, cursor:"pointer" }}>
+            Nothing yet — skip
           </button>
         </div>
       </div>
     );
   }
 
-  // ── Standard steps 0–4 ───────────────────────────────────────────────────────
-  return (
-    <div style={wrap}>
-      <ProgressHeader currentNum={progressNumber} />
+  // ── CONVERSATION — coach chat with Arc proposals ───────────────────────────
+  if (step === STEP_CHAT) {
+    const canSend = input.trim() && !sending;
+    const stage = inferArcCoachStage({
+      msgs,
+      arcPayload: {},
+      isEdit: false,
+      priorTurns: msgs.filter(m => m.role === "assistant").length,
+    });
+    const pills = !sending && !arcOptions ? getArcSuggestionPills(stage) : [];
+    const showConfirmCard = selectedIdx != null && editedArc;
 
-      <div style={{ flex:1, padding:"32px 24px 16px", display:"flex", flexDirection:"column", overflowY:"auto" }}>
-        <div style={{ fontFamily:T.serif, fontSize:28, color:T.text, lineHeight:1.2, marginBottom:10 }}>{current.title}</div>
-        <div style={{ fontSize:14, color:T.muted, marginBottom:24, lineHeight:1.6 }}>{current.sub}</div>
+    return (
+      <div style={{ position:"fixed", inset:0, background:T.bg, display:"flex", flexDirection:"column", fontFamily:T.font, maxWidth:430, margin:"0 auto" }}>
+        <style>{`@keyframes obDot{0%,60%,100%{opacity:.2;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}`}</style>
 
-        {current.body && (
-          <div style={{ background:T.raised, borderRadius:T.r, padding:"16px 18px", marginBottom:24, borderLeft:`3px solid ${T.accent}` }}>
-            <div style={{ fontSize:13, color:T.sub, lineHeight:1.7 }}>{current.body}</div>
-          </div>
-        )}
-
-        {step === 1 && (
-          <input
-            style={{ ...styleInp, fontSize:18, padding:"14px 16px", marginBottom:8 }}
-            placeholder="e.g. Alex"
-            value={name}
-            onChange={e => setName(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && handleContinue()}
-            autoFocus
-          />
-        )}
-
-        {step === COACH_STEP && (
-          <div>
-            <div style={{ background:"rgba(200,144,42,0.08)", border:`0.5px solid rgba(200,144,42,0.25)`, borderRadius:T.r, padding:"16px 18px", marginBottom:20 }}>
-              <div style={{ display:"flex", gap:12, alignItems:"center", marginBottom:12 }}>
-                <div style={{ width:44, height:44, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, flexShrink:0 }}>🤖</div>
-                <div>
-                  <div style={{ fontSize:13, fontWeight:500, color:T.text }}>Your coach knows your habits</div>
-                  <div style={{ fontSize:11, color:T.gold, marginTop:2 }}>⚡ Real context, not generic tips</div>
-                </div>
+        {skipConfirmVisible && (
+          <div
+            style={{ position:"absolute", inset:0, zIndex:200, background:"rgba(0,0,0,0.72)", display:"flex", alignItems:"center", justifyContent:"center", padding:24 }}
+            onClick={() => setSkipConfirmVisible(false)}
+          >
+            <div style={{ background:T.raised, borderRadius:T.r, padding:24, maxWidth:320, width:"100%", boxShadow:"0 8px 32px rgba(0,0,0,0.4)" }}
+              onClick={e => e.stopPropagation()}>
+              <div style={{ fontSize:17, fontWeight:700, color:T.text, marginBottom:10 }}>Skip the setup?</div>
+              <div style={{ fontSize:13, color:T.sub, lineHeight:1.65, marginBottom:22 }}>
+                This conversation is how your first Arc gets built. Skipping means starting with a blank app — you can set up an Arc later from Today.
               </div>
-              <div style={{ background:T.surface, borderRadius:"12px 12px 12px 3px", padding:"10px 14px", fontSize:13, color:T.muted, lineHeight:1.6, borderLeft:`2px solid rgba(200,144,42,0.3)` }}>
-                "Hey {name || "there"} — once you start logging, I can see exactly what's working and where things fall apart. Ask me anything."
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                <button
+                  onClick={() => { setSkipConfirmVisible(false); setTimeout(() => textareaRef.current?.focus(), 80); }}
+                  style={{ padding:13, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer" }}>
+                  Keep talking
+                </button>
+                <button
+                  onClick={() => { setSkipConfirmVisible(false); setEditedArc(null); setStep(STEP_NOTIF); }}
+                  style={{ padding:13, borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:"none", color:T.muted, fontSize:13, cursor:"pointer" }}>
+                  Skip anyway
+                </button>
               </div>
-            </div>
-            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-              {[
-                { icon:"🔍", text:"Finds patterns in your logs — like why you always skip Thursdays" },
-                { icon:"💬", text:"Answers in plain language, based on your real data" },
-                { icon:"⚡", text:"Can log habits, create new ones, and help you reflect" },
-              ].map(({ icon, text }) => (
-                <div key={text} style={{ display:"flex", alignItems:"flex-start", gap:12, padding:"10px 14px", background:T.raised, borderRadius:T.rsm, border:`0.5px solid ${T.border}` }}>
-                  <span style={{ fontSize:16, flexShrink:0, marginTop:1 }}>{icon}</span>
-                  <span style={{ fontSize:13, color:T.sub, lineHeight:1.55 }}>{text}</span>
-                </div>
-              ))}
             </div>
           </div>
         )}
 
-        {step === ARC_BECOMING_STEP && (
-          <div>
-            <textarea
-              style={{ ...styleInp, fontSize:16, padding:"14px 16px", minHeight:96, resize:"vertical", lineHeight:1.55, fontFamily:T.font }}
-              placeholder="e.g. Fitter, sharper, and less reactive."
-              value={arcIdentity}
-              onChange={e => setArcIdentity(e.target.value)}
-              maxLength={250}
-              autoFocus
-            />
-            <div style={{ marginTop:14, marginBottom:8, fontSize:11, fontWeight:600, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em" }}>
-              Or start from one of these
+        {/* Header */}
+        <div style={{ flexShrink:0, paddingTop:"max(16px, env(safe-area-inset-top, 16px))", paddingBottom:12, paddingLeft:20, paddingRight:20, borderBottom:`0.5px solid ${T.border}`, display:"flex", alignItems:"center", gap:12, background:T.bg }}>
+          <div style={{ width:40, height:40, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>🤖</div>
+          <div style={{ flex:1 }}>
+            <div style={{ fontSize:14, fontWeight:600, color:T.text }}>Coach</div>
+            <div style={{ fontSize:11, color:T.gold, marginTop:1 }}>Step {STEP_NUMBERS[STEP_CHAT]} of {DISPLAY_TOTAL}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSkipConfirmVisible(true)}
+            style={{ flexShrink:0, background:"none", border:"none", color:T.hint, fontSize:12, cursor:"pointer", fontFamily:T.font, padding:"6px 4px" }}>
+            Skip
+          </button>
+        </div>
+
+        {/* Messages */}
+        <div style={{ flex:1, overflowY:"auto", padding:"20px 16px 8px", display:"flex", flexDirection:"column", gap:12 }}>
+          {msgs.map((msg, i) =>
+            msg.role === "assistant" ? (
+              <div key={i} style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
+                <div style={{ width:28, height:28, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, flexShrink:0 }}>🤖</div>
+                <div style={{ background:T.surface, borderRadius:"14px 14px 14px 3px", padding:"10px 16px", fontSize:15, color:T.text, lineHeight:1.65, maxWidth:"82%", whiteSpace:"pre-wrap" }}>
+                  {bubbleContentForDisplay(msg.content)}
+                </div>
+              </div>
+            ) : (
+              <div key={i} style={{ display:"flex", justifyContent:"flex-end" }}>
+                <div style={{ background:T.accent, borderRadius:"14px 14px 3px 14px", padding:"10px 16px", fontSize:15, color:"#fff", lineHeight:1.65, maxWidth:"82%", whiteSpace:"pre-wrap" }}>
+                  {bubbleContentForDisplay(msg.content)}
+                </div>
+              </div>
+            )
+          )}
+
+          {sending && (
+            <div style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
+              <div style={{ width:28, height:28, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, flexShrink:0 }}>🤖</div>
+              <div style={{ padding:"10px 16px", background:T.surface, borderRadius:"14px 14px 14px 3px", display:"flex", gap:5, alignItems:"center" }}>
+                {[0,1,2].map(i => <div key={i} style={{ width:6, height:6, borderRadius:"50%", background:T.muted, animation:`obDot 1.2s ease-in-out ${i*0.2}s infinite` }}/>)}
+              </div>
             </div>
-            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-              {ARC_IDENTITY_EXAMPLES.map(ex => (
-                <button key={ex} type="button" onClick={() => setArcIdentity(ex)}
+          )}
+
+          {/* Arc option cards */}
+          {arcOptions && !showConfirmCard && (
+            <div style={{ display:"flex", flexDirection:"column", gap:10, margin:"4px 0 6px" }}>
+              {arcOptions.map((opt, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => pickOption(i)}
                   style={{
-                    padding:"9px 12px", borderRadius:T.rsm,
-                    border:`0.5px solid ${arcIdentity === ex ? T.accent : T.border}`,
-                    background: arcIdentity === ex ? "rgba(192,57,43,0.08)" : T.surface,
-                    color: arcIdentity === ex ? T.text : T.sub,
-                    fontSize:13, cursor:"pointer", textAlign:"left", lineHeight:1.4,
-                    fontFamily:T.font,
+                    textAlign:"left", padding:"14px 16px", borderRadius:T.r,
+                    border:"0.5px solid rgba(200,144,42,0.45)",
+                    background:"linear-gradient(180deg, rgba(200,144,42,0.08), rgba(26,26,22,0.96))",
+                    cursor:"pointer", fontFamily:T.font,
                   }}>
-                  {ex}
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:6 }}>
+                    <span style={{ fontFamily:T.serif, fontSize:19, color:T.text, lineHeight:1.2 }}>
+                      {opt.title || resolveArcTitle("", opt.identity)}
+                    </span>
+                    <span style={{ fontSize:11, color:T.gold, fontWeight:700, flexShrink:0, marginLeft:10 }}>
+                      {arcDurationWeeksLabel(opt.durationDays)}
+                    </span>
+                  </div>
+                  <div style={{ fontSize:13, color:T.sub, lineHeight:1.5, marginBottom:8 }}>{opt.identity}</div>
+                  {opt.proofActions?.length > 0 && (
+                    <div style={{ fontSize:12, color:T.muted, lineHeight:1.55 }}>
+                      {opt.proofActions.map(p => `· ${p}`).join("  ")}
+                    </div>
+                  )}
+                  <div style={{ fontSize:12, color:T.gold, fontWeight:600, marginTop:9 }}>Pick this one →</div>
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={() => { setArcOptions(null); setTimeout(() => textareaRef.current?.focus(), 60); }}
+                style={{ padding:"8px 0", background:"none", border:"none", color:T.muted, fontSize:12, cursor:"pointer", fontFamily:T.font }}>
+                None of these fit — keep talking
+              </button>
             </div>
-            <div style={{ fontSize:11, color:T.hint, marginTop:14, lineHeight:1.55 }}>
-              You can edit any of this later. Leave blank if you'd rather skip the Arc and just track habits.
-            </div>
-          </div>
-        )}
+          )}
 
-        {step === ARC_WHY_STEP && (
-          <div>
-            <textarea
-              style={{ ...styleInp, fontSize:16, padding:"14px 16px", minHeight:96, resize:"vertical", lineHeight:1.55, fontFamily:T.font }}
-              placeholder="e.g. Tired of starting and stopping. Want to be someone who finishes."
-              value={arcWhy}
-              onChange={e => setArcWhy(e.target.value)}
-              maxLength={250}
-              autoFocus
-            />
-            <div style={{ fontSize:11, color:T.hint, marginTop:12, lineHeight:1.55 }}>
-              The coach will quietly remember this. Optional — skip if you'd rather not say.
-            </div>
-          </div>
-        )}
+          {/* Selected option — review / edit / confirm */}
+          {showConfirmCard && (
+            <div style={{
+              margin:"4px 0 6px", padding:"16px 16px 14px", borderRadius:T.r,
+              border:"0.5px solid rgba(200,144,42,0.5)",
+              background:"linear-gradient(180deg, rgba(200,144,42,0.10), rgba(26,26,22,0.97))",
+            }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.14em", textTransform:"uppercase" }}>
+                  Your Arc
+                </div>
+                <button type="button" onClick={() => setEditingArc(e => !e)}
+                  style={{ background:"none", border:"none", color:T.gold, fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:T.font, padding:"2px 4px" }}>
+                  {editingArc ? "Done editing" : "Edit"}
+                </button>
+              </div>
 
-        {step === ARC_BAD_DAY_STEP && (
-          <div>
-            <div style={{ fontSize:11, fontWeight:600, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>
-              Old pattern to weaken
-            </div>
-            <textarea
-              style={{ ...styleInp, fontSize:16, padding:"12px 14px", minHeight:64, resize:"vertical", lineHeight:1.55, marginBottom:16, fontFamily:T.font }}
-              placeholder="e.g. Doom-scrolling when I'm tired instead of training."
-              value={arcOldPattern}
-              onChange={e => setArcOldPattern(e.target.value)}
-              maxLength={200}
-              autoFocus
-            />
-            <div style={{ fontSize:11, fontWeight:600, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>
-              On a bad day, what still counts as proof?
-            </div>
-            <input
-              style={{ ...styleInp, fontSize:16, padding:"12px 14px" }}
-              placeholder="e.g. 15 minutes of training, even if it's terrible."
-              value={arcMinimumProof}
-              onChange={e => setArcMinimumProof(e.target.value)}
-              maxLength={150}
-            />
-            <div style={{ fontSize:11, color:T.hint, marginTop:12, lineHeight:1.55 }}>
-              Both optional. The minimum is what the coach falls back to on rough days.
-            </div>
-          </div>
-        )}
-
-        {step === FOCUS_STEP && (
-          <>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:16 }}>
-              {FOCUS_OPTIONS.map(opt => {
-                const isOn = selected.includes(opt.label);
-                const wasTapped = tappedFocus === opt.label;
-                return (
-                  <button key={opt.label} onClick={() => pickFocusAndAdvance(opt)}
-                    disabled={advancing && !wasTapped}
-                    style={{
-                      padding:"14px 12px", borderRadius:T.rsm,
-                      border:`1.5px solid ${isOn?opt.color:T.borderStrong}`,
-                      background:isOn?opt.color+"20":T.surface,
-                      cursor: advancing ? "default" : "pointer",
-                      textAlign:"left",
-                      transition:"transform 0.18s ease-out, background 0.15s, border 0.15s, opacity 0.15s",
-                      opacity: advancing && !wasTapped ? 0.4 : 1,
-                      transform: wasTapped ? "scale(1.02)" : "scale(1)",
-                      position:"relative",
-                    }}>
-                    {isOn && (
-                      <div style={{
-                        position:"absolute", top:8, right:8,
-                        width:18, height:18, borderRadius:"50%",
-                        background:opt.color,
-                        display:"flex", alignItems:"center", justifyContent:"center",
-                        animation: wasTapped ? "focusCheckPop 0.3s ease-out" : "none",
-                      }}>
-                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2 2 4-4" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              {editingArc ? (
+                <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                  <input style={styleInp} value={editedArc.title} maxLength={40}
+                    onChange={e => setEditedArc(a => ({ ...a, title: e.target.value }))} placeholder="Arc title"/>
+                  <textarea style={{ ...styleInp, minHeight:56, resize:"vertical", lineHeight:1.5 }} value={editedArc.identity} maxLength={250}
+                    onChange={e => setEditedArc(a => ({ ...a, identity: e.target.value }))} placeholder="Direction — one concrete sentence"/>
+                  <textarea style={{ ...styleInp, minHeight:44, resize:"vertical", lineHeight:1.5 }} value={editedArc.why} maxLength={250}
+                    onChange={e => setEditedArc(a => ({ ...a, why: e.target.value }))} placeholder="Why it matters (optional)"/>
+                  <input style={styleInp} value={editedArc.minimumProof} maxLength={150}
+                    onChange={e => setEditedArc(a => ({ ...a, minimumProof: e.target.value }))} placeholder="Bad-day minimum (optional)"/>
+                  <div>
+                    <div style={{ fontSize:10, fontWeight:700, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>Duration</div>
+                    <div style={{ display:"flex", gap:6 }}>
+                      {[14, 28, 56, 84].map(d => (
+                        <button key={d} type="button" onClick={() => setEditedArc(a => ({ ...a, durationDays: d }))}
+                          style={{
+                            flex:1, padding:"8px 0", borderRadius:T.rsm, fontFamily:T.font, fontSize:12, fontWeight:600, cursor:"pointer",
+                            border:`0.5px solid ${editedArc.durationDays === d ? "rgba(200,144,42,0.6)" : T.border}`,
+                            background: editedArc.durationDays === d ? "rgba(200,144,42,0.14)" : T.surface,
+                            color: editedArc.durationDays === d ? T.gold : T.muted,
+                          }}>
+                          {arcDurationWeeksLabel(d)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:10, fontWeight:700, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>Proof actions</div>
+                    {editedArc.proofActions.map((p, i) => (
+                      <div key={i} style={{ display:"flex", gap:6, marginBottom:6 }}>
+                        <input style={{ ...styleInp, flex:1, padding:"8px 10px", fontSize:14 }} value={p} maxLength={40}
+                          onChange={e => setEditedArc(a => {
+                            const next = [...a.proofActions]; next[i] = e.target.value;
+                            return { ...a, proofActions: next };
+                          })}/>
+                        <button type="button" aria-label="Remove proof action"
+                          onClick={() => setEditedArc(a => ({ ...a, proofActions: a.proofActions.filter((_, j) => j !== i) }))}
+                          style={{ width:34, borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:T.surface, color:T.muted, fontSize:14, cursor:"pointer" }}>
+                          ✕
+                        </button>
                       </div>
+                    ))}
+                    {editedArc.proofActions.length < 5 && (
+                      <button type="button"
+                        onClick={() => setEditedArc(a => ({ ...a, proofActions: [...a.proofActions, ""] }))}
+                        style={{ padding:"7px 12px", borderRadius:T.rsm, border:`0.5px dashed ${T.borderStrong}`, background:"none", color:T.muted, fontSize:12, cursor:"pointer", fontFamily:T.font }}>
+                        + Add proof action
+                      </button>
                     )}
-                    <div style={{ fontSize:22, marginBottom:6 }}>{opt.emoji}</div>
-                    <div style={{ fontSize:12, fontWeight:500, color:isOn?opt.color:T.text, lineHeight:1.3 }}>{opt.label}</div>
-                  </button>
-                );
-              })}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div style={{ fontFamily:T.serif, fontSize:22, color:T.text, lineHeight:1.2, marginBottom:4 }}>
+                    {editedArc.title || resolveArcTitle("", editedArc.identity)}
+                  </div>
+                  <div style={{ fontSize:11, color:T.muted, marginBottom:12 }}>
+                    {arcDurationWeeksLabel(editedArc.durationDays)} · starts today
+                  </div>
+                  <div style={{ fontSize:14, color:T.sub, lineHeight:1.5, marginBottom:12 }}>{editedArc.identity}</div>
+                  {editedArc.minimumProof ? (
+                    <div style={{ fontSize:12, color:T.muted, lineHeight:1.5, marginBottom:10 }}>
+                      <span style={{ color:T.green, fontWeight:600 }}>Bad-day minimum:</span> {editedArc.minimumProof}
+                    </div>
+                  ) : null}
+                  {editedArc.proofActions?.filter(p => p.trim()).length > 0 && (
+                    <div style={{ marginBottom:4 }}>
+                      <div style={{ fontSize:10, fontWeight:700, color:T.hint, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:6 }}>
+                        Daily proof
+                      </div>
+                      {editedArc.proofActions.filter(p => p.trim()).map((p, i) => (
+                        <div key={i} style={{ display:"flex", gap:8, alignItems:"flex-start", marginBottom:3 }}>
+                          <span style={{ fontSize:11, color:T.gold, fontWeight:700, marginTop:2, flexShrink:0 }}>·</span>
+                          <span style={{ fontSize:13, color:T.text, lineHeight:1.45 }}>{p}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+
+              <div style={{ display:"flex", flexDirection:"column", gap:8, marginTop:14 }}>
+                <button type="button" onClick={confirmArc}
+                  disabled={!editedArc.identity?.trim()}
+                  style={{ width:"100%", padding:14, borderRadius:T.rsm, border:"none", background:T.gold, color:"#0F0F0D", fontSize:15, fontWeight:700, cursor:"pointer", fontFamily:T.font }}>
+                  Start this Arc →
+                </button>
+                <button type="button" onClick={() => { setSelectedIdx(null); setEditedArc(null); }}
+                  style={{ width:"100%", padding:8, background:"none", border:"none", color:T.muted, fontSize:12, cursor:"pointer", fontFamily:T.font }}>
+                  ← Back to the options
+                </button>
+              </div>
             </div>
-            <div style={{ fontSize:12, color:T.muted, textAlign:"center", marginTop:4 }}>
-              Tap one to get started — you can add more inside the app.
+          )}
+
+          <div ref={chatEndRef}/>
+        </div>
+
+        {/* Input bar */}
+        {!showConfirmCard && (
+          <div style={{ flexShrink:0, borderTop:`0.5px solid ${T.border}`, padding:"10px 14px", paddingBottom:"max(20px, env(safe-area-inset-bottom, 20px))", background:T.bg }}>
+            <ArcSuggestionPills pills={pills} onPill={handleSuggestionPill} disabled={sending}/>
+            <div style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
+              {speech.supported && (
+                <div style={{ flexShrink:0, alignSelf:"flex-end", marginBottom:1 }}>
+                  <MicBtn speech={speech} color={T.gold} size={44} prominent/>
+                </div>
+              )}
+              <div style={{ flex:1, position:"relative" }}>
+                <textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  onInput={e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 88) + "px"; }}
+                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+                  placeholder="Say it however it comes out…"
+                  disabled={sending}
+                  style={{
+                    width:"100%", boxSizing:"border-box",
+                    background:T.surface, border:`0.5px solid ${T.borderStrong}`,
+                    borderRadius:T.rsm, padding:"10px 14px",
+                    // 16px font prevents iOS zoom on focus
+                    fontSize:16, color:T.text, resize:"none",
+                    fontFamily:T.font, lineHeight:1.5, outline:"none",
+                    minHeight:"42px", maxHeight:"88px", overflowY:"auto", height:"auto",
+                  }}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => sendMessage()}
+                disabled={!canSend}
+                style={{
+                  width:36, height:36, borderRadius:"50%", border:`0.5px solid ${T.border}`,
+                  flexShrink:0, alignSelf:"flex-end",
+                  background:canSend ? T.gold : T.surface,
+                  cursor:canSend ? "pointer" : "default",
+                  display:"flex", alignItems:"center", justifyContent:"center",
+                  transition:"background 0.2s",
+                }}
+              >
+                <svg width="15" height="15" viewBox="0 0 18 18" fill="none">
+                  <path d="M2 9h14M9 2l7 7-7 7" stroke={canSend ? "#1a1a16" : T.hint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
             </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── WELCOME + NAME ──────────────────────────────────────────────────────────
+  const isWelcome = step === STEP_WELCOME;
+  return (
+    <div style={wrap}>
+      <ProgressHeader currentNum={STEP_NUMBERS[step] || 1} />
+
+      <div style={{ flex:1, padding:"32px 24px 16px", display:"flex", flexDirection:"column", overflowY:"auto" }}>
+        {isWelcome ? (
+          <>
+            <div style={{ fontFamily:T.serif, fontSize:28, color:T.text, lineHeight:1.2, marginBottom:10 }}>Forged.</div>
+            <div style={{ fontSize:14, color:T.muted, marginBottom:24, lineHeight:1.6 }}>
+              A companion for a season of change.
+            </div>
+            <div style={{ background:T.raised, borderRadius:T.r, padding:"16px 18px", marginBottom:24, borderLeft:`3px solid ${T.accent}` }}>
+              <div style={{ fontSize:13, color:T.sub, lineHeight:1.7 }}>
+                You run your life in Arcs — a few focused weeks with one direction. You show daily proof, your coach
+                keeps you honest, and every week you get a straight Review of what actually happened. Talk to it
+                like a person; the mic works everywhere.
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ fontFamily:T.serif, fontSize:28, color:T.text, lineHeight:1.2, marginBottom:10 }}>First — who are you?</div>
+            <div style={{ fontSize:14, color:T.muted, marginBottom:24, lineHeight:1.6 }}>Your name. That&apos;s it.</div>
+            <input
+              style={{ ...styleInp, fontSize:18, padding:"14px 16px", marginBottom:8 }}
+              placeholder="e.g. Alex"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && name.trim()) setStep(STEP_CHAT); }}
+              autoFocus
+            />
           </>
         )}
       </div>
 
-      {step !== FOCUS_STEP && (
-        <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
-          <button
-            onClick={handleContinue}
-            style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:500, cursor:"pointer", transition:"all 0.2s" }}>
-            {step === ARC_BECOMING_STEP && !arcIdentity.trim()
-              ? "Skip — just track habits →"
-              : current.cta}
-          </button>
-        </div>
-      )}
+      <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
+        <button
+          onClick={() => {
+            if (isWelcome) { setStep(STEP_NAME); return; }
+            if (!name.trim()) return;
+            setStep(STEP_CHAT);
+          }}
+          style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:500, cursor:"pointer", transition:"all 0.2s" }}>
+          {isWelcome ? "Let's begin" : "That's me"}
+        </button>
+      </div>
     </div>
   );
 }

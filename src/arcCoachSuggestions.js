@@ -3,10 +3,19 @@
  */
 
 export const ARC_OPENER_EXISTING =
-  "Let's build your 8-week Arc. You've already got some habits tracked, so we'll use those as raw material. Picture yourself eight weeks from now — in an ideal world, what feels different? What are you doing more of, doing less of, or finally getting under control?";
+  "Let's build your next Arc. You've already got some habits tracked, so we'll use those as raw material. Picture yourself a few weeks from now — in an ideal world, what feels different? What are you doing more of, doing less of, or finally getting under control?";
 
 export const ARC_OPENER_NEW =
-  "Let's build your first 8-week Arc. Picture yourself eight weeks from now — in an ideal world, what feels different? What are you doing more of, doing less of, or finally getting under control?";
+  "Let's build your first Arc — a few focused weeks with one direction. Picture yourself at the end of it: in an ideal world, what feels different? What are you doing more of, doing less of, or finally getting under control?";
+
+/**
+ * Conversation-first onboarding opener — a natural first question, not a
+ * setup form. Seeded client-side so the first message costs nothing.
+ */
+export function onboardingConversationOpener(name) {
+  const who = String(name || "").trim().split(/\s+/)[0];
+  return `Good to meet you${who ? `, ${who}` : ""}. Before any setup — what's actually going on? What made you download this, and what are you trying to change right now? Say it however it comes out; typing or the mic both work.`;
+}
 
 export const ARC_EDIT_OPENER =
   "Want to adjust the title, identity, proof actions, or bad-day minimum? Tap View Arc above to see everything at a glance. Arc length (weeks) is locked once you've started — we can't shorten or extend mid-Arc yet.";
@@ -97,5 +106,5 @@ export function onboardingArcOpener(arcIdentity) {
   const idt = String(arcIdentity || "").trim();
   if (!idt) return ARC_OPENER_NEW;
   const short = idt.length > 90 ? `${idt.slice(0, 87)}…` : idt;
-  return `Let's lock in your first Arc. You wrote: "${short}" Picture yourself eight weeks from now — in an ideal world, what else feels different?`;
+  return `Let's lock in your first Arc. You wrote: "${short}" Picture yourself at the end of this Arc — in an ideal world, what else feels different?`;
 }
