@@ -138,35 +138,46 @@ const COACH_TOOLS = [
   },
 ];
 
-// Convert a plain-string system prompt into the typed-array form Anthropic
-// expects when attaching cache_control. Returns "" unchanged so we don't
-// send an empty cache breakpoint when the client omits a system prompt.
-function cachedSystem(system) {
-  const text = typeof system === "string" ? system : "";
-  if (!text.trim()) return "";
-  return [{ type: "text", text, cache_control: { type: "ephemeral" } }];
+// ── System prompt blocks ───────────────────────────────────────────────────────
+// The client sends the prompt split into two parts:
+//   system_stable   — personality, rules, Arc identity, memory. Changes at most
+//                     once per day → carries cache_control so repeat turns pay
+//                     ~10% of input price for this prefix.
+//   system_volatile — today's snapshot, habit states, logged-today flags.
+//                     Changes every turn → never cached (a cache breakpoint
+//                     here would write a new cache entry each turn for nothing).
+// Older clients send a single `system` string; that falls back to the legacy
+// single-cached-block behaviour so nothing breaks mid-deploy.
+function buildSystemBlocks(systemStable, systemVolatile, legacySystem) {
+  const stable = typeof systemStable === "string" ? systemStable : "";
+  const volatile = typeof systemVolatile === "string" ? systemVolatile : "";
+  if (stable.trim()) {
+    const blocks = [{ type: "text", text: stable, cache_control: { type: "ephemeral" } }];
+    if (volatile.trim()) blocks.push({ type: "text", text: volatile });
+    return blocks;
+  }
+  const legacy = typeof legacySystem === "string" ? legacySystem : "";
+  if (!legacy.trim()) return "";
+  return [{ type: "text", text: legacy, cache_control: { type: "ephemeral" } }];
 }
 
-/** Post-tool confirmation: keep cached client system + a short uncached turn hint (saves repeating the whole prompt in a new cache block). */
-function systemBlocksForToolConfirmation(system) {
-  const text = typeof system === "string" ? system : "";
-  const blocks = [];
-  if (text.trim()) {
-    blocks.push({ type: "text", text, cache_control: { type: "ephemeral" } });
-  }
+/**
+ * Follow-up call after tools ran — used ONLY when a tool failed or the model
+ * emitted tools without any reply text. The user has already seen whatever
+ * text streamed before the tools, so this writes an addendum, not a reply.
+ */
+function followupSystemBlocks(systemStable, systemVolatile, legacySystem, hadStreamedText) {
+  const base = buildSystemBlocks(systemStable, systemVolatile, legacySystem);
+  const blocks = Array.isArray(base) ? [...base] : [];
   blocks.push({
     type: "text",
     text:
-      "THIS TURN ONLY: tool results are in the next message. Use them to confirm success/failure only — they do not change your response order.\n\n" +
-      "RESPONSE ORDER — non-negotiable:\n" +
-      "1. Respond to the PERSON first. If they shared anything personal, emotional, heavy, or gave a big dump — acknowledge that substance before anything else. Show you actually heard what they said.\n" +
-      "2. Only after that: ask any clarifying question (e.g. how many minutes for a project habit). Keep it short and natural, at the end.\n" +
-      "3. Never open with logging status language ('saved', 'logged', 'locked in', 'journal saved', 'got it', 'done'). Those words kill the human feel — the receipt chips handle the admin.\n\n" +
-      "MATCH YOUR RESPONSE TO THE MESSAGE SIZE:\n" +
-      "• Big brain dump (lots of context, personal wins/struggles, multiple habits, voice note): write 3–5 real sentences. Be SPECIFIC — name the gym session, the vape situation, the hours logged, the thing that slipped, the win they earned. Don't collapse a massive day into a generic one-liner. That's dismissive. Find the most meaningful thing they said and lead with it.\n" +
-      "• Quick tap-in with no personal content: 1–2 sentences is fine.\n\n" +
-      "If any tool_result has success:false, weave that in naturally — don't ignore it, but don't let it dominate your opening.\n" +
-      "Do NOT write your own bullet list of what was saved — the receipt chips handle that.\n" +
+      "THIS TURN ONLY: tool results are in the next message.\n" +
+      (hadStreamedText
+        ? "The user has ALREADY SEEN the reply text you wrote before the tools ran. Do NOT repeat or rephrase it. Write only a short addendum (1–2 sentences) covering what genuinely needs saying — usually that something couldn't be captured and what you need to fix it.\n"
+        : "You called tools without writing a reply. Write the reply now — respond to the person first, specific and human, 1–4 short sentences.\n") +
+      "Never open with logging status language ('saved', 'logged', 'got it', 'done'). The app shows its own quiet capture line.\n" +
+      "If a tool_result has success:false, say plainly what didn't get captured and ask the one thing you need — nothing dramatic.\n" +
       "No new tool calls.",
   });
   return blocks;
@@ -225,6 +236,54 @@ function buildActionReceipt(outcomes) {
   }
   if (!hasLine) lines.push("(No changes applied.)");
   return lines.join("\n");
+}
+
+/**
+ * Structured "Captured:" items for the redesigned receipt line. Same source of
+ * truth as buildActionReceipt (executed tool outcomes, never model wording) —
+ * the client renders these as one quiet collapsible line under the reply.
+ */
+function buildCapturedItems(outcomes) {
+  if (!outcomes?.length) return [];
+  const items = [];
+  for (const o of outcomes) {
+    if (o.tool === "log_habit") {
+      const n = o.habit_name || "Habit";
+      const ht = o.habit_type;
+      let suffix = "";
+      if (o.success) {
+        if (ht === "project" && o.value_saved && typeof o.value_saved === "object" && o.value_saved.minutes != null) {
+          suffix = ` · ${o.value_saved.minutes}m`;
+        } else if ((ht === "limit" || ht === "goal") && typeof o.value_saved === "number") {
+          suffix = ` · ${o.value_saved}`;
+        } else if ((ht === "daily" || ht === "weekly") && o.value_saved === "skip") {
+          suffix = " · rest day";
+        }
+      }
+      items.push({
+        kind: "log", ok: !!o.success, nav: "today",
+        label: o.success ? `${n}${suffix}` : `${n} — ${o.error || "couldn't log"}`,
+      });
+    } else if (o.tool === "add_daily_note") {
+      items.push({
+        kind: "note", ok: !!o.success, nav: "journal",
+        label: o.success ? "note kept" : `note — ${o.error || "couldn't save"}`,
+      });
+    } else if (o.tool === "create_habit") {
+      items.push({
+        kind: "create", ok: !!o.success, nav: "today",
+        label: o.success ? `new: ${o.name}` : `create — ${o.error || "failed"}`,
+      });
+    } else if (o.tool === "edit_habit") {
+      items.push({
+        kind: "edit", ok: !!o.success, nav: "today",
+        label: o.success ? `updated ${o.habit_name}` : `edit ${o.habit_name || ""} — ${o.error || "failed"}`,
+      });
+    } else if (!o.success) {
+      items.push({ kind: "other", ok: false, nav: null, label: `${o.tool} — ${o.error || "failed"}` });
+    }
+  }
+  return items;
 }
 
 function textFromMessageContent(content) {
@@ -516,33 +575,21 @@ function isOverloadedError(err) {
   return err?.status === 529 || err?.error?.error?.type === "overloaded_error";
 }
 
-// ── Retry wrapper for the FIRST Anthropic call only ────────────────────────────
-// Only wrap calls made before any tools execute. Never retry after tools run —
-// that risks double-logging habits.
-async function withRetry(fn, maxAttempts = 2, delayMs = 1500) {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      if (isOverloadedError(err) && attempt < maxAttempts) {
-        console.warn("[chat] overload on attempt", attempt, "— retrying in", delayMs, "ms");
-        await new Promise(r => setTimeout(r, delayMs));
-        continue;
-      }
-      throw err;
-    }
-  }
-}
-
 // ── Free-tier server-side rate limit ───────────────────────────────────────────
 // Keep in sync with client-side FREE_DAILY_LIMIT in src/theme.js.
-const FREE_DAILY_LIMIT = 3;
+const FREE_DAILY_LIMIT = 5;
 
 // ── Handler ────────────────────────────────────────────────────────────────────
 async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const { messages, system, client_date: rawClientDate } = req.body;
+  const {
+    messages,
+    system,
+    system_stable: systemStable,
+    system_volatile: systemVolatile,
+    client_date: rawClientDate,
+  } = req.body;
   if (!messages || !Array.isArray(messages)) return res.status(400).json({ error: "Invalid request body" });
   // Validated YYYY-MM-DD or null. Used both for log entries (so they land on
   // the user's local day, not UTC) and for daily quota tracking (so quotas
@@ -622,51 +669,89 @@ async function handler(req, res) {
   // toolsRan = true means tool calls have already executed — do NOT retry (would double-log).
   let toolsRan = false;
   let receiptForCatch = "";
+  let capturedForCatch = [];
   let actionsForCatch = { created: [], edited: [], logged: [], noted: [] };
+  // True once any reply text has been streamed to the client. Used to decide
+  // whether a 529 retry is safe and whether the post-tool follow-up call is
+  // needed at all.
+  let textEmitted = false;
 
   try {
-    // ── First call — detect tool_use ─────────────────────────────────────────
-    // Wrapped in withRetry: one automatic retry after 1.5 s on 529 overload.
-    // ONLY the first call is retried — after tools run we must not retry.
-    const firstResp = await withRetry(() => client.messages.create({
-      model: "claude-haiku-4-5", max_tokens: 2048,
-      system: cachedSystem(system), tools,
-      messages: trimmedMessages,
-    }));
+    // ── Single-pass loop ──────────────────────────────────────────────────────
+    // One streaming call produces BOTH the human reply (streamed to the client
+    // immediately) and any tool_use blocks (executed after the text finishes).
+    // The prompt instructs the model to write its full reply first, then call
+    // tools — so the user reads a human response in ~1s while logging happens
+    // quietly behind it. A second model call only happens when a tool fails or
+    // the model emitted tools with no reply text.
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("X-Accel-Buffering", "no");
 
-    const firstToolBlocks = (firstResp.content || []).filter(b => b.type === "tool_use");
-    console.log("[chat] firstResp", {
+    let finalMsg = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const stream = client.messages.stream({
+          model: "claude-haiku-4-5", max_tokens: 2048,
+          system: buildSystemBlocks(systemStable, systemVolatile, system),
+          tools,
+          messages: trimmedMessages,
+        });
+        for await (const event of stream) {
+          if (event.type === "content_block_delta" && event.delta?.type === "text_delta" && event.delta.text) {
+            textEmitted = true;
+            sse(res, { text: event.delta.text });
+          }
+        }
+        finalMsg = await stream.finalMessage();
+        break;
+      } catch (err) {
+        // Retry once on 529 overload — but ONLY if nothing has streamed yet.
+        // After text has reached the client a retry would duplicate the reply.
+        if (isOverloadedError(err) && attempt < 2 && !textEmitted) {
+          console.warn("[chat] overload on attempt", attempt, "— retrying in 1500ms");
+          await new Promise(r => setTimeout(r, 1500));
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    const toolBlocks = (finalMsg.content || []).filter(b => b.type === "tool_use");
+    console.log("[chat] firstPass", {
       userId,
-      stop_reason: firstResp.stop_reason,
-      tool_blocks: firstToolBlocks.length,
-      tools_requested: firstToolBlocks.map(t => t.name),
+      stop_reason: finalMsg.stop_reason,
+      tool_blocks: toolBlocks.length,
+      tools_requested: toolBlocks.map(t => t.name),
       input_messages: trimmedMessages.length,
-      // Prompt-cache visibility — confirms the tools/system prefix is being
+      text_emitted: textEmitted,
+      // Prompt-cache visibility — confirms the tools/system-stable prefix is
       // re-used across turns. cache_read_input_tokens billed at ~10% of normal.
-      cache_read_input_tokens:    firstResp.usage?.cache_read_input_tokens    ?? 0,
-      cache_creation_input_tokens:firstResp.usage?.cache_creation_input_tokens?? 0,
-      input_tokens:               firstResp.usage?.input_tokens               ?? 0,
-      output_tokens:              firstResp.usage?.output_tokens              ?? 0,
+      cache_read_input_tokens:    finalMsg.usage?.cache_read_input_tokens    ?? 0,
+      cache_creation_input_tokens:finalMsg.usage?.cache_creation_input_tokens?? 0,
+      input_tokens:               finalMsg.usage?.input_tokens               ?? 0,
+      output_tokens:              finalMsg.usage?.output_tokens              ?? 0,
     });
 
     // ── Defensive: tool blocks present but the model was cut off ────────────
     // If max_tokens fires while emitting tool_use, the partial JSON in the
-    // input field is usually unparseable. Either way we cannot trust those
-    // tool calls. Surface a clear error rather than silently ignoring them.
-    if (firstResp.stop_reason !== "tool_use" && firstToolBlocks.length > 0) {
+    // input field is unparseable / untrustworthy. Don't execute those tools.
+    if (finalMsg.stop_reason !== "tool_use" && toolBlocks.length > 0) {
       console.warn("[chat] truncated tool_use detected", {
         userId,
-        stop_reason: firstResp.stop_reason,
-        partial_tools: firstToolBlocks.map(t => t.name),
+        stop_reason: finalMsg.stop_reason,
+        partial_tools: toolBlocks.map(t => t.name),
       });
-      return res.status(502).json({
-        error: "That message had too many coach actions for one turn (habits + journal). Try splitting into two messages, or fewer logs at once.",
+      sse(res, {
+        done: true,
+        error: "That message had too many coach actions for one turn. Nothing was saved — try splitting it into two messages.",
+        ...(!isPro ? { remaining: FREE_DAILY_LIMIT - usageCount } : {}),
       });
+      return res.end();
     }
 
     // ── Tool path ─────────────────────────────────────────────────────────────
-    if (firstResp.stop_reason === "tool_use") {
-      const toolBlocks = firstToolBlocks;
+    if (finalMsg.stop_reason === "tool_use" && toolBlocks.length > 0) {
       const toolResults = [];
       const actions = { created: [], edited: [], logged: [], noted: [] };
       /** @type {Array<{ tool: string, success: boolean, error?: string, habit_name?: string, habit_type?: string, name?: string, value_saved?: unknown, date?: string, mode?: string }>} */
@@ -758,34 +843,48 @@ async function handler(req, res) {
       });
 
       // Tools have executed — mark so the catch block knows not to suggest retry
-      // and can surface the receipt even if the confirmation stream fails.
+      // and can surface the capture line even if a follow-up stream fails.
       toolsRan = true;
       actionsForCatch = actions;
 
-      // Stream confirmation — Claude now knows exact success/failure per action.
-      // We intentionally leave `tools` available so Claude can chain a follow-up
-      // tool call if needed (rare). max_tokens 480: enough for several warm
-      // sentences; client prompt + turn hint cap verbosity (~120 words).
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("X-Accel-Buffering", "no");
-
       const receiptText = buildActionReceipt(outcomes);
+      const capturedItems = buildCapturedItems(outcomes);
       receiptForCatch = receiptText;
+      capturedForCatch = capturedItems;
 
-      const confirmStream = client.messages.stream({
-        model: "claude-haiku-4-5", max_tokens: 900,
-        system: systemBlocksForToolConfirmation(system), tools,
-        messages: [
-          ...trimmedMessages,
-          { role: "assistant", content: firstResp.content },
-          { role: "user",      content: toolResults },
-        ],
-      });
-
-      for await (const chunk of confirmStream) {
-        if (chunk.type === "content_block_delta" && chunk.delta?.type === "text_delta") {
-          sse(res, { text: chunk.delta.text });
+      // ── Follow-up call — ONLY when something genuinely needs saying ────────
+      // The reply already streamed before the tools ran. A second model call
+      // happens only if (a) a tool failed in a way the user must hear about,
+      // or (b) the model emitted tools without writing any reply text.
+      const hadFailure = outcomes.some(o => !o.success);
+      if (hadFailure || !textEmitted) {
+        try {
+          const followStream = client.messages.stream({
+            model: "claude-haiku-4-5", max_tokens: 500,
+            system: followupSystemBlocks(systemStable, systemVolatile, system, textEmitted),
+            tools, // keep the tools prefix identical so the prompt cache still hits
+            messages: [
+              ...trimmedMessages,
+              { role: "assistant", content: finalMsg.content },
+              { role: "user",      content: toolResults },
+            ],
+          });
+          let followPrefixSent = false;
+          for await (const chunk of followStream) {
+            if (chunk.type === "content_block_delta" && chunk.delta?.type === "text_delta" && chunk.delta.text) {
+              // Separate the addendum from already-streamed reply text.
+              if (textEmitted && !followPrefixSent) {
+                sse(res, { text: "\n\n" });
+                followPrefixSent = true;
+              }
+              sse(res, { text: chunk.delta.text });
+            }
+          }
+        } catch (followErr) {
+          // The data is already saved — never fail the turn because the
+          // follow-up wording call broke. The capture line tells the truth.
+          console.error("[chat] follow-up stream failed:", followErr?.message || followErr);
+          captureException(followErr, { route: "chat", phase: "followup", userId });
         }
       }
 
@@ -797,6 +896,7 @@ async function handler(req, res) {
         logged:   actions.logged.length  ? actions.logged  : null,
         noted:    actions.noted.length   ? actions.noted   : null,
         receipt:  receiptText || null,
+        captured: capturedItems.length ? capturedItems : null,
         tool_failures: outcomes.some(o => !o.success) ? outcomes.filter(o => !o.success) : null,
       });
       // Count this as one message against the free-tier daily quota.
@@ -811,27 +911,7 @@ async function handler(req, res) {
       return res.end();
     }
 
-    // ── Normal chat — stream directly (FIX: use .stream() not .create()) ─────
-    // max_tokens raised to 1000: goal-plan responses include a <goal_plan>
-    // JSON block (~150-200 tokens) + conversational text. At 500 the block was
-    // frequently truncated mid-JSON, causing parseGoalPlan to silently fail and
-    // the raw XML to leak into the chat bubble.
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("X-Accel-Buffering", "no");
-
-    const chatStream = client.messages.stream({
-      model: "claude-haiku-4-5", max_tokens: 1000,
-      system: cachedSystem(system), tools,
-      messages: trimmedMessages,
-    });
-
-    for await (const chunk of chatStream) {
-      if (chunk.type === "content_block_delta" && chunk.delta?.type === "text_delta") {
-        sse(res, { text: chunk.delta.text });
-      }
-    }
-
+    // ── No tools — the reply already streamed above. Close out the turn. ─────
     sse(res, { done: true, ...(!isPro ? { remaining: FREE_DAILY_LIMIT - (usageCount + 1) } : {}) });
     if (!isPro) {
       try {
@@ -870,15 +950,18 @@ async function handler(req, res) {
     });
 
     if (!res.headersSent) {
+      // SSE headers may have been set but never flushed — reset for JSON.
+      res.setHeader("Content-Type", "application/json");
       return res.status(err?.status || 500).json({ error: cleanMsg, retryable: overloaded });
     }
-    // Headers already sent (SSE open) — tools may have run. Send receipt so the
-    // client can show what was saved even though the confirm stream failed.
+    // Headers already sent (SSE open) — tools may have run. Send the capture
+    // data so the client can show what was saved even though the stream failed.
     sse(res, {
       error:    cleanMsg,
-      retryable: overloaded && !toolsRan, // retrying is only safe if tools haven't run yet
+      retryable: overloaded && !toolsRan && !textEmitted, // retry only safe before tools/text
       done:     true,
       receipt:  receiptForCatch || null,
+      captured: capturedForCatch.length ? capturedForCatch : null,
       created:  actionsForCatch.created.length ? actionsForCatch.created : null,
       edited:   actionsForCatch.edited.length  ? actionsForCatch.edited  : null,
       logged:   actionsForCatch.logged.length  ? actionsForCatch.logged  : null,

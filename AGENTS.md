@@ -73,7 +73,7 @@ The Supabase anon key is hardcoded in `src/supabase.js` and route files — that
 
 - Default model is `claude-haiku-4-5`. Do not silently swap to Sonnet/Opus.
 - `api/chat.js` uses **prompt caching** (`cache_control: { type: "ephemeral" }`) on the tools array and system prompt (all `messages.create` / `messages.stream` paths). `api/coach-summary.js` caches the stable system prompt the same way. Don't strip these.
-- Free-tier daily quota is 10/day, enforced server-side via the `chat_usage` table. Client-side cap exists too but is not authoritative.
+- Free-tier daily quota is 5/day, enforced server-side via the `chat_usage` table (`FREE_DAILY_LIMIT` in both `api/chat.js` and `src/theme.js` — keep in sync). Client-side cap exists too but is not authoritative.
 - `trimmedMessages = messages.slice(-12)` keeps context small. If you're tempted to raise this, consider cost first.
 - Tools are executed sequentially (not in parallel) because the model sometimes calls `create_habit` then `log_habit` on the new habit in one turn.
 

@@ -4307,9 +4307,8 @@ onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} o
                         clearTimeout(pageSpeechCopyConfirmTimerRef.current);
                         pageSpeechCopyConfirmTimerRef.current = null;
                       }
-                      // Non-Pro: fall through to AICoach which handles paywall
-                      if (!isPro) { openCoachWithMode("mic"); return; }
                       // Page mic: record on current page; handoff when user stops (see pageSpeech effect)
+                      // Voice input is free for everyone — no Pro gate here.
                       if (pageSpeech.supported) {
                         if (!pageSpeech.listening) pageDictationAccumulatorRef.current = "";
                         pageSpeech.toggle();

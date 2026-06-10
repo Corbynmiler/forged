@@ -33,3 +33,4 @@ dist/
 # (the landing page uses public/screenshots/*.jpg, NOT these PNGs)
 public/IMG_*.PNG
 public/Screenshot*.png
+.staging/
