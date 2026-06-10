@@ -650,7 +650,7 @@ async function handler(req, res) {
   const { data: allRows } = await supabase
     .from("habits")
     .select(
-      "user_id, name, emoji, habit_type, logs, target_date, goal_status, weekly_target, daily_budget, daily_target_minutes"
+      "user_id, name, emoji, habit_type, logs, target_date, goal_status, weekly_target, daily_budget, daily_target_minutes, is_proof_action, block_id"
     )
     .in("user_id", userIds);
 
