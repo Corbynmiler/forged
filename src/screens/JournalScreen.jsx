@@ -872,12 +872,12 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
 
       {/* Header */}
       <div style={{ padding:"16px 18px 10px", display:"flex", alignItems:"flex-end", justifyContent:"space-between", flexWrap:"wrap", gap:8 }}>
-        <div>
+        <div style={{ minWidth:0, flex:"1 1 200px" }}>
           {arcActiveJournal ? (
             <>
               <div style={{ fontSize:10, fontWeight:800, color:T.gold, letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:6 }}>Evidence</div>
-              <div style={{ fontFamily:T.serif, fontSize:28, color:T.text }}>
-                {String(activeBlock?.identity || "Your Arc").trim().slice(0, 60)}
+              <div style={{ fontFamily:T.serif, fontSize:28, color:T.text, lineHeight:1.2, overflowWrap:"break-word", wordBreak:"break-word" }}>
+                {String(activeBlock?.identity || "Your Arc").trim()}
               </div>
               <div style={{ fontSize:13, color:T.muted, marginTop:3 }}>
                 {mainTab === "activity" ? (

@@ -494,7 +494,7 @@ export function InsightsScreen({
             {arcActive ? `Week ${arcWeekN} of ${arcWeeksTotal}` : "Forge report"}
           </div>
           {arcActive && activeBlock?.identity ? (
-            <div style={{ fontSize:12, color:T.sub, fontStyle:"italic", fontFamily:T.serif, marginTop:8, lineHeight:1.45, maxWidth:340 }}>
+            <div style={{ fontSize:12, color:T.sub, fontStyle:"italic", fontFamily:T.serif, marginTop:8, lineHeight:1.45, minWidth:0, overflowWrap:"break-word", wordBreak:"break-word" }}>
               {String(activeBlock.identity).trim()}
             </div>
           ) : firstLogLabel ? (

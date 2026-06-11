@@ -259,19 +259,17 @@ export function detectsArcEditIntent(text) {
   return false;
 }
 
-/** Short subtitle for the Today Arc header (shown with 2-line clamp in UI). */
+/** Short subtitle for the Today Arc strip — full text; UI wraps on narrow screens. */
 export function arcHeaderSubtitle(block) {
   if (!block) return "";
   const why = String(block.whyStatement || "").trim();
   if (why) {
     const firstSentence = why.split(/(?<=[.!?])\s+/)[0]?.trim() || why;
-    const pick = firstSentence.length >= 18 && firstSentence.length <= 100 ? firstSentence : why;
-    return truncateAtWordBoundary(pick, 110);
+    return firstSentence.length >= 18 && firstSentence.length <= 100 ? firstSentence : why;
   }
   let id = String(block.identity || "").trim();
   id = id.replace(/^someone who\s+/i, "").replace(/^i\s+want\s+to\s+be\s+/i, "").trim();
-  if (!id) return "";
-  return truncateAtWordBoundary(id, 110);
+  return id;
 }
 
 /**

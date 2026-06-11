@@ -25,7 +25,7 @@ function FieldRow({ label, value, accent }) {
       <div style={{ fontSize: 10, fontWeight: 700, color: accent || T.hint, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>
         {label}
       </div>
-      <div style={{ fontSize: 14, color: T.text, lineHeight: 1.55 }}>{v}</div>
+      <div style={{ fontSize: 14, color: T.text, lineHeight: 1.55, minWidth: 0, overflowWrap: "break-word", wordBreak: "break-word" }}>{v}</div>
     </div>
   );
 }

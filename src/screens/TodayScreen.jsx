@@ -160,7 +160,7 @@ function TodayReceiptCard({ entry, loggedCount, generating, onGenerate, onOpenJo
   if (loggedCount === 0) return null;
   const arcActive = !!activeBlock?.id;
   const isNight = hourNow >= 19;
-  const identity = arcActive ? String(activeBlock.identity || "").trim().slice(0, 110) : "";
+  const identity = arcActive ? String(activeBlock.identity || "").trim() : "";
   const minimum = arcActive ? String(activeBlock.minimumProof || "").trim() : "";
   const minHit = arcActive && loggedCount > 0 && !!minimum; // simple heuristic; refined in Phase 2
   const eyebrowLabel = arcActive ? (isNight ? "Night verdict" : "Today's verdict") : "Today's receipt";
@@ -180,7 +180,7 @@ function TodayReceiptCard({ entry, loggedCount, generating, onGenerate, onOpenJo
         <div style={{ padding:"14px 16px 12px" }}>
           <div style={{ fontSize:10, fontWeight:700, color:eyebrowColor, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:8 }}>{eyebrowLabel}</div>
           {arcActive && identity ? (
-            <div style={{ fontSize:13, color:T.sub, fontStyle:"italic", fontFamily:T.serif, marginBottom:10, lineHeight:1.4 }}>
+            <div style={{ fontSize:13, color:T.sub, fontStyle:"italic", fontFamily:T.serif, marginBottom:10, lineHeight:1.45, minWidth:0, overflowWrap:"break-word", wordBreak:"break-word" }}>
               {identity}
             </div>
           ) : null}
@@ -498,7 +498,7 @@ function ArcStrip({ activeBlock, onEditArc }) {
       <div style={{ fontSize: 10, fontWeight: 800, color: T.gold, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 8 }}>
         {weeksLabel} · Day {dayX} of {duration} · Week {week}/{totalWeeks}
       </div>
-      <div style={{ fontFamily: T.serif, fontSize: 22, color: T.text, lineHeight: 1.15, marginBottom: subtitle ? 6 : 10 }}>
+      <div style={{ fontFamily: T.serif, fontSize: 22, color: T.text, lineHeight: 1.2, marginBottom: subtitle ? 6 : 10, minWidth: 0, overflowWrap: "break-word", wordBreak: "break-word" }}>
         {arcTitle}
       </div>
       {subtitle ? (
@@ -507,10 +507,9 @@ function ArcStrip({ activeBlock, onEditArc }) {
           color: T.sub,
           lineHeight: 1.45,
           marginBottom: 10,
-          display: "-webkit-box",
-          WebkitLineClamp: 2,
-          WebkitBoxOrient: "vertical",
-          overflow: "hidden",
+          minWidth: 0,
+          overflowWrap: "break-word",
+          wordBreak: "break-word",
         }}>
           {subtitle}
         </div>
@@ -736,9 +735,9 @@ export function TodayScreen({
       <div data-tour="today-summary" style={{ margin:"6px 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:"18px 20px", display:"flex", alignItems:"center", gap:18 }}>
         <Ring pct={pct} centerMain={ringCenterMain} centerSub={ringCenterSub}/>
         <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ fontFamily:T.serif, fontSize:arcActive && activeBlock?.identity ? 18 : 20, color:T.text, marginBottom:4, lineHeight:1.25 }}>
+          <div style={{ fontFamily:T.serif, fontSize:arcActive && activeBlock?.identity ? 18 : 20, color:T.text, marginBottom:4, lineHeight:1.35, minWidth:0, overflowWrap:"break-word", wordBreak:"break-word" }}>
             {arcActive && activeBlock?.identity
-              ? String(activeBlock.identity).trim().slice(0, 90)
+              ? String(activeBlock.identity).trim()
               : (!arcActive && pct === 100 && totalTrackables > 0 ? "Forged for today" : greeting)}
           </div>
           <div style={{ fontSize:13, color:T.muted }}>
