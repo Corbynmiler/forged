@@ -371,6 +371,15 @@ function ReceiptRow({ receipt, expanded, onToggle, compact }) {
   );
 }
 
+const RECEIPT_LABEL_ACCENT = {
+  "Proof shown": T.gold,
+  "Wins": T.green,
+  "Missed": T.amber,
+  "Pattern": T.muted,
+  "Why": T.hint,
+  "Tomorrow": "#7BA3C9",
+};
+
 function ReceiptExpandedBody({ parsed, content }) {
   const sections = [
     parsed?.proof ? { label: "Proof shown", text: parsed.proof } : null,
@@ -385,16 +394,36 @@ function ReceiptExpandedBody({ parsed, content }) {
     return (
       <div style={{ marginTop: 6 }}>
         {parsed?.narrative ? (
-          <div style={{ fontSize: 12.5, color: T.sub, lineHeight: 1.55, marginBottom: 8, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+          <div style={{ fontSize: 12.5, color: T.sub, lineHeight: 1.55, marginBottom: 10, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
             {parsed.narrative}
           </div>
         ) : null}
-        {sections.map(s => (
-          <div key={s.label} style={{ marginBottom: 6 }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: T.hint, letterSpacing: "0.08em", textTransform: "uppercase" }}>{s.label}</div>
-            <div style={{ fontSize: 12.5, color: T.sub, lineHeight: 1.5, marginTop: 2, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{s.text}</div>
-          </div>
-        ))}
+        {sections.map((s, i) => {
+          const accent = RECEIPT_LABEL_ACCENT[s.label] || T.hint;
+          return (
+            <div
+              key={s.label}
+              style={{
+                marginBottom: i < sections.length - 1 ? 12 : 0,
+                paddingTop: i > 0 || parsed?.narrative ? 10 : 0,
+                borderTop: i > 0 || (i === 0 && parsed?.narrative) ? `0.5px solid ${T.border}` : "none",
+              }}
+            >
+              <div style={{
+                fontSize: 9, fontWeight: 700, color: accent, letterSpacing: "0.1em",
+                textTransform: "uppercase", marginBottom: 5, opacity: 0.92,
+              }}>
+                {s.label}
+              </div>
+              <div style={{
+                fontSize: 12.5, color: T.sub, lineHeight: 1.55,
+                whiteSpace: "pre-wrap", overflowWrap: "anywhere",
+              }}>
+                {s.text}
+              </div>
+            </div>
+          );
+        })}
       </div>
     );
   }
