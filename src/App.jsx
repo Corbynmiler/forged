@@ -4103,17 +4103,17 @@ export default function App() {
         {screen === "arc" && <ArcScreen
           tab={arcTab} onTabChange={setArcTab}
           activeBlock={activeBlock} habits={habits} goals={goals} journalEntries={journalEntries}
+          arcLedgerRows={arcLedgerRows}
           isPro={isPro} onUpgrade={() => setShowUpgrade(true)}
           userId={sessionUserId} userName={user.name || ""} coachName={coachName}
           onStartArc={openArcCoachCreate} onEditArc={openArcCoachEdit}
+          onRunItBack={handleArcContinue} onEvolve={handleArcEvolve}
           onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry}
           onSaveJournalEntry={handleSaveJournalEntry} onJournalGenerated={handleJournalGenerated}
           journalInitialTab={showJournalCompose ? "compose" : journalOpenTab ?? undefined}
           journalAutoGenerate={journalAutoGenerate}
           onJournalInitialComposeDone={() => { setShowJournalCompose(false); setJournalOpenTab(null); setJournalAutoGenerate(false); }}
           completedArcBlock={completedArcBlock}
-          onArcReviewComplete={() => reloadForgeBlocks(sessionUserId)}
-          onShowHistory={() => setShowHistory(true)} onShare={() => setShowShare(true)}
         />}
         {screen === "social"   && <SocialScreen
           user={user} xp={xp} habits={habits}
