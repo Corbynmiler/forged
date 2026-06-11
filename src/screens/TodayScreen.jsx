@@ -8,6 +8,8 @@ import {
   TodayGoalCard,
 } from "../components/habitCards.jsx";
 import { resolveArcTitle, arcHeaderSubtitle, arcDurationWeeksLabel } from "../arcProofMatch.js";
+import { parseReceiptStructured } from "../lib/arcTimeline.js";
+import { ReceiptExpandedBody } from "../components/ArcTimeline.jsx";
 
 // ── Coach greeting helpers (deterministic, no AI) ──────────────────────────
 function coachGreetingDaysLeft(targetYmd) {
@@ -157,28 +159,64 @@ function parseReceiptFields(content) {
 // a Night Verdict — identity line at top, bad-day-min row, "Tomorrow's first
 // proof" phrasing. Same underlying journal-generate data; no API change.
 function TodayReceiptCard({ entry, loggedCount, generating, onGenerate, onOpenJournal, onOpenCoachWithDraft, activeBlock = null, hourNow = 0 }) {
+  const [expanded, setExpanded] = useState(false);
   if (loggedCount === 0) return null;
   const arcActive = !!activeBlock?.id;
   const isNight = hourNow >= 19;
   const identity = arcActive ? String(activeBlock.identity || "").trim() : "";
   const minimum = arcActive ? String(activeBlock.minimumProof || "").trim() : "";
   const minHit = arcActive && loggedCount > 0 && !!minimum; // simple heuristic; refined in Phase 2
-  const eyebrowLabel = arcActive ? (isNight ? "Night verdict" : "Today's verdict") : "Today's receipt";
+  const eyebrowLabel = arcActive ? (isNight ? "Tonight's audit" : "Today's verdict") : "Today's receipt";
   const eyebrowColor = arcActive ? T.gold : T.hint;
   const borderColor = arcActive ? "rgba(200,144,42,0.4)" : T.border;
 
   if (entry) {
     const parsed = parseReceiptFields(entry.content);
+    const structured = parseReceiptStructured(entry.content);
     if (!parsed) return null;
+    const previewLine = parsed.pattern || parsed.tomorrow || parsed.missed || null;
     const missedStr = (parsed.missed || "").toLowerCase().trim();
     const hasMissed = missedStr && missedStr !== "none" && !missedStr.startsWith("not tracked");
     const contextDraft = hasMissed
       ? `I want to add some context on today — ${parsed.missed} didn't make it in. Here's why:`
       : null;
+
+    if (!expanded) {
+      return (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          style={{
+            display: "block", width: "calc(100% - 28px)", margin: "0 14px 10px", padding: "14px 16px",
+            borderRadius: T.r, border: `0.5px solid ${borderColor}`, background: T.raised,
+            cursor: "pointer", textAlign: "left", fontFamily: T.font, boxSizing: "border-box",
+          }}
+        >
+          <div style={{ fontSize: 10, fontWeight: 700, color: eyebrowColor, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 6 }}>
+            {eyebrowLabel}
+          </div>
+          <div style={{ fontSize: 15, fontWeight: 500, color: T.text, fontFamily: T.serif, lineHeight: 1.35, marginBottom: previewLine ? 6 : 0 }}>
+            {parsed.title}
+          </div>
+          {previewLine ? (
+            <div style={{
+              fontSize: 12, color: T.sub, lineHeight: 1.45,
+              overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical",
+            }}>
+              {previewLine}
+            </div>
+          ) : null}
+          <div style={{ fontSize: 11, color: T.muted, marginTop: 8 }}>Tap to view</div>
+        </button>
+      );
+    }
+
     return (
       <div style={{ margin:"0 14px 10px", borderRadius:T.r, border:`0.5px solid ${borderColor}`, background:T.raised, overflow:"hidden" }}>
         <div style={{ padding:"14px 16px 12px" }}>
-          <div style={{ fontSize:10, fontWeight:700, color:eyebrowColor, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:8 }}>{eyebrowLabel}</div>
+          <button type="button" onClick={() => setExpanded(false)}
+            style={{ display: "block", width: "100%", padding: 0, margin: 0, background: "none", border: "none", cursor: "pointer", textAlign: "left", fontFamily: T.font }}>
+            <div style={{ fontSize:10, fontWeight:700, color:eyebrowColor, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:8 }}>{eyebrowLabel}</div>
           {arcActive && identity ? (
             <div style={{ fontSize:13, color:T.sub, fontStyle:"italic", fontFamily:T.serif, marginBottom:10, lineHeight:1.45, minWidth:0, overflowWrap:"break-word", wordBreak:"break-word" }}>
               {identity}
@@ -186,29 +224,14 @@ function TodayReceiptCard({ entry, loggedCount, generating, onGenerate, onOpenJo
           ) : null}
           <div style={{ fontSize:15, fontWeight:500, color:T.text, fontFamily:T.serif, marginBottom:(parsed.pattern||parsed.tomorrow||hasMissed||minimum)?10:0, lineHeight:1.35 }}>{parsed.title}</div>
           {arcActive && minimum && (
-            <div style={{ display:"flex", gap:6, marginBottom:6, alignItems:"flex-start" }}>
+            <div style={{ display:"flex", gap:6, marginBottom:10, alignItems:"flex-start" }}>
               <span style={{ fontSize:11, color: minHit ? T.green : T.amber, fontWeight:700, marginTop:2, flexShrink:0 }}>{minHit ? "✓" : "·"}</span>
               <div style={{ fontSize:13, color:T.sub, lineHeight:1.5 }}>
                 <span style={{ color:T.muted, marginRight:4 }}>Bad-day min:</span>{minimum}
               </div>
             </div>
           )}
-          {parsed.pattern && (
-            <div style={{ display:"flex", gap:6, marginBottom:6, alignItems:"flex-start" }}>
-              <span style={{ fontSize:11, color:T.accent, fontWeight:700, marginTop:2, flexShrink:0 }}>◎</span>
-              <div style={{ fontSize:13, color:T.sub, lineHeight:1.5 }}>
-                <span style={{ color:T.muted, marginRight:4 }}>Pattern:</span>{parsed.pattern}
-              </div>
-            </div>
-          )}
-          {parsed.tomorrow && (
-            <div style={{ display:"flex", gap:6, marginBottom:hasMissed?8:0, alignItems:"flex-start" }}>
-              <span style={{ fontSize:11, color:T.green, fontWeight:700, marginTop:2, flexShrink:0 }}>↑</span>
-              <div style={{ fontSize:13, color:T.sub, lineHeight:1.5 }}>
-                <span style={{ color:T.muted, marginRight:4 }}>{arcActive ? "Tomorrow's first proof:" : "Tomorrow:"}</span>{parsed.tomorrow}
-              </div>
-            </div>
-          )}
+          <ReceiptExpandedBody parsed={structured} content={entry.content} />
           {hasMissed && onOpenCoachWithDraft && (
             <button type="button" onClick={() => onOpenCoachWithDraft(contextDraft)}
               style={{ display:"block", width:"100%", padding:"7px 10px", marginTop:2, background:"rgba(255,255,255,0.04)", border:`0.5px solid ${T.border}`, borderRadius:T.rsm, cursor:"pointer", textAlign:"left", fontFamily:T.font }}>
@@ -216,6 +239,7 @@ function TodayReceiptCard({ entry, loggedCount, generating, onGenerate, onOpenJo
               <span style={{ fontSize:12, color:T.sub, fontWeight:500 }}>tell the coach why →</span>
             </button>
           )}
+          </button>
         </div>
         <div style={{ display:"flex", borderTop:`0.5px solid ${T.border}` }}>
           <button type="button" onClick={onOpenJournal}

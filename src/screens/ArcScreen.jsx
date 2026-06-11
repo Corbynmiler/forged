@@ -1,80 +1,12 @@
 // ─── ARC SCREEN ───────────────────────────────────────────────────────────────
-// Arc journey home: integrated hero + connected week path + chapter detail.
-import { useState, useEffect } from "react";
+// Continuous Arc journey: neutral evidence chapters, completed Arcs, active Arc.
+import { useState, useEffect, useMemo } from "react";
 import { T } from "../theme.js";
 import { supabase, rowToForgeBlock } from "../supabase.js";
-import { getCurrentArcWeek } from "../lib/arcTimeline.js";
-import { ArcTimeline, ArcArchiveCard } from "../components/ArcTimeline.jsx";
+import { buildLifeChronology, getCurrentArcWeek, partitionJournalEntries } from "../lib/arcTimeline.js";
+import { ArcTimeline, LifeArcHistory } from "../components/ArcTimeline.jsx";
 
-function PastArcsSection({
-  userId, isPro, onUpgrade, habits, goals, journalEntries, arcLedgerRows,
-  userName, onRunItBack, onEvolve,
-}) {
-  const [pastArcs, setPastArcs] = useState(null);
-  const [expandedId, setExpandedId] = useState(null);
-
-  useEffect(() => {
-    if (!userId) return;
-    let cancelled = false;
-    supabase
-      .from("forge_blocks")
-      .select("id, title, identity, status, start_date, end_date, duration_days, arc_rank, completion_score, review, why_statement, old_pattern, minimum_proof")
-      .eq("user_id", userId)
-      .neq("status", "active")
-      .order("start_date", { ascending: false })
-      .limit(12)
-      .then(({ data }) => { if (!cancelled && data) setPastArcs(data.map(rowToForgeBlock)); });
-    return () => { cancelled = true; };
-  }, [userId]);
-
-  if (!pastArcs?.length) return null;
-
-  if (!isPro) {
-    return (
-      <div style={{ marginTop: 36, paddingTop: 24, borderTop: `0.5px solid rgba(255,255,255,0.05)` }}>
-        <button type="button" onClick={onUpgrade}
-          style={{ width: "100%", padding: "10px 2px", background: "none", border: "none", cursor: "pointer", textAlign: "left", fontFamily: T.font }}>
-          <div style={{ fontSize: 12, color: T.muted }}>{pastArcs.length} past Arc{pastArcs.length === 1 ? "" : "s"} · <span style={{ color: T.gold }}>Pro</span> to expand →</div>
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ marginTop: 36, paddingTop: 24, borderTop: `0.5px solid rgba(255,255,255,0.05)` }}>
-      <div style={{ fontSize: 9, fontWeight: 700, color: T.hint, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 8, padding: "0 2px" }}>
-        Arc history
-      </div>
-      {pastArcs.map(block => {
-        const expanded = expandedId === block.id;
-        return (
-          <ArcArchiveCard
-            key={block.id}
-            block={block}
-            journalEntries={journalEntries}
-            expanded={expanded}
-            onToggle={() => setExpandedId(expanded ? null : block.id)}
-          >
-            <ArcTimeline
-              block={block}
-              habits={habits}
-              goals={goals}
-              journalEntries={journalEntries}
-              arcLedgerRows={arcLedgerRows.filter(r => r.blockId === block.id || r.block_id === block.id)}
-              userId={userId}
-              userName={userName}
-              isPro={isPro}
-              isActive={false}
-              embedded
-              onRunItBack={onRunItBack}
-              onEvolve={onEvolve}
-            />
-          </ArcArchiveCard>
-        );
-      })}
-    </div>
-  );
-}
+const BLOCK_SELECT = "id, title, identity, status, start_date, end_date, duration_days, arc_rank, completion_score, review, why_statement, old_pattern, minimum_proof";
 
 export function ArcScreen({
   tab = "arc", onTabChange,
@@ -84,6 +16,21 @@ export function ArcScreen({
 }) {
   const [initialWeek, setInitialWeek] = useState(null);
   const [openChronology, setOpenChronology] = useState(false);
+  const [allBlocks, setAllBlocks] = useState(null);
+
+  useEffect(() => {
+    if (!userId) { setAllBlocks([]); return; }
+    let cancelled = false;
+    supabase
+      .from("forge_blocks")
+      .select(BLOCK_SELECT)
+      .eq("user_id", userId)
+      .order("start_date", { ascending: true })
+      .then(({ data }) => {
+        if (!cancelled) setAllBlocks((data || []).map(rowToForgeBlock));
+      });
+    return () => { cancelled = true; };
+  }, [userId, activeBlock?.id, activeBlock?.status]);
 
   useEffect(() => {
     if (tab === "evidence") {
@@ -98,9 +45,54 @@ export function ArcScreen({
     }
   }, [tab, activeBlock?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!activeBlock?.id) {
+  const blocksForLife = useMemo(() => {
+    if (!allBlocks) {
+      return activeBlock?.id ? [activeBlock] : [];
+    }
+    if (activeBlock?.id && !allBlocks.some(b => b.id === activeBlock.id)) {
+      return [...allBlocks, activeBlock].sort((a, b) => (a.startDate || "").localeCompare(b.startDate || ""));
+    }
+    return allBlocks;
+  }, [allBlocks, activeBlock]);
+
+  const life = useMemo(
+    () => buildLifeChronology({ blocks: blocksForLife, journalEntries }),
+    [blocksForLife, journalEntries],
+  );
+
+  const historySegments = useMemo(
+    () => life.segments.filter(s => s.type !== "active-arc"),
+    [life.segments],
+  );
+
+  const currentBlock = life.activeBlock || activeBlock;
+  const journalInArc = useMemo(() => {
+    if (!currentBlock?.id) return [];
+    return partitionJournalEntries(currentBlock, journalEntries).inArc;
+  }, [currentBlock, journalEntries]);
+
+  const historyProps = {
+    segments: historySegments,
+    habits,
+    goals,
+    journalEntries,
+    arcLedgerRows,
+    userId,
+    userName,
+    isPro,
+    onUpgrade,
+    onRunItBack,
+    onEvolve,
+  };
+
+  if (!currentBlock?.id) {
     return (
-      <div style={{ padding: "32px 24px 24px", textAlign: "center", minWidth: 0 }}>
+      <div style={{ padding: "32px 24px 24px", textAlign: "center", minWidth: 0, overflowX: "hidden" }}>
+        {historySegments.length > 0 ? (
+          <div style={{ textAlign: "left", marginBottom: 28, padding: "0 2px" }}>
+            <LifeArcHistory {...historyProps} />
+          </div>
+        ) : null}
         <div style={{ fontSize: 40, marginBottom: 14 }}>⚒️</div>
         <div style={{ fontFamily: T.serif, fontSize: 26, color: T.text, marginBottom: 8, lineHeight: 1.2 }}>
           What season are you in?
@@ -115,23 +107,20 @@ export function ArcScreen({
             Define your Arc →
           </button>
         ) : null}
-        <PastArcsSection
-          userId={userId} isPro={isPro} onUpgrade={onUpgrade}
-          habits={habits} goals={goals} journalEntries={journalEntries}
-          arcLedgerRows={arcLedgerRows} userName={userName}
-          onRunItBack={onRunItBack} onEvolve={onEvolve}
-        />
       </div>
     );
   }
 
   return (
     <div style={{ padding: "4px 10px 32px", minWidth: 0, overflowX: "hidden", boxSizing: "border-box" }}>
+      {historySegments.length > 0 ? <LifeArcHistory {...historyProps} /> : null}
+
       <ArcTimeline
-        block={activeBlock}
+        block={currentBlock}
         habits={habits}
         goals={goals}
-        journalEntries={journalEntries}
+        journalEntries={journalInArc}
+        chronologyJournalEntries={journalEntries}
         arcLedgerRows={arcLedgerRows}
         userId={userId}
         userName={userName}
@@ -140,13 +129,6 @@ export function ArcScreen({
         onEditArc={onEditArc}
         initialWeek={initialWeek}
         openChronologyOnMount={openChronology}
-      />
-
-      <PastArcsSection
-        userId={userId} isPro={isPro} onUpgrade={onUpgrade}
-        habits={habits} goals={goals} journalEntries={journalEntries}
-        arcLedgerRows={arcLedgerRows} userName={userName}
-        onRunItBack={onRunItBack} onEvolve={onEvolve}
       />
     </div>
   );

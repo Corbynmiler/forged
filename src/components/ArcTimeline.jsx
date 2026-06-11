@@ -15,6 +15,8 @@ import {
   formatWeekStatusLine,
 } from "../lib/arcTimeline.js";
 
+export { buildLifeChronology } from "../lib/arcTimeline.js";
+
 const CHECKPOINT_W = 80;
 const NODE = 44;
 const RAIL_PAD = "calc(50% - 40px)";
@@ -380,7 +382,7 @@ const RECEIPT_LABEL_ACCENT = {
   "Tomorrow": "#7BA3C9",
 };
 
-function ReceiptExpandedBody({ parsed, content }) {
+export function ReceiptExpandedBody({ parsed, content }) {
   const sections = [
     parsed?.proof ? { label: "Proof shown", text: parsed.proof } : null,
     parsed?.wins ? { label: "Wins", text: parsed.wins } : null,
@@ -865,7 +867,7 @@ function WeekDetail({
 function BeforeArcDetail({ entries, reducedMotion, panelKey }) {
   return (
     <div key={panelKey} style={{ animation: reducedMotion ? undefined : "arcChapterIn 0.28s ease both", paddingBottom: 24 }}>
-      <DetailAccent />
+      <NeutralDetailAccent />
       <div style={{ fontSize: 10, fontWeight: 800, color: T.muted, letterSpacing: "0.12em", textTransform: "uppercase" }}>
         Before this Arc
       </div>
@@ -873,6 +875,150 @@ function BeforeArcDetail({ entries, reducedMotion, panelKey }) {
         These entries do not count toward Arc progress.
       </div>
       <BeforeArcChronology entries={entries} reducedMotion={reducedMotion} />
+    </div>
+  );
+}
+
+function NeutralDetailAccent() {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+      <div style={{ width: 3, height: 14, borderRadius: 2, background: "rgba(255,255,255,0.18)", flexShrink: 0 }} />
+      <div style={{ flex: 1, height: 1, background: "linear-gradient(90deg, rgba(255,255,255,0.1), transparent)" }} />
+    </div>
+  );
+}
+
+function NeutralWeekChapter({ segment, expanded, onToggle, reducedMotion }) {
+  const neutralWeek = useMemo(() => ({
+    weekNum: 0,
+    startDate: segment.weekStart,
+    endDate: segment.weekEnd,
+    dayStart: 1,
+    dayEnd: 7,
+    status: "complete",
+  }), [segment.weekStart, segment.weekEnd]);
+
+  const entryLabel = segment.entryCount === 1 ? "1 entry" : `${segment.entryCount} entries`;
+
+  return (
+    <div style={{
+      marginBottom: 12,
+      borderBottom: `0.5px solid ${T.border}`,
+      paddingBottom: expanded ? 12 : 8,
+      animation: expanded && !reducedMotion ? "arcChapterIn 0.35s ease both" : undefined,
+    }}>
+      <button type="button" onClick={onToggle}
+        style={{
+          width: "100%", padding: "12px 2px", background: "none", border: "none", cursor: "pointer",
+          textAlign: "left", fontFamily: T.font,
+        }}>
+        <div style={{ fontSize: 9, fontWeight: 700, color: T.hint, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>
+          {segment.kindLabel}
+        </div>
+        <div style={{ fontFamily: T.serif, fontSize: 16, color: T.text, lineHeight: 1.25, marginBottom: 4, overflowWrap: "anywhere" }}>
+          {segment.headline}
+        </div>
+        <div style={{ fontSize: 11, color: T.muted }}>
+          {segment.rangeLabel} · {entryLabel}
+        </div>
+        {!expanded ? (
+          <div style={{ fontSize: 11, color: T.sub, marginTop: 6 }}>Tap to view daily evidence ▸</div>
+        ) : null}
+      </button>
+      {expanded ? (
+        <div style={{ padding: "4px 6px 8px", animation: reducedMotion ? undefined : "arcChapterIn 0.28s ease both" }}>
+          <NeutralDetailAccent />
+          <div style={{ fontSize: 10, fontWeight: 800, color: T.muted, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+            {segment.kindLabel}
+          </div>
+          <div style={{ fontSize: 11.5, color: T.muted, marginTop: 3 }}>{segment.rangeLabel}</div>
+          <div style={{ fontSize: 12, color: T.sub, marginTop: 6, lineHeight: 1.45 }}>
+            Not part of any Arc — evidence only.
+          </div>
+          <WeekDayJourney
+            week={neutralWeek}
+            arcLedgerRows={[]}
+            journalEntries={segment.entries}
+            reducedMotion={reducedMotion}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function LifeArcHistory({
+  segments = [],
+  habits = [],
+  goals = [],
+  journalEntries = [],
+  arcLedgerRows = [],
+  userId,
+  userName = "",
+  isPro = false,
+  onUpgrade,
+  onRunItBack,
+  onEvolve,
+}) {
+  const [expandedNeutralId, setExpandedNeutralId] = useState(null);
+  const [expandedArcId, setExpandedArcId] = useState(null);
+  const reducedMotion = useReducedMotion();
+
+  if (!segments.length) return null;
+
+  return (
+    <div style={{ marginBottom: 8, paddingBottom: 8, borderBottom: `0.5px solid rgba(255,255,255,0.05)` }}>
+      <div style={{ fontSize: 9, fontWeight: 700, color: T.hint, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 10, padding: "0 2px" }}>
+        Your journey
+      </div>
+      {segments.map((seg) => {
+        if (seg.type === "neutral") {
+          const expanded = expandedNeutralId === seg.id;
+          return (
+            <NeutralWeekChapter
+              key={seg.id}
+              segment={seg}
+              expanded={expanded}
+              onToggle={() => setExpandedNeutralId(expanded ? null : seg.id)}
+              reducedMotion={reducedMotion}
+            />
+          );
+        }
+        if (seg.type === "completed-arc") {
+          const expanded = expandedArcId === seg.block.id;
+          const blockLedger = arcLedgerRows.filter(r => (r.blockId || r.block_id) === seg.block.id);
+          return (
+            <ArcArchiveCard
+              key={seg.id}
+              block={seg.block}
+              journalEntries={seg.journalEntries}
+              expanded={expanded}
+              onToggle={() => {
+                if (!isPro) { onUpgrade?.(); return; }
+                setExpandedArcId(expanded ? null : seg.block.id);
+              }}
+              proLocked={!isPro}
+            >
+              <ArcTimeline
+                block={seg.block}
+                habits={habits}
+                goals={goals}
+                journalEntries={seg.journalEntries}
+                chronologyJournalEntries={journalEntries}
+                arcLedgerRows={blockLedger}
+                userId={userId}
+                userName={userName}
+                isPro={isPro}
+                isActive={false}
+                embedded
+                onRunItBack={onRunItBack}
+                onEvolve={onEvolve}
+              />
+            </ArcArchiveCard>
+          );
+        }
+        return null;
+      })}
     </div>
   );
 }
@@ -1072,6 +1218,7 @@ export function ArcTimeline({
   habits = [],
   goals = [],
   journalEntries = [],
+  chronologyJournalEntries,
   arcLedgerRows = [],
   userId,
   userName = "",
@@ -1084,6 +1231,7 @@ export function ArcTimeline({
   openChronologyOnMount = false,
   embedded = false,
 }) {
+  const allChronologyEntries = chronologyJournalEntries ?? journalEntries;
   const railRef = useRef(null);
   const reducedMotion = useReducedMotion();
   const [weeklyBriefs, setWeeklyBriefs] = useState({});
@@ -1429,14 +1577,14 @@ export function ArcTimeline({
             style={SECONDARY_BTN}
           >
             <span>All evidence chronology</span>
-            <span style={{ color: T.muted, fontSize: 11 }}>{journalEntries.length} entries ▸</span>
+            <span style={{ color: T.muted, fontSize: 11 }}>{allChronologyEntries.length} entries ▸</span>
           </button>
         </div>
       ) : null}
 
       {showChronology ? (
         <EvidenceChronologySheet
-          journalEntries={journalEntries}
+          journalEntries={allChronologyEntries}
           block={block}
           onClose={() => setShowChronology(false)}
           reducedMotion={reducedMotion}
@@ -1446,7 +1594,7 @@ export function ArcTimeline({
   );
 }
 
-export function ArcArchiveCard({ block, journalEntries = [], expanded, onToggle, children }) {
+export function ArcArchiveCard({ block, journalEntries = [], expanded, onToggle, children, proLocked = false }) {
   const title = resolveArcTitle(block.title, block.identity);
   const start = block.startDate ? parseLocal(block.startDate).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "";
   const end = block.endDate ? parseLocal(block.endDate).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "";
@@ -1488,6 +1636,11 @@ export function ArcArchiveCard({ block, journalEntries = [], expanded, onToggle,
           }}>
             {story}
           </div>
+        ) : null}
+        {proLocked && !expanded ? (
+          <div style={{ fontSize: 11, color: T.muted, marginTop: 6 }}>Pro to expand full journey ▸</div>
+        ) : !expanded ? (
+          <div style={{ fontSize: 11, color: T.sub, marginTop: 6 }}>Tap to view week rail & evidence ▸</div>
         ) : null}
       </button>
       {expanded ? <div style={{ paddingTop: 8 }}>{children}</div> : null}
