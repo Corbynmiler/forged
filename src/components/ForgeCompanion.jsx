@@ -1,524 +1,672 @@
-// ─── FORGE COMPANION ─────────────────────────────────────────────────────────────
-// Preview-only experimental layer. Additive visual reward system sitting on top of
-// the existing Arc — does NOT replace or modify Arc week rail / day spine / timeline.
-// Derives all data at render time from existing arc_daily_scores rows. No migrations.
+// ─── FORGE COMPANION ──────────────────────────────────────────────────────────────
+// Preview-only experimental companion layer. Additive — does not replace or modify
+// the Arc week rail, day spine, or timeline logic. No schema migrations.
+// Placed between ArcJourneyHero and the week rail via ArcTimeline's forgeSlot prop.
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { T } from "../theme.js";
 import { supabase, rowToForgeBlock } from "../supabase.js";
-import { getForgeItem, getForgeProgress, FORGE_STAGES } from "../lib/forgeItemLogic.js";
+import {
+  getItemPool, getDefaultForgeItem, getForgeProgress,
+  getRecentForgeHistory, FORGE_STAGES,
+} from "../lib/forgeItemLogic.js";
 import { useReducedMotion } from "../hooks/useReducedMotion.js";
 
-// ─── CSS ANIMATIONS ──────────────────────────────────────────────────────────────
-// Injected once at mount. Prefixed fg- to avoid collisions with app styles.
-const FORGE_CSS = `
-  .fg-fire-1 { animation: fg-fire1 1.4s ease-in-out infinite; transform-origin: 46px 168px; }
-  .fg-fire-2 { animation: fg-fire2 1.9s ease-in-out infinite 0.35s; transform-origin: 46px 168px; }
-  .fg-fire-3 { animation: fg-fire3 2.2s ease-in-out infinite 0.75s; transform-origin: 46px 168px; }
-  @keyframes fg-fire1 {
-    0%,100% { opacity: 0.88; transform: scaleY(1) scaleX(1); }
-    50%      { opacity: 0.52; transform: scaleY(0.9) scaleX(1.06); }
-  }
-  @keyframes fg-fire2 {
-    0%,100% { opacity: 0.62; transform: scaleY(1.04); }
-    33%     { opacity: 0.88; transform: scaleY(0.93) scaleX(0.97); }
-    66%     { opacity: 0.38; transform: scaleY(1.02) scaleX(1.04); }
-  }
-  @keyframes fg-fire3 {
-    0%,100% { opacity: 0.32; transform: scaleY(0.94); }
-    50%     { opacity: 0.58; transform: scaleY(1.12) scaleX(0.93); }
-  }
-  .fg-ember { animation: fg-ember var(--dur,2.2s) ease-out infinite var(--del,0s); }
-  @keyframes fg-ember {
-    0%   { opacity: 0.9; transform: translate(0,0) scale(1); }
-    60%  { opacity: 0.6; }
-    100% { opacity: 0; transform: translate(var(--dx,-10px),-58px) scale(0.25); }
-  }
-  .fg-glow-pulse { animation: fg-glow-p 2.8s ease-in-out infinite; }
-  @keyframes fg-glow-p { 0%,100% { opacity: 0.32; } 50% { opacity: 0.62; } }
-  .fg-item-hot { animation: fg-hot 2s ease-in-out infinite; }
-  @keyframes fg-hot {
-    0%,100% { opacity: 0.55; transform: scale(1); }
-    50%     { opacity: 0.9;  transform: scale(1.12); }
-  }
-  .fg-item-gold { animation: fg-gold 3.6s ease-in-out infinite; }
-  @keyframes fg-gold { 0%,100% { opacity: 0.38; } 50% { opacity: 0.72; } }
-  .fg-hammer { animation: fg-hamr 2.5s ease-in-out infinite; transform-origin: 234px 108px; }
-  @keyframes fg-hamr {
-    0%,100% { transform: rotate(0deg); }
-    28%     { transform: rotate(-14deg); }
-    58%     { transform: rotate(5deg); }
-  }
-  .fg-card-ember { animation: fg-card-e 3.2s ease-in-out infinite; }
-  @keyframes fg-card-e { 0%,100% { opacity: 0.45; } 50% { opacity: 0.82; } }
-  .fg-stage-shine { animation: fg-shine 4s ease-in-out infinite; }
-  @keyframes fg-shine { 0%,100% { opacity: 0; } 45%,55% { opacity: 0.18; } }
-`;
-
-// ─── STAGE VISUAL CONFIG ─────────────────────────────────────────────────────────
+// ─── STAGE COLOURS ────────────────────────────────────────────────────────────────
 const SC = [
-  { fill: "#9B4A14", glow: "#E67E22", accent: "#E67E22", hot: true  }, // 0 raw ore
-  { fill: "#B03018", glow: "#E74C3C", accent: "#E74C3C", hot: true  }, // 1 rough
-  { fill: "#606870", glow: "#7A8890", accent: "#7A8890", hot: false }, // 2 hammered
-  { fill: "#94A8B4", glow: "#BDD0DC", accent: "#BDD0DC", hot: false }, // 3 tempered
-  { fill: "#C8902A", glow: "#F5C842", accent: "#F5C842", hot: false }, // 4 forged
+  { fill:"#9B4A14", edge:"#E67E22", glow:"#E67E22", metal:"#C86820", hot:true  }, // raw ore
+  { fill:"#B03018", edge:"#E74C3C", glow:"#E74C3C", metal:"#C04020", hot:true  }, // rough
+  { fill:"#606870", edge:"#7A8890", glow:"#8096A8", metal:"#606870", hot:false }, // hammered
+  { fill:"#94A8B4", edge:"#BDD0DC", glow:"#BDD0DC", metal:"#94A8B4", hot:false }, // tempered
+  { fill:"#C8902A", edge:"#F5C842", glow:"#F5C842", metal:"#C8902A", hot:false }, // forged
 ];
 
-// ─── ITEM SVGs (compact, for card + forge wall) ──────────────────────────────────
+// ─── CSS ──────────────────────────────────────────────────────────────────────────
+const CSS = `
+  .fg-fire1{animation:fg-f1 1.4s ease-in-out infinite;transform-origin:46px 170px}
+  .fg-fire2{animation:fg-f2 1.9s ease-in-out infinite .35s;transform-origin:46px 170px}
+  .fg-fire3{animation:fg-f3 2.1s ease-in-out infinite .7s;transform-origin:46px 170px}
+  @keyframes fg-f1{0%,100%{opacity:.88;transform:scaleY(1) scaleX(1)}50%{opacity:.5;transform:scaleY(.9) scaleX(1.05)}}
+  @keyframes fg-f2{0%,100%{opacity:.62;transform:scaleY(1.04)}33%{opacity:.88;transform:scaleY(.94) scaleX(.97)}66%{opacity:.38;transform:scaleY(1.02) scaleX(1.04)}}
+  @keyframes fg-f3{0%,100%{opacity:.3;transform:scaleY(.94)}50%{opacity:.55;transform:scaleY(1.1) scaleX(.94)}}
+  .fg-ember{animation:fg-emb var(--dur,2.2s) ease-out infinite var(--del,0s)}
+  @keyframes fg-emb{0%{opacity:.9;transform:translate(0,0) scale(1)}60%{opacity:.6}100%{opacity:0;transform:translate(var(--dx,-10px),-60px) scale(.2)}}
+  .fg-glow{animation:fg-gl 2.8s ease-in-out infinite}
+  @keyframes fg-gl{0%,100%{opacity:.3}50%{opacity:.62}}
+  .fg-item-hot{animation:fg-ih 2s ease-in-out infinite}
+  @keyframes fg-ih{0%,100%{opacity:.55;transform:scale(1)}50%{opacity:.95;transform:scale(1.12)}}
+  .fg-item-gold{animation:fg-ig 3.6s ease-in-out infinite}
+  @keyframes fg-ig{0%,100%{opacity:.35}50%{opacity:.72}}
+  .fg-idle{animation:fg-idle 3.4s ease-in-out infinite}
+  @keyframes fg-idle{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}
+  .fg-strike{animation:fg-stk .7s cubic-bezier(.4,0,.6,1) 1;transform-origin:14px -6px}
+  @keyframes fg-stk{0%{transform:rotate(0)}20%{transform:rotate(-35deg)}55%{transform:rotate(22deg)}75%{transform:rotate(22deg)}100%{transform:rotate(0)}}
+  .fg-spark{animation:fg-sp .55s ease-out var(--del,0s) 1 forwards;opacity:0}
+  @keyframes fg-sp{0%{opacity:1;transform:translate(0,0) scale(1)}100%{opacity:0;transform:translate(var(--sx,0px),var(--sy,-20px)) scale(.3)}}
+  .fg-card-glow{animation:fg-cg 3s ease-in-out infinite}
+  @keyframes fg-cg{0%,100%{opacity:.45}50%{opacity:.82}}
+  @media (prefers-reduced-motion:reduce){
+    .fg-fire1,.fg-fire2,.fg-fire3,.fg-ember,.fg-glow,.fg-item-hot,.fg-item-gold,.fg-idle,.fg-strike,.fg-spark,.fg-card-glow{animation:none}
+  }
+`;
 
-function SwordSVG({ s, stage, h }) {
+// ─── ITEM SVGS ────────────────────────────────────────────────────────────────────
+// Each returns a fragment of SVG content. Wrapped in <svg> by callers.
+
+function SwordPaths({ stage, s }) {
+  if (stage === 0) return (
+    <>
+      <rect x="-14" y="-8" width="28" height="16" rx="3" fill={s.metal}/>
+      <rect x="-14" y="-8" width="28" height="7" rx="2" fill={s.edge} opacity=".4"/>
+      <rect x="-14" y="-8" width="28" height="16" rx="3" fill="none" stroke={s.edge} strokeWidth=".8" opacity=".7"/>
+    </>
+  );
+  if (stage === 1) return (
+    <>
+      <path d="M-11-30 L11-30 L9 10 L0 18 L-9 10 Z" fill={s.metal} style={{filter:`blur(.8px)`}}/>
+      <path d="M-11-30 L-13-16 L-10-4 L-11 10 L0 18 L11 10 L10-4 L13-16 L11-30 Z"
+        fill="none" stroke={s.edge} strokeWidth="1" opacity=".5"/>
+    </>
+  );
+  if (stage === 2) return (
+    <>
+      <path d="M-5-38 L5-38 L6 10 L0 16 L-6 10 Z" fill={s.fill}/>
+      <path d="M0-38 L3-36 L4 8 L0 14 Z" fill={s.edge} opacity=".25"/>
+    </>
+  );
+  if (stage === 3) return (
+    <>
+      <path d="M-4-40 L4-40 L5 10 L0 16 L-5 10 Z" fill={s.fill}/>
+      <line x1="0" y1="-36" x2="0" y2="8" stroke={s.edge} strokeWidth=".7" opacity=".55"/>
+      <rect x="-14" y="16" width="28" height="5" rx="2.5" fill={s.fill} opacity=".9"/>
+      <rect x="-5" y="21" width="10" height="18" rx="3.5" fill="#6B4A2A"/>
+      {[24,27,30,33,36].map(y=><line key={y} x1="-5" y1={y} x2="5" y2={y} stroke="#8B6A3A" strokeWidth="1.2" opacity=".55"/>)}
+    </>
+  );
+  // stage 4
   return (
-    <svg viewBox="-14 -32 28 68" width={h * 0.5} height={h} style={{ overflow: "visible" }}
-      filter={s.hot ? `drop-shadow(0 0 5px ${s.glow})` : stage === 4 ? `drop-shadow(0 0 4px ${s.glow}70)` : "none"}>
-      {stage === 0 && <ellipse cx="0" cy="4" rx="9" ry="14" fill={s.fill} opacity="0.8" style={{ filter: "blur(3px)" }}/>}
-      {stage === 0 && <ellipse cx="0" cy="4" rx="6" ry="9"  fill={s.glow} opacity="0.35" style={{ filter: "blur(2px)" }}/>}
-      {stage >= 1 && (
-        <>
-          {stage <= 1 && <ellipse cx="0" cy="-22" rx="5" ry="7" fill={s.glow} opacity="0.4" style={{ filter: "blur(2px)" }}/>}
-          <path
-            d={stage === 1 ? "M-3.5 -28 L3.5 -28 L4.5 8 L0 14 L-4.5 8 Z" : "M-2.5 -28 L2.5 -28 L3 6 L0 12 L-3 6 Z"}
-            fill={s.fill} opacity={stage <= 1 ? 0.88 : 1}
-            style={stage === 1 ? { filter: "blur(0.8px)" } : {}}
-          />
-          {stage >= 3 && <line x1="0" y1="-24" x2="0" y2="4" stroke={s.glow} strokeWidth="0.5" opacity="0.55"/>}
-          {stage >= 2 && <rect x="-10" y="12" width="20" height="3.5" rx="1.75" fill={s.fill}/>}
-          {stage >= 2 && <rect x="-3.5" y="15.5" width="7" height="16" rx="3" fill={stage >= 3 ? "#8B6914" : "#4A3A10"}/>}
-          {stage >= 3 && <circle cx="0" cy="33" r="4.5" fill={s.fill}/>}
-          {stage >= 4 && <text x="0" y="-10" textAnchor="middle" fontSize="5" fill={s.glow} opacity="0.75" style={{ fontFamily: "serif" }}>⟡</text>}
-          {stage >= 4 && <ellipse cx="0" cy="33" rx="6" ry="6" fill={s.glow} opacity="0.22" style={{ filter: "blur(1px)" }}/>}
-        </>
-      )}
-    </svg>
+    <>
+      <path d="M-3.5-42 L3.5-42 L5 10 L0 16 L-5 10 Z" fill={s.fill}/>
+      <line x1="0" y1="-38" x2="0" y2="8" stroke={s.edge} strokeWidth=".7" opacity=".6"/>
+      <path d="M4 -42 L5 10 L3.5 8 L2.5-40 Z" fill={s.edge} opacity=".18"/>
+      <path d="M-16 10 L16 10 L14 16 L-14 16 Z" fill={s.fill}/>
+      <rect x="-5" y="16" width="10" height="22" rx="4" fill="#5C3E20"/>
+      {[19,22,25,28,31,34].map(y=><line key={y} x1="-5" y1={y} x2="5" y2={y} stroke="#8B6A3A" strokeWidth="1.2" opacity=".6"/>)}
+      <circle cx="0" cy="42" r="7" fill={s.fill}/>
+      <circle cx="0" cy="42" r="5" fill={s.edge} opacity=".22"/>
+      <text x="0" y="-18" textAnchor="middle" fontSize="6" fill={s.edge} opacity=".75" fontFamily="serif">⟡</text>
+      <path d="M-1-42 L-1-28 L0-28 L0-42 Z" fill="#FFFBE0" opacity=".14"/>
+    </>
   );
 }
 
-function ShieldSVG({ s, stage, h }) {
+function ShieldPaths({ stage, s }) {
+  if (stage === 0) return (
+    <>
+      <ellipse cx="0" cy="0" rx="16" ry="12" fill={s.metal}/>
+      <ellipse cx="0" cy="0" rx="16" ry="12" fill="none" stroke={s.edge} strokeWidth=".8" opacity=".7"/>
+    </>
+  );
+  const rough = stage <= 1;
   return (
-    <svg viewBox="-22 -30 44 60" width={h * 0.72} height={h} style={{ overflow: "visible" }}
-      filter={s.hot ? `drop-shadow(0 0 5px ${s.glow})` : stage === 4 ? `drop-shadow(0 0 4px ${s.glow}70)` : "none"}>
-      {stage === 0 && <ellipse cx="0" cy="0" rx="16" ry="22" fill={s.fill} opacity="0.75" style={{ filter: "blur(3px)" }}/>}
-      {stage >= 1 && (
-        <>
-          <path d="M0 -28 L20 -15 L20 5 Q20 26 0 28 Q-20 26 -20 5 L-20 -15 Z"
-            fill={s.fill} opacity={stage <= 1 ? 0.82 : 0.96}
-            style={stage === 1 ? { filter: "blur(1px)" } : {}}/>
-          {stage >= 3 && <path d="M0 -20 L12 -11 L12 3 Q12 16 0 18 Q-12 16 -12 3 L-12 -11 Z" fill={s.glow} opacity="0.14"/>}
-          {stage >= 3 && <line x1="0" y1="-22" x2="0" y2="18" stroke={s.glow} strokeWidth="0.6" opacity="0.45"/>}
-          {stage >= 4 && <text x="0" y="3" textAnchor="middle" fontSize="9" fill={s.glow} opacity="0.62" style={{ fontFamily: "serif" }}>⟡</text>}
-        </>
-      )}
-    </svg>
+    <>
+      <path d="M0-28 L20-15 L20 6 Q20 26 0 28 Q-20 26 -20 6 L-20-15 Z"
+        fill={s.fill} opacity={rough?.85:1} style={rough?{filter:"blur(1px)"}:{}}/>
+      {stage>=3&&<path d="M0-20 L12-11 L12 3 Q12 17 0 19 Q-12 17 -12 3 L-12-11 Z" fill={s.edge} opacity=".13"/>}
+      {stage>=3&&<line x1="0" y1="-22" x2="0" y2="18" stroke={s.edge} strokeWidth=".6" opacity=".45"/>}
+      {stage>=3&&<line x1="-12" y1="-4" x2="12" y2="-4" stroke={s.edge} strokeWidth=".6" opacity=".3"/>}
+      {stage>=4&&<text x="0" y="4" textAnchor="middle" fontSize="10" fill={s.edge} opacity=".6" fontFamily="serif">⟡</text>}
+      {stage>=4&&<circle cx="0" cy="0" r="4" fill={s.edge} opacity=".12"/>}
+    </>
   );
 }
 
-function HelmetSVG({ s, stage, h }) {
+function HelmetPaths({ stage, s }) {
+  if (stage === 0) return <ellipse cx="0" cy="-4" rx="14" ry="18" fill={s.metal} style={{filter:"blur(2px)"}}/>;
+  const rough = stage <= 1;
   return (
-    <svg viewBox="-22 -30 44 58" width={h * 0.76} height={h} style={{ overflow: "visible" }}
-      filter={s.hot ? `drop-shadow(0 0 5px ${s.glow})` : stage === 4 ? `drop-shadow(0 0 4px ${s.glow}70)` : "none"}>
-      {stage === 0 && <ellipse cx="0" cy="-6" rx="14" ry="20" fill={s.fill} opacity="0.8" style={{ filter: "blur(3px)" }}/>}
-      {stage >= 1 && (
-        <>
-          <path d="M-17 8 Q-17 -28 0 -28 Q17 -28 17 8 Z"
-            fill={s.fill} opacity={stage <= 1 ? 0.82 : 0.96}
-            style={stage === 1 ? { filter: "blur(1px)" } : {}}/>
-          <rect x="-19" y="6" width="38" height="5" rx="2.5" fill={s.fill} opacity={stage <= 1 ? 0.82 : 0.96}/>
-          {stage >= 3 && <rect x="-1.5" y="-8" width="3" height="17" rx="1.5" fill={s.glow} opacity="0.7"/>}
-          {stage >= 3 && <>
-            <path d="M-17 8 L-17 22 Q-17 26 -10 26 L-10 8 Z" fill={s.fill} opacity="0.88"/>
-            <path d="M17 8 L17 22 Q17 26 10 26 L10 8 Z" fill={s.fill} opacity="0.88"/>
-          </>}
-          {stage >= 4 && <path d="M0 -28 Q4 -40 0 -37 Q-4 -40 0 -28" fill={s.glow} opacity="0.8"/>}
-        </>
-      )}
-    </svg>
+    <>
+      <path d="M-18 10 Q-18-30 0-30 Q18-30 18 10 Z"
+        fill={s.fill} opacity={rough?.82:1} style={rough?{filter:"blur(1px)"}:{}}/>
+      <rect x="-20" y="8" width="40" height="5.5" rx="2.75" fill={s.fill} opacity={rough?.82:1}/>
+      {stage>=3&&<rect x="-2" y="-10" width="4" height="18" rx="2" fill={s.edge} opacity=".7"/>}
+      {stage>=3&&<>
+        <path d="M-18 10 L-18 24 Q-18 28 -11 28 L-11 10 Z" fill={s.fill} opacity=".88"/>
+        <path d="M18 10 L18 24 Q18 28 11 28 L11 10 Z" fill={s.fill} opacity=".88"/>
+      </>}
+      {stage>=4&&<path d="M0-30 Q5-44 0-42 Q-5-44 0-30" fill={s.edge} opacity=".8"/>}
+      {stage>=4&&<line x1="-14" y1="1" x2="14" y2="1" stroke={s.edge} strokeWidth=".5" opacity=".3"/>}
+    </>
   );
 }
 
-function DaggerSVG({ s, stage, h }) {
+function AxePaths({ stage, s }) {
+  if (stage === 0) return <ellipse cx="-4" cy="-4" rx="14" ry="18" fill={s.metal} style={{filter:"blur(2px)"}}/>;
+  const rough = stage <= 1;
   return (
-    <svg viewBox="-10 -30 20 60" width={h * 0.42} height={h} style={{ overflow: "visible" }}
-      filter={s.hot ? `drop-shadow(0 0 5px ${s.glow})` : stage === 4 ? `drop-shadow(0 0 4px ${s.glow}70)` : "none"}>
-      {stage === 0 && <ellipse cx="0" cy="2" rx="6" ry="14" fill={s.fill} opacity="0.8" style={{ filter: "blur(2.5px)" }}/>}
-      {stage >= 1 && (
-        <>
-          <path d={stage === 1 ? "M-3 -28 L3 -28 L3.5 6 L0 10 L-3.5 6 Z" : "M-2 -28 L2 -28 L2.5 4 L0 8 L-2.5 4 Z"}
-            fill={s.fill} opacity={stage <= 1 ? 0.85 : 1}
-            style={stage === 1 ? { filter: "blur(0.6px)" } : {}}/>
-          {stage >= 2 && <rect x="-7" y="8" width="14" height="2.5" rx="1.25" fill={s.fill}/>}
-          {stage >= 2 && <rect x="-2.5" y="10.5" width="5" height="12" rx="2.5" fill={stage >= 3 ? "#8B6914" : "#4A3A10"}/>}
-          {stage >= 3 && <circle cx="0" cy="24" r="3" fill={s.fill}/>}
-          {stage >= 4 && <line x1="0" y1="-24" x2="0" y2="2" stroke={s.glow} strokeWidth="0.4" opacity="0.55"/>}
-        </>
-      )}
-    </svg>
+    <>
+      <rect x="-3" y="-4" width="6" height="36" rx="3" fill={stage>=2?"#8B6914":"#5A4010"} opacity=".9"/>
+      <path d="M-3-4 L-18-24 Q-22-30 -12-30 L15-10 Q21-4 14 3 L-3-4 Z"
+        fill={s.fill} opacity={rough?.85:1} style={rough?{filter:"blur(1px)"}:{}}/>
+      {stage>=3&&<line x1="-19" y1="-22" x2="13" y2="2" stroke={s.edge} strokeWidth=".6" opacity=".45"/>}
+      {stage>=4&&<text x="-4" y="-12" textAnchor="middle" fontSize="6" fill={s.edge} opacity=".7" fontFamily="serif">⟡</text>}
+    </>
   );
 }
 
-function AxeSVG({ s, stage, h }) {
+function PickPaths({ stage, s }) {
+  if (stage === 0) return <rect x="-10" y="-6" width="20" height="12" rx="3" fill={s.metal} style={{filter:"blur(1.5px)"}}/>;
   return (
-    <svg viewBox="-20 -30 40 60" width={h * 0.68} height={h} style={{ overflow: "visible" }}
-      filter={s.hot ? `drop-shadow(0 0 5px ${s.glow})` : stage === 4 ? `drop-shadow(0 0 4px ${s.glow}70)` : "none"}>
-      {stage === 0 && <ellipse cx="-2" cy="-4" rx="14" ry="20" fill={s.fill} opacity="0.78" style={{ filter: "blur(3px)" }}/>}
-      {stage >= 1 && (
-        <>
-          <rect x="-2.5" y="-4" width="5" height="34" rx="2.5" fill={stage >= 2 ? "#8B6914" : "#5A4010"} opacity="0.9"/>
-          <path d={stage === 1
-            ? "M-2.5 -4 L-16 -22 Q-20 -28 -10 -28 L14 -10 Q20 -4 13 2 L-2.5 -4 Z"
-            : "M-2.5 -4 L-16 -22 Q-20 -28 -10 -28 L13 -8 Q19 -3 13 3 L-2.5 -4 Z"}
-            fill={s.fill} opacity={stage <= 1 ? 0.85 : 0.96}
-            style={stage === 1 ? { filter: "blur(0.8px)" } : {}}/>
-          {stage >= 3 && <line x1="-17" y1="-20" x2="11" y2="2" stroke={s.glow} strokeWidth="0.5" opacity="0.5"/>}
-          {stage >= 4 && <text x="-5" y="-11" textAnchor="middle" fontSize="5" fill={s.glow} opacity="0.7" style={{ fontFamily: "serif" }}>⟡</text>}
-        </>
-      )}
-    </svg>
+    <>
+      <rect x="-2" y="-6" width="4" height="32" rx="2" fill={stage>=2?"#8B6914":"#5A4010"} opacity=".9"/>
+      <path d="M-2-6 L-14-18 Q-18-22 -12-22 L10-8 Q14-4 10 0 L-2-6 Z"
+        fill={s.fill} opacity={stage<=1?.85:1} style={stage<=1?{filter:"blur(.8px)"}:{}}/>
+      {stage>=2&&<path d="M-2-6 L14-18 Q18-22 12-22 L10-8 Z" fill={s.fill} opacity=".75"/>}
+      {stage>=4&&<line x1="-13" y1="-16" x2="9" y2="-6" stroke={s.edge} strokeWidth=".5" opacity=".45"/>}
+    </>
   );
 }
 
-function BannerSVG({ s, stage, h }) {
+function BannerPaths({ stage, s }) {
+  if (stage === 0) return <rect x="-9" y="-16" width="18" height="32" rx="2" fill={s.metal} style={{filter:"blur(2px)"}}/>;
   return (
-    <svg viewBox="-14 -30 28 60" width={h * 0.55} height={h} style={{ overflow: "visible" }}
-      filter={s.hot ? `drop-shadow(0 0 5px ${s.glow})` : stage === 4 ? `drop-shadow(0 0 4px ${s.glow}70)` : "none"}>
-      {stage === 0 && <rect x="-9" y="-18" width="18" height="36" rx="3" fill={s.fill} opacity="0.78" style={{ filter: "blur(2.5px)" }}/>}
-      {stage >= 1 && (
-        <>
-          <rect x="-2" y="-30" width="4" height="60" rx="2" fill={stage >= 2 ? "#8B6914" : "#5A4010"} opacity="0.9"/>
-          <path d={stage >= 2 ? "M2 -26 L15 -19 L15 5 L2 8 Z" : "M2 -24 L13 -17 L13 3 L2 6 Z"}
-            fill={s.fill} opacity={stage <= 1 ? 0.85 : 0.92}
-            style={stage === 1 ? { filter: "blur(0.8px)" } : {}}/>
-          {stage >= 3 && <polygon points="0,-30 -3,-23 3,-23" fill={s.fill} opacity="0.9"/>}
-          {stage >= 4 && <text x="9" y="-4" textAnchor="middle" fontSize="5" fill={s.glow} opacity="0.7" style={{ fontFamily: "serif" }}>⟡</text>}
-        </>
-      )}
-    </svg>
+    <>
+      <rect x="-2.5" y="-30" width="5" height="60" rx="2.5" fill={stage>=2?"#8B6914":"#5A4010"} opacity=".9"/>
+      <path d={stage>=2?"M2.5-26 L16-18 L16 6 L2.5 10 Z":"M2.5-24 L14-16 L14 3 L2.5 7 Z"}
+        fill={s.fill} opacity={stage<=1?.85:.92}/>
+      {stage>=3&&<polygon points="0,-30 -3,-22 3,-22" fill={s.fill} opacity=".9"/>}
+      {stage>=4&&<text x="10" y="-4" textAnchor="middle" fontSize="5" fill={s.edge} opacity=".7" fontFamily="serif">⟡</text>}
+    </>
   );
 }
 
-function ItemPreviewSVG({ type, stage, size = 52 }) {
-  const s = SC[stage] || SC[0];
-  const props = { s, stage, h: size };
-  if (stage === 0) return <DaggerSVG {...props}/>; // blob stage uses dagger slot but shows raw form
+function CharmPaths({ stage, s }) {
+  if (stage === 0) return <ellipse cx="0" cy="0" rx="10" ry="10" fill={s.metal} style={{filter:"blur(2px)"}}/>;
+  return (
+    <>
+      <path d={`M0-${stage>=2?16:14} L${stage>=2?12:10} ${stage>=2?4:2} L${stage>=2?7:6} ${stage>=2?14:11} L-${stage>=2?7:6} ${stage>=2?14:11} L-${stage>=2?12:10} ${stage>=2?4:2} Z`}
+        fill={s.fill} opacity={stage<=1?.85:1}/>
+      {stage>=3&&<circle cx="0" cy="0" r="4" fill={s.edge} opacity=".25"/>}
+      {stage>=4&&<text x="0" y="4" textAnchor="middle" fontSize="8" fill={s.edge} opacity=".7" fontFamily="serif">✦</text>}
+    </>
+  );
+}
+
+function ArmourPaths({ stage, s }) {
+  if (stage === 0) return <rect x="-16" y="-20" width="32" height="36" rx="4" fill={s.metal} style={{filter:"blur(2.5px)"}}/>;
+  const rough = stage <= 1;
+  return (
+    <>
+      {/* breastplate */}
+      <path d="M-16-18 Q-16-28 0-28 Q16-28 16-18 L18 10 Q18 20 0 22 Q-18 20 -18 10 Z"
+        fill={s.fill} opacity={rough?.82:1} style={rough?{filter:"blur(1px)"}:{}}/>
+      {stage>=2&&<>
+        {/* shoulder pauldrons */}
+        <path d="M-16-18 Q-22-18 -24-10 Q-24-4 -18 0 L-16 0 L-16-18 Z" fill={s.fill} opacity=".9"/>
+        <path d="M16-18 Q22-18 24-10 Q24-4 18 0 L16 0 L16-18 Z" fill={s.fill} opacity=".9"/>
+      </>}
+      {stage>=3&&<line x1="0" y1="-24" x2="0" y2="18" stroke={s.edge} strokeWidth=".7" opacity=".4"/>}
+      {stage>=3&&<line x1="-12" y1="-6" x2="12" y2="-6" stroke={s.edge} strokeWidth=".5" opacity=".35"/>}
+      {stage>=4&&<text x="0" y="4" textAnchor="middle" fontSize="9" fill={s.edge} opacity=".55" fontFamily="serif">⟡</text>}
+      {stage>=4&&<path d="M-16-18 L16-18 L14-16 L-14-16 Z" fill={s.edge} opacity=".1"/>}
+    </>
+  );
+}
+
+function AegisPaths({ stage, s }) {
+  if (stage === 0) return <ellipse cx="0" cy="0" rx="20" ry="24" fill={s.metal} style={{filter:"blur(2.5px)"}}/>;
+  const rough = stage <= 1;
+  return (
+    <>
+      <path d="M0-30 L24-16 L24 8 Q24 34 0 38 Q-24 34 -24 8 L-24-16 Z"
+        fill={s.fill} opacity={rough?.82:1} style={rough?{filter:"blur(1px)"}:{}}/>
+      {stage>=2&&<path d="M0-30 L26-16 L28 8 Q0 40 0 40 Q-28 8 -28-16 Z" fill="none" stroke={s.edge} strokeWidth="1.5" opacity=".2"/>}
+      {stage>=3&&<path d="M0-20 L14-10 L14 5 Q14 20 0 22 Q-14 20 -14 5 L-14-10 Z" fill={s.edge} opacity=".12"/>}
+      {stage>=3&&<line x1="0" y1="-24" x2="0" y2="22" stroke={s.edge} strokeWidth=".7" opacity=".4"/>}
+      {stage>=4&&<>
+        <text x="0" y="6" textAnchor="middle" fontSize="14" fill={s.edge} opacity=".55" fontFamily="serif">⟡</text>
+        <circle cx="0" cy="0" r="6" fill={s.edge} opacity=".08"/>
+        <line x1="-16" y1="0" x2="16" y2="0" stroke={s.edge} strokeWidth=".5" opacity=".25"/>
+      </>}
+    </>
+  );
+}
+
+function ItemPaths({ type, stage }) {
+  const s = SC[Math.min(stage, 4)];
   switch (type) {
-    case "sword": case "aegis": return <SwordSVG  {...props}/>;
-    case "shield":              return <ShieldSVG {...props}/>;
-    case "helmet": case "armour": return <HelmetSVG {...props}/>;
-    case "dagger": case "charm": case "ring": return <DaggerSVG {...props}/>;
-    case "axe": case "warhammer":  return <AxeSVG   {...props}/>;
-    case "banner":              return <BannerSVG {...props}/>;
-    default:                    return <SwordSVG  {...props}/>;
+    case "sword": case "dagger": return <SwordPaths stage={stage} s={s}/>;
+    case "shield": return <ShieldPaths stage={stage} s={s}/>;
+    case "helmet": return <HelmetPaths stage={stage} s={s}/>;
+    case "axe": return <AxePaths stage={stage} s={s}/>;
+    case "pick": return <PickPaths stage={stage} s={s}/>;
+    case "banner": return <BannerPaths stage={stage} s={s}/>;
+    case "charm": return <CharmPaths stage={stage} s={s}/>;
+    case "armour": return <ArmourPaths stage={stage} s={s}/>;
+    case "aegis": return <AegisPaths stage={stage} s={s}/>;
+    default: return <SwordPaths stage={stage} s={s}/>;
   }
 }
 
-// ─── ANVIL ITEM (larger, for workshop scene) ──────────────────────────────────────
+// viewBox per item type (width height cx cy) for the compact card & forge wall
+const VB = {
+  sword:  { vb:"-16 -48 32 96",  w:.55 },
+  dagger: { vb:"-10 -44 20 88",  w:.42 },
+  shield: { vb:"-24 -34 48 68",  w:.70 },
+  helmet: { vb:"-24 -36 48 72",  w:.74 },
+  axe:    { vb:"-24 -36 48 68",  w:.72 },
+  pick:   { vb:"-20 -30 40 60",  w:.68 },
+  banner: { vb:"-16 -36 32 72",  w:.55 },
+  charm:  { vb:"-16 -20 32 40",  w:.78 },
+  armour: { vb:"-24 -34 48 66",  w:.80 },
+  aegis:  { vb:"-28 -36 56 80",  w:.80 },
+};
 
-function AnvilItemSVG({ type, stage }) {
-  const s = SC[stage] || SC[0];
-
-  if (stage === 0) {
-    return (
-      <g>
-        <ellipse cx="0" cy="8" rx="13" ry="17" fill={s.fill} opacity="0.72" style={{ filter: "blur(3.5px)" }}/>
-        <ellipse cx="0" cy="8" rx="8" ry="11" fill={s.glow} opacity="0.28" style={{ filter: "blur(2px)" }}/>
-      </g>
-    );
-  }
-
-  switch (type) {
-    case "shield": return (
-      <g>
-        <path d="M0 -36 L26 -19 L26 7 Q26 34 0 38 Q-26 34 -26 7 L-26 -19 Z"
-          fill={s.fill} opacity={stage <= 1 ? 0.8 : 0.95}
-          style={stage === 1 ? { filter: "blur(1px)" } : {}}/>
-        {stage >= 3 && <path d="M0 -24 L15 -13 L15 4 Q15 18 0 22 Q-15 18 -15 4 L-15 -13 Z" fill={s.glow} opacity="0.14"/>}
-        {stage >= 3 && <line x1="0" y1="-26" x2="0" y2="22" stroke={s.glow} strokeWidth="0.7" opacity="0.4"/>}
-        {stage >= 4 && <text x="0" y="4" textAnchor="middle" fontSize="13" fill={s.glow} opacity="0.6" style={{ fontFamily: "serif" }}>⟡</text>}
-      </g>
-    );
-    case "helmet": case "armour": return (
-      <g>
-        {stage <= 1
-          ? <ellipse cx="0" cy="-8" rx="16" ry="22" fill={s.fill} opacity="0.8" style={{ filter: "blur(1.5px)" }}/>
-          : <>
-            <path d="M-19 9 Q-19 -30 0 -30 Q19 -30 19 9 Z" fill={s.fill} opacity="0.95"/>
-            <rect x="-21" y="7" width="42" height="6" rx="3" fill={s.fill} opacity="0.95"/>
-            {stage >= 3 && <rect x="-1.8" y="-12" width="3.6" height="20" rx="1.8" fill={s.glow} opacity="0.7"/>}
-            {stage >= 3 && <>
-              <path d="M-19 9 L-19 24 Q-19 29 -12 29 L-12 9 Z" fill={s.fill} opacity="0.88"/>
-              <path d="M19 9 L19 24 Q19 29 12 29 L12 9 Z" fill={s.fill} opacity="0.88"/>
-            </>}
-            {stage >= 4 && <path d="M0 -30 Q5 -44 0 -41 Q-5 -44 0 -30" fill={s.glow} opacity="0.8"/>}
-          </>
-        }
-      </g>
-    );
-    case "axe": case "warhammer": return (
-      <g>
-        <rect x="-3" y="-5" width="6" height="42" rx="3" fill={stage >= 2 ? "#8B6914" : "#5A4010"} opacity="0.9"/>
-        <path d={stage === 1
-          ? "M-3 -5 L-20 -26 Q-26 -34 -13 -34 L18 -12 Q25 -5 17 3 L-3 -5 Z"
-          : "M-3 -5 L-20 -26 Q-26 -34 -12 -34 L17 -11 Q24 -4 16 3 L-3 -5 Z"}
-          fill={s.fill} opacity={stage <= 1 ? 0.85 : 0.95}
-          style={stage === 1 ? { filter: "blur(1px)" } : {}}/>
-        {stage >= 3 && <line x1="-21" y1="-24" x2="14" y2="2" stroke={s.glow} strokeWidth="0.6" opacity="0.5"/>}
-        {stage >= 4 && <text x="-7" y="-14" textAnchor="middle" fontSize="7" fill={s.glow} opacity="0.7" style={{ fontFamily: "serif" }}>⟡</text>}
-      </g>
-    );
-    case "banner": return (
-      <g>
-        <rect x="-2.5" y="-40" width="5" height="70" rx="2.5" fill={stage >= 2 ? "#8B6914" : "#5A4010"} opacity="0.9"/>
-        <path d={stage >= 2 ? "M2.5 -36 L20 -27 L20 6 L2.5 10 Z" : "M2.5 -32 L17 -23 L17 4 L2.5 7 Z"}
-          fill={s.fill} opacity={stage <= 1 ? 0.85 : 0.92}/>
-        {stage >= 3 && <polygon points="0,-40 -4,-30 4,-30" fill={s.fill} opacity="0.9"/>}
-        {stage >= 4 && <text x="12" y="-6" textAnchor="middle" fontSize="7" fill={s.glow} opacity="0.7" style={{ fontFamily: "serif" }}>⟡</text>}
-      </g>
-    );
-    default: { // sword / dagger / charm / ring / aegis
-      const isTiny = (type === "dagger" || type === "charm" || type === "ring");
-      const xScale = isTiny ? 0.7 : 1;
-      return (
-        <g transform={`scale(${xScale},1)`}>
-          {stage === 1 && <ellipse cx="0" cy="-26" rx="7" ry="9" fill={s.glow} opacity="0.4" style={{ filter: "blur(3px)" }}/>}
-          <path
-            d={stage === 1 ? "M-4.5 -42 L4.5 -42 L5.5 10 L0 18 L-5.5 10 Z" : "M-3.5 -42 L3.5 -42 L4 8 L0 16 L-4 8 Z"}
-            fill={s.fill} opacity={stage <= 1 ? 0.86 : 1}
-            style={stage === 1 ? { filter: "blur(1px)" } : {}}
-          />
-          {stage >= 3 && <line x1="0" y1="-36" x2="0" y2="6" stroke={s.glow} strokeWidth="0.7" opacity="0.5"/>}
-          {stage >= 2 && <rect x="-15" y="16" width="30" height="5.5" rx="2.75" fill={s.fill} opacity="0.9"/>}
-          {stage >= 2 && <rect x="-5" y="21.5" width="10" height="22" rx="4" fill={stage >= 3 ? "#8B6914" : "#4A3A10"} opacity="0.9"/>}
-          {stage >= 3 && <circle cx="0" cy="46" r="7" fill={s.fill} opacity="0.9"/>}
-          {stage >= 4 && <>
-            <text x="0" y="-14" textAnchor="middle" fontSize="8" fill={s.glow} opacity="0.78" style={{ fontFamily: "serif" }}>⟡</text>
-            <ellipse cx="0" cy="46" rx="10" ry="10" fill={s.glow} opacity="0.2" style={{ filter: "blur(1px)" }}/>
-          </>}
-        </g>
-      );
-    }
-  }
+function ItemPreview({ type, stage, height = 52 }) {
+  const s = SC[Math.min(stage, 4)];
+  const cfg = VB[type] ?? VB.sword;
+  const filter = s.hot
+    ? `drop-shadow(0 0 5px ${s.glow})`
+    : stage === 4 ? `drop-shadow(0 0 4px ${s.glow}70)` : "none";
+  return (
+    <svg viewBox={cfg.vb} width={Math.round(height * cfg.w)} height={height}
+      style={{ overflow:"visible", filter, display:"block" }}>
+      <ItemPaths type={type} stage={stage}/>
+    </svg>
+  );
 }
 
-// ─── WORKSHOP SCENE ─────────────────────────────────────────────────────────────────
+// ─── SMITH CHARACTER ──────────────────────────────────────────────────────────────
+// A proper layered SVG companion character. Defined relative to foot-center (0,0).
+// Translate the group to position within the scene.
 
-function WorkshopScene({ item, progress, reducedMotion }) {
+function SmithCharacter({ striking = false, reducedMotion = false }) {
+  return (
+    <g className={reducedMotion ? "" : "fg-idle"}>
+      {/* Shadow */}
+      <ellipse cx="0" cy="1" rx="19" ry="4" fill="#000" opacity=".45"/>
+      {/* LEGS */}
+      <rect x="-13" y="-28" width="11" height="29" rx="4" fill="#2A3040"/>
+      <rect x="2"   y="-26" width="11" height="27" rx="4" fill="#2A3040"/>
+      {/* Boots */}
+      <path d="M-16-2 Q-15 2 -6 2 L-6-1 L-14-2 Z" fill="#3A2A18"/>
+      <path d="M1-1 Q1 3 10 3 L11-1 L2-2 Z" fill="#3A2A18"/>
+      {/* TORSO */}
+      <rect x="-16" y="-66" width="32" height="40" rx="7" fill="#2E3848"/>
+      {/* APRON (leather over torso) */}
+      <path d="M-12-60 L12-60 L14-28 L-14-28 Z" fill="#5C3A1C"/>
+      {/* Apron seam */}
+      <line x1="0" y1="-60" x2="0" y2="-28" stroke="#4A2E14" strokeWidth="1.5" opacity=".5"/>
+      {/* Apron pocket */}
+      <rect x="-5" y="-44" width="10" height="8" rx="2" fill="#4A2E14" opacity=".8"/>
+      {/* Apron strings over shoulders */}
+      <line x1="-12" y1="-60" x2="-8" y2="-70" stroke="#5C3A1C" strokeWidth="2.5"/>
+      <line x1="12"  y1="-60" x2="8"  y2="-70" stroke="#5C3A1C" strokeWidth="2.5"/>
+      {/* LEFT ARM + TONGS */}
+      <rect x="-24" y="-64" width="9" height="28" rx="4" fill="#B87840"/>
+      {/* Left glove */}
+      <path d="M-24-38 Q-28-36 -26-32 Q-24-28 -20-30 L-20-36 Z" fill="#8B5E3C"/>
+      {/* Tongs */}
+      <line x1="-24" y1="-32" x2="-27" y2="-18" stroke="#6A6860" strokeWidth="2.5" strokeLinecap="round"/>
+      <line x1="-22" y1="-32" x2="-24" y2="-18" stroke="#6A6860" strokeWidth="2"   strokeLinecap="round"/>
+      {/* RIGHT ARM + HAMMER (animated) */}
+      <g className={striking && !reducedMotion ? "fg-strike" : ""} style={{transformOrigin:"14px -62px"}}>
+        <rect x="13" y="-64" width="9" height="28" rx="4" fill="#B87840"/>
+        {/* Right glove */}
+        <path d="M13-38 Q17-36 18-32 Q19-28 15-29 L13-35 Z" fill="#8B5E3C"/>
+        {/* Hammer handle */}
+        <rect x="16" y="-86" width="4.5" height="30" rx="2.25" fill="#5C3E20"/>
+        {/* Hammer head */}
+        <rect x="9"  y="-98" width="20" height="14" rx="3.5" fill="#6A6860"/>
+        {/* Hammer face sheen */}
+        <rect x="9"  y="-98" width="20" height="4"  rx="1.5" fill="#8A8880" opacity=".5"/>
+        {/* Face of hammer */}
+        <rect x="9"  y="-88" width="20" height="4"  rx="1.5" fill="#5A5858" opacity=".4"/>
+      </g>
+      {/* NECK */}
+      <rect x="-7" y="-78" width="14" height="10" rx="5" fill="#B87840"/>
+      {/* HEAD */}
+      <ellipse cx="0" cy="-90" rx="17" ry="19" fill="#C8844A"/>
+      {/* HAIR / BANDANA */}
+      <path d="M-17-97 Q-17-110 0-112 Q17-110 17-97 L13-97 Q13-108 0-110 Q-13-108 -13-97 Z" fill="#1A1412"/>
+      {/* Bandana accent stripe */}
+      <path d="M-17-97 Q-17-106 0-108 Q17-106 17-97" fill="none" stroke="#C04018" strokeWidth="3.5" opacity=".88"/>
+      {/* Bandana knot right side */}
+      <path d="M17-97 Q21-99 19-94 Q17-89 15-91" fill="#C04018" opacity=".7"/>
+      {/* FACE */}
+      {/* Eye sockets (slight shadow) */}
+      <ellipse cx="-5.5" cy="-89" rx="4" ry="3.5" fill="#B07030" opacity=".2"/>
+      <ellipse cx="5.5"  cy="-89" rx="4" ry="3.5" fill="#B07030" opacity=".2"/>
+      {/* Eyes */}
+      <circle cx="-5.5" cy="-89" r="2.8" fill="#1A1412"/>
+      <circle cx="5.5"  cy="-89" r="2.8" fill="#1A1412"/>
+      {/* Eye gleam */}
+      <circle cx="-4.5" cy="-90" r="1.1" fill="#FFF" opacity=".82"/>
+      <circle cx="6.5"  cy="-90" r="1.1" fill="#FFF" opacity=".82"/>
+      {/* Brow suggestion */}
+      <path d="M-9-93 Q-5.5-95 -2-93" fill="none" stroke="#8B4820" strokeWidth="1.5" opacity=".4"/>
+      <path d="M2-93 Q5.5-95 9-93"    fill="none" stroke="#8B4820" strokeWidth="1.5" opacity=".4"/>
+      {/* Nose */}
+      <path d="M-3-84 Q0-82 3-84" fill="none" stroke="#A06830" strokeWidth="1.5" opacity=".5"/>
+      {/* Mouth — slight focused line */}
+      <path d="M-5-78 Q0-76 5-78" fill="none" stroke="#8B4820" strokeWidth="1.6" strokeLinecap="round"/>
+      {/* Jaw shadow */}
+      <path d="M-16-96 Q-17-82 -13-76" stroke="#A06030" strokeWidth="1.5" fill="none" opacity=".25"/>
+      <path d="M16-96 Q17-82 13-76"    stroke="#A06030" strokeWidth="1.5" fill="none" opacity=".25"/>
+      {/* Cheek warm highlight */}
+      <ellipse cx="-10" cy="-83" rx="5" ry="3" fill="#E07040" opacity=".12"/>
+      <ellipse cx="10"  cy="-83" rx="5" ry="3" fill="#E07040" opacity=".12"/>
+    </g>
+  );
+}
+
+// Small portrait crop (just head+shoulders) for the compact card
+function SmithPortrait({ size = 44 }) {
+  return (
+    <svg viewBox="-20 -115 40 55" width={size} height={size}
+      style={{ display:"block", borderRadius:"50%", background:"#1A1208" }}>
+      {/* Shoulders */}
+      <rect x="-16" y="-76" width="32" height="12" rx="6" fill="#2E3848"/>
+      <path d="M-12-76 L12-76 L10-72 L-10-72 Z" fill="#5C3A1C"/>
+      {/* Bandana strings hint */}
+      <line x1="-12" y1="-76" x2="-8" y2="-82" stroke="#5C3A1C" strokeWidth="2"/>
+      <line x1="12"  y1="-76" x2="8"  y2="-82" stroke="#5C3A1C" strokeWidth="2"/>
+      {/* Neck */}
+      <rect x="-6" y="-84" width="12" height="8" rx="4" fill="#B87840"/>
+      {/* Head */}
+      <ellipse cx="0" cy="-96" rx="16" ry="18" fill="#C8844A"/>
+      {/* Hair */}
+      <path d="M-16-102 Q-16-115 0-117 Q16-115 16-102 L13-102 Q13-113 0-115 Q-13-113 -13-102 Z" fill="#1A1412"/>
+      <path d="M-16-102 Q-16-111 0-113 Q16-111 16-102" fill="none" stroke="#C04018" strokeWidth="3" opacity=".85"/>
+      {/* Eyes */}
+      <circle cx="-5.5" cy="-94" r="2.5" fill="#1A1412"/>
+      <circle cx="5.5"  cy="-94" r="2.5" fill="#1A1412"/>
+      <circle cx="-4.5" cy="-95" r="1"   fill="#FFF" opacity=".8"/>
+      <circle cx="6.5"  cy="-95" r="1"   fill="#FFF" opacity=".8"/>
+      {/* Mouth */}
+      <path d="M-4-87 Q0-85 4-87" fill="none" stroke="#8B4820" strokeWidth="1.4" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
+// ─── WORKSHOP SCENE ───────────────────────────────────────────────────────────────
+
+const EMBERS = [
+  {cx:39,cy:107,del:"0s",  dur:"2.3s",dx:"-14px",r:1.6},
+  {cx:53,cy:107,del:".6s", dur:"1.9s",dx:"-5px", r:1.0},
+  {cx:35,cy:107,del:"1.1s",dur:"2.7s",dx:"-18px",r:1.3},
+  {cx:57,cy:107,del:".25s",dur:"2.1s",dx:"7px",  r:0.9},
+  {cx:46,cy:107,del:"1.5s",dur:"1.7s",dx:"-10px",r:1.9},
+  {cx:43,cy:107,del:".9s", dur:"2.5s",dx:"10px", r:1.1},
+  {cx:50,cy:107,del:"1.8s",dur:"2.0s",dx:"-4px", r:0.8},
+];
+
+const SPARK_OFFSETS = [
+  {sx:"-18px",sy:"-22px",del:".32s"},{sx:"16px",sy:"-26px",del:".36s"},
+  {sx:"-24px",sy:"-14px",del:".34s"},{sx:"22px",sy:"-18px",del:".38s"},
+  {sx:"-10px",sy:"-30px",del:".3s"}, {sx:"8px", sy:"-32px",del:".4s"},
+];
+
+function WorkshopScene({ item, progress, striking, reducedMotion }) {
   const { stage } = progress;
-  const s = SC[stage] || SC[0];
+  const s = SC[Math.min(stage,4)];
 
-  const EMBERS = [
-    { cx: 39, delay: "0s",   dur: "2.3s", dx: "-14px", r: 1.6 },
-    { cx: 53, delay: "0.7s", dur: "1.9s", dx: "-6px",  r: 1.0 },
-    { cx: 35, delay: "1.2s", dur: "2.7s", dx: "-18px", r: 1.3 },
-    { cx: 57, delay: "0.25s",dur: "2.1s", dx: "7px",   r: 0.9 },
-    { cx: 46, delay: "1.6s", dur: "1.7s", dx: "-10px", r: 1.9 },
-    { cx: 42, delay: "0.9s", dur: "2.5s", dx: "10px",  r: 1.1 },
-    { cx: 50, delay: "1.9s", dur: "2.0s", dx: "-4px",  r: 0.8 },
+  // viewbox for item on anvil (varies by type)
+  const itemVbMap = {
+    sword:  {vb:"-16 -48 32 100",ty:-35},
+    dagger: {vb:"-10 -44 20 88", ty:-30},
+    shield: {vb:"-24 -34 48 70", ty:-20},
+    helmet: {vb:"-24 -36 48 72", ty:-18},
+    axe:    {vb:"-24 -36 48 70", ty:-22},
+    pick:   {vb:"-20 -28 40 58", ty:-16},
+    banner: {vb:"-16 -36 32 70", ty:-30},
+    charm:  {vb:"-16 -20 32 44", ty:-8},
+    armour: {vb:"-24 -34 48 68", ty:-18},
+    aegis:  {vb:"-28 -36 56 82", ty:-22},
+  };
+  const iCfg = itemVbMap[item.type] ?? itemVbMap.sword;
+
+  return (
+    <svg viewBox="0 0 340 222" style={{width:"100%",height:"auto",display:"block"}}>
+      <defs>
+        <radialGradient id="fg-amb" cx="23%" cy="76%" r="46%">
+          <stop offset="0%"  stopColor="#E67E22" stopOpacity=".38"/>
+          <stop offset="50%" stopColor="#C0392B" stopOpacity=".1"/>
+          <stop offset="100%" stopColor="#0D0D0B" stopOpacity="0"/>
+        </radialGradient>
+        <radialGradient id="fg-hot-h" cx="50%" cy="50%" r="50%">
+          <stop offset="0%"  stopColor="#E67E22" stopOpacity=".85"/>
+          <stop offset="100%" stopColor="#E67E22" stopOpacity="0"/>
+        </radialGradient>
+        <radialGradient id="fg-gold-h" cx="50%" cy="50%" r="50%">
+          <stop offset="0%"  stopColor="#F5C842" stopOpacity=".78"/>
+          <stop offset="100%" stopColor="#F5C842" stopOpacity="0"/>
+        </radialGradient>
+        <radialGradient id="fg-cool-h" cx="50%" cy="50%" r="50%">
+          <stop offset="0%"  stopColor={s.glow} stopOpacity=".5"/>
+          <stop offset="100%" stopColor={s.glow} stopOpacity="0"/>
+        </radialGradient>
+        <filter id="fg-b3"><feGaussianBlur stdDeviation="3"/></filter>
+        <filter id="fg-b6"><feGaussianBlur stdDeviation="6"/></filter>
+        <clipPath id="fg-scene"><rect width="340" height="222"/></clipPath>
+      </defs>
+
+      <g clipPath="url(#fg-scene)">
+        {/* BG */}
+        <rect width="340" height="222" fill="#0D0D0B"/>
+        <rect width="340" height="222" fill="url(#fg-amb)"/>
+        {/* Back wall — subtle stone texture lines */}
+        {[60,110,160].map(y=><line key={y} x1="0" y1={y} x2="340" y2={y} stroke="#151310" strokeWidth="1"/>)}
+        {[90,190,270].map(x=><line key={x} x1={x} y1="0" x2={x} y2="170" stroke="#151310" strokeWidth=".5" opacity=".4"/>)}
+        <line x1="0" y1="170" x2="340" y2="170" stroke="#1E1C16" strokeWidth="2"/>
+
+        {/* ── FURNACE ── */}
+        {/* Chimney */}
+        <rect x="22" y="4" width="38" height="30" rx="2" fill="#1C1A14"/>
+        <rect x="26" y="4" width="30" height="4"  rx="1" fill="#242218"/>
+        {/* Furnace body */}
+        <rect x="8" y="30" width="76" height="140" rx="5" fill="#1E1C16"/>
+        {/* Stone seams */}
+        {[66,98,130].map(y=><line key={y} x1="8" y1={y} x2="84" y2={y} stroke="#141210" strokeWidth="1"/>)}
+        <line x1="46" y1="30" x2="46" y2="170" stroke="#141210" strokeWidth=".5" opacity=".4"/>
+        {/* Arch surround */}
+        <path d="M16 104 Q46 62 76 104" fill="none" stroke="#2A2820" strokeWidth="5"/>
+        <path d="M16 104 Q46 64 76 104" fill="none" stroke="#161410" strokeWidth="2.5"/>
+        {/* Opening */}
+        <path d="M18 170 L18 104 Q46 66 74 104 L74 170 Z" fill="#090806"/>
+        {/* Ash bed */}
+        <ellipse cx="46" cy="166" rx="23" ry="4" fill="#201C10" opacity=".95"/>
+        {/* Fire layers */}
+        <path className={reducedMotion?"":"fg-fire1"} d="M26 170 L34 138 L41 154 L47 130 L53 147 L60 133 L67 170 Z" fill="#B03018" opacity=".88"/>
+        <path className={reducedMotion?"":"fg-fire2"} d="M30 170 L38 122 L47 142 L55 116 L63 137 L69 170 Z"       fill="#E67E22" opacity=".65"/>
+        <path className={reducedMotion?"":"fg-fire3"} d="M34 170 L42 132 L47 112 L52 128 L59 120 L65 170 Z"       fill="#F5C842" opacity=".34"/>
+        {/* Floor glow */}
+        <ellipse cx="46" cy="170" rx="42" ry="8" fill="#E67E22"
+          opacity={reducedMotion?.16:.2} className={reducedMotion?"":"fg-glow"} style={{filter:"blur(5px)"}}/>
+        {/* Arch interior glow */}
+        <path d="M8 104 Q8 48 22 28 Q34 10 46 6 Q58 10 70 28 Q84 48 84 104 L74 104 Q74 54 46 36 Q18 54 18 104 Z"
+          fill="#E67E22" opacity=".05"/>
+        {/* Embers */}
+        {!reducedMotion && EMBERS.map((e,i)=>(
+          <circle key={i} cx={e.cx} cy={e.cy} r={e.r}
+            fill={i%3===0?"#F5C842":"#E67E22"}
+            className="fg-ember"
+            style={{"--dur":e.dur,"--del":e.del,"--dx":e.dx}}/>
+        ))}
+
+        {/* ── ANVIL ── */}
+        <ellipse cx="180" cy="176" rx="54" ry="7" fill="#000" opacity=".45" style={{filter:"blur(2px)"}}/>
+        {/* Horn */}
+        <path d="M125 130 Q108 133 112 138 L125 138 Z" fill="#242220"/>
+        {/* Top plate */}
+        <rect x="123" y="122" width="114" height="18" rx="3" fill="#302E26"/>
+        <rect x="123" y="122" width="114" height="3"  rx="1.5" fill="#3A3830" opacity=".6"/>
+        {/* Body */}
+        <rect x="142" y="140" width="78" height="22" rx="2" fill="#242220"/>
+        {/* Base */}
+        <rect x="128" y="162" width="104" height="16" rx="3" fill="#302E26"/>
+        <rect x="128" y="162" width="104" height="3"  rx="1.5" fill="#3A3830" opacity=".55"/>
+
+        {/* Item aura on anvil */}
+        {s.hot && <ellipse cx="192" cy="122" rx="32" ry="13" fill="url(#fg-hot-h)"
+          className={reducedMotion?"":"fg-item-hot"} style={{filter:"blur(4px)"}}/>}
+        {stage===4 && <ellipse cx="192" cy="122" rx="28" ry="11" fill="url(#fg-gold-h)"
+          className={reducedMotion?"":"fg-item-gold"} style={{filter:"blur(3px)"}}/>}
+        {stage>=2&&stage<=3 && <ellipse cx="192" cy="122" rx="24" ry="10" fill="url(#fg-cool-h)"
+          opacity=".5" style={{filter:"blur(3px)"}}/>}
+
+        {/* ── ITEM ON ANVIL ── */}
+        <svg x={192-28} y={50} viewBox={iCfg.vb} width="56" height={122-50}>
+          <ItemPaths type={item.type} stage={stage}/>
+        </svg>
+
+        {/* STRIKE SPARKS — appear at anvil surface on hammer impact */}
+        {!reducedMotion && striking && SPARK_OFFSETS.map((sp,i)=>(
+          <circle key={i} cx="192" cy="118" r="2.5" fill={i%2===0?"#F5C842":"#E67E22"}
+            className="fg-spark" style={{"--sx":sp.sx,"--sy":sp.sy,"--del":sp.del}}/>
+        ))}
+
+        {/* ── SMITH CHARACTER ── */}
+        {/* Positioned: feet at (268,170) */}
+        <g transform="translate(268,170)">
+          <SmithCharacter striking={striking} reducedMotion={reducedMotion}/>
+        </g>
+
+        {/* ── TOOL RACK (right) ── */}
+        <rect x="307" y="12"  width="4" height="158" rx="2" fill="#1C1A14"/>
+        <rect x="304" y="12"  width="10" height="3" rx="1.5" fill="#242220"/>
+        <rect x="304" y="167" width="10" height="3" rx="1.5" fill="#242220"/>
+        {[28,55,82,109,136].map((y,i)=>(
+          <g key={i}>
+            <rect x="304" y={y} width="10" height="3" rx="1" fill="#2A2820"/>
+            <line x1="309" y1={y+3} x2="315" y2={y+20} stroke="#3A3830" strokeWidth="1.5"/>
+            {i%2===0
+              ? <rect x="312" y={y+18} width="7" height="14" rx="2" fill="#3A3830" opacity=".8"/>
+              : <path d={`M311 ${y+18} L319 ${y+18} L315 ${y+30} Z`} fill="#3A3830" opacity=".72"/>
+            }
+          </g>
+        ))}
+
+        {/* ── FLOOR ── */}
+        <rect x="0" y="170" width="340" height="52" fill="#141210"/>
+        {[85,170,255].map(x=><line key={x} x1={x} y1="170" x2={x} y2="222" stroke="#1C1A16" strokeWidth="1"/>)}
+        <line x1="0" y1="188" x2="340" y2="188" stroke="#1C1A16" strokeWidth=".5"/>
+
+        {/* Stage label */}
+        <text x="320" y="17" textAnchor="end" fontSize="8"
+          fontFamily="DM Sans,system-ui,sans-serif" fontWeight="700" letterSpacing=".1em"
+          fill={s.edge} opacity=".6">
+          {(FORGE_STAGES[stage]?.label??"").toUpperCase()}
+        </text>
+      </g>
+    </svg>
+  );
+}
+
+// ─── STAGE TRACKER ────────────────────────────────────────────────────────────────
+
+function StageTracker({ stage }) {
+  return (
+    <div style={{display:"flex",alignItems:"flex-start",padding:"0 2px"}}>
+      {FORGE_STAGES.map((st,i)=>{
+        const done=i<stage, active=i===stage;
+        const c=SC[i];
+        return (
+          <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:6,position:"relative"}}>
+            {i<FORGE_STAGES.length-1&&(
+              <div style={{position:"absolute",top:11,left:"50%",right:0,height:2,
+                background:done?`linear-gradient(90deg,${T.gold}80,${T.gold}40)`:T.hint+"28",zIndex:0}}/>
+            )}
+            <div style={{width:22,height:22,borderRadius:"50%",zIndex:1,position:"relative",
+              border:`2px solid ${active?c.edge:done?c.edge+"60":T.hint+"28"}`,
+              background:active?c.edge+"22":done?c.edge+"10":"transparent",
+              display:"flex",alignItems:"center",justifyContent:"center",
+              fontSize:9,fontWeight:700,
+              color:active?c.edge:done?c.edge+"AA":T.hint+"55",
+              boxShadow:active?`0 0 12px ${c.edge}55`:"none",
+              transition:"box-shadow .5s ease"}}>
+              {done?"✓":i+1}
+            </div>
+            <div style={{fontSize:8.5,fontWeight:active?700:500,color:active?T.text:done?T.sub:T.hint,
+              textAlign:"center",lineHeight:1.3,transition:"color .3s"}}>
+              {st.label}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── ITEM SELECTOR ────────────────────────────────────────────────────────────────
+
+function ItemSelector({ arc, currentItem, onSelect }) {
+  const pool = useMemo(()=>getItemPool(arc),[arc?.id,arc?.duration_days,arc?.durationDays]);
+  return (
+    <div style={{marginBottom:16}}>
+      <div style={{fontSize:10,fontWeight:700,color:T.hint,letterSpacing:".12em",
+        textTransform:"uppercase",marginBottom:8}}>
+        Choose your forged item
+      </div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        {pool.map(item=>{
+          const active=item.id===currentItem.id;
+          return (
+            <button key={item.id} type="button" onClick={()=>onSelect(item)}
+              style={{display:"flex",alignItems:"center",gap:6,padding:"7px 12px",
+                borderRadius:T.rsm,border:`1px solid ${active?T.gold+"80":T.border}`,
+                background:active?T.gold+"12":T.surface,cursor:"pointer",
+                fontFamily:T.font,fontSize:12,color:active?T.text:T.sub,fontWeight:active?600:400,
+                boxShadow:active?`0 0 10px ${T.gold}20`:"none",
+                transition:"all .2s ease"}}>
+              <ItemPreview type={item.type} stage={4} height={22}/>
+              {item.name}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{fontSize:11,color:T.hint,marginTop:6}}>
+        Preview only — saved locally, not to your account.
+      </div>
+    </div>
+  );
+}
+
+// ─── RECENT FORGE HISTORY ─────────────────────────────────────────────────────────
+
+function RecentHistory({ rows, item }) {
+  if (!rows.length) return null;
+
+  const buildMessages = [
+    "ore collected", "billet heated", "rough shape found",
+    "edges hammered", "blade formed", "surface flattened",
+    "guard shaped", "handle wrapped", "polish started", "final edge set",
   ];
 
   return (
-    <svg viewBox="0 0 320 200" style={{ width: "100%", height: "auto", display: "block" }}>
-      <defs>
-        <radialGradient id="fg-forge-amb" cx="22%" cy="78%" r="48%">
-          <stop offset="0%"   stopColor="#E67E22" stopOpacity="0.38"/>
-          <stop offset="52%"  stopColor="#C0392B" stopOpacity="0.1"/>
-          <stop offset="100%" stopColor="#0D0D0B" stopOpacity="0"/>
-        </radialGradient>
-        <radialGradient id="fg-hot-halo" cx="50%" cy="50%" r="50%">
-          <stop offset="0%"   stopColor="#E67E22" stopOpacity="0.85"/>
-          <stop offset="100%" stopColor="#E67E22" stopOpacity="0"/>
-        </radialGradient>
-        <radialGradient id="fg-gold-halo" cx="50%" cy="50%" r="50%">
-          <stop offset="0%"   stopColor="#F5C842" stopOpacity="0.75"/>
-          <stop offset="100%" stopColor="#F5C842" stopOpacity="0"/>
-        </radialGradient>
-        <radialGradient id="fg-cool-halo" cx="50%" cy="50%" r="50%">
-          <stop offset="0%"   stopColor={s.glow}  stopOpacity="0.5"/>
-          <stop offset="100%" stopColor={s.glow}  stopOpacity="0"/>
-        </radialGradient>
-        <filter id="fg-blur3"><feGaussianBlur stdDeviation="3"/></filter>
-        <filter id="fg-blur6"><feGaussianBlur stdDeviation="6"/></filter>
-      </defs>
-
-      {/* Background */}
-      <rect width="320" height="200" fill="#0D0D0B"/>
-      <rect width="320" height="200" fill="url(#fg-forge-amb)"/>
-
-      {/* Wall back line */}
-      <line x1="0" y1="170" x2="320" y2="170" stroke="#1E1C16" strokeWidth="1.5"/>
-
-      {/* ── FORGE FURNACE ── */}
-      {/* Chimney */}
-      <rect x="23" y="6" width="36" height="30" rx="2" fill="#1C1A14"/>
-      <rect x="26" y="6" width="30" height="3" rx="1" fill="#242218"/>
-      {/* Furnace body */}
-      <rect x="10" y="32" width="74" height="138" rx="5" fill="#1E1C16"/>
-      {/* Stone seams */}
-      {[68, 100, 130].map(y => (
-        <line key={y} x1="10" y1={y} x2="84" y2={y} stroke="#141210" strokeWidth="1"/>
-      ))}
-      <line x1="47" y1="32" x2="47" y2="170" stroke="#141210" strokeWidth="0.5" opacity="0.5"/>
-      {/* Arch outline */}
-      <path d="M18 102 Q47 62 76 102" fill="none" stroke="#2A2820" strokeWidth="5"/>
-      <path d="M18 102 Q47 64 76 102" fill="none" stroke="#161410" strokeWidth="2.5"/>
-      {/* Opening interior */}
-      <path d="M20 170 L20 102 Q47 66 74 102 L74 170 Z" fill="#090806"/>
-      {/* Ash bed */}
-      <ellipse cx="47" cy="166" rx="24" ry="4" fill="#201C10" opacity="0.95"/>
-
-      {/* Fire (animated layers) */}
-      <g>
-        <path className={reducedMotion ? "" : "fg-fire-1"}
-          d="M26 170 L34 138 L41 154 L47 130 L53 147 L60 133 L67 170 Z"
-          fill="#B03018" opacity="0.88"/>
-        <path className={reducedMotion ? "" : "fg-fire-2"}
-          d="M30 170 L38 122 L47 142 L55 116 L63 137 L69 170 Z"
-          fill="#E67E22" opacity="0.65"/>
-        <path className={reducedMotion ? "" : "fg-fire-3"}
-          d="M34 170 L42 132 L47 112 L52 128 L59 120 L65 170 Z"
-          fill="#F5C842" opacity="0.34"/>
-      </g>
-
-      {/* Floor glow from forge */}
-      <ellipse cx="47" cy="170" rx="40" ry="8" fill="#E67E22"
-        opacity={reducedMotion ? 0.14 : 0.18}
-        className={reducedMotion ? "" : "fg-glow-pulse"}
-        style={{ filter: "blur(5px)" }}/>
-      {/* Arch glow */}
-      <path d="M10 102 Q10 48 22 30 Q34 12 47 8 Q60 12 72 30 Q84 48 84 102 L74 102 Q74 54 47 38 Q20 54 20 102 Z"
-        fill="#E67E22" opacity="0.055"/>
-
-      {/* Embers */}
-      {!reducedMotion && EMBERS.map((e, i) => (
-        <circle key={i} cx={e.cx} cy="105" r={e.r} fill={i % 3 === 0 ? "#F5C842" : "#E67E22"}
-          className="fg-ember"
-          style={{ "--dur": e.dur, "--del": e.delay, "--dx": e.dx }}/>
-      ))}
-
-      {/* ── ANVIL ── */}
-      {/* Shadow */}
-      <ellipse cx="178" cy="174" rx="52" ry="7" fill="#000" opacity="0.45" style={{ filter: "blur(2px)" }}/>
-      {/* Horn */}
-      <path d="M127 128 Q110 131 114 136 L127 136 Z" fill="#242220"/>
-      {/* Top plate */}
-      <rect x="125" y="121" width="106" height="17" rx="3" fill="#302E26"/>
-      <rect x="125" y="121" width="106" height="3"  rx="1.5" fill="#3A3830" opacity="0.65"/>
-      {/* Body */}
-      <rect x="140" y="138" width="76" height="20" rx="2" fill="#242220"/>
-      {/* Base */}
-      <rect x="130" y="158" width="98" height="16" rx="3" fill="#302E26"/>
-      <rect x="130" y="158" width="98" height="3"  rx="1.5" fill="#3A3830" opacity="0.55"/>
-
-      {/* Item glow halo on anvil */}
-      {s.hot && (
-        <ellipse cx="190" cy="121" rx="30" ry="12"
-          fill="url(#fg-hot-halo)"
-          className={reducedMotion ? "" : "fg-item-hot"}
-          style={{ filter: "blur(4px)" }}/>
-      )}
-      {stage === 4 && (
-        <ellipse cx="190" cy="121" rx="26" ry="10"
-          fill="url(#fg-gold-halo)"
-          className={reducedMotion ? "" : "fg-item-gold"}
-          style={{ filter: "blur(3px)" }}/>
-      )}
-      {stage >= 2 && stage <= 3 && (
-        <ellipse cx="190" cy="121" rx="22" ry="9"
-          fill="url(#fg-cool-halo)"
-          opacity="0.5"
-          style={{ filter: "blur(3px)" }}/>
-      )}
-
-      {/* Current item on anvil */}
-      <g transform="translate(190,80)">
-        <AnvilItemSVG type={item.type} stage={stage}/>
-      </g>
-
-      {/* ── BLACKSMITH SILHOUETTE ── */}
-      <g opacity="0.62">
-        <ellipse cx="248" cy="88"  rx="13" ry="14"  fill="#1A1814"/> {/* head */}
-        <rect    x="236" y="100"  width="24" height="48" rx="9"  fill="#1A1814"/> {/* torso */}
-        {/* Raised arm + hammer */}
-        <g className={!reducedMotion && (stage === 1 || stage === 2) ? "fg-hammer" : ""}>
-          <path d="M236 110 L217 84 L222 79 L240 108" fill="#1A1814"/>
-          <rect x="208" y="72" width="17" height="9" rx="2.5" fill="#36342C"/>
-          <line x1="221" y1="77" x2="236" y2="94" stroke="#36342C" strokeWidth="3.5" strokeLinecap="round"/>
-        </g>
-        {/* Down arm */}
-        <path d="M260 113 L274 130 L269 134 L256 118" fill="#1A1814"/>
-        {/* Legs */}
-        <rect x="238" y="146" width="10" height="24" rx="4" fill="#1A1814"/>
-        <rect x="250" y="148" width="10" height="22" rx="4" fill="#1A1814"/>
-        {/* Leather apron */}
-        <path d="M238 122 L260 122 L257 146 L240 146 Z" fill="#121008" opacity="0.7"/>
-      </g>
-
-      {/* ── TOOL RACK (right) ── */}
-      <rect x="295" y="14"  width="4" height="156" rx="2" fill="#1C1A14"/>
-      <rect x="292" y="14"  width="10" height="3" rx="1.5" fill="#242220"/>
-      <rect x="292" y="167" width="10" height="3" rx="1.5" fill="#242220"/>
-      {[30, 57, 84, 111, 138].map((y, i) => (
-        <g key={i}>
-          <rect x="292" y={y} width="10" height="3" rx="1" fill="#2A2820"/>
-          <line x1="297" y1={y + 3} x2="304" y2={y + 20} stroke="#3A3830" strokeWidth="1.5"/>
-          {i % 2 === 0
-            ? <rect x="301" y={y + 18} width="7" height="13" rx="2" fill="#3A3830" opacity="0.8"/>
-            : <path d={`M299 ${y+18} L307 ${y+18} L303 ${y+30} Z`} fill="#3A3830" opacity="0.72"/>
-          }
-        </g>
-      ))}
-
-      {/* ── FLOOR ── */}
-      <rect x="0" y="170" width="320" height="30" fill="#141210"/>
-      {[80, 160, 240].map(x => (
-        <line key={x} x1={x} y1="170" x2={x} y2="200" stroke="#1C1A16" strokeWidth="1"/>
-      ))}
-      <line x1="0" y1="185" x2="320" y2="185" stroke="#1C1A16" strokeWidth="0.5"/>
-
-      {/* Stage label watermark */}
-      <text x="312" y="17" textAnchor="end" fontSize="8" fill={s.accent} opacity="0.55"
-        fontFamily="DM Sans,system-ui,sans-serif" fontWeight="700" letterSpacing="0.1em">
-        {(FORGE_STAGES[stage]?.label ?? "").toUpperCase()}
-      </text>
-    </svg>
-  );
-}
-
-// ─── STAGE TRACKER ─────────────────────────────────────────────────────────────────
-
-function StageTracker({ currentStage }) {
-  return (
-    <div style={{ padding: "18px 0 6px" }}>
-      <div style={{ display: "flex", alignItems: "flex-start", padding: "0 2px" }}>
-        {FORGE_STAGES.map((stage, i) => {
-          const done   = i < currentStage;
-          const active = i === currentStage;
-          const s = SC[i];
+    <div style={{marginBottom:16}}>
+      <div style={{fontSize:10,fontWeight:700,color:T.hint,letterSpacing:".12em",
+        textTransform:"uppercase",marginBottom:10}}>
+        Recent forge days
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:6}}>
+        {rows.map((r,i)=>{
+          const d=new Date(r.date+"T12:00:00");
+          const now=new Date();
+          const diffDays=Math.round((now-d)/(86400000));
+          const label=diffDays===0?"Today":diffDays===1?"Yesterday":
+            d.toLocaleDateString("en-AU",{weekday:"short",day:"numeric",month:"short"});
+          const pct=r.total>0?Math.round((r.done/r.total)*100):0;
+          const msgIdx=(r.date.charCodeAt(r.date.length-1)+(i*3))%buildMessages.length;
           return (
-            <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 7, position: "relative" }}>
-              {i < FORGE_STAGES.length - 1 && (
-                <div style={{
-                  position: "absolute", top: 11, left: "50%", right: 0, height: 2,
-                  background: done ? `linear-gradient(90deg,${T.gold}80,${T.gold}40)` : T.hint + "30",
-                  zIndex: 0,
-                }}/>
-              )}
-              <div style={{
-                width: 22, height: 22, borderRadius: "50%", zIndex: 1, position: "relative",
-                border: `2px solid ${active ? s.accent : done ? s.accent + "60" : T.hint + "30"}`,
-                background: active ? s.accent + "22" : done ? s.accent + "11" : "transparent",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 9, fontWeight: 700,
-                color: active ? s.accent : done ? s.accent + "AA" : T.hint + "60",
-                boxShadow: active ? `0 0 12px ${s.accent}50` : "none",
-                transition: "box-shadow 0.5s ease",
-              }}>
-                {done ? "✓" : i + 1}
-              </div>
-              <div style={{
-                fontSize: 8.5, fontWeight: active ? 700 : 500,
-                color: active ? T.text : done ? T.sub : T.hint,
-                textAlign: "center", lineHeight: 1.3,
-                transition: "color 0.3s",
-              }}>
-                {stage.label}
+            <div key={r.date} style={{display:"flex",alignItems:"center",gap:10}}>
+              <div style={{width:6,height:6,borderRadius:"50%",
+                background:i===0?T.gold:T.gold+"50",flexShrink:0}}/>
+              <div style={{fontSize:11,color:i===0?T.sub:T.muted,lineHeight:1.4,minWidth:0}}>
+                <span style={{color:i===0?T.text:T.sub,fontWeight:i===0?600:400}}>{label}</span>
+                <span style={{color:T.hint}}> — </span>
+                {buildMessages[msgIdx]}
+                <span style={{color:T.hint}}> · {pct}%</span>
               </div>
             </div>
           );
@@ -528,215 +676,205 @@ function StageTracker({ currentStage }) {
   );
 }
 
-// ─── FORGE WALL (past completed arc items) ─────────────────────────────────────────
+// ─── FORGE WALL ───────────────────────────────────────────────────────────────────
 
-function ForgeWall({ pastArcs }) {
-  const items = useMemo(() => pastArcs.map(arc => ({
-    arc,
-    item: getForgeItem(arc),
-    finalStage: Math.min(4,
-      (arc.completion_score ?? 0) >= 85 ? 4 :
-      (arc.completion_score ?? 0) >= 60 ? 3 :
-      (arc.completion_score ?? 0) >= 35 ? 2 : 1
-    ),
-    score: arc.completion_score ?? 0,
-  })), [pastArcs]);
+function ForgeWall({ userId }) {
+  const [arcs,setArcs]=useState(null);
+  const [loading,setLoading]=useState(true);
 
-  return (
-    <div style={{ margin: "0 20px 20px" }}>
-      <div style={{
-        fontSize: 9, fontWeight: 700, color: T.hint,
-        letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 12,
-      }}>
-        Forge Wall · {items.length} completed
-      </div>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        {items.map((entry, i) => {
-          const isComplete = entry.finalStage >= 4;
-          return (
-            <div key={entry.arc.id || i} style={{
-              width: 72, display: "flex", flexDirection: "column", alignItems: "center", gap: 5,
-              padding: "12px 6px 10px",
-              background: T.surface,
-              borderRadius: T.rsm,
-              border: `1px solid ${isComplete ? T.gold + "30" : T.border}`,
-              boxShadow: isComplete ? `0 0 16px ${T.gold}14` : "none",
-            }}>
-              <ItemPreviewSVG type={entry.item.type} stage={entry.finalStage} size={42}/>
-              <div style={{ fontSize: 9, color: T.muted, textAlign: "center", lineHeight: 1.3, fontWeight: 600 }}>
-                {entry.item.name}
-              </div>
-              <div style={{ fontSize: 8, color: isComplete ? T.gold : T.hint, fontWeight: 700 }}>
-                {entry.score}%
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ─── STAGE NARRATIVE ─────────────────────────────────────────────────────────────
-
-function stageNarrative(stage, item) {
-  return [
-    `Raw materials are assembled. The forge is lit. ${item.name} exists only as potential — the first real strike hasn't landed yet.`,
-    `Metal is heating. A rough shape is starting to emerge from the ore. The outline of ${item.name} is visible in the glow.`,
-    `The hammer has found its rhythm. Structure is set. ${item.name} is recognisably itself now, waiting for refinement.`,
-    `Heat and patience have done their work. Details are being carved in. ${item.name} is nearly complete.`,
-    `The forge work is done. ${item.name} has been quenched, tempered, and polished. This is what sustained effort looks like.`,
-  ][stage] ?? "";
-}
-
-// ─── WORKSHOP SHEET ─────────────────────────────────────────────────────────────────
-
-function ForgeWorkshopSheet({ arc, item, progress, userId, onClose, reducedMotion }) {
-  const [pastArcs, setPastArcs] = useState(null);
-  const s = SC[progress.stage] || SC[0];
-
-  useEffect(() => {
-    if (!userId) return;
-    let cancelled = false;
-    supabase
-      .from("forge_blocks")
-      .select("id, title, duration_days, arc_rank, completion_score, start_date, end_date, status")
-      .eq("user_id", userId)
-      .eq("status", "completed")
-      .order("start_date", { ascending: false })
-      .limit(12)
-      .then(({ data }) => {
-        if (!cancelled && data) setPastArcs(data.map(rowToForgeBlock));
+  useEffect(()=>{
+    if(!userId)return;
+    let c=false;
+    supabase.from("forge_blocks")
+      .select("id,title,duration_days,completion_score,start_date,end_date,status")
+      .eq("user_id",userId).eq("status","completed")
+      .order("start_date",{ascending:false}).limit(12)
+      .then(({data})=>{
+        if(c)return;
+        setArcs(data?data.map(rowToForgeBlock):[]);
+        setLoading(false);
       });
-    return () => { cancelled = true; };
-  }, [userId]);
+    return()=>{c=true;};
+  },[userId]);
 
   return (
-    <div
-      style={{
-        position: "fixed", inset: 0, zIndex: 9999,
-        background: "rgba(5,5,4,0.88)",
-        display: "flex", flexDirection: "column", justifyContent: "flex-end",
-      }}
-      onClick={onClose}
-    >
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          background: T.bg,
-          borderRadius: "22px 22px 0 0",
-          maxHeight: "95dvh",
-          overflowY: "auto",
-          WebkitOverflowScrolling: "touch",
-          paddingBottom: `max(36px, env(safe-area-inset-bottom, 0px))`,
-        }}
-      >
-        {/* Drag handle */}
-        <div style={{ padding: "12px 0 2px", display: "flex", justifyContent: "center" }}>
-          <div style={{ width: 38, height: 4, borderRadius: 2, background: T.hint + "55" }}/>
+    <div style={{margin:"0 0 20px"}}>
+      <div style={{fontSize:10,fontWeight:700,color:T.hint,letterSpacing:".12em",
+        textTransform:"uppercase",marginBottom:10}}>
+        Forge Wall
+      </div>
+      {loading&&(
+        <div style={{fontSize:13,color:T.hint,padding:"10px 0"}}>Loading…</div>
+      )}
+      {!loading&&(!arcs||arcs.length===0)&&(
+        <div style={{padding:"14px 16px",background:T.surface,borderRadius:T.rsm,
+          border:`1px dashed ${T.hint}28`}}>
+          <div style={{fontSize:13,color:T.hint,lineHeight:1.65}}>
+            Finish this Arc and your forged item joins the wall. Every completed Arc leaves an artifact.
+          </div>
+        </div>
+      )}
+      {!loading&&arcs&&arcs.length>0&&(
+        <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+          {arcs.map((arc,i)=>{
+            const item=getDefaultForgeItem(arc);
+            const score=arc.completionScore??arc.completion_score??0;
+            const finalStage=score>=85?4:score>=60?3:score>=35?2:1;
+            const isComplete=finalStage>=4;
+            return (
+              <div key={arc.id||i} style={{width:76,display:"flex",flexDirection:"column",
+                alignItems:"center",gap:5,padding:"12px 6px 10px",
+                background:T.surface,borderRadius:T.rsm,
+                border:`1px solid ${isComplete?T.gold+"30":T.border}`,
+                boxShadow:isComplete?`0 0 16px ${T.gold}14`:"none"}}>
+                <ItemPreview type={item.type} stage={finalStage} height={44}/>
+                <div style={{fontSize:9,color:T.muted,textAlign:"center",lineHeight:1.3,fontWeight:600}}>
+                  {item.name}
+                </div>
+                <div style={{fontSize:8,color:isComplete?T.gold:T.hint,fontWeight:700}}>
+                  {score}%
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── WORKSHOP SHEET ───────────────────────────────────────────────────────────────
+
+function WorkshopSheet({ arc, item, progress, userId, onClose, onSelectItem, reducedMotion }) {
+  const [striking, setStriking] = useState(false);
+  const [showSelector, setShowSelector] = useState(false);
+  const s = SC[Math.min(progress.stage,4)];
+
+  // Trigger hammer strike on open
+  useEffect(()=>{
+    if(reducedMotion)return;
+    const t=setTimeout(()=>{setStriking(true);},500);
+    const t2=setTimeout(()=>{setStriking(false);},1800);
+    return()=>{clearTimeout(t);clearTimeout(t2);};
+  },[]);
+
+  const stageNarrative=[
+    `Raw materials are assembled. The forge is lit. ${item.name} exists only as potential — the first strike hasn't landed yet.`,
+    `The metal is heating. A rough shape is beginning to emerge from the ore. The outline of ${item.name} is visible in the glow.`,
+    `The hammer has found its rhythm. Structure is set. ${item.name} is recognisably itself, waiting for refinement.`,
+    `Heat and patience are doing their work. Details are being carved in. ${item.name} is nearly complete.`,
+    `The forge work is done. ${item.name} has been quenched, tempered, and polished. This is what sustained effort looks like.`,
+  ][progress.stage]??"";
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(5,5,4,.88)",
+      display:"flex",flexDirection:"column",justifyContent:"flex-end"}} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()}
+        style={{background:T.bg,borderRadius:"22px 22px 0 0",maxHeight:"95dvh",
+          overflowY:"auto",WebkitOverflowScrolling:"touch",
+          paddingBottom:`max(36px,env(safe-area-inset-bottom,0px))`}}>
+
+        {/* Handle */}
+        <div style={{padding:"12px 0 2px",display:"flex",justifyContent:"center"}}>
+          <div style={{width:38,height:4,borderRadius:2,background:T.hint+"55"}}/>
         </div>
 
         {/* Header */}
-        <div style={{ padding: "10px 20px 0", display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+        <div style={{padding:"10px 20px 0",display:"flex",alignItems:"flex-start",justifyContent:"space-between"}}>
           <div>
-            <div style={{
-              fontSize: 9, fontWeight: 700, color: s.accent,
-              letterSpacing: "0.17em", textTransform: "uppercase", marginBottom: 4,
-            }}>
-              The Forge · {arc?.title ? arc.title.slice(0, 36) + (arc.title.length > 36 ? "…" : "") : "Your Arc"}
+            <div style={{fontSize:9,fontWeight:700,color:s.edge,letterSpacing:".17em",
+              textTransform:"uppercase",marginBottom:4}}>
+              The Forge · {arc?.title?arc.title.slice(0,40)+(arc.title.length>40?"…":""):"Your Arc"}
             </div>
-            <h2 style={{ fontFamily: T.serif, fontSize: 28, color: T.text, margin: 0, lineHeight: 1.1 }}>
+            <h2 style={{fontFamily:T.serif,fontSize:28,color:T.text,margin:0,lineHeight:1.1}}>
               {item.name}
             </h2>
+            <div style={{fontSize:13,color:T.muted,marginTop:3,fontStyle:"italic"}}>
+              "{item.desc}"
+            </div>
           </div>
-          <button type="button" onClick={onClose} style={{
-            background: T.surface, border: `1px solid ${T.border}`,
-            borderRadius: 20, padding: "7px 16px",
-            color: T.sub, fontSize: 13, fontFamily: T.font, cursor: "pointer",
-            marginTop: 2, flexShrink: 0,
-          }}>Done</button>
+          <button type="button" onClick={onClose}
+            style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,
+              padding:"7px 16px",color:T.sub,fontSize:13,fontFamily:T.font,cursor:"pointer",
+              marginTop:2,flexShrink:0}}>
+            Done
+          </button>
         </div>
 
         {/* Workshop scene */}
-        <div style={{ margin: "14px 0 0", borderTop: `0.5px solid ${T.border}`, borderBottom: `0.5px solid ${T.border}` }}>
-          <WorkshopScene item={item} progress={progress} reducedMotion={reducedMotion}/>
+        <div style={{margin:"14px 0 0",borderTop:`0.5px solid ${T.border}`,borderBottom:`0.5px solid ${T.border}`}}>
+          <WorkshopScene item={item} progress={progress} striking={striking} reducedMotion={reducedMotion}/>
         </div>
 
-        {/* Stage tracker */}
-        <div style={{ padding: "0 20px" }}>
-          <StageTracker currentStage={progress.stage}/>
-        </div>
+        <div style={{padding:"0 20px"}}>
+          {/* Stage tracker */}
+          <div style={{padding:"18px 0 6px"}}>
+            <StageTracker stage={progress.stage}/>
+          </div>
 
-        {/* Progress block */}
-        <div style={{ margin: "10px 20px", padding: "18px", background: T.surface, borderRadius: T.rsm, border: `1px solid ${T.border}` }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 14 }}>
-            <div>
-              <div style={{ fontSize: 10, color: T.muted, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>Days at the forge</div>
-              <div style={{ fontFamily: T.serif, fontSize: 30, color: T.text, lineHeight: 1 }}>
-                {progress.daysForged}
-                <span style={{ fontFamily: T.font, fontSize: 14, color: T.hint, marginLeft: 5 }}>/ {progress.totalDays}</span>
+          {/* Progress block */}
+          <div style={{margin:"12px 0",padding:"18px",background:T.surface,borderRadius:T.rsm,border:`1px solid ${T.border}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:14}}>
+              <div>
+                <div style={{fontSize:10,color:T.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>Days at the forge</div>
+                <div style={{fontFamily:T.serif,fontSize:30,color:T.text,lineHeight:1}}>
+                  {progress.daysForged}
+                  <span style={{fontFamily:T.font,fontSize:14,color:T.hint,marginLeft:5}}>/ {progress.totalDays}</span>
+                </div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:10,color:T.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>Complete</div>
+                <div style={{fontSize:26,fontWeight:800,color:s.edge,lineHeight:1}}>{progress.pct}%</div>
               </div>
             </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 10, color: T.muted, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>Complete</div>
-              <div style={{ fontSize: 26, fontWeight: 800, color: s.accent, lineHeight: 1 }}>{progress.pct}%</div>
+            <div style={{height:7,background:T.raised,borderRadius:4,overflow:"hidden",marginBottom:14}}>
+              <div style={{height:"100%",width:`${progress.pct}%`,
+                background:`linear-gradient(90deg,${s.fill},${s.edge})`,borderRadius:4,
+                transition:reducedMotion?"none":"width .9s cubic-bezier(.4,0,.2,1)",
+                minWidth:progress.pct>0?8:0}}/>
+            </div>
+            <div style={{fontSize:13,color:T.sub,lineHeight:1.65}}>
+              {stageNarrative}
+            </div>
+            {progress.nextStage&&progress.daysToNext>0&&(
+              <div style={{marginTop:10,fontSize:12,color:T.hint,borderTop:`1px solid ${T.border}`,paddingTop:10}}>
+                Next: <span style={{color:T.sub}}>{progress.nextStage.label}</span>
+                {" · "}unlock in{" "}<span style={{color:T.text,fontWeight:600}}>{progress.daysToNext} more day{progress.daysToNext!==1?"s":""}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Recent forge days */}
+          {(progress.history ?? []).length > 0 && (
+            <RecentHistory rows={progress.history} item={item}/>
+          )}
+
+          {/* How it works */}
+          <div style={{margin:"0 0 16px",padding:"14px 16px",background:`${s.edge}09`,
+            borderRadius:T.rsm,borderLeft:`2px solid ${s.edge}50`}}>
+            <div style={{fontSize:10,color:s.edge,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",marginBottom:6}}>
+              How the forge works
+            </div>
+            <div style={{fontSize:12,color:T.sub,lineHeight:1.75}}>
+              Every day you hit your proof threshold, the forge advances. Missing a day never removes progress — the work stays. Each completed Arc produces a finished item.
             </div>
           </div>
-          {/* Progress bar */}
-          <div style={{ height: 7, background: T.raised, borderRadius: 4, overflow: "hidden" }}>
-            <div style={{
-              height: "100%", width: `${progress.pct}%`,
-              background: `linear-gradient(90deg,${s.fill},${s.accent})`,
-              borderRadius: 4,
-              transition: reducedMotion ? "none" : "width 0.9s cubic-bezier(0.4,0,0.2,1)",
-              minWidth: progress.pct > 0 ? 8 : 0,
-            }}/>
-          </div>
-          <div style={{ marginTop: 14, fontSize: 13, color: T.sub, lineHeight: 1.65 }}>
-            {stageNarrative(progress.stage, item)}
-          </div>
+
+          {/* Item selector */}
+          <button type="button" onClick={()=>setShowSelector(v=>!v)}
+            style={{display:"flex",alignItems:"center",gap:6,background:"none",
+              border:`1px solid ${T.border}`,borderRadius:T.rsm,padding:"9px 14px",
+              color:T.sub,fontSize:12,fontFamily:T.font,cursor:"pointer",
+              marginBottom:16,width:"100%",justifyContent:"center"}}>
+            {showSelector?"▲ Hide item selector":"⚒ Change forged item (preview only)"}
+          </button>
+          {showSelector&&(
+            <ItemSelector arc={arc} currentItem={item} onSelect={onSelectItem}/>
+          )}
+
+          {/* Forge Wall */}
+          <ForgeWall userId={userId}/>
         </div>
-
-        {/* Item description */}
-        <div style={{ margin: "2px 20px 16px", fontSize: 14, color: T.muted, lineHeight: 1.75, fontStyle: "italic" }}>
-          "{item.desc}"
-        </div>
-
-        {/* Rules card */}
-        <div style={{
-          margin: "0 20px 20px", padding: "14px 16px",
-          background: `${s.accent}09`,
-          borderRadius: T.rsm,
-          borderLeft: `2px solid ${s.accent}50`,
-        }}>
-          <div style={{ fontSize: 10, color: s.accent, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6 }}>
-            How the forge works
-          </div>
-          <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.75 }}>
-            Every day you hit your proof threshold, the forge advances. Missing a day doesn't reset progress — the work you've done stays. Each completed Arc produces a finished item. Your collection grows as you grow.
-          </div>
-        </div>
-
-        {/* Forge wall — past arcs */}
-        {pastArcs && pastArcs.length > 0 && (
-          <ForgeWall pastArcs={pastArcs}/>
-        )}
-
-        {/* Empty forge wall placeholder */}
-        {(pastArcs === null || pastArcs.length === 0) && (
-          <div style={{
-            margin: "0 20px 20px", padding: "16px 18px",
-            background: T.surface, borderRadius: T.rsm,
-            border: `1px dashed ${T.hint}28`,
-          }}>
-            <div style={{ fontSize: 10, color: T.hint, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 6 }}>
-              Forge Wall
-            </div>
-            <div style={{ fontSize: 13, color: T.hint, lineHeight: 1.65 }}>
-              Finish this Arc and {item.name} joins your collection. Every completed Arc becomes a permanent artifact in your workshop.
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -745,122 +883,129 @@ function ForgeWorkshopSheet({ arc, item, progress, userId, onClose, reducedMotio
 // ─── COMPACT CARD ─────────────────────────────────────────────────────────────────
 
 function ForgeCard({ item, progress, onOpen, reducedMotion }) {
-  const s = SC[progress.stage] || SC[0];
-
+  const s = SC[Math.min(progress.stage,4)];
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      style={{
-        width: "100%", display: "flex", alignItems: "center",
-        background: T.surface,
-        border: `1px solid ${T.border}`,
-        borderRadius: T.r,
-        padding: 0,
-        cursor: "pointer",
-        fontFamily: T.font,
-        textAlign: "left",
-        position: "relative",
-        overflow: "hidden",
-        minHeight: 80,
-      }}
-    >
-      {/* Left ember accent bar */}
-      <div style={{
-        position: "absolute", top: 0, left: 0, bottom: 0, width: 3,
-        background: `linear-gradient(180deg,${s.accent}50,${s.accent}95,${s.accent}50)`,
-        borderRadius: "16px 0 0 16px",
-      }} className={!reducedMotion && s.hot ? "fg-card-ember" : ""}/>
+    <button type="button" onClick={onOpen}
+      style={{width:"100%",display:"flex",alignItems:"center",gap:0,
+        background:T.surface,border:`1px solid ${T.border}`,
+        borderRadius:T.r,padding:0,cursor:"pointer",fontFamily:T.font,
+        textAlign:"left",position:"relative",overflow:"hidden",minHeight:76}}>
 
-      {/* Item icon area */}
-      <div style={{
-        width: 68, minWidth: 68, height: 80,
-        display: "flex", alignItems: "center", justifyContent: "center",
-        background: `radial-gradient(ellipse at center, ${s.accent}14 0%, transparent 68%)`,
-        position: "relative",
-      }}>
-        {!reducedMotion && s.hot && (
-          <div style={{
-            position: "absolute", inset: 0,
-            background: `radial-gradient(ellipse at center, ${s.accent}1A 0%, transparent 60%)`,
-          }} className="fg-glow-pulse"/>
-        )}
-        <ItemPreviewSVG type={item.type} stage={progress.stage} size={54}/>
+      {/* Left ember accent */}
+      <div style={{position:"absolute",top:0,left:0,bottom:0,width:3,
+        background:`linear-gradient(180deg,${s.edge}50,${s.edge}95,${s.edge}50)`,
+        borderRadius:"16px 0 0 16px"}}
+        className={!reducedMotion&&s.hot?"fg-card-glow":""}/>
+
+      {/* Smith portrait */}
+      <div style={{width:60,minWidth:60,height:76,display:"flex",alignItems:"center",
+        justifyContent:"center",background:`radial-gradient(ellipse at center,${s.edge}14 0%,transparent 68%)`}}>
+        <div style={{width:46,height:46,borderRadius:"50%",overflow:"hidden",
+          border:`1.5px solid ${s.edge}40`,flexShrink:0}}>
+          <SmithPortrait size={46}/>
+        </div>
+      </div>
+
+      {/* Item preview */}
+      <div style={{width:52,minWidth:52,height:76,display:"flex",alignItems:"center",
+        justifyContent:"center",flexShrink:0}}>
+        <ItemPreview type={item.type} stage={progress.stage} height={52}/>
       </div>
 
       {/* Info */}
-      <div style={{ flex: 1, padding: "13px 6px 13px 2px", minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 7, marginBottom: 4 }}>
-          <span style={{ fontFamily: T.serif, fontSize: 15, color: T.text, lineHeight: 1.2 }}>
+      <div style={{flex:1,padding:"11px 6px 11px 4px",minWidth:0}}>
+        <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:4}}>
+          <span style={{fontFamily:T.serif,fontSize:15,color:T.text,lineHeight:1.2}}>
             {item.name}
           </span>
-          <span style={{ fontSize: 8.5, color: T.hint, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", flexShrink: 0 }}>
-            The Forge
-          </span>
         </div>
-
-        {/* Stage pill strip */}
-        <div style={{ display: "flex", gap: 4, marginBottom: 6, alignItems: "center" }}>
-          {FORGE_STAGES.map((_, i) => {
-            const done   = i < progress.stage;
-            const active = i === progress.stage;
-            return (
-              <div key={i} style={{
-                height: 6,
-                width: active ? 20 : 7,
-                borderRadius: 3,
-                background: active ? s.accent : done ? s.accent + "55" : T.hint + "38",
-                transition: "width 0.45s ease, background 0.45s ease",
-              }}/>
-            );
+        <div style={{display:"flex",gap:4,marginBottom:5,alignItems:"center"}}>
+          {FORGE_STAGES.map((_,i)=>{
+            const done=i<progress.stage,active=i===progress.stage;
+            return <div key={i} style={{height:6,width:active?18:7,borderRadius:3,
+              background:active?s.edge:done?s.edge+"55":T.hint+"38",
+              transition:"width .45s ease,background .45s ease"}}/>;
           })}
-          <span style={{ fontSize: 10, color: T.sub, marginLeft: 2 }}>
-            {FORGE_STAGES[progress.stage]?.label}
-          </span>
+          <span style={{fontSize:10,color:T.sub,marginLeft:2}}>{FORGE_STAGES[progress.stage]?.label}</span>
         </div>
-
-        <div style={{ fontSize: 11, color: T.muted }}>
-          {progress.daysForged} of {progress.totalDays} days forged
-          <span style={{ color: T.hint }}> · </span>
-          <span style={{ color: s.accent, fontWeight: 600 }}>{progress.pct}%</span>
+        <div style={{fontSize:11,color:T.muted}}>
+          {progress.daysForged} day{progress.daysForged!==1?"s":""} forged
+          <span style={{color:T.hint}}> · </span>
+          <span style={{color:s.edge,fontWeight:600}}>{progress.pct}%</span>
         </div>
       </div>
 
-      {/* Open chevron */}
-      <div style={{ padding: "0 16px 0 4px", fontSize: 22, color: T.hint, lineHeight: 1, flexShrink: 0 }}>›</div>
+      <div style={{padding:"0 14px 0 4px",fontSize:22,color:T.hint,lineHeight:1,flexShrink:0}}>›</div>
     </button>
   );
 }
 
-// ─── ROOT EXPORT ─────────────────────────────────────────────────────────────────
+// ─── ROOT EXPORT ──────────────────────────────────────────────────────────────────
 
 export function ForgeCompanion({ arc, arcLedgerRows, userId, style }) {
   const [expanded, setExpanded] = useState(false);
   const reducedMotion = useReducedMotion();
 
-  const item     = useMemo(() => getForgeItem(arc), [arc?.id, arc?.duration_days]);
-  const progress = useMemo(() => getForgeProgress(arc, arcLedgerRows), [arc?.id, arc?.duration_days, arcLedgerRows]);
+  // localStorage-persisted item selection per arc
+  const storageKey = arc?.id ? `fg_item_${arc.id}` : null;
+  const [selectedItem, setSelectedItem] = useState(() => {
+    if (!arc) return null;
+    const saved = storageKey ? localStorage.getItem(storageKey) : null;
+    if (saved) {
+      const found = getItemPool(arc).find(i => i.id === saved) ?? getDefaultForgeItem(arc);
+      return found;
+    }
+    return getDefaultForgeItem(arc);
+  });
 
-  if (!arc) return null;
+  // Recompute if arc changes
+  useEffect(() => {
+    if (!arc) return;
+    const saved = storageKey ? localStorage.getItem(storageKey) : null;
+    if (saved) {
+      const found = getItemPool(arc).find(i=>i.id===saved);
+      setSelectedItem(found ?? getDefaultForgeItem(arc));
+    } else {
+      setSelectedItem(getDefaultForgeItem(arc));
+    }
+  }, [arc?.id]);
+
+  const progress = useMemo(
+    () => getForgeProgress(arc, arcLedgerRows),
+    [arc?.id, arc?.duration_days, arc?.durationDays, arcLedgerRows]
+  );
+
+  const history = useMemo(
+    () => getRecentForgeHistory(arcLedgerRows, arc),
+    [arcLedgerRows, arc?.id]
+  );
+
+  function handleSelectItem(item) {
+    setSelectedItem(item);
+    if (storageKey) localStorage.setItem(storageKey, item.id);
+  }
+
+  if (!arc || !selectedItem) return null;
 
   return (
     <>
-      <style dangerouslySetInnerHTML={{ __html: FORGE_CSS }}/>
+      <style dangerouslySetInnerHTML={{__html: CSS}}/>
       <div style={style}>
         <ForgeCard
-          item={item}
+          item={selectedItem}
           progress={progress}
-          onOpen={() => setExpanded(true)}
+          onOpen={()=>setExpanded(true)}
           reducedMotion={reducedMotion}
         />
       </div>
       {expanded && (
-        <ForgeWorkshopSheet
+        <WorkshopSheet
           arc={arc}
-          item={item}
-          progress={progress}
+          item={selectedItem}
+          progress={{...progress, history}}
           userId={userId}
-          onClose={() => setExpanded(false)}
+          onClose={()=>setExpanded(false)}
+          onSelectItem={handleSelectItem}
           reducedMotion={reducedMotion}
         />
       )}

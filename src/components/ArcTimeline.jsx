@@ -1083,6 +1083,7 @@ export function ArcTimeline({
   initialWeek = null,
   openChronologyOnMount = false,
   embedded = false,
+  forgeSlot = null,
 }) {
   const railRef = useRef(null);
   const reducedMotion = useReducedMotion();
@@ -1303,6 +1304,8 @@ export function ArcTimeline({
           {detailsFields}
         </ArcJourneyHero>
       ) : null}
+
+      {forgeSlot}
 
       <div
         ref={railRef}

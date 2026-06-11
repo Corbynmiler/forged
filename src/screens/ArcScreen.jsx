@@ -141,14 +141,14 @@ export function ArcScreen({
         onEditArc={onEditArc}
         initialWeek={initialWeek}
         openChronologyOnMount={openChronology}
-      />
-
-      {/* ── Forge Companion (preview-only experimental layer) ── */}
-      <ForgeCompanion
-        arc={activeBlock}
-        arcLedgerRows={arcLedgerRows}
-        userId={userId}
-        style={{ marginTop: 14 }}
+        forgeSlot={
+          <ForgeCompanion
+            arc={activeBlock}
+            arcLedgerRows={arcLedgerRows}
+            userId={userId}
+            style={{ marginTop: 8, marginBottom: 8 }}
+          />
+        }
       />
 
       <PastArcsSection
