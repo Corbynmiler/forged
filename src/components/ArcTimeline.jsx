@@ -7,6 +7,7 @@ import { getArcDayNumber, getArcDurationDays, isProofHabitForBlock } from "../ar
 import { useReducedMotion } from "../hooks/useReducedMotion.js";
 import {
   buildArcTimeline,
+  buildWeekDayJourney,
   partitionJournalEntries,
   reviewTextFromBlock,
   ymdAddDays,
@@ -196,7 +197,7 @@ function BeforeArcNode({ count, selected, adjacent, onSelect, reducedMotion, ind
       onSelect={onSelect}
       reducedMotion={reducedMotion}
       index={index}
-      quiet
+      quiet={!selected}
       label={(
         <div style={{ fontSize: 7.5, fontWeight: 800, letterSpacing: "0.08em", color: selected ? T.sub : T.hint, textAlign: "center", marginBottom: 4, lineHeight: 1.2 }}>
           BEFORE
@@ -206,10 +207,12 @@ function BeforeArcNode({ count, selected, adjacent, onSelect, reducedMotion, ind
     >
       <div style={{
         width: 32, height: 32, borderRadius: "50%", margin: "0 auto",
-        border: `1.5px solid ${selected ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.08)"}`,
-        background: selected ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.02)",
+        border: `2px solid ${selected ? T.gold : "rgba(255,255,255,0.1)"}`,
+        background: T.bg,
+        boxShadow: selected ? `0 0 10px ${T.gold}33` : "none",
         display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: 11, color: T.muted,
+        fontSize: 11, color: selected ? T.sub : T.muted,
+        position: "relative", zIndex: 2,
       }}>
         ◂
       </div>
@@ -236,8 +239,9 @@ function StartNode({ startDate, selected, adjacent, onSelect, reducedMotion, ind
       <div style={{
         width: 34, height: 34, borderRadius: "50%", margin: "0 auto",
         border: `2px solid ${selected ? T.gold : "rgba(200,144,42,0.45)"}`,
-        background: selected ? "rgba(200,144,42,0.14)" : "rgba(200,144,42,0.06)",
+        background: T.bg,
         boxShadow: selected ? `0 0 14px ${T.gold}33` : "none",
+        position: "relative", zIndex: 2,
       }} />
     </RailCheckpoint>
   );
@@ -280,6 +284,7 @@ function WeekNode({ week, selected, adjacent, onSelect, reducedMotion, index }) 
           display: "flex", alignItems: "center", justifyContent: "center",
           boxShadow: selected ? `0 0 12px ${T.gold}44` : "none",
           animation: isCurrent && selected && !reducedMotion ? "arcPulse 2.8s ease-in-out infinite" : undefined,
+          zIndex: 2,
         }}>
           {isComplete && week.isGenuinelyComplete ? (
             <span style={{ fontSize: 13, color: "#4ade80", fontWeight: 700 }}>✓</span>
@@ -337,7 +342,7 @@ function ReceiptRow({ receipt, expanded, onToggle, compact }) {
       onClick={onToggle}
       style={{
         width: "100%", textAlign: "left",
-        padding: compact ? "7px 0" : "8px 0",
+        padding: compact ? "6px 0" : "8px 0",
         background: "none", border: "none",
         borderBottom: `0.5px solid ${T.border}`,
         cursor: "pointer", fontFamily: T.font,
@@ -348,23 +353,396 @@ function ReceiptRow({ receipt, expanded, onToggle, compact }) {
         <span style={{ fontSize: 10, color: T.sub }}>{expanded ? "▾" : "▸"}</span>
       </div>
       {parsed.title ? (
-        <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginTop: 3, lineHeight: 1.35, overflowWrap: "anywhere" }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginTop: 2, lineHeight: 1.35, overflowWrap: "anywhere" }}>
           {parsed.title}
         </div>
       ) : null}
-      {expanded && parsed.narrative ? (
-        <div style={{ fontSize: 12.5, color: T.sub, marginTop: 5, lineHeight: 1.55, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
-          {parsed.narrative}
-        </div>
-      ) : !expanded && parsed.narrative ? (
+      {expanded ? (
+        <ReceiptExpandedBody parsed={parsed} content={receipt.content} />
+      ) : parsed.narrative ? (
         <div style={{
-          fontSize: 12, color: T.muted, marginTop: 3, lineHeight: 1.4,
-          overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical",
+          fontSize: 12, color: T.muted, marginTop: 2, lineHeight: 1.4,
+          overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical",
         }}>
           {parsed.narrative}
         </div>
       ) : null}
     </button>
+  );
+}
+
+function ReceiptExpandedBody({ parsed, content }) {
+  const sections = [
+    parsed?.proof ? { label: "Proof shown", text: parsed.proof } : null,
+    parsed?.wins ? { label: "Wins", text: parsed.wins } : null,
+    parsed?.missed ? { label: "Missed", text: parsed.missed } : null,
+    parsed?.pattern ? { label: "Pattern", text: parsed.pattern } : null,
+    parsed?.why ? { label: "Why", text: parsed.why } : null,
+    parsed?.tomorrow ? { label: "Tomorrow", text: parsed.tomorrow } : null,
+  ].filter(Boolean);
+
+  if (sections.length > 0) {
+    return (
+      <div style={{ marginTop: 6 }}>
+        {parsed?.narrative ? (
+          <div style={{ fontSize: 12.5, color: T.sub, lineHeight: 1.55, marginBottom: 8, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+            {parsed.narrative}
+          </div>
+        ) : null}
+        {sections.map(s => (
+          <div key={s.label} style={{ marginBottom: 6 }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: T.hint, letterSpacing: "0.08em", textTransform: "uppercase" }}>{s.label}</div>
+            <div style={{ fontSize: 12.5, color: T.sub, lineHeight: 1.5, marginTop: 2, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{s.text}</div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div style={{ fontSize: 12.5, color: T.sub, marginTop: 5, lineHeight: 1.55, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+      {content}
+    </div>
+  );
+}
+
+const DAY_NODE = 16;
+
+function DaySpineNode({ day, state, focused, onClick, reducedMotion }) {
+  const hasReceipt = day?.hasReceipt;
+  const hasProof = day?.hasProof;
+  const isToday = state === "today";
+  const isFuture = state === "future";
+  const isEmpty = state === "empty";
+  const isPartial = state === "partial";
+  const isEvidence = state === "evidence" || (isToday && hasReceipt);
+
+  let bg = "transparent";
+  let border = "rgba(255,255,255,0.12)";
+  let inner = null;
+
+  if (isEvidence) {
+    bg = "rgba(61,155,95,0.18)";
+    border = isToday ? T.gold : "#3d9b5f";
+    inner = <span style={{ fontSize: 9, color: "#4ade80", fontWeight: 700, lineHeight: 1 }}>✓</span>;
+  } else if (isPartial || (isToday && hasProof)) {
+    bg = "rgba(200,144,42,0.12)";
+    border = isToday ? T.gold : "rgba(200,144,42,0.55)";
+    inner = <span style={{ width: 5, height: 5, borderRadius: "50%", background: T.gold, display: "block" }} />;
+  } else if (isToday) {
+    bg = "rgba(200,144,42,0.08)";
+    border = T.gold;
+    inner = <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.gold, display: "block" }} />;
+  } else if (isFuture) {
+    border = "rgba(255,255,255,0.06)";
+    inner = null;
+  } else if (isEmpty) {
+    border = "rgba(255,255,255,0.08)";
+    inner = null;
+  }
+
+  const ring = (focused || isToday) && !reducedMotion ? `0 0 0 2px ${T.gold}33` : "none";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`Day ${state}`}
+      style={{
+        width: DAY_NODE, height: DAY_NODE, borderRadius: "50%",
+        border: `2px solid ${border}`, background: bg,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 0, cursor: "pointer", flexShrink: 0,
+        boxShadow: ring,
+        transition: reducedMotion ? "none" : "box-shadow 0.22s ease, border-color 0.22s ease",
+        opacity: isFuture ? 0.35 : 1,
+      }}
+    >
+      {inner}
+    </button>
+  );
+}
+
+function useViewportDayFocus(dayRefs, reducedMotion) {
+  const [focusedDate, setFocusedDate] = useState(null);
+  const timerRef = useRef(null);
+  const lastRef = useRef(null);
+
+  const detect = useCallback(() => {
+    const targetY = window.innerHeight * 0.38;
+    let best = null;
+    let bestDist = Infinity;
+    for (const [date, el] of dayRefs.current.entries()) {
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      const center = r.top + r.height * 0.35;
+      const dist = Math.abs(center - targetY);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = date;
+      }
+    }
+    if (best && best !== lastRef.current) {
+      lastRef.current = best;
+      setFocusedDate(best);
+    }
+  }, [dayRefs]);
+
+  useEffect(() => {
+    const onScroll = () => {
+      clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(detect, 140);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    detect();
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      clearTimeout(timerRef.current);
+    };
+  }, [detect]);
+
+  const scrollToDay = useCallback((date) => {
+    const el = dayRefs.current.get(date);
+    if (!el) return;
+    el.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "center" });
+    lastRef.current = date;
+    setFocusedDate(date);
+  }, [dayRefs, reducedMotion]);
+
+  return { focusedDate, scrollToDay };
+}
+
+function WeekDayJourney({ week, arcLedgerRows, journalEntries, reducedMotion }) {
+  const days = useMemo(
+    () => buildWeekDayJourney(week, { arcLedgerRows, journalEntries }),
+    [week, arcLedgerRows, journalEntries],
+  );
+  const [expandedDate, setExpandedDate] = useState(null);
+  const dayRefs = useRef(new Map());
+  const { focusedDate, scrollToDay } = useViewportDayFocus(dayRefs, reducedMotion);
+
+  if (!days.length || week.status === "upcoming") return null;
+
+  return (
+    <div style={{ marginTop: 14, position: "relative" }}>
+      <div style={{ fontSize: 9, fontWeight: 700, color: T.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8 }}>
+        Daily evidence
+      </div>
+      <div style={{ position: "relative" }}>
+        {days.map((day) => {
+          const focused = focusedDate === day.date;
+          const spineColor = day.hasReceipt || day.state === "evidence"
+            ? "rgba(61,155,95,0.35)"
+            : day.hasProof || day.state === "partial"
+              ? "rgba(200,144,42,0.25)"
+              : "rgba(255,255,255,0.07)";
+
+          return (
+            <div
+              key={day.date}
+              ref={(el) => {
+                if (el) dayRefs.current.set(day.date, el);
+                else dayRefs.current.delete(day.date);
+              }}
+              data-day={day.date}
+              style={{
+                display: "flex",
+                gap: 10,
+                minWidth: 0,
+                opacity: day.state === "future" ? 0.45 : focused ? 1 : 0.82,
+                transition: reducedMotion ? "none" : "opacity 0.22s ease",
+              }}
+            >
+              <div style={{ width: 20, display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
+                {!day.isFirst ? (
+                  <div style={{ width: 2, height: 6, background: spineColor, flexShrink: 0 }} />
+                ) : <div style={{ height: 4 }} />}
+                <DaySpineNode
+                  day={day}
+                  state={day.state}
+                  focused={focused}
+                  reducedMotion={reducedMotion}
+                  onClick={() => scrollToDay(day.date)}
+                />
+                {!day.isLast ? (
+                  <div style={{ width: 2, flex: 1, minHeight: 8, background: spineColor }} />
+                ) : null}
+              </div>
+
+              <div style={{ flex: 1, minWidth: 0, paddingBottom: day.isLast ? 4 : 10 }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    scrollToDay(day.date);
+                    if (day.hasReceipt) setExpandedDate(expandedDate === day.date ? null : day.date);
+                  }}
+                  style={{
+                    width: "100%", textAlign: "left", background: "none", border: "none",
+                    padding: 0, cursor: "pointer", fontFamily: T.font,
+                  }}
+                >
+                  <div style={{
+                    fontSize: 11, fontWeight: focused ? 600 : 500,
+                    color: focused ? T.text : T.muted, lineHeight: 1.3,
+                  }}>
+                    {day.label}
+                  </div>
+
+                  {day.hasReceipt && day.parsed ? (
+                    <>
+                      {day.parsed.title ? (
+                        <div style={{
+                          fontSize: 13, fontWeight: 600, color: T.text,
+                          marginTop: 3, lineHeight: 1.35, overflowWrap: "anywhere",
+                        }}>
+                          {day.parsed.title}
+                        </div>
+                      ) : null}
+                      {expandedDate === day.date ? (
+                        <div onClick={e => e.stopPropagation()} style={{ marginTop: 4 }}>
+                          <ReceiptExpandedBody parsed={day.parsed} content={day.journal.content} />
+                          <button type="button" onClick={() => setExpandedDate(null)}
+                            style={{ marginTop: 4, padding: 0, background: "none", border: "none", color: T.sub, fontSize: 11, cursor: "pointer", fontFamily: T.font }}>
+                            Collapse ▴
+                          </button>
+                        </div>
+                      ) : day.parsed.narrative ? (
+                        <div style={{
+                          fontSize: 12, color: T.sub, marginTop: 3, lineHeight: 1.45,
+                          overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical",
+                        }}>
+                          {day.parsed.narrative}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : day.state === "partial" ? (
+                    <div style={{ fontSize: 12, color: T.sub, marginTop: 3, lineHeight: 1.4 }}>
+                      Proof logged{day.proofTotal > 0 ? ` · ${day.proofDone}/${day.proofTotal}` : ""} · no receipt
+                    </div>
+                  ) : day.state === "future" ? (
+                    <div style={{ fontSize: 12, color: T.hint, marginTop: 3, fontStyle: "italic" }}>Ahead</div>
+                  ) : day.state === "today" && !day.hasReceipt && !day.hasProof ? (
+                    <div style={{ fontSize: 12, color: T.muted, marginTop: 3 }}>No evidence yet today</div>
+                  ) : (
+                    <div style={{ fontSize: 12, color: T.hint, marginTop: 3 }}>No evidence captured</div>
+                  )}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function BeforeArcChronology({ entries, reducedMotion }) {
+  const [expanded, setExpanded] = useState(null);
+  const [visibleCount, setVisibleCount] = useState(6);
+  const dayRefs = useRef(new Map());
+  const { focusedDate, scrollToDay } = useViewportDayFocus(dayRefs, reducedMotion);
+
+  const sorted = useMemo(
+    () => [...entries].sort((a, b) => (b.date || "").localeCompare(a.date || "")),
+    [entries],
+  );
+  const visible = sorted.slice(0, visibleCount);
+  const hasMore = visibleCount < sorted.length;
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      {visible.map((e, i) => {
+        const parsed = parseReceiptStructured(e.content);
+        const focused = focusedDate === e.date;
+        const isLast = i === visible.length - 1 && !hasMore;
+
+        return (
+          <div
+            key={e.date}
+            ref={(el) => {
+              if (el) dayRefs.current.set(e.date, el);
+              else dayRefs.current.delete(e.date);
+            }}
+            style={{
+              display: "flex", gap: 10, minWidth: 0,
+              opacity: focused ? 1 : 0.85,
+              transition: reducedMotion ? "none" : "opacity 0.22s ease",
+            }}
+          >
+            <div style={{ width: 20, display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
+              {i > 0 ? <div style={{ width: 2, height: 6, background: "rgba(255,255,255,0.07)" }} /> : <div style={{ height: 4 }} />}
+              <DaySpineNode
+                state="evidence"
+                focused={focused}
+                reducedMotion={reducedMotion}
+                onClick={() => scrollToDay(e.date)}
+              />
+              {!isLast ? <div style={{ width: 2, flex: 1, minHeight: 8, background: "rgba(255,255,255,0.07)" }} /> : null}
+            </div>
+            <div style={{ flex: 1, minWidth: 0, paddingBottom: isLast ? 4 : 8 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  scrollToDay(e.date);
+                  setExpanded(expanded === e.date ? null : e.date);
+                }}
+                style={{ width: "100%", textAlign: "left", background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: T.font }}
+              >
+                <div style={{ fontSize: 11, fontWeight: focused ? 600 : 500, color: focused ? T.text : T.muted }}>
+                  {fmtEntryDate(e.date)}
+                </div>
+                {parsed?.title ? (
+                  <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginTop: 2, lineHeight: 1.35, overflowWrap: "anywhere" }}>
+                    {parsed.title}
+                  </div>
+                ) : null}
+                {expanded === e.date ? (
+                  <div onClick={ev => ev.stopPropagation()} style={{ marginTop: 4 }}>
+                    <ReceiptExpandedBody parsed={parsed} content={e.content} />
+                  </div>
+                ) : parsed?.narrative ? (
+                  <div style={{
+                    fontSize: 12, color: T.sub, marginTop: 2, lineHeight: 1.45,
+                    overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical",
+                  }}>
+                    {parsed.narrative}
+                  </div>
+                ) : null}
+              </button>
+            </div>
+          </div>
+        );
+      })}
+      {hasMore ? (
+        <button
+          type="button"
+          onClick={() => setVisibleCount(c => Math.min(c + 7, sorted.length))}
+          style={{
+            marginTop: 10, padding: "8px 0", background: "none", border: "none",
+            color: T.sub, fontSize: 12.5, fontWeight: 500, cursor: "pointer", fontFamily: T.font,
+          }}
+        >
+          Show earlier entries · {sorted.length - visibleCount} more ▸
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function RailConnector({ active, width = 14 }) {
+  return (
+    <div
+      aria-hidden
+      style={{
+        flex: `0 0 ${width}px`,
+        width,
+        height: 2,
+        marginTop: 36,
+        alignSelf: "flex-start",
+        background: active ? `linear-gradient(90deg, ${T.gold}66, rgba(255,255,255,0.08))` : "rgba(255,255,255,0.08)",
+        zIndex: 0,
+        flexShrink: 0,
+      }}
+    />
   );
 }
 
@@ -378,16 +756,15 @@ function DetailAccent() {
 }
 
 function WeekDetail({
-  week, generatingBrief, onGenerateBrief, briefError, reducedMotion, panelKey,
+  week, arcLedgerRows, journalEntries, generatingBrief, onGenerateBrief, briefError, reducedMotion, panelKey,
 }) {
-  const [expandedReceipt, setExpandedReceipt] = useState(null);
   if (!week) return null;
 
   const statusLine = formatWeekStatusLine(week);
   const rangeLabel = `${fmtEntryDate(week.startDate)} – ${fmtEntryDate(week.endDate)}`;
 
   return (
-    <div key={panelKey} style={{ animation: reducedMotion ? undefined : "arcChapterIn 0.28s ease both" }}>
+    <div key={panelKey} style={{ animation: reducedMotion ? undefined : "arcChapterIn 0.28s ease both", paddingBottom: 24 }}>
       <DetailAccent />
       <div style={{ fontSize: 10, fontWeight: 800, color: T.gold, letterSpacing: "0.12em", textTransform: "uppercase" }}>
         Week {week.weekNum} · Days {week.dayStart}–{week.dayEnd}
@@ -406,33 +783,36 @@ function WeekDetail({
       ) : null}
 
       {week.chapterSummary ? (
-        <div style={{ fontSize: 13, color: T.sub, marginTop: 8, lineHeight: 1.55, overflowWrap: "anywhere" }}>
+        <div style={{ fontSize: 13, color: T.sub, marginTop: 6, lineHeight: 1.5, overflowWrap: "anywhere" }}>
           {week.chapterSummary}
         </div>
       ) : null}
 
       {statusLine ? (
-        <div style={{ fontSize: 12.5, color: T.text, marginTop: 10, lineHeight: 1.45 }}>{statusLine}</div>
+        <div style={{ fontSize: 12, color: T.sub, marginTop: 8, lineHeight: 1.4 }}>{statusLine}</div>
       ) : null}
 
       {week.briefText && !week.chapterSummary ? (
-        <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 9, fontWeight: 700, color: T.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6 }}>
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: T.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>
             Weekly review
           </div>
-          <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.65, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+          <div style={{
+            fontSize: 12.5, color: T.sub, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere",
+            overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical",
+          }}>
             {week.briefText}
           </div>
         </div>
       ) : week.status === "current" && onGenerateBrief && !week.briefText ? (
-        <div style={{ marginTop: 12 }}>
+        <div style={{ marginTop: 10 }}>
           <button
             type="button"
             disabled={generatingBrief}
             onClick={() => onGenerateBrief(week)}
             style={{
-              padding: "7px 12px", borderRadius: 8, border: `0.5px solid rgba(200,144,42,0.35)`,
-              background: "rgba(200,144,42,0.08)", color: T.gold, fontSize: 12, fontWeight: 600,
+              padding: "6px 12px", borderRadius: 8, border: `0.5px solid rgba(200,144,42,0.35)`,
+              background: "rgba(200,144,42,0.08)", color: T.gold, fontSize: 11.5, fontWeight: 600,
               cursor: "pointer", fontFamily: T.font, opacity: generatingBrief ? 0.6 : 1,
             }}
           >
@@ -441,57 +821,29 @@ function WeekDetail({
         </div>
       ) : null}
 
-      {briefError ? <div style={{ fontSize: 11, color: T.accent, marginTop: 8 }}>{briefError}</div> : null}
+      {briefError ? <div style={{ fontSize: 11, color: T.accent, marginTop: 6 }}>{briefError}</div> : null}
 
-      {week.receipts?.length > 0 ? (
-        <div style={{ marginTop: 14 }}>
-          <div style={{ fontSize: 9, fontWeight: 700, color: T.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 2 }}>
-            Daily evidence
-          </div>
-          {week.receipts.map(r => (
-            <ReceiptRow
-              key={r.date}
-              receipt={r}
-              compact
-              expanded={expandedReceipt === r.date}
-              onToggle={() => setExpandedReceipt(expandedReceipt === r.date ? null : r.date)}
-            />
-          ))}
-        </div>
-      ) : week.status !== "upcoming" ? (
-        <div style={{ fontSize: 12, color: T.muted, fontStyle: "italic", marginTop: 12 }}>No receipts recorded this week.</div>
-      ) : null}
+      <WeekDayJourney
+        week={week}
+        arcLedgerRows={arcLedgerRows}
+        journalEntries={journalEntries}
+        reducedMotion={reducedMotion}
+      />
     </div>
   );
 }
 
 function BeforeArcDetail({ entries, reducedMotion, panelKey }) {
-  const [expanded, setExpanded] = useState(null);
-  const sorted = useMemo(
-    () => [...entries].sort((a, b) => (b.date || "").localeCompare(a.date || "")),
-    [entries],
-  );
-
   return (
-    <div key={panelKey} style={{ animation: reducedMotion ? undefined : "arcChapterIn 0.28s ease both" }}>
+    <div key={panelKey} style={{ animation: reducedMotion ? undefined : "arcChapterIn 0.28s ease both", paddingBottom: 24 }}>
       <DetailAccent />
       <div style={{ fontSize: 10, fontWeight: 800, color: T.muted, letterSpacing: "0.12em", textTransform: "uppercase" }}>
         Before this Arc
       </div>
-      <div style={{ fontSize: 12.5, color: T.sub, marginTop: 8, lineHeight: 1.5 }}>
-        These {entries.length} entries predate this Arc and are not included in its progress.
+      <div style={{ fontSize: 12, color: T.sub, marginTop: 6, lineHeight: 1.45 }}>
+        These entries do not count toward Arc progress.
       </div>
-      <div style={{ marginTop: 12 }}>
-        {sorted.map(e => (
-          <ReceiptRow
-            key={e.date}
-            receipt={{ date: e.date, content: e.content }}
-            compact
-            expanded={expanded === e.date}
-            onToggle={() => setExpanded(expanded === e.date ? null : e.date)}
-          />
-        ))}
-      </div>
+      <BeforeArcChronology entries={entries} reducedMotion={reducedMotion} />
     </div>
   );
 }
@@ -887,6 +1239,8 @@ export function ArcTimeline({
       <WeekDetail
         week={selectedWeek}
         panelKey={selectedSegment}
+        arcLedgerRows={ledgerRows}
+        journalEntries={journalInArc}
         generatingBrief={generatingBrief}
         onGenerateBrief={isActive ? handleGenerateBrief : null}
         briefError={briefError}
@@ -941,65 +1295,78 @@ export function ArcTimeline({
           paddingRight: RAIL_PAD,
           minHeight: 108,
         }}>
-          {/* Path line */}
-          <div style={{
-            position: "absolute", left: RAIL_PAD, right: RAIL_PAD, top: 38,
-            height: 2, background: "rgba(255,255,255,0.08)", pointerEvents: "none",
-          }}>
-            <div style={{
-              height: "100%",
-              width: `${Math.min(100, ((currentWeek) / Math.max(1, timeline.weekCount)) * 100)}%`,
-              background: T.gold,
-              opacity: 0.5,
-            }} />
-          </div>
+          {(() => {
+            const nodes = [];
+            const pushConnector = (active) => {
+              if (nodes.length > 0) nodes.push(<RailConnector key={`c-${nodes.length}`} active={active} />);
+            };
+            const weekSegIndex = (n) => {
+              const idx = segmentList.indexOf(SEG.week(n));
+              const cur = segmentList.indexOf(SEG.week(currentWeek));
+              return idx >= 0 && cur >= 0 && idx <= cur;
+            };
 
-          {unassigned.length > 0 ? (
-            <BeforeArcNode
-              count={unassigned.length}
-              selected={selectedSegment === SEG.before}
-              adjacent={isAdjacent(SEG.before)}
-              onSelect={handleSelectSegment}
-              reducedMotion={reducedMotion}
-              index={nodeIndex++}
-            />
-          ) : null}
+            if (unassigned.length > 0) {
+              nodes.push(
+                <BeforeArcNode
+                  key="before"
+                  count={unassigned.length}
+                  selected={selectedSegment === SEG.before}
+                  adjacent={isAdjacent(SEG.before)}
+                  onSelect={handleSelectSegment}
+                  reducedMotion={reducedMotion}
+                  index={nodeIndex++}
+                />,
+              );
+            }
 
-          <StartNode
-            startDate={block.startDate}
-            selected={selectedSegment === SEG.start}
-            adjacent={isAdjacent(SEG.start)}
-            onSelect={handleSelectSegment}
-            reducedMotion={reducedMotion}
-            index={nodeIndex++}
-          />
-
-          {timeline.weeks.map((week) => {
-            const seg = SEG.week(week.weekNum);
-            return (
-              <WeekNode
-                key={week.weekNum}
-                week={week}
-                selected={selectedSegment === seg}
-                adjacent={isAdjacent(seg)}
+            pushConnector(false);
+            nodes.push(
+              <StartNode
+                key="start"
+                startDate={block.startDate}
+                selected={selectedSegment === SEG.start}
+                adjacent={isAdjacent(SEG.start)}
                 onSelect={handleSelectSegment}
                 reducedMotion={reducedMotion}
                 index={nodeIndex++}
-              />
+              />,
             );
-          })}
 
-          <FinishNode
-            block={block}
-            daysLeft={daysLeft}
-            weeksLeft={weeksLeft}
-            isComplete={isArcComplete}
-            selected={selectedSegment === SEG.finish}
-            adjacent={isAdjacent(SEG.finish)}
-            onSelect={handleSelectSegment}
-            reducedMotion={reducedMotion}
-            index={nodeIndex++}
-          />
+            timeline.weeks.forEach((week) => {
+              const seg = SEG.week(week.weekNum);
+              pushConnector(weekSegIndex(week.weekNum));
+              nodes.push(
+                <WeekNode
+                  key={week.weekNum}
+                  week={week}
+                  selected={selectedSegment === seg}
+                  adjacent={isAdjacent(seg)}
+                  onSelect={handleSelectSegment}
+                  reducedMotion={reducedMotion}
+                  index={nodeIndex++}
+                />,
+              );
+            });
+
+            pushConnector(currentWeek >= timeline.weekCount);
+            nodes.push(
+              <FinishNode
+                key="finish"
+                block={block}
+                daysLeft={daysLeft}
+                weeksLeft={weeksLeft}
+                isComplete={isArcComplete}
+                selected={selectedSegment === SEG.finish}
+                adjacent={isAdjacent(SEG.finish)}
+                onSelect={handleSelectSegment}
+                reducedMotion={reducedMotion}
+                index={nodeIndex++}
+              />,
+            );
+
+            return nodes;
+          })()}
         </div>
       </div>
 

@@ -126,7 +126,72 @@ export function parseReceiptStructured(content) {
     pattern: sections.pattern || null,
     narrative: narrativeLines.join(" ") || null,
     proof: sections["proof shown"] || sections.wins || null,
+    wins: sections.wins || null,
+    missed: sections.missed || null,
+    extras: sections.extras || null,
+    why: sections.why || null,
+    tomorrow: sections.tomorrow || null,
   };
+}
+
+/** Localised day label for vertical journey, e.g. "Monday · May 26". */
+export function formatDayLabel(dateStr, today = todayStr()) {
+  const d = parseLocal(dateStr);
+  const dayName = d.toLocaleDateString(undefined, { weekday: "long" });
+  const datePart = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  if (dateStr === today) return `Today · ${datePart}`;
+  return `${dayName} · ${datePart}`;
+}
+
+/**
+ * Day node states for vertical week journey.
+ * evidence | partial | empty | today | future
+ */
+export function buildWeekDayJourney(week, {
+  arcLedgerRows = [],
+  journalEntries = [],
+  today = todayStr(),
+} = {}) {
+  if (!week?.startDate || !week?.endDate) return [];
+
+  const ledger = ledgerMap(arcLedgerRows);
+  const journalByDate = journalMap(journalEntries);
+  const days = datesInRange(week.startDate, week.endDate);
+
+  return days.map((dateStr, i) => {
+    const journal = journalByDate.get(dateStr);
+    const led = ledger.get(dateStr);
+    const hasReceipt = !!journal?.content?.trim();
+    const proofDone = led?.proof_done ?? led?.proofDone ?? 0;
+    const proofTotal = led?.proof_total ?? led?.proofTotal ?? 0;
+    const hasProof = proofTotal > 0 || proofDone > 0;
+    const isToday = dateStr === today;
+    const isFuture = dateStr > today;
+
+    let state;
+    if (isFuture) state = "future";
+    else if (hasReceipt) state = isToday ? "today" : "evidence";
+    else if (hasProof) state = isToday ? "today" : "partial";
+    else if (isToday) state = "today";
+    else state = "empty";
+
+    const parsed = hasReceipt ? parseReceiptStructured(journal.content) : null;
+
+    return {
+      date: dateStr,
+      arcDay: week.dayStart + i,
+      label: formatDayLabel(dateStr, today),
+      state,
+      hasReceipt,
+      hasProof,
+      proofDone,
+      proofTotal,
+      journal: hasReceipt ? { content: journal.content, date: dateStr } : null,
+      parsed,
+      isFirst: i === 0,
+      isLast: i === days.length - 1,
+    };
+  });
 }
 
 /** Human-readable evidence count for checkpoints. */
