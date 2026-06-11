@@ -1,5 +1,5 @@
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { T, COACH_ICON_OPTIONS } from "../theme.js";
 import { todayStr, daysAgo, parseLocal, isSatisfiedForTodayRing, getStreak, stripJournalTitleLine } from "../utils.js";
 import { Ring, SLabel, Modal, GBtn } from "../components/ui.jsx";
@@ -580,6 +580,8 @@ export function TodayScreen({
   onOpenHub = null,
 }) {
   const [showProofPicker, setShowProofPicker] = useState(false);
+  const [justCompleted, setJustCompleted] = useState(false);
+  const prevProofDoneRef = useRef(null);
 
   const activeGoals    = goals.filter(g => g.status !== "completed");
   const trackHabits    = habits.filter(h => h.habitType !== "log");
@@ -594,6 +596,22 @@ export function TodayScreen({
     : trackHabits;
   const proofDone      = proofHabits.filter(h => isSatisfiedForTodayRing(h)).length;
   const proofTotal     = proofHabits.length;
+  const arcDayComplete = arcActive && proofTotal > 0 && proofDone === proofTotal;
+
+  useEffect(() => {
+    if (!arcActive || proofTotal <= 0) {
+      prevProofDoneRef.current = proofDone;
+      return;
+    }
+    const prev = prevProofDoneRef.current;
+    if (prev != null && prev < proofTotal && proofDone === proofTotal) {
+      setJustCompleted(true);
+      const t = setTimeout(() => setJustCompleted(false), 1400);
+      prevProofDoneRef.current = proofDone;
+      return () => clearTimeout(t);
+    }
+    prevProofDoneRef.current = proofDone;
+  }, [arcActive, proofDone, proofTotal]);
   const loggedCount    = arcActive
     ? proofDone
     : trackHabits.filter(h => isSatisfiedForTodayRing(h)).length;
@@ -675,6 +693,7 @@ export function TodayScreen({
 
   return (
     <div>
+      <style>{`@keyframes todayCompleteIn { from { opacity: 0.55; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }`}</style>
       {!activeBlock && habits.length > 0 && typeof onStartArc === "function" && (
         <button
           type="button"
@@ -732,17 +751,37 @@ export function TodayScreen({
           </div>
         </div>
       )}
-      <div data-tour="today-summary" style={{ margin:"6px 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, padding:"18px 20px", display:"flex", alignItems:"center", gap:18 }}>
+      <div data-tour="today-summary" style={{
+        margin:"6px 14px 12px", background:T.raised, borderRadius:T.r,
+        border:`0.5px solid ${arcDayComplete ? "rgba(200,144,42,0.35)" : T.border}`,
+        padding:"18px 20px", display:"flex", alignItems:"center", gap:18,
+      }}>
         <Ring pct={pct} centerMain={ringCenterMain} centerSub={ringCenterSub}/>
         <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ fontFamily:T.serif, fontSize:arcActive && activeBlock?.identity ? 18 : 20, color:T.text, marginBottom:4, lineHeight:1.35, minWidth:0, overflowWrap:"break-word", wordBreak:"break-word" }}>
-            {arcActive && activeBlock?.identity
-              ? String(activeBlock.identity).trim()
-              : (!arcActive && pct === 100 && totalTrackables > 0 ? "Forged for today" : greeting)}
-          </div>
-          <div style={{ fontSize:13, color:T.muted }}>
-            {arcActive ? `Day ${arcDayX} · ${ringSummary || "show proof"}` : (ringSummary || " ")}
-          </div>
+          {arcDayComplete ? (
+            <>
+              <div style={{
+                fontFamily:T.serif, fontSize:20, color:T.gold, marginBottom:4, lineHeight:1.3,
+                animation: justCompleted ? "todayCompleteIn 0.55s ease-out" : undefined,
+              }}>
+                Today is complete.
+              </div>
+              <div style={{ fontSize:13, color:T.sub, lineHeight:1.45 }}>
+                {proofTotal} {proofTotal === 1 ? "piece" : "pieces"} of proof. Day {arcDayX} is on the record.
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontFamily:T.serif, fontSize:arcActive && activeBlock?.identity ? 18 : 20, color:T.text, marginBottom:4, lineHeight:1.35, minWidth:0, overflowWrap:"break-word", wordBreak:"break-word" }}>
+                {arcActive && activeBlock?.identity
+                  ? String(activeBlock.identity).trim()
+                  : (!arcActive && pct === 100 && totalTrackables > 0 ? "Forged for today" : greeting)}
+              </div>
+              <div style={{ fontSize:13, color:T.muted }}>
+                {arcActive ? `Day ${arcDayX} · ${ringSummary || "show proof"}` : (ringSummary || " ")}
+              </div>
+            </>
+          )}
           {doneTasksCount > 0 && (
             <div style={{ marginTop:6, fontSize:11, color:T.muted, fontWeight:500 }}>
               ✓ {doneTasksCount}{totalTasksCount > doneTasksCount ? ` of ${totalTasksCount}` : ""} loose end{doneTasksCount === 1 ? "" : "s"} cleared

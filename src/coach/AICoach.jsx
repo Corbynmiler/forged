@@ -741,10 +741,55 @@ function coachRichTextToElements(text, { strongColor, baseColor, keyRoot = "r" }
   return out.length ? out : [<span key={`${keyRoot}-0`} style={{ color: baseColor }}>{text}</span>];
 }
 
+function CapturedChip({ item, onNavigateTo, onClose }) {
+  const canNav = item.ok && item.nav && !!onNavigateTo;
+  const border = item.ok ? "rgba(39,174,96,0.35)" : "rgba(230,126,34,0.4)";
+  const bg = item.ok ? "rgba(39,174,96,0.09)" : "rgba(230,126,34,0.08)";
+  const color = item.ok ? "#27AE60" : "#E67E22";
+  const inner = (
+    <>
+      <span style={{ flexShrink: 0, fontSize: 10 }}>{item.ok ? "✓" : "✗"}</span>
+      <span style={{ minWidth: 0, lineHeight: 1.35, wordBreak: "break-word", overflowWrap: "break-word" }}>
+        {item.label}
+      </span>
+      {canNav ? <span style={{ flexShrink: 0, opacity: 0.55, fontSize: 9.5 }}>→</span> : null}
+    </>
+  );
+  const chipStyle = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
+    maxWidth: "100%",
+    padding: "4px 10px",
+    borderRadius: 20,
+    fontSize: 11.5,
+    fontWeight: 500,
+    border: `0.5px solid ${border}`,
+    background: bg,
+    color,
+    lineHeight: 1.3,
+    fontFamily: T.font,
+    boxSizing: "border-box",
+    textAlign: "left",
+  };
+  if (canNav) {
+    return (
+      <button
+        type="button"
+        onClick={() => { onNavigateTo(item.nav); onClose?.(); }}
+        style={{ ...chipStyle, cursor: "pointer" }}
+      >
+        {inner}
+      </button>
+    );
+  }
+  return <span style={chipStyle}>{inner}</span>;
+}
+
 /**
  * Quiet, collapsible capture line under a coach reply.
- * Collapsed: "Captured: gym · water · note kept" in one muted line.
- * Expanded: one row per item; failures show in amber; rows navigate.
+ * Collapsed: wrapped chips inside the viewport.
+ * Expanded: one navigable row per item.
  * Server truth only (structured items from api/chat.js) — never model wording.
  */
 function CapturedLine({ items, onNavigateTo, onClose }) {
@@ -752,35 +797,35 @@ function CapturedLine({ items, onNavigateTo, onClose }) {
   const list = Array.isArray(items) ? items : [];
   if (!list.length) return null;
   const failures = list.filter(it => !it.ok);
-  const summary = list.map(it => it.label).join(" · ");
   return (
-    <div style={{ marginTop:6 }}>
+    <div style={{ marginTop: 6, width: "100%", maxWidth: "100%", minWidth: 0, overflow: "hidden" }}>
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
         aria-expanded={open}
         style={{
-          display:"flex", alignItems:"baseline", gap:5, maxWidth:"100%",
-          background:"none", border:"none", padding:"2px 0", cursor:"pointer",
-          fontFamily:T.font, textAlign:"left",
+          display: "flex", alignItems: "center", gap: 5, width: "100%", maxWidth: "100%",
+          background: "none", border: "none", padding: "2px 0", cursor: "pointer",
+          fontFamily: T.font, textAlign: "left",
         }}
       >
         <span style={{
-          fontSize:10.5, fontWeight:700, letterSpacing:"0.05em",
-          color: failures.length ? "#E67E22" : T.hint, flexShrink:0,
+          fontSize: 10.5, fontWeight: 700, letterSpacing: "0.05em",
+          color: failures.length ? "#E67E22" : T.hint, flexShrink: 0,
         }}>
           Captured{failures.length ? " (issues)" : ""}:
         </span>
-        <span style={{
-          fontSize:11, color:T.muted, lineHeight:1.4, minWidth:0,
-          ...(open ? {} : { overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }),
-        }}>
-          {summary}
-        </span>
-        <span style={{ fontSize:9, color:T.hint, flexShrink:0, transform: open ? "rotate(180deg)" : "none", transition:"transform 0.15s" }}>▾</span>
+        <span style={{ flex: 1, minWidth: 0 }} />
+        <span style={{ fontSize: 9, color: T.hint, flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>▾</span>
       </button>
-      {open ? (
-        <div style={{ display:"flex", flexDirection:"column", gap:3, marginTop:4 }}>
+      {!open ? (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 4, maxWidth: "100%" }}>
+          {list.map((it, i) => (
+            <CapturedChip key={i} item={it} onNavigateTo={onNavigateTo} onClose={onClose} />
+          ))}
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 3, marginTop: 4, maxWidth: "100%" }}>
           {list.map((it, i) => {
             const canNav = it.ok && it.nav && !!onNavigateTo;
             return (
@@ -789,24 +834,40 @@ function CapturedLine({ items, onNavigateTo, onClose }) {
                 type="button"
                 onClick={canNav ? () => { onNavigateTo(it.nav); onClose?.(); } : undefined}
                 style={{
-                  display:"flex", alignItems:"center", gap:6,
-                  background:"none", border:"none", padding:"2px 0",
+                  display: "flex", alignItems: "flex-start", gap: 6, maxWidth: "100%",
+                  background: "none", border: "none", padding: "2px 0",
                   cursor: canNav ? "pointer" : "default",
-                  fontFamily:T.font, textAlign:"left",
+                  fontFamily: T.font, textAlign: "left",
                 }}
               >
-                <span style={{ fontSize:10, color: it.ok ? "#27AE60" : "#E67E22", flexShrink:0 }}>
+                <span style={{ fontSize: 10, color: it.ok ? "#27AE60" : "#E67E22", flexShrink: 0, marginTop: 2 }}>
                   {it.ok ? "✓" : "✗"}
                 </span>
-                <span style={{ fontSize:11.5, color: it.ok ? T.sub : "#E67E22", lineHeight:1.4 }}>
+                <span style={{
+                  fontSize: 11.5, color: it.ok ? T.sub : "#E67E22", lineHeight: 1.4,
+                  minWidth: 0, wordBreak: "break-word", overflowWrap: "break-word",
+                }}>
                   {it.label}
                 </span>
-                {canNav ? <span style={{ fontSize:9, color:T.hint }}>→</span> : null}
+                {canNav ? <span style={{ fontSize: 9, color: T.hint, flexShrink: 0 }}>→</span> : null}
               </button>
             );
           })}
         </div>
-      ) : null}
+      )}
+    </div>
+  );
+}
+
+/** Shown while the server executes capture tools after reply text has streamed. */
+function CaptureSavingLine() {
+  return (
+    <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6, maxWidth: "100%" }}>
+      <div style={{
+        width: 5, height: 5, borderRadius: "50%", background: T.hint, flexShrink: 0,
+        animation: "coachDot 1.2s ease-in-out infinite",
+      }} />
+      <span style={{ fontSize: 11, color: T.muted, lineHeight: 1.4 }}>Saving what mattered…</span>
     </div>
   );
 }
@@ -1416,7 +1477,10 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
   const coachPersistDayRef = useRef(todayStr());
   const [input,    setInput]    = useState("");
   const [loading,  setLoading]  = useState(false);
+  const [captureSaving, setCaptureSaving] = useState(false);
   const [error,    setError]    = useState(null);
+  const streamActiveRef = useRef(false);
+  const lastStreamTextAtRef = useRef(0);
   const [freeCoachMsgsToday, setFreeCoachMsgsToday] = useState(0);
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
@@ -1530,7 +1594,28 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior:"smooth" });
-  }, [messages, loading]);
+  }, [messages, loading, captureSaving]);
+
+  // After reply text stops streaming, tools still run server-side — quiet status.
+  useEffect(() => {
+    if (!streamActiveRef.current) {
+      setCaptureSaving(false);
+      return;
+    }
+    const tick = () => {
+      if (!streamActiveRef.current) {
+        setCaptureSaving(false);
+        return;
+      }
+      const streamMsg = messagesRef.current.find(m => m.id === COACH_STREAM_ID);
+      const hasText = String(streamMsg?.content || "").trim().length > 0;
+      const idleMs = Date.now() - lastStreamTextAtRef.current;
+      setCaptureSaving(hasText && lastStreamTextAtRef.current > 0 && idleMs > 500);
+    };
+    tick();
+    const id = setInterval(tick, 150);
+    return () => clearInterval(id);
+  }, [messages]);
 
   useEffect(() => {
     if (isPro) return;
@@ -1677,6 +1762,9 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
         const streamTs = Date.now();
         setMessages(prev => [...prev, { role: "assistant", content: "", id: COACH_STREAM_ID, ts: streamTs }]);
         setLoading(false);
+        streamActiveRef.current = true;
+        lastStreamTextAtRef.current = 0;
+        setCaptureSaving(false);
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -1697,10 +1785,14 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
               if (evt.text) {
                 fullText += evt.text;
                 const snap = fullText;
+                lastStreamTextAtRef.current = Date.now();
+                setCaptureSaving(false);
                 setMessages(prev => prev.map(m => m.id === COACH_STREAM_ID ? { ...m, content: snap } : m));
                 bottomRef.current?.scrollIntoView({ behavior: "smooth" });
               }
               if (evt.done) {
+                streamActiveRef.current = false;
+                setCaptureSaving(false);
                 // Input was cleared optimistically on submit; do NOT clear here —
                 // streams can be long, and the user may have started typing the next message.
                 if (!evt.error) bumpAfterSuccess(evt.remaining);
@@ -1796,6 +1888,8 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
         setMessages(prev => [...prev, { role: "assistant", content: data.reply || "", ts: Date.now() }]);
       }
     } catch (e) {
+      streamActiveRef.current = false;
+      setCaptureSaving(false);
       setLoading(false);
       // Roll back to pre-send state so the user can retry cleanly
       setMessages(baseMessages);
@@ -1803,6 +1897,8 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
       setInput(trimmed); // restore input — never lost on failure
       setError(e.message || "Couldn't reach the coach. Try again.");
     } finally {
+      streamActiveRef.current = false;
+      setCaptureSaving(false);
       setLoading(false);
     }
   }
@@ -1814,7 +1910,7 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
   return (
     <div style={{ position:"fixed", inset:0, minHeight:"100dvh", background:"rgba(0,0,0,0.82)", zIndex:400, display:"flex", alignItems:"flex-end", justifyContent:"center", overscrollBehavior:"contain", touchAction:"none" }}
       onClick={e => e.target === e.currentTarget && onClose()}>
-      <div style={{ width:430, maxWidth:"100vw", background:T.raised, borderRadius:"22px 22px 0 0", display:"flex", flexDirection:"column", height:"min(680px, 85dvh)", minHeight:0, touchAction:"auto" }}>
+      <div style={{ width:430, maxWidth:"100vw", background:T.raised, borderRadius:"22px 22px 0 0", display:"flex", flexDirection:"column", height:"min(680px, 85dvh)", minHeight:0, minWidth:0, overflow:"hidden", touchAction:"auto" }}>
 
         {/* Header */}
         <div style={{ display:"flex", alignItems:"center", gap:12, padding:"16px 20px 13px", borderBottom:`0.5px solid ${T.border}`, flexShrink:0 }}>
@@ -1847,7 +1943,7 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
         </div>
 
         {/* Messages */}
-        <div style={{ flex:1, overflowY:"auto", WebkitOverflowScrolling:"touch", overscrollBehavior:"contain", padding:"16px 16px 8px", display:"flex", flexDirection:"column", gap:10 }}>
+        <div style={{ flex:1, overflowY:"auto", overflowX:"hidden", WebkitOverflowScrolling:"touch", overscrollBehavior:"contain", padding:"16px 16px 8px", display:"flex", flexDirection:"column", gap:10, minWidth:0, maxWidth:"100%" }}>
           {messages.length === 0 ? (
             <>
               <div style={{ display:"flex", justifyContent:"flex-start" }}>
@@ -1946,15 +2042,19 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
               ? formatCoachChatDisplay(coachMainRaw)
               : coachMainRaw;
             return (
-              <div key={m.id || `${m.role}-${i}-${m.ts ?? ""}`} style={{ display:"flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
-                <div style={{ maxWidth:"90%", display:"flex", flexDirection:"column", alignItems: m.role === "user" ? "flex-end" : "flex-start", width: parsed ? "100%" : undefined }}>
+              <div key={m.id || `${m.role}-${i}-${m.ts ?? ""}`} style={{ display:"flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start", width:"100%", maxWidth:"100%", minWidth:0 }}>
+                <div style={{
+                  maxWidth:"90%", width: m.role === "assistant" ? "90%" : undefined,
+                  minWidth:0, display:"flex", flexDirection:"column",
+                  alignItems: m.role === "user" ? "flex-end" : "flex-start",
+                }}>
                   {(coachMain || coachReceipt) ? (
                     <div style={{
-                      padding:"10px 14px",
+                      padding:"10px 14px", maxWidth:"100%", minWidth:0, boxSizing:"border-box",
                       borderRadius: m.role === "user" ? "14px 14px 3px 14px" : "14px 14px 14px 3px",
                       background: m.role === "user" ? T.accent : T.surface,
                       fontSize:14, color: m.role === "user" ? "#fff" : T.text,
-                      lineHeight:1.6, wordBreak:"break-word",
+                      lineHeight:1.6, wordBreak:"break-word", overflowWrap:"break-word",
                     }}>
                       {coachMain ? (
                         <CoachFormattedBubble text={coachMain} isUser={m.role === "user"} />
@@ -1983,6 +2083,9 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
                     </div>
                   ) : null}
                   {/* Quiet capture line — sits under the bubble, not inside it */}
+                  {m.role === "assistant" && m.id === COACH_STREAM_ID && captureSaving ? (
+                    <CaptureSavingLine />
+                  ) : null}
                   {m.role === "assistant" && m.captured?.length ? (
                     <CapturedLine items={m.captured} onNavigateTo={onNavigateTo} onClose={onClose} />
                   ) : null}
@@ -2027,7 +2130,7 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
         </div>
 
         {/* Input bar — mic left (voice entry), field, send right (standard chat hierarchy) */}
-        <div id="coach-input-bar" style={{ padding:"10px 14px 10px", borderTop:`0.5px solid ${T.border}`, flexShrink:0 }}>
+        <div id="coach-input-bar" style={{ padding:"10px 14px 10px", borderTop:`0.5px solid ${T.border}`, flexShrink:0, minWidth:0, maxWidth:"100%", overflow:"hidden" }}>
           {atFreeCap ? (
             <div style={{ padding:"4px 2px 6px" }}>
               <div style={{ fontSize:13, color:T.sub, lineHeight:1.5 }}>
