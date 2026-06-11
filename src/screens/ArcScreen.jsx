@@ -5,52 +5,6 @@ import { T } from "../theme.js";
 import { supabase, rowToForgeBlock } from "../supabase.js";
 import { getCurrentArcWeek } from "../lib/arcTimeline.js";
 import { ArcTimeline, ArcArchiveCard } from "../components/ArcTimeline.jsx";
-import { JournalScreen } from "./JournalScreen.jsx";
-
-function AllEvidencePanel({
-  habits, goals, journalEntries, userId, isPro, onUpgrade, userName, coachName,
-  activeBlock, onReflect, onDeleteJournalLog, onSaveJournalEntry, onJournalGenerated,
-  journalInitialTab, journalAutoGenerate, onJournalInitialComposeDone, onClose,
-}) {
-  return (
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 200,
-      background: T.bg, display: "flex", flexDirection: "column",
-      paddingTop: "env(safe-area-inset-top, 0px)",
-    }}>
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "12px 14px", borderBottom: `0.5px solid ${T.border}`, flexShrink: 0,
-      }}>
-        <div style={{ fontSize: 15, fontWeight: 600, color: T.text }}>All activity & receipts</div>
-        <button type="button" onClick={onClose}
-          style={{ padding: "6px 12px", borderRadius: 8, border: `0.5px solid ${T.border}`, background: T.raised, color: T.text, fontSize: 13, cursor: "pointer", fontFamily: T.font }}>
-          Done
-        </button>
-      </div>
-      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", minWidth: 0 }}>
-        <JournalScreen
-          habits={habits}
-          goals={goals}
-          onReflect={onReflect}
-          onDeleteJournalLog={onDeleteJournalLog}
-          journalUserId={userId}
-          isPro={isPro}
-          onUpgrade={onUpgrade}
-          journalEntries={journalEntries}
-          onSaveJournalEntry={onSaveJournalEntry}
-          onJournalGenerated={onJournalGenerated}
-          initialTab={journalInitialTab}
-          autoGenerateOnMount={journalAutoGenerate}
-          onInitialComposeDone={onJournalInitialComposeDone}
-          userName={userName}
-          coachName={coachName}
-          activeBlock={activeBlock}
-        />
-      </div>
-    </div>
-  );
-}
 
 function PastArcsSection({
   userId, isPro, onUpgrade, habits, goals, journalEntries, arcLedgerRows,
@@ -125,23 +79,22 @@ function PastArcsSection({
 export function ArcScreen({
   tab = "arc", onTabChange,
   activeBlock, habits, goals, journalEntries, arcLedgerRows = [],
-  isPro, onUpgrade, userId, userName, coachName,
+  isPro, onUpgrade, userId, userName,
   onStartArc, onEditArc, onRunItBack, onEvolve,
-  onReflect, onDeleteJournalLog, onSaveJournalEntry, onJournalGenerated,
-  journalInitialTab, journalAutoGenerate, onJournalInitialComposeDone,
 }) {
-  const [showAllEvidence, setShowAllEvidence] = useState(false);
   const [initialWeek, setInitialWeek] = useState(null);
+  const [openChronology, setOpenChronology] = useState(false);
 
   useEffect(() => {
     if (tab === "evidence") {
-      setShowAllEvidence(true);
+      setOpenChronology(true);
       onTabChange?.("arc");
     } else if (tab === "reviews") {
       setInitialWeek(getCurrentArcWeek(activeBlock));
       onTabChange?.("arc");
-    } else {
+    } else if (tab !== "arc") {
       setInitialWeek(null);
+      setOpenChronology(false);
     }
   }, [tab, activeBlock?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -186,7 +139,7 @@ export function ArcScreen({
         isActive
         onEditArc={onEditArc}
         initialWeek={initialWeek}
-        onShowAllEvidence={() => setShowAllEvidence(true)}
+        openChronologyOnMount={openChronology}
       />
 
       <PastArcsSection
@@ -195,28 +148,6 @@ export function ArcScreen({
         arcLedgerRows={arcLedgerRows} userName={userName}
         onRunItBack={onRunItBack} onEvolve={onEvolve}
       />
-
-      {showAllEvidence ? (
-        <AllEvidencePanel
-          habits={habits}
-          goals={goals}
-          journalEntries={journalEntries}
-          userId={userId}
-          isPro={isPro}
-          onUpgrade={onUpgrade}
-          userName={userName}
-          coachName={coachName}
-          activeBlock={activeBlock}
-          onReflect={onReflect}
-          onDeleteJournalLog={onDeleteJournalLog}
-          onSaveJournalEntry={onSaveJournalEntry}
-          onJournalGenerated={onJournalGenerated}
-          journalInitialTab={journalInitialTab}
-          journalAutoGenerate={journalAutoGenerate}
-          onJournalInitialComposeDone={onJournalInitialComposeDone}
-          onClose={() => setShowAllEvidence(false)}
-        />
-      ) : null}
     </div>
   );
 }

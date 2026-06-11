@@ -15,33 +15,111 @@ import {
 } from "../lib/arcTimeline.js";
 
 const CHECKPOINT_W = 80;
-const PATH_H = 56;
 const NODE = 44;
+const RAIL_PAD = "calc(50% - 40px)";
+
+const SEG = {
+  before: "before",
+  start: "start",
+  finish: "finish",
+  week: (n) => `week-${n}`,
+  parseWeek: (seg) => {
+    const m = /^week-(\d+)$/.exec(seg || "");
+    return m ? Number(m[1]) : null;
+  },
+};
 
 const ARC_MOTION_CSS = `
-@keyframes arcHeroBeam {
-  from { transform: scaleY(0); opacity: 0; }
-  to { transform: scaleY(1); opacity: 1; }
-}
 @keyframes arcPathReveal {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
 @keyframes arcChapterIn {
-  from { opacity: 0; transform: translateY(10px); }
+  from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
 @keyframes arcPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(200,144,42,0.35); }
-  50% { box-shadow: 0 0 0 6px rgba(200,144,42,0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(200,144,42,0.3); }
+  50% { box-shadow: 0 0 0 5px rgba(200,144,42,0); }
 }
 @media (prefers-reduced-motion: reduce) {
-  @keyframes arcHeroBeam { from, to { transform: none; opacity: 1; } }
   @keyframes arcPathReveal { from, to { transform: none; opacity: 1; } }
   @keyframes arcChapterIn { from, to { transform: none; opacity: 1; } }
   @keyframes arcPulse { from, to { box-shadow: none; } }
 }
 `;
+
+const SECONDARY_BTN = {
+  display: "flex", alignItems: "center", gap: 6,
+  padding: "10px 2px", background: "none", border: "none",
+  color: T.sub, fontSize: 12.5, fontWeight: 500, cursor: "pointer",
+  fontFamily: T.font, textAlign: "left", width: "100%",
+};
+
+function useRailCenterSelection(railRef, onSegment, reducedMotion) {
+  const timerRef = useRef(null);
+  const skipRef = useRef(false);
+
+  const detectCenter = useCallback(() => {
+    if (skipRef.current) return;
+    const rail = railRef.current;
+    if (!rail) return;
+    const railRect = rail.getBoundingClientRect();
+    const viewportCenter = railRect.left + railRect.width / 2;
+    const nodes = rail.querySelectorAll("[data-segment]");
+    let best = null;
+    let bestDist = Infinity;
+    nodes.forEach((el) => {
+      const r = el.getBoundingClientRect();
+      const center = r.left + r.width / 2;
+      const dist = Math.abs(center - viewportCenter);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = el.getAttribute("data-segment");
+      }
+    });
+    if (best) onSegment(best);
+  }, [railRef, onSegment]);
+
+  const scrollToSegment = useCallback((segment) => {
+    const rail = railRef.current;
+    const el = rail?.querySelector(`[data-segment="${segment}"]`);
+    if (!el) return;
+    skipRef.current = true;
+    el.scrollIntoView({
+      behavior: reducedMotion ? "auto" : "smooth",
+      inline: "center",
+      block: "nearest",
+    });
+    const delay = reducedMotion ? 60 : 380;
+    window.setTimeout(() => {
+      skipRef.current = false;
+      onSegment(segment);
+    }, delay);
+  }, [railRef, onSegment, reducedMotion]);
+
+  useEffect(() => {
+    const rail = railRef.current;
+    if (!rail) return;
+    const onScroll = () => {
+      if (skipRef.current) return;
+      clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(detectCenter, 90);
+    };
+    const onScrollEnd = () => {
+      if (!skipRef.current) detectCenter();
+    };
+    rail.addEventListener("scroll", onScroll, { passive: true });
+    rail.addEventListener("scrollend", onScrollEnd);
+    return () => {
+      rail.removeEventListener("scroll", onScroll);
+      rail.removeEventListener("scrollend", onScrollEnd);
+      clearTimeout(timerRef.current);
+    };
+  }, [railRef, detectCenter]);
+
+  return { scrollToSegment, detectCenter };
+}
 
 function ProofRing({ percent, size = 40, active, complete }) {
   const p = percent == null ? 0 : Math.max(0, Math.min(100, percent));
@@ -50,7 +128,7 @@ function ProofRing({ percent, size = 40, active, complete }) {
   const offset = c - (p / 100) * c;
   const stroke = active ? T.gold : complete ? "#3d9b5f" : "rgba(255,255,255,0.12)";
   return (
-    <svg width={size} height={size} style={{ position: "absolute", inset: 0 }}>
+    <svg width={size} height={size} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="2.5" />
       {(p > 0 || active) ? (
         <circle
@@ -64,92 +142,193 @@ function ProofRing({ percent, size = 40, active, complete }) {
   );
 }
 
-function PathCheckpoint({
-  week, selected, onSelect, reducedMotion, index,
+function RailCheckpoint({
+  segment, label, sublabel, selected, adjacent, onSelect, reducedMotion, index,
+  children, quiet = false, scrollSnap = "center",
 }) {
-  const isCurrent = week.status === "current";
-  const isComplete = week.status === "complete";
-  const isUpcoming = week.status === "upcoming";
-  const isSelected = selected;
-
-  const nodeBg = isSelected
-    ? "rgba(200,144,42,0.22)"
-    : isCurrent
-      ? "rgba(200,144,42,0.12)"
-      : isComplete
-        ? "rgba(61,155,95,0.10)"
-        : "rgba(255,255,255,0.03)";
-
-  const borderColor = isSelected
-    ? T.gold
-    : isCurrent
-      ? "rgba(200,144,42,0.7)"
-      : isComplete
-        ? "rgba(61,155,95,0.45)"
-        : "rgba(255,255,255,0.08)";
+  const scale = selected ? 1.16 : adjacent ? 0.94 : 0.88;
+  const opacity = selected ? 1 : quiet ? 0.38 : adjacent ? 0.58 : 0.72;
+  const transition = reducedMotion ? "none" : "transform 0.24s ease, opacity 0.24s ease";
 
   return (
     <button
       type="button"
-      data-week={week.weekNum}
-      onClick={() => onSelect(week.weekNum)}
-      aria-label={`Week ${week.weekNum}${week.chapterTitle ? `, ${week.chapterTitle}` : ""}`}
+      data-segment={segment}
+      onClick={() => onSelect(segment)}
+      aria-pressed={selected}
       style={{
         flex: `0 0 ${CHECKPOINT_W}px`,
         width: CHECKPOINT_W,
-        scrollSnapAlign: "center",
+        scrollSnapAlign: scrollSnap,
         background: "none",
         border: "none",
-        padding: 0,
+        padding: "0 0 4px",
         cursor: "pointer",
         fontFamily: T.font,
-        opacity: isUpcoming ? 0.42 : 1,
-        animation: reducedMotion ? undefined : `arcPathReveal 0.45s ease ${index * 0.04}s both`,
+        opacity,
+        transform: `scale(${scale})`,
+        transition,
+        transformOrigin: "center top",
+        animation: reducedMotion ? undefined : `arcPathReveal 0.4s ease ${index * 0.03}s both`,
       }}
     >
-      <div style={{ fontSize: 8, fontWeight: 800, letterSpacing: "0.1em", color: isCurrent ? T.gold : T.hint, textAlign: "center", marginBottom: 4 }}>
-        W{week.weekNum}
+      {label}
+      {children}
+      {sublabel ? (
+        <div style={{
+          marginTop: 5, padding: "0 2px", textAlign: "center", fontSize: 8.5,
+          color: selected ? T.sub : T.muted, lineHeight: 1.2,
+          overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+        }}>
+          {sublabel}
+        </div>
+      ) : null}
+    </button>
+  );
+}
+
+function BeforeArcNode({ count, selected, adjacent, onSelect, reducedMotion, index }) {
+  return (
+    <RailCheckpoint
+      segment={SEG.before}
+      selected={selected}
+      adjacent={adjacent}
+      onSelect={onSelect}
+      reducedMotion={reducedMotion}
+      index={index}
+      quiet
+      label={(
+        <div style={{ fontSize: 7.5, fontWeight: 800, letterSpacing: "0.08em", color: selected ? T.sub : T.hint, textAlign: "center", marginBottom: 4, lineHeight: 1.2 }}>
+          BEFORE
+        </div>
+      )}
+      sublabel={`${count} earlier`}
+    >
+      <div style={{
+        width: 32, height: 32, borderRadius: "50%", margin: "0 auto",
+        border: `1.5px solid ${selected ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.08)"}`,
+        background: selected ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.02)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 11, color: T.muted,
+      }}>
+        ◂
       </div>
+    </RailCheckpoint>
+  );
+}
+
+function StartNode({ startDate, selected, adjacent, onSelect, reducedMotion, index }) {
+  return (
+    <RailCheckpoint
+      segment={SEG.start}
+      selected={selected}
+      adjacent={adjacent}
+      onSelect={onSelect}
+      reducedMotion={reducedMotion}
+      index={index}
+      label={(
+        <div style={{ fontSize: 7.5, fontWeight: 800, letterSpacing: "0.1em", color: selected ? T.gold : T.hint, textAlign: "center", marginBottom: 4 }}>
+          START
+        </div>
+      )}
+      sublabel={startDate ? fmtEntryDate(startDate) : null}
+    >
+      <div style={{
+        width: 34, height: 34, borderRadius: "50%", margin: "0 auto",
+        border: `2px solid ${selected ? T.gold : "rgba(200,144,42,0.45)"}`,
+        background: selected ? "rgba(200,144,42,0.14)" : "rgba(200,144,42,0.06)",
+        boxShadow: selected ? `0 0 14px ${T.gold}33` : "none",
+      }} />
+    </RailCheckpoint>
+  );
+}
+
+function WeekNode({ week, selected, adjacent, onSelect, reducedMotion, index }) {
+  const isCurrent = week.status === "current";
+  const isComplete = week.status === "complete";
+  const isUpcoming = week.status === "upcoming";
+  const segment = SEG.week(week.weekNum);
+
+  const nodeBg = selected
+    ? "rgba(200,144,42,0.22)"
+    : isComplete ? "rgba(61,155,95,0.10)" : "rgba(255,255,255,0.03)";
+  const borderColor = selected
+    ? T.gold
+    : isComplete ? "rgba(61,155,95,0.5)" : isCurrent ? "rgba(200,144,42,0.55)" : "rgba(255,255,255,0.1)";
+
+  return (
+    <RailCheckpoint
+      segment={segment}
+      selected={selected}
+      adjacent={adjacent}
+      onSelect={onSelect}
+      reducedMotion={reducedMotion}
+      index={index}
+      quiet={isUpcoming && !selected}
+      label={(
+        <div style={{ fontSize: 8, fontWeight: 800, letterSpacing: "0.1em", color: selected ? T.gold : isCurrent ? T.gold : T.hint, textAlign: "center", marginBottom: 4 }}>
+          W{week.weekNum}
+        </div>
+      )}
+      sublabel={week.evidenceLabel || (week.chapterTitle && !isUpcoming ? week.chapterTitle : null)}
+    >
       <div style={{ position: "relative", width: NODE, height: NODE, margin: "0 auto" }}>
-        <ProofRing percent={week.proofPercent} size={NODE} active={isCurrent || isSelected} complete={isComplete && !isCurrent} />
+        <ProofRing percent={week.proofPercent} size={NODE} active={selected || isCurrent} complete={isComplete && !selected} />
         <div style={{
           position: "absolute", inset: 5, borderRadius: "50%",
-          background: nodeBg,
-          border: `2px solid ${borderColor}`,
+          background: nodeBg, border: `2px solid ${borderColor}`,
           display: "flex", alignItems: "center", justifyContent: "center",
-          animation: isCurrent && !reducedMotion ? "arcPulse 2.8s ease-in-out infinite" : undefined,
+          boxShadow: selected ? `0 0 12px ${T.gold}44` : "none",
+          animation: isCurrent && selected && !reducedMotion ? "arcPulse 2.8s ease-in-out infinite" : undefined,
         }}>
           {isComplete && week.isGenuinelyComplete ? (
-            <span style={{ fontSize: 14, color: "#4ade80", fontWeight: 700 }}>✓</span>
+            <span style={{ fontSize: 13, color: "#4ade80", fontWeight: 700 }}>✓</span>
           ) : isCurrent ? (
-            <span style={{ width: 8, height: 8, borderRadius: "50%", background: T.gold }} />
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: T.gold }} />
           ) : (
             <span style={{ fontSize: 11, fontWeight: 700, color: T.muted }}>{week.weekNum}</span>
           )}
         </div>
       </div>
-      <div style={{
-        marginTop: 6, padding: "0 2px", textAlign: "center", minHeight: 28,
-      }}>
-        {week.evidenceLabel ? (
-          <div style={{ fontSize: 9, color: T.sub, lineHeight: 1.25, overflowWrap: "anywhere" }}>
-            {week.evidenceLabel}
-          </div>
-        ) : null}
-        {week.chapterTitle && !isUpcoming ? (
-          <div style={{
-            fontSize: 8.5, color: isSelected ? T.gold : T.muted, lineHeight: 1.2, marginTop: 2,
-            overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
-          }}>
-            {week.chapterTitle}
-          </div>
-        ) : null}
-      </div>
-    </button>
+    </RailCheckpoint>
   );
 }
 
-function ReceiptChip({ receipt, expanded, onToggle }) {
+function FinishNode({ block, daysLeft, weeksLeft, isComplete, selected, adjacent, onSelect, reducedMotion, index }) {
+  const endLabel = block.endDate
+    ? parseLocal(block.endDate).toLocaleDateString(undefined, { day: "numeric", month: "short" })
+    : "";
+
+  return (
+    <RailCheckpoint
+      segment={SEG.finish}
+      selected={selected}
+      adjacent={adjacent}
+      onSelect={onSelect}
+      reducedMotion={reducedMotion}
+      index={index}
+      scrollSnap="center"
+      label={(
+        <div style={{ fontSize: 7.5, fontWeight: 800, letterSpacing: "0.1em", color: selected ? T.gold : T.hint, textAlign: "center", marginBottom: 4, lineHeight: 1.15 }}>
+          {isComplete ? "DONE" : "FINISH"}
+        </div>
+      )}
+      sublabel={!isComplete && daysLeft >= 0 ? `${daysLeft}d left` : endLabel || null}
+    >
+      <div style={{
+        width: 34, height: 34, borderRadius: "50%", margin: "0 auto",
+        border: `2px dashed ${selected ? T.gold : isComplete ? T.gold : "rgba(255,255,255,0.15)"}`,
+        background: selected ? "rgba(200,144,42,0.12)" : isComplete ? "rgba(200,144,42,0.08)" : "transparent",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 13,
+      }}>
+        {isComplete ? "◆" : "◎"}
+      </div>
+    </RailCheckpoint>
+  );
+}
+
+function ReceiptRow({ receipt, expanded, onToggle, compact }) {
   const parsed = parseReceiptStructured(receipt.content);
   if (!parsed?.title && !parsed?.narrative) return null;
   return (
@@ -157,27 +336,29 @@ function ReceiptChip({ receipt, expanded, onToggle }) {
       type="button"
       onClick={onToggle}
       style={{
-        width: "100%", textAlign: "left", padding: "10px 0",
-        background: "none", border: "none", borderBottom: `0.5px solid ${T.border}`,
+        width: "100%", textAlign: "left",
+        padding: compact ? "7px 0" : "8px 0",
+        background: "none", border: "none",
+        borderBottom: `0.5px solid ${T.border}`,
         cursor: "pointer", fontFamily: T.font,
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
         <span style={{ fontSize: 11, color: T.muted, flexShrink: 0 }}>{fmtEntryDate(receipt.date)}</span>
-        <span style={{ fontSize: 10, color: T.hint }}>{expanded ? "▾" : "▸"}</span>
+        <span style={{ fontSize: 10, color: T.sub }}>{expanded ? "▾" : "▸"}</span>
       </div>
       {parsed.title ? (
-        <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginTop: 4, lineHeight: 1.35, overflowWrap: "anywhere" }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginTop: 3, lineHeight: 1.35, overflowWrap: "anywhere" }}>
           {parsed.title}
         </div>
       ) : null}
       {expanded && parsed.narrative ? (
-        <div style={{ fontSize: 12.5, color: T.sub, marginTop: 6, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+        <div style={{ fontSize: 12.5, color: T.sub, marginTop: 5, lineHeight: 1.55, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
           {parsed.narrative}
         </div>
       ) : !expanded && parsed.narrative ? (
         <div style={{
-          fontSize: 12, color: T.muted, marginTop: 4, lineHeight: 1.45,
+          fontSize: 12, color: T.muted, marginTop: 3, lineHeight: 1.4,
           overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical",
         }}>
           {parsed.narrative}
@@ -187,8 +368,17 @@ function ReceiptChip({ receipt, expanded, onToggle }) {
   );
 }
 
-function WeekChapter({
-  week, generatingBrief, onGenerateBrief, briefError, reducedMotion, weekKey,
+function DetailAccent() {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+      <div style={{ width: 3, height: 14, borderRadius: 2, background: T.gold, flexShrink: 0 }} />
+      <div style={{ flex: 1, height: 1, background: `linear-gradient(90deg, ${T.gold}55, transparent)` }} />
+    </div>
+  );
+}
+
+function WeekDetail({
+  week, generatingBrief, onGenerateBrief, briefError, reducedMotion, panelKey,
 }) {
   const [expandedReceipt, setExpandedReceipt] = useState(null);
   if (!week) return null;
@@ -197,50 +387,51 @@ function WeekChapter({
   const rangeLabel = `${fmtEntryDate(week.startDate)} – ${fmtEntryDate(week.endDate)}`;
 
   return (
-    <div
-      key={weekKey}
-      style={{
-        animation: reducedMotion ? undefined : "arcChapterIn 0.38s ease both",
-      }}
-    >
+    <div key={panelKey} style={{ animation: reducedMotion ? undefined : "arcChapterIn 0.28s ease both" }}>
+      <DetailAccent />
       <div style={{ fontSize: 10, fontWeight: 800, color: T.gold, letterSpacing: "0.12em", textTransform: "uppercase" }}>
         Week {week.weekNum} · Days {week.dayStart}–{week.dayEnd}
       </div>
-      <div style={{ fontSize: 11.5, color: T.muted, marginTop: 4 }}>{rangeLabel}</div>
+      <div style={{ fontSize: 11.5, color: T.muted, marginTop: 3 }}>{rangeLabel}</div>
 
       {week.chapterTitle ? (
         <div style={{
-          fontFamily: T.serif, fontSize: 22, color: T.text, lineHeight: 1.2,
-          marginTop: 12, marginBottom: 8, overflowWrap: "anywhere", wordBreak: "break-word",
+          fontFamily: T.serif, fontSize: 20, color: T.text, lineHeight: 1.2,
+          marginTop: 10, overflowWrap: "anywhere", wordBreak: "break-word",
         }}>
           {week.chapterTitle}
         </div>
       ) : week.status === "upcoming" ? (
-        <div style={{ fontSize: 13, color: T.muted, marginTop: 12, fontStyle: "italic" }}>Not started yet</div>
+        <div style={{ fontSize: 13, color: T.muted, marginTop: 10, fontStyle: "italic" }}>Not started yet</div>
+      ) : null}
+
+      {week.chapterSummary ? (
+        <div style={{ fontSize: 13, color: T.sub, marginTop: 8, lineHeight: 1.55, overflowWrap: "anywhere" }}>
+          {week.chapterSummary}
+        </div>
       ) : null}
 
       {statusLine ? (
-        <div style={{ fontSize: 12.5, color: T.sub, marginBottom: 16, lineHeight: 1.5 }}>{statusLine}</div>
+        <div style={{ fontSize: 12.5, color: T.text, marginTop: 10, lineHeight: 1.45 }}>{statusLine}</div>
       ) : null}
 
-      {week.briefText ? (
-        <div style={{ marginBottom: 18 }}>
-          <div style={{ fontSize: 9, fontWeight: 700, color: T.hint, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8 }}>
+      {week.briefText && !week.chapterSummary ? (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: T.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6 }}>
             Weekly review
           </div>
-          <div style={{ fontSize: 13.5, color: T.text, lineHeight: 1.7, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+          <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.65, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
             {week.briefText}
           </div>
         </div>
-      ) : week.status === "current" && onGenerateBrief ? (
-        <div style={{ marginBottom: 18 }}>
-          <p style={{ fontSize: 12, color: T.muted, margin: "0 0 10px" }}>No weekly review yet for this chapter.</p>
+      ) : week.status === "current" && onGenerateBrief && !week.briefText ? (
+        <div style={{ marginTop: 12 }}>
           <button
             type="button"
             disabled={generatingBrief}
             onClick={() => onGenerateBrief(week)}
             style={{
-              padding: "8px 14px", borderRadius: 8, border: `0.5px solid rgba(200,144,42,0.35)`,
+              padding: "7px 12px", borderRadius: 8, border: `0.5px solid rgba(200,144,42,0.35)`,
               background: "rgba(200,144,42,0.08)", color: T.gold, fontSize: 12, fontWeight: 600,
               cursor: "pointer", fontFamily: T.font, opacity: generatingBrief ? 0.6 : 1,
             }}
@@ -250,180 +441,246 @@ function WeekChapter({
         </div>
       ) : null}
 
-      {briefError ? <div style={{ fontSize: 11, color: T.accent, marginBottom: 12 }}>{briefError}</div> : null}
+      {briefError ? <div style={{ fontSize: 11, color: T.accent, marginTop: 8 }}>{briefError}</div> : null}
 
       {week.receipts?.length > 0 ? (
-        <div>
-          <div style={{ fontSize: 9, fontWeight: 700, color: T.hint, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: T.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 2 }}>
             Daily evidence
           </div>
           {week.receipts.map(r => (
-            <ReceiptChip
+            <ReceiptRow
               key={r.date}
               receipt={r}
+              compact
               expanded={expandedReceipt === r.date}
               onToggle={() => setExpandedReceipt(expandedReceipt === r.date ? null : r.date)}
             />
           ))}
         </div>
       ) : week.status !== "upcoming" ? (
-        <div style={{ fontSize: 12, color: T.muted, fontStyle: "italic", paddingTop: 8 }}>No receipts recorded this week.</div>
+        <div style={{ fontSize: 12, color: T.muted, fontStyle: "italic", marginTop: 12 }}>No receipts recorded this week.</div>
       ) : null}
     </div>
   );
 }
 
-function FinishLineNode({ block, daysLeft, isComplete }) {
+function BeforeArcDetail({ entries, reducedMotion, panelKey }) {
+  const [expanded, setExpanded] = useState(null);
+  const sorted = useMemo(
+    () => [...entries].sort((a, b) => (b.date || "").localeCompare(a.date || "")),
+    [entries],
+  );
+
+  return (
+    <div key={panelKey} style={{ animation: reducedMotion ? undefined : "arcChapterIn 0.28s ease both" }}>
+      <DetailAccent />
+      <div style={{ fontSize: 10, fontWeight: 800, color: T.muted, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+        Before this Arc
+      </div>
+      <div style={{ fontSize: 12.5, color: T.sub, marginTop: 8, lineHeight: 1.5 }}>
+        These {entries.length} entries predate this Arc and are not included in its progress.
+      </div>
+      <div style={{ marginTop: 12 }}>
+        {sorted.map(e => (
+          <ReceiptRow
+            key={e.date}
+            receipt={{ date: e.date, content: e.content }}
+            compact
+            expanded={expanded === e.date}
+            onToggle={() => setExpanded(expanded === e.date ? null : e.date)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StartDetail({ block, reducedMotion, panelKey }) {
+  const title = resolveArcTitle(block.title, block.identity);
+  return (
+    <div key={panelKey} style={{ animation: reducedMotion ? undefined : "arcChapterIn 0.28s ease both" }}>
+      <DetailAccent />
+      <div style={{ fontSize: 10, fontWeight: 800, color: T.gold, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+        Arc begins
+      </div>
+      <div style={{ fontSize: 11.5, color: T.muted, marginTop: 3 }}>
+        {block.startDate ? fmtEntryDate(block.startDate) : ""}
+      </div>
+      <div style={{ fontFamily: T.serif, fontSize: 18, color: T.text, marginTop: 10, lineHeight: 1.2, overflowWrap: "anywhere" }}>
+        {title}
+      </div>
+      {block.identity ? (
+        <div style={{ fontSize: 13, color: T.sub, marginTop: 6, fontStyle: "italic", lineHeight: 1.5, overflowWrap: "anywhere" }}>
+          {block.identity}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function FinishDetail({ block, daysLeft, weeksLeft, isComplete, reducedMotion, panelKey }) {
   const endLabel = block.endDate
     ? parseLocal(block.endDate).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })
     : "";
   const story = reviewTextFromBlock(block);
 
   return (
-    <div
-      style={{
-        flex: `0 0 ${CHECKPOINT_W + 16}px`,
-        width: CHECKPOINT_W + 16,
-        scrollSnapAlign: "end",
-        paddingTop: 18,
-        textAlign: "center",
-      }}
-    >
-      <div style={{
-        width: 36, height: 36, borderRadius: "50%", margin: "0 auto",
-        border: `2px dashed ${isComplete ? T.gold : "rgba(255,255,255,0.15)"}`,
-        display: "flex", alignItems: "center", justifyContent: "center",
-        background: isComplete ? "rgba(200,144,42,0.12)" : "transparent",
-      }}>
-        <span style={{ fontSize: 14 }}>{isComplete ? "◆" : "◎"}</span>
+    <div key={panelKey} style={{ animation: reducedMotion ? undefined : "arcChapterIn 0.28s ease both" }}>
+      <DetailAccent />
+      <div style={{ fontSize: 10, fontWeight: 800, color: isComplete ? T.gold : T.muted, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+        {isComplete ? "Arc complete" : "Arc ends"}
       </div>
-      <div style={{ fontSize: 8, fontWeight: 800, letterSpacing: "0.12em", color: isComplete ? T.gold : T.hint, marginTop: 8 }}>
-        {isComplete ? "ARC COMPLETE" : "THE FINISH LINE"}
-      </div>
-      {!isComplete && daysLeft >= 0 ? (
-        <div style={{ fontSize: 9, color: T.muted, marginTop: 4, lineHeight: 1.35, padding: "0 4px" }}>
+      {endLabel ? <div style={{ fontSize: 11.5, color: T.muted, marginTop: 3 }}>{endLabel}</div> : null}
+      {!isComplete ? (
+        <div style={{ fontSize: 13, color: T.text, marginTop: 10, lineHeight: 1.5 }}>
           {daysLeft} day{daysLeft === 1 ? "" : "s"} remaining
-          {endLabel ? <><br />ends {endLabel}</> : null}
+          {weeksLeft > 0 ? ` · ${weeksLeft} week${weeksLeft === 1 ? "" : "s"} left` : ""}
         </div>
-      ) : isComplete && endLabel ? (
-        <div style={{ fontSize: 9, color: T.sub, marginTop: 4 }}>{endLabel}</div>
       ) : null}
-      {isComplete && story ? (
-        <div style={{
-          fontSize: 8.5, color: T.muted, marginTop: 6, lineHeight: 1.3, padding: "0 2px",
-          overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical",
-        }}>
-          {story}
+      {story ? (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: T.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6 }}>
+            Arc story
+          </div>
+          <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.65, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+            {story}
+          </div>
+        </div>
+      ) : !isComplete ? (
+        <div style={{ fontSize: 12.5, color: T.sub, marginTop: 10, lineHeight: 1.5 }}>
+          Your Arc story will appear here when you complete this season.
         </div>
       ) : null}
     </div>
   );
 }
 
+function EvidenceChronologySheet({ journalEntries, block, onClose, reducedMotion }) {
+  const [expanded, setExpanded] = useState(null);
+  const duration = getArcDurationDays(block);
+  const arcEnd = block?.startDate ? ymdAddDays(block.startDate, duration - 1) : null;
+
+  const sorted = useMemo(
+    () => [...(journalEntries || [])].filter(e => e?.date).sort((a, b) => b.date.localeCompare(a.date)),
+    [journalEntries],
+  );
+
+  let lastZone = null;
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 200, background: T.bg,
+      display: "flex", flexDirection: "column",
+      paddingTop: "env(safe-area-inset-top, 0px)",
+      paddingBottom: "env(safe-area-inset-bottom, 0px)",
+      animation: reducedMotion ? undefined : "arcChapterIn 0.25s ease both",
+    }}>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "12px 14px", borderBottom: `0.5px solid ${T.border}`, flexShrink: 0,
+      }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: T.text }}>Evidence chronology</div>
+          <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>All captured days, newest first</div>
+        </div>
+        <button type="button" onClick={onClose}
+          style={{ padding: "6px 12px", borderRadius: 8, border: `0.5px solid ${T.border}`, background: T.raised, color: T.text, fontSize: 13, cursor: "pointer", fontFamily: T.font }}>
+          Done
+        </button>
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "8px 14px 24px", minWidth: 0 }}>
+        {sorted.length === 0 ? (
+          <div style={{ fontSize: 13, color: T.muted, padding: "24px 0", textAlign: "center" }}>No evidence recorded yet.</div>
+        ) : sorted.map(e => {
+          const inArc = block?.startDate && arcEnd && e.date >= block.startDate && e.date <= arcEnd;
+          const zone = inArc ? "arc" : "outside";
+          const showLabel = zone !== lastZone;
+          lastZone = zone;
+          return (
+            <div key={e.date}>
+              {showLabel ? (
+                <div style={{
+                  fontSize: 9, fontWeight: 700, color: T.muted, letterSpacing: "0.1em",
+                  textTransform: "uppercase", padding: "12px 0 6px",
+                }}>
+                  {inArc ? "This Arc" : "Outside this Arc"}
+                </div>
+              ) : null}
+              <ReceiptRow
+                receipt={e}
+                expanded={expanded === e.date}
+                onToggle={() => setExpanded(expanded === e.date ? null : e.date)}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function ArcJourneyHero({
-  block, habits, dayNum, duration, weekNum, weeksTotal, daysLeft, progress,
-  proofDone, proofTotal, journeyFocused, onFocusJourney, onEditArc, onToggleDetails,
-  detailsOpen, reducedMotion, children,
+  block, dayNum, duration, weekNum, weeksTotal, daysLeft, progress,
+  proofDone, proofTotal, onEditArc, onToggleDetails, detailsOpen, reducedMotion, children,
 }) {
   const arcTitle = resolveArcTitle(block.title, block.identity);
 
   return (
-    <div style={{
-      position: "relative",
-      marginBottom: journeyFocused ? 8 : 20,
-      transition: reducedMotion ? undefined : "margin 0.4s ease",
-    }}>
+    <div style={{ position: "relative", marginBottom: 10, padding: "14px 2px 0" }}>
+      <div style={{ fontSize: 10, fontWeight: 800, color: T.gold, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 8 }}>
+        {arcDurationWeeksLabel(duration)} · Week {weekNum} of {weeksTotal}
+      </div>
       <div style={{
-        padding: journeyFocused ? "14px 2px 0" : "18px 2px 0",
-        transition: reducedMotion ? undefined : "padding 0.4s ease",
+        fontFamily: T.serif, fontSize: 26, color: T.text, lineHeight: 1.12,
+        marginBottom: 8, overflowWrap: "anywhere", wordBreak: "break-word",
       }}>
-        {!journeyFocused ? (
-          <>
-            <div style={{ fontSize: 10, fontWeight: 800, color: T.gold, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 8 }}>
-              {arcDurationWeeksLabel(duration)} · Week {weekNum} of {weeksTotal}
-            </div>
-            <div style={{
-              fontFamily: T.serif, fontSize: 28, color: T.text, lineHeight: 1.12,
-              marginBottom: 8, overflowWrap: "anywhere", wordBreak: "break-word",
-            }}>
-              {arcTitle}
-            </div>
-            {block.identity ? (
-              <div style={{ fontSize: 13.5, color: T.sub, lineHeight: 1.5, marginBottom: 14, fontStyle: "italic", overflowWrap: "anywhere" }}>
-                {block.identity}
-              </div>
-            ) : null}
-          </>
-        ) : (
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, marginBottom: 10 }}>
-            <div style={{ fontFamily: T.serif, fontSize: 18, color: T.text, lineHeight: 1.2, overflowWrap: "anywhere", flex: 1 }}>
-              {arcTitle}
-            </div>
-            <span style={{ fontSize: 10, fontWeight: 700, color: T.gold, flexShrink: 0 }}>W{weekNum}/{weeksTotal}</span>
-          </div>
-        )}
-
-        <button
-          type="button"
-          onClick={onFocusJourney}
-          aria-label="View Arc journey"
-          style={{
-            width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer",
-            textAlign: "left", fontFamily: T.font,
-          }}
-        >
-          <div style={{ height: 5, borderRadius: 3, background: "rgba(255,255,255,0.06)", overflow: "hidden", position: "relative" }}>
-            <div style={{
-              height: "100%", width: `${Math.round(progress * 100)}%`,
-              background: `linear-gradient(90deg, ${T.accent}, ${T.gold})`,
-              borderRadius: 3,
-              transition: reducedMotion ? undefined : "width 0.5s ease",
-            }} />
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 11, color: T.muted }}>
-            <span>Day {dayNum} of {duration}</span>
-            <span>{proofTotal > 0 ? `${proofDone}/${proofTotal} proof today` : (daysLeft === 0 ? "Final day" : `${daysLeft} days left`)}</span>
-          </div>
-        </button>
-
-        <div style={{
-          display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap",
-        }}>
-          {onEditArc ? (
-            <button type="button" onClick={onEditArc}
-              style={{ padding: "7px 12px", borderRadius: 8, border: `0.5px solid ${T.border}`, background: "transparent", color: T.sub, fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: T.font }}>
-              Edit Arc
-            </button>
-          ) : null}
-          {onToggleDetails ? (
-            <button type="button" onClick={onToggleDetails}
-              style={{ padding: "7px 12px", borderRadius: 8, border: `0.5px solid ${T.border}`, background: "transparent", color: T.muted, fontSize: 11.5, fontWeight: 500, cursor: "pointer", fontFamily: T.font }}>
-              {detailsOpen ? "Hide details" : "Details"}
-            </button>
-          ) : null}
-          {!journeyFocused ? (
-            <button type="button" onClick={onFocusJourney}
-              style={{ padding: "7px 12px", borderRadius: 8, border: `0.5px solid rgba(200,144,42,0.35)`, background: "rgba(200,144,42,0.08)", color: T.gold, fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: T.font, marginLeft: "auto" }}>
-              View journey →
-            </button>
-          ) : null}
+        {arcTitle}
+      </div>
+      {block.identity ? (
+        <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.5, marginBottom: 12, fontStyle: "italic", overflowWrap: "anywhere" }}>
+          {block.identity}
         </div>
+      ) : null}
 
-        {detailsOpen && children ? (
-          <div style={{ marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${T.border}` }}>
-            {children}
-          </div>
+      <div style={{ height: 5, borderRadius: 3, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
+        <div style={{
+          height: "100%", width: `${Math.round(progress * 100)}%`,
+          background: `linear-gradient(90deg, ${T.accent}, ${T.gold})`,
+          borderRadius: 3,
+          transition: reducedMotion ? undefined : "width 0.5s ease",
+        }} />
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 11, color: T.muted }}>
+        <span>Day {dayNum} of {duration}</span>
+        <span>{proofTotal > 0 ? `${proofDone}/${proofTotal} proof today` : (daysLeft === 0 ? "Final day" : `${daysLeft} days left`)}</span>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+        {onEditArc ? (
+          <button type="button" onClick={onEditArc}
+            style={{ padding: "7px 12px", borderRadius: 8, border: `0.5px solid ${T.border}`, background: "transparent", color: T.sub, fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: T.font }}>
+            Edit Arc
+          </button>
+        ) : null}
+        {onToggleDetails ? (
+          <button type="button" onClick={onToggleDetails}
+            style={{ padding: "7px 12px", borderRadius: 8, border: `0.5px solid ${T.border}`, background: "transparent", color: T.muted, fontSize: 11.5, fontWeight: 500, cursor: "pointer", fontFamily: T.font }}>
+            {detailsOpen ? "Hide details" : "Details"}
+          </button>
         ) : null}
       </div>
 
-      {/* Progress beam into path */}
+      {detailsOpen && children ? (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: `0.5px solid ${T.border}` }}>
+          {children}
+        </div>
+      ) : null}
+
       <div style={{
-        width: 2, height: journeyFocused ? 28 : 0, margin: "0 auto",
-        background: `linear-gradient(180deg, ${T.gold}, transparent)`,
-        transformOrigin: "top",
-        animation: journeyFocused && !reducedMotion ? "arcHeroBeam 0.45s ease both" : undefined,
-        opacity: journeyFocused ? 1 : 0,
-        transition: reducedMotion ? undefined : "height 0.4s ease, opacity 0.3s ease",
+        width: 2, height: 16, margin: "10px auto 0",
+        background: `linear-gradient(180deg, ${T.gold}88, transparent)`,
+        borderRadius: 1,
       }} />
     </div>
   );
@@ -443,25 +700,23 @@ export function ArcTimeline({
   onRunItBack,
   onEvolve,
   initialWeek = null,
-  onShowAllEvidence,
+  openChronologyOnMount = false,
   embedded = false,
 }) {
   const railRef = useRef(null);
-  const journeyRef = useRef(null);
   const reducedMotion = useReducedMotion();
   const [weeklyBriefs, setWeeklyBriefs] = useState({});
   const [briefsLoading, setBriefsLoading] = useState(true);
-  const [selectedWeek, setSelectedWeek] = useState(null);
+  const [selectedSegment, setSelectedSegment] = useState(null);
   const [generatingBrief, setGeneratingBrief] = useState(false);
   const [briefError, setBriefError] = useState(null);
-  const [showUnassigned, setShowUnassigned] = useState(false);
-  const [journeyFocused, setJourneyFocused] = useState(embedded ? true : false);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [expandedReceipt, setExpandedReceipt] = useState(null);
-
+  const [showChronology, setShowChronology] = useState(openChronologyOnMount);
   const [ledgerRows, setLedgerRows] = useState(arcLedgerRows);
+  const initialScrollDone = useRef(false);
 
   useEffect(() => { setLedgerRows(arcLedgerRows); }, [arcLedgerRows]);
+  useEffect(() => { if (openChronologyOnMount) setShowChronology(true); }, [openChronologyOnMount]);
 
   const { inArc: journalInArc, unassigned } = useMemo(
     () => partitionJournalEntries(block, journalEntries),
@@ -517,6 +772,7 @@ export function ArcTimeline({
   const duration = getArcDurationDays(block);
   const dayNum = getArcDayNumber(block);
   const daysLeft = Math.max(0, duration - dayNum);
+  const weeksLeft = Math.max(0, timeline.weekCount - currentWeek);
   const weeksTotal = timeline.weekCount;
   const progress = Math.min(1, Math.max(0, (dayNum - 1) / Math.max(1, duration)));
 
@@ -524,36 +780,51 @@ export function ArcTimeline({
   const proofDone = proofHabits.filter(h => isSatisfiedForTodayRing(h)).length;
   const proofTotal = proofHabits.length;
 
-  useEffect(() => {
-    setSelectedWeek(initialWeek ?? currentWeek);
-  }, [block?.id, initialWeek, currentWeek]);
-
-  const scrollWeekIntoView = useCallback((weekNum) => {
-    const el = railRef.current?.querySelector(`[data-week="${weekNum}"]`);
-    el?.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", inline: "center", block: "nearest" });
-  }, [reducedMotion]);
+  const defaultSegment = initialWeek != null ? SEG.week(initialWeek) : SEG.week(currentWeek);
 
   useEffect(() => {
-    if (!selectedWeek || briefsLoading) return;
-    const t = setTimeout(() => scrollWeekIntoView(selectedWeek), 100);
+    setSelectedSegment(defaultSegment);
+    initialScrollDone.current = false;
+  }, [block?.id, defaultSegment]);
+
+  const handleSegmentChange = useCallback((seg) => {
+    setSelectedSegment(seg);
+    setBriefError(null);
+  }, []);
+
+  const { scrollToSegment } = useRailCenterSelection(railRef, handleSegmentChange, reducedMotion);
+
+  const handleSelectSegment = useCallback((seg) => {
+    scrollToSegment(seg);
+  }, [scrollToSegment]);
+
+  useEffect(() => {
+    if (briefsLoading || initialScrollDone.current || !selectedSegment) return;
+    const t = setTimeout(() => {
+      scrollToSegment(selectedSegment);
+      initialScrollDone.current = true;
+    }, 80);
     return () => clearTimeout(t);
-  }, [selectedWeek, briefsLoading, scrollWeekIntoView, block?.id, journeyFocused]);
+  }, [briefsLoading, selectedSegment, scrollToSegment, block?.id]);
 
-  useEffect(() => {
-    if (embedded) setJourneyFocused(true);
-  }, [embedded]);
+  const segmentList = useMemo(() => {
+    const list = [];
+    if (unassigned.length > 0) list.push(SEG.before);
+    list.push(SEG.start);
+    timeline.weeks.forEach(w => list.push(SEG.week(w.weekNum)));
+    list.push(SEG.finish);
+    return list;
+  }, [unassigned.length, timeline.weeks]);
 
-  const focusJourney = useCallback(() => {
-    setJourneyFocused(true);
-    requestAnimationFrame(() => {
-      journeyRef.current?.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
-      scrollWeekIntoView(selectedWeek ?? currentWeek);
-    });
-  }, [reducedMotion, scrollWeekIntoView, selectedWeek, currentWeek]);
+  const selectedIndex = segmentList.indexOf(selectedSegment);
+  const isAdjacent = (seg) => {
+    const i = segmentList.indexOf(seg);
+    return selectedIndex >= 0 && Math.abs(i - selectedIndex) === 1;
+  };
 
-  const selected = timeline.weeks.find(w => w.weekNum === selectedWeek) || timeline.weeks[currentWeek - 1];
+  const selectedWeekNum = SEG.parseWeek(selectedSegment);
+  const selectedWeek = timeline.weeks.find(w => w.weekNum === selectedWeekNum);
   const isArcComplete = block.status !== "active";
-  const trackWidth = (timeline.weeks.length + 1) * CHECKPOINT_W + 32;
 
   async function handleGenerateBrief(week) {
     if (!userId || generatingBrief) return;
@@ -595,6 +866,37 @@ export function ArcTimeline({
     </>
   );
 
+  let detailPanel = null;
+  if (selectedSegment === SEG.before) {
+    detailPanel = <BeforeArcDetail entries={unassigned} reducedMotion={reducedMotion} panelKey="before" />;
+  } else if (selectedSegment === SEG.start) {
+    detailPanel = <StartDetail block={block} reducedMotion={reducedMotion} panelKey="start" />;
+  } else if (selectedSegment === SEG.finish) {
+    detailPanel = (
+      <FinishDetail
+        block={block}
+        daysLeft={daysLeft}
+        weeksLeft={weeksLeft}
+        isComplete={isArcComplete}
+        reducedMotion={reducedMotion}
+        panelKey="finish"
+      />
+    );
+  } else if (selectedWeek) {
+    detailPanel = (
+      <WeekDetail
+        week={selectedWeek}
+        panelKey={selectedSegment}
+        generatingBrief={generatingBrief}
+        onGenerateBrief={isActive ? handleGenerateBrief : null}
+        briefError={briefError}
+        reducedMotion={reducedMotion}
+      />
+    );
+  }
+
+  let nodeIndex = 0;
+
   return (
     <div style={{ minWidth: 0, overflow: "hidden", maxWidth: "100%" }}>
       <style>{ARC_MOTION_CSS}</style>
@@ -602,7 +904,6 @@ export function ArcTimeline({
       {isActive && !embedded ? (
         <ArcJourneyHero
           block={block}
-          habits={habits}
           dayNum={dayNum}
           duration={duration}
           weekNum={currentWeek}
@@ -611,8 +912,6 @@ export function ArcTimeline({
           progress={progress}
           proofDone={proofDone}
           proofTotal={proofTotal}
-          journeyFocused={journeyFocused}
-          onFocusJourney={focusJourney}
           onEditArc={onEditArc}
           onToggleDetails={(block.whyStatement || block.oldPattern || block.minimumProof) ? () => setDetailsOpen(v => !v) : null}
           detailsOpen={detailsOpen}
@@ -622,151 +921,130 @@ export function ArcTimeline({
         </ArcJourneyHero>
       ) : null}
 
-      <div ref={journeyRef} style={{ minWidth: 0, opacity: journeyFocused || embedded ? 1 : 0.55, transition: reducedMotion ? undefined : "opacity 0.4s ease" }}>
-        {/* Start marker */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 6px 10px", minWidth: 0 }}>
-          <div style={{ width: 10, height: 10, borderRadius: "50%", background: T.gold, boxShadow: `0 0 12px ${T.gold}55` }} />
-          <div>
-            <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: "0.12em", color: T.gold }}>ARC BEGINS</div>
-            <div style={{ fontSize: 11, color: T.muted }}>{block.startDate ? fmtEntryDate(block.startDate) : ""}</div>
-          </div>
-        </div>
-
-        {/* Connected path — horizontal scroll only here */}
-        <div
-          ref={railRef}
-          style={{
-            overflowX: "auto",
-            overflowY: "hidden",
-            WebkitOverflowScrolling: "touch",
-            scrollSnapType: "x mandatory",
-            minWidth: 0,
-            maxWidth: "100%",
-            marginBottom: 0,
-            paddingBottom: 4,
-          }}
-        >
-          <div style={{ position: "relative", width: trackWidth, minHeight: PATH_H + 72, padding: "0 12px" }}>
-            {/* Path line */}
-            <svg
-              style={{ position: "absolute", left: 24, top: 28, pointerEvents: "none" }}
-              width={trackWidth - 48}
-              height={12}
-              aria-hidden
-            >
-              <line x1="0" y1="6" x2={trackWidth - 48} y2="6" stroke="rgba(255,255,255,0.08)" strokeWidth="2" />
-              <line
-                x1="0" y1="6"
-                x2={Math.min(trackWidth - 48, ((currentWeek - 0.5) / timeline.weekCount) * (trackWidth - 48))}
-                y2="6"
-                stroke={T.gold}
-                strokeWidth="2"
-                strokeOpacity="0.55"
-              />
-            </svg>
-
-            <div style={{ display: "flex", alignItems: "flex-start", position: "relative", zIndex: 1 }}>
-              {timeline.weeks.map((week, i) => (
-                <PathCheckpoint
-                  key={week.weekNum}
-                  week={week}
-                  selected={selectedWeek === week.weekNum}
-                  onSelect={(w) => { setSelectedWeek(w); setBriefError(null); }}
-                  reducedMotion={reducedMotion}
-                  index={i}
-                />
-              ))}
-              <FinishLineNode
-                block={block}
-                daysLeft={daysLeft}
-                isComplete={isArcComplete}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Chapter stem + content */}
-        <div style={{ display: "flex", gap: 0, minWidth: 0, padding: "8px 6px 0" }}>
-          <div style={{ width: 20, flexShrink: 0, display: "flex", justifyContent: "center" }}>
+      <div
+        ref={railRef}
+        style={{
+          overflowX: "auto",
+          overflowY: "hidden",
+          WebkitOverflowScrolling: "touch",
+          scrollSnapType: "x mandatory",
+          minWidth: 0,
+          maxWidth: "100%",
+          marginBottom: 4,
+        }}
+      >
+        <div style={{
+          display: "flex",
+          alignItems: "flex-start",
+          position: "relative",
+          paddingLeft: RAIL_PAD,
+          paddingRight: RAIL_PAD,
+          minHeight: 108,
+        }}>
+          {/* Path line */}
+          <div style={{
+            position: "absolute", left: RAIL_PAD, right: RAIL_PAD, top: 38,
+            height: 2, background: "rgba(255,255,255,0.08)", pointerEvents: "none",
+          }}>
             <div style={{
-              width: 2, flex: 1, minHeight: 40,
-              background: `linear-gradient(180deg, ${T.gold}88, rgba(200,144,42,0.15))`,
-              borderRadius: 1,
+              height: "100%",
+              width: `${Math.min(100, ((currentWeek) / Math.max(1, timeline.weekCount)) * 100)}%`,
+              background: T.gold,
+              opacity: 0.5,
             }} />
           </div>
-          <div style={{ flex: 1, minWidth: 0, paddingBottom: 20 }}>
-            <WeekChapter
-              week={selected}
-              weekKey={selected?.weekNum}
-              generatingBrief={generatingBrief}
-              onGenerateBrief={isActive ? handleGenerateBrief : null}
-              briefError={briefError}
-              reducedMotion={reducedMotion}
-            />
-          </div>
-        </div>
 
-        {/* Completed arc actions */}
-        {isArcComplete && (onRunItBack || onEvolve) ? (
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "0 6px 16px" }}>
-            {onRunItBack ? (
-              <button type="button" onClick={() => onRunItBack(block)}
-                style={{ padding: "10px 16px", borderRadius: 8, border: "none", background: T.gold, color: "#0F0F0D", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: T.font }}>
-                Run it back
-              </button>
-            ) : null}
-            {onEvolve ? (
-              <button type="button" onClick={() => onEvolve(block)}
-                style={{ padding: "10px 16px", borderRadius: 8, border: `0.5px solid ${T.border}`, background: "transparent", color: T.text, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: T.font }}>
-                Evolve Arc
-              </button>
-            ) : null}
-          </div>
-        ) : null}
+          {unassigned.length > 0 ? (
+            <BeforeArcNode
+              count={unassigned.length}
+              selected={selectedSegment === SEG.before}
+              adjacent={isAdjacent(SEG.before)}
+              onSelect={handleSelectSegment}
+              reducedMotion={reducedMotion}
+              index={nodeIndex++}
+            />
+          ) : null}
+
+          <StartNode
+            startDate={block.startDate}
+            selected={selectedSegment === SEG.start}
+            adjacent={isAdjacent(SEG.start)}
+            onSelect={handleSelectSegment}
+            reducedMotion={reducedMotion}
+            index={nodeIndex++}
+          />
+
+          {timeline.weeks.map((week) => {
+            const seg = SEG.week(week.weekNum);
+            return (
+              <WeekNode
+                key={week.weekNum}
+                week={week}
+                selected={selectedSegment === seg}
+                adjacent={isAdjacent(seg)}
+                onSelect={handleSelectSegment}
+                reducedMotion={reducedMotion}
+                index={nodeIndex++}
+              />
+            );
+          })}
+
+          <FinishNode
+            block={block}
+            daysLeft={daysLeft}
+            weeksLeft={weeksLeft}
+            isComplete={isArcComplete}
+            selected={selectedSegment === SEG.finish}
+            adjacent={isAdjacent(SEG.finish)}
+            onSelect={handleSelectSegment}
+            reducedMotion={reducedMotion}
+            index={nodeIndex++}
+          />
+        </div>
       </div>
 
-      {/* Archive utilities — visually separate */}
-      {!embedded && unassigned.length > 0 ? (
-        <div style={{ marginTop: 32, paddingTop: 20, borderTop: `0.5px solid rgba(255,255,255,0.05)` }}>
-          <button
-            type="button"
-            onClick={() => setShowUnassigned(v => !v)}
-            style={{
-              width: "100%", padding: "8px 0", background: "none", border: "none",
-              color: T.hint, fontSize: 11.5, cursor: "pointer", fontFamily: T.font, textAlign: "left",
-            }}
-          >
-            Earlier evidence · {unassigned.length} {showUnassigned ? "▾" : "▸"}
-          </button>
-          {showUnassigned ? (
-            <>
-              <p style={{ fontSize: 11, color: T.muted, margin: "8px 0 12px", lineHeight: 1.5 }}>
-                These entries predate this Arc or fall outside its date range. They are not part of this journey.
-              </p>
-              {unassigned.slice(0, 15).map(e => (
-                <ReceiptChip
-                  key={e.date}
-                  receipt={{ date: e.date, content: e.content }}
-                  expanded={expandedReceipt === e.date}
-                  onToggle={() => setExpandedReceipt(expandedReceipt === e.date ? null : e.date)}
-                />
-              ))}
-            </>
+      {/* Detail — content height only */}
+      <div style={{ minWidth: 0, padding: "4px 6px 16px" }}>
+        {detailPanel}
+      </div>
+
+      {isArcComplete && (onRunItBack || onEvolve) ? (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "0 6px 16px" }}>
+          {onRunItBack ? (
+            <button type="button" onClick={() => onRunItBack(block)}
+              style={{ padding: "10px 16px", borderRadius: 8, border: "none", background: T.gold, color: "#0F0F0D", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: T.font }}>
+              Run it back
+            </button>
+          ) : null}
+          {onEvolve ? (
+            <button type="button" onClick={() => onEvolve(block)}
+              style={{ padding: "10px 16px", borderRadius: 8, border: `0.5px solid ${T.border}`, background: "transparent", color: T.text, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: T.font }}>
+              Evolve Arc
+            </button>
           ) : null}
         </div>
       ) : null}
 
-      {!embedded && onShowAllEvidence ? (
-        <button
-          type="button"
-          onClick={onShowAllEvidence}
-          style={{
-            marginTop: 16, padding: "8px 0", background: "none", border: "none",
-            color: T.hint, fontSize: 11.5, cursor: "pointer", fontFamily: T.font,
-          }}
-        >
-          All activity & receipts →
-        </button>
+      {!embedded ? (
+        <div style={{ marginTop: 8, paddingTop: 16, borderTop: `0.5px solid rgba(255,255,255,0.06)` }}>
+          <button
+            type="button"
+            onClick={() => setShowChronology(true)}
+            style={SECONDARY_BTN}
+          >
+            <span>All evidence chronology</span>
+            <span style={{ color: T.muted, fontSize: 11 }}>{journalEntries.length} entries ▸</span>
+          </button>
+        </div>
+      ) : null}
+
+      {showChronology ? (
+        <EvidenceChronologySheet
+          journalEntries={journalEntries}
+          block={block}
+          onClose={() => setShowChronology(false)}
+          reducedMotion={reducedMotion}
+        />
       ) : null}
     </div>
   );

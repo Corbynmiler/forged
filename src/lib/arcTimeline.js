@@ -142,9 +142,12 @@ export function formatEvidenceLabel(evidenceDays, daysPossible, status) {
 /** Short status line for chapter panel. */
 export function formatWeekStatusLine(week) {
   const { evidenceDays, daysPossible, proofPercent, status } = week;
+  const possible = Math.max(1, daysPossible || 7);
   const parts = [];
   if (evidenceDays > 0) {
-    parts.push(evidenceDays === 1 ? "Evidence on 1 day" : `Evidence on ${evidenceDays} days`);
+    if (evidenceDays === 1) parts.push("Evidence on 1 day");
+    else if (evidenceDays < possible) parts.push(`Evidence on ${evidenceDays} of ${possible} days`);
+    else parts.push(`Evidence on ${evidenceDays} days`);
   } else if (status === "complete") {
     parts.push("No days recorded");
   } else if (status === "current") {
@@ -154,6 +157,60 @@ export function formatWeekStatusLine(week) {
     parts.push(`${proofPercent}% proof shown`);
   }
   return parts.join(" · ") || (status === "upcoming" ? "Ahead" : "");
+}
+
+const CHAPTER_TITLE_MAX = 55;
+const CHAPTER_TITLE_WORD_MAX = 7;
+
+function wordCount(text) {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+/** Fit text into a concise chapter title (max ~55 chars, ~3–7 words). */
+export function truncateChapterTitle(text) {
+  if (!text?.trim()) return null;
+  let t = text.trim().replace(/^["']|["']$/g, "");
+  if (t.includes(" — ") && wordCount(t.split(" — ")[0]) <= CHAPTER_TITLE_WORD_MAX) {
+    t = t.split(" — ")[0].trim();
+  }
+  if (t.length <= CHAPTER_TITLE_MAX && wordCount(t) <= CHAPTER_TITLE_WORD_MAX) return t;
+  if (wordCount(t) > CHAPTER_TITLE_WORD_MAX) {
+    const shortened = t.split(/\s+/).slice(0, CHAPTER_TITLE_WORD_MAX).join(" ");
+    if (shortened.length <= CHAPTER_TITLE_MAX) return shortened;
+  }
+  if (t.length > CHAPTER_TITLE_MAX) {
+    const clipped = t.slice(0, CHAPTER_TITLE_MAX - 1);
+    return `${clipped.replace(/\s+\S*$/, "").trim()}…`;
+  }
+  return t;
+}
+
+function condenseBriefToTitle(briefText) {
+  const first = (briefText.trim().match(/[^.!?]+[.!?]?/)?.[0] || briefText).trim();
+  const cleaned = first.replace(/^this week[,]?\s*/i, "").replace(/^you\s+/i, "");
+  return truncateChapterTitle(cleaned);
+}
+
+function briefSummaryFromBrief(briefText, usedTitle) {
+  if (!briefText?.trim()) return null;
+  const trimmed = briefText.trim();
+  const sentences = trimmed.match(/[^.!?]+[.!?]+/g) || [trimmed];
+  const first = sentences[0]?.trim() || "";
+  const titleStem = (usedTitle || "").replace(/…$/, "").trim();
+
+  if (titleStem && first.length > titleStem.length + 8) {
+    if (first.toLowerCase().startsWith(titleStem.toLowerCase())) {
+      const rest = first.slice(titleStem.length).replace(/^[—,.\s]+/, "").trim();
+      if (rest.length >= 16) return rest.slice(0, 240);
+    }
+    if (first.length > CHAPTER_TITLE_MAX) return first.slice(0, 240);
+  }
+  if (sentences.length >= 2) {
+    const pair = sentences.slice(0, 2).join(" ").trim();
+    if (pair.length >= 20 && pair !== usedTitle) return pair.slice(0, 240);
+  }
+  if (first.length > CHAPTER_TITLE_MAX && first !== usedTitle) return first.slice(0, 240);
+  return null;
 }
 
 const WEAK_TITLE_RE = /^(solid|good|quiet|productive|recovery|reset|steady|building|foundations?|deep work|mixed|partial|light)\b/i;
@@ -189,7 +246,8 @@ function headlineFromBrief(briefText) {
   const sentences = firstBlock.match(/[^.!?]+[.!?]?/g) || [firstBlock];
   for (const raw of sentences) {
     const s = raw.replace(/^["']|["']$/g, "").trim();
-    if (s.length < 12 || s.length > 58) continue;
+    if (s.length < 12 || s.length > CHAPTER_TITLE_MAX) continue;
+    if (wordCount(s) > CHAPTER_TITLE_WORD_MAX) continue;
     if (/^this week/i.test(s)) continue;
     if (/^you /i.test(s)) continue;
     const scored = scoreChapterCandidate(s);
@@ -222,24 +280,51 @@ function chapterFromReceipts(range, journalByDate) {
 }
 
 /**
- * Chapter title hierarchy:
- * 1. Weekly review headline
- * 2. Best receipt pattern / title in week
+ * Chapter title + optional summary hierarchy:
+ * 1. Concise weekly review headline (title) + remainder (summary)
+ * 2. Receipt-derived title; brief body becomes summary when available
  * 3. Factual empty states
  */
-export function deriveChapterTitle({ status, briefText, range, journalByDate, evidenceDays }) {
-  if (status === "upcoming") return null;
-  if (status === "complete" && evidenceDays === 0) return "No evidence recorded";
-  if (status === "current" && evidenceDays === 0) return null;
-
-  const fromBrief = headlineFromBrief(briefText);
-  if (fromBrief) return fromBrief;
+export function deriveChapterContent({ status, briefText, range, journalByDate, evidenceDays }) {
+  if (status === "upcoming") return { chapterTitle: null, chapterSummary: null };
+  if (status === "complete" && evidenceDays === 0) {
+    return { chapterTitle: "No evidence recorded", chapterSummary: null };
+  }
+  if (status === "current" && evidenceDays === 0) {
+    return { chapterTitle: null, chapterSummary: null };
+  }
 
   const fromReceipts = chapterFromReceipts(range, journalByDate);
-  if (fromReceipts) return fromReceipts;
+  const receiptTitle = fromReceipts ? truncateChapterTitle(fromReceipts) : null;
+  const briefHeadline = headlineFromBrief(briefText);
 
-  if (evidenceDays === 0 && status === "complete") return "A quiet week";
-  return null;
+  if (briefHeadline) {
+    const title = truncateChapterTitle(briefHeadline);
+    const summary = briefSummaryFromBrief(briefText, title);
+    return { chapterTitle: title, chapterSummary: summary };
+  }
+
+  if (receiptTitle) {
+    const summary = briefText?.trim() ? briefSummaryFromBrief(briefText, receiptTitle) : null;
+    return { chapterTitle: receiptTitle, chapterSummary: summary };
+  }
+
+  if (briefText?.trim()) {
+    return {
+      chapterTitle: condenseBriefToTitle(briefText),
+      chapterSummary: briefSummaryFromBrief(briefText, null),
+    };
+  }
+
+  if (evidenceDays === 0 && status === "complete") {
+    return { chapterTitle: "A quiet week", chapterSummary: null };
+  }
+  return { chapterTitle: null, chapterSummary: null };
+}
+
+/** @deprecated use deriveChapterContent */
+export function deriveChapterTitle(opts) {
+  return deriveChapterContent(opts).chapterTitle;
 }
 
 /**
@@ -292,7 +377,7 @@ export function buildArcWeekSnapshot(block, weekNum, {
 
   const briefKey = calendarBriefKeyForArcWeek(range);
   const briefText = briefKey ? (weeklyBriefsByWeekStart[briefKey]?.text || "") : "";
-  const chapterTitle = deriveChapterTitle({
+  const { chapterTitle, chapterSummary } = deriveChapterContent({
     status, briefText, range, journalByDate, evidenceDays,
   });
   const evidenceLabel = formatEvidenceLabel(evidenceDays, daysPossible, status);
@@ -304,6 +389,7 @@ export function buildArcWeekSnapshot(block, weekNum, {
     evidenceDays,
     proofPercent,
     chapterTitle,
+    chapterSummary,
     evidenceLabel,
     briefText: briefText.trim() || null,
     briefWeekStart: briefKey,
