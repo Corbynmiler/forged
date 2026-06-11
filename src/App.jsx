@@ -64,12 +64,8 @@ import {
 
 // Hooks
 import {
-  useSpeechInput,
-  mergeDictationIntoText,
-  polishInterimDisplay,
   isLikelyHomeScreenPwa,
   copyForgedUrlToClipboard,
-  MicBtn,
 } from "./hooks/useSpeechInput.jsx";
 import { useScrollLock } from "./hooks/useScrollLock.js";
 
@@ -222,52 +218,10 @@ export default function App() {
     try { return localStorage.getItem("forged_coach_opened") === "1"; } catch { return false; }
   });
   const [showCoachTeaser, setShowCoachTeaser] = useState(false);
-  /** Message recorded via page-level mic, auto-sent when AICoach mounts. Cleared after use. */
+  /** Message auto-sent when AICoach mounts (e.g. nudge flows). Cleared after use. */
   const [coachPendingMsg, setCoachPendingMsg] = useState(null);
   /** Pre-fills the coach text input on open (not auto-sent). Cleared on close. */
   const [coachDraftInput, setCoachDraftInput] = useState(null);
-  // Accumulates finals + stop-time interim flush across Web Speech segments. Same session
-  // as in-chat dictation: browsers end recognition after pauses unless we auto-restart.
-  const pageDictationAccumulatorRef = useRef("");
-  // Page-level speech hook: mic tap in CoachBar records without opening the sheet first.
-  // autoRestart matches AICoach so silence does not end the session until the user stops.
-  const pageSpeech = useSpeechInput(
-    (transcript) => {
-      const t = (transcript || "").trim();
-      if (!t) return;
-      const prev = pageDictationAccumulatorRef.current;
-      pageDictationAccumulatorRef.current = prev ? `${prev} ${t}` : t;
-      if (import.meta.env.DEV) {
-        console.log("[pageSpeech] segment", t.length, "chars; total", pageDictationAccumulatorRef.current.length);
-      }
-    },
-    { autoRestart: true, meter: false },
-  );
-  const [pageSpeechBarDismissed, setPageSpeechBarDismissed] = useState(false);
-  const [pageSpeechCopyConfirm, setPageSpeechCopyConfirm] = useState("");
-  const pageSpeechCopyConfirmTimerRef = useRef(null);
-  const prevPageSpeechListeningRef = useRef(false);
-  useEffect(() => () => {
-    if (pageSpeechCopyConfirmTimerRef.current) clearTimeout(pageSpeechCopyConfirmTimerRef.current);
-  }, []);
-  useEffect(() => {
-    const was = prevPageSpeechListeningRef.current;
-    const now = pageSpeech.listening;
-    if (was && !now) {
-      const msg = pageDictationAccumulatorRef.current.trim();
-      pageDictationAccumulatorRef.current = "";
-      if (msg) {
-        if (import.meta.env.DEV) console.log("[pageSpeech] handoff", msg.length, "chars");
-        setCoachDraftInput(null);
-        setCoachPendingMsg(msg);
-        try { localStorage.setItem("forged_coach_opened", "1"); } catch { /* ignore */ }
-        setCoachEverOpened(true);
-        setCoachOpenMode("text");
-        setShowCoach(true);
-      }
-    }
-    prevPageSpeechListeningRef.current = now;
-  }, [pageSpeech.listening]);
   /** Ephemeral bubble above the coach FAB: `{ id, text }` while visible; `id` ties to the navigation that triggered it. */
   const [coachPageNudge, setCoachPageNudge] = useState(null);
   const coachNudgeSeqRef = useRef(0);
@@ -4289,13 +4243,7 @@ export default function App() {
             !showCoach && ["today", "arc", "social", "hub"].includes(screen);
           const safeBottom = "env(safe-area-inset-bottom, 0px)";
           const aboveNav = `calc(62px + ${safeBottom})`;
-          const showPageSpeechMicIssue =
-            showCoachBar &&
-            (pageSpeech.speechError || pageSpeech.micBlocked) &&
-            !pageSpeechBarDismissed;
-          const aboveCoachBar = showPageSpeechMicIssue
-            ? `calc(212px + ${safeBottom})`
-            : `calc(132px + ${safeBottom})`;
+          const aboveCoachBar = `calc(132px + ${safeBottom})`;
           return (
             <>
               {!showCoach && (pageGuide?.page === screen || coachPageNudge) ? (
@@ -4439,61 +4387,18 @@ export default function App() {
                     width:"100%",
                     maxWidth:430,
                     bottom:aboveNav,
-                    zIndex: showPageSpeechMicIssue ? 103 : 101,
+                    zIndex:101,
                     padding:"0 10px 0",
                     boxSizing:"border-box",
                   }}
                 >
                   <CoachBar
-                    reserveRightPx={showTodayAdd && showPageSpeechMicIssue ? 118 : 0}
                     coachName={coachName}
                     coachIcon={coachIcon}
                     habitColor={habitColor}
-                    onOpenMic={() => {
-                      setPageSpeechBarDismissed(false);
-                      setPageSpeechCopyConfirm("");
-                      if (pageSpeechCopyConfirmTimerRef.current) {
-                        clearTimeout(pageSpeechCopyConfirmTimerRef.current);
-                        pageSpeechCopyConfirmTimerRef.current = null;
-                      }
-                      // Page mic: record on current page; handoff when user stops (see pageSpeech effect)
-                      // Voice input is free for everyone — no Pro gate here.
-                      if (pageSpeech.supported) {
-                        if (!pageSpeech.listening) pageDictationAccumulatorRef.current = "";
-                        pageSpeech.toggle();
-                      } else {
-                        openCoachWithMode("mic"); // fallback if speech API unavailable
-                      }
-                    }}
+                    onOpenMic={() => openCoachWithMode("mic")}
                     onOpenText={() => openCoachWithMode("text")}
                     coachEverOpened={coachEverOpened}
-                    isListening={pageSpeech.listening}
-                    listeningInterim={pageSpeech.interim || ""}
-                    speechError={pageSpeech.speechError || ""}
-                    micBlocked={pageSpeech.micBlocked}
-                    errorDismissed={pageSpeechBarDismissed}
-                    onDismissError={() => setPageSpeechBarDismissed(true)}
-                    onTryAgain={() => {
-                      setPageSpeechBarDismissed(false);
-                      if (!pageSpeech.listening) pageDictationAccumulatorRef.current = "";
-                      pageSpeech.toggle();
-                    }}
-                    onCopyLink={isLikelyHomeScreenPwa() ? async () => {
-                      const ok = await copyForgedUrlToClipboard();
-                      setPageSpeechCopyConfirm(ok
-                        ? "Link copied — open it in Safari."
-                        : "Could not copy. Open Forged manually in Safari.");
-                      if (pageSpeechCopyConfirmTimerRef.current) clearTimeout(pageSpeechCopyConfirmTimerRef.current);
-                      pageSpeechCopyConfirmTimerRef.current = setTimeout(() => {
-                        setPageSpeechCopyConfirm("");
-                        pageSpeechCopyConfirmTimerRef.current = null;
-                      }, 4500);
-                    } : undefined}
-                    copyLinkConfirm={pageSpeechCopyConfirm}
-                    onTypeInstead={() => {
-                      setPageSpeechBarDismissed(true);
-                      openCoachWithMode("text");
-                    }}
                   />
                 </div>
               ) : null}

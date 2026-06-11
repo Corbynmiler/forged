@@ -91,14 +91,25 @@ export function speechUnsupportedHelpMessage() {
   return "Voice input isn't available in this browser. Type your entry instead.";
 }
 
+let speechSucceededInSession = false;
+
+/** Set when recognition actually starts or delivers a transcript this session. */
+export function markSpeechSucceededInSession() {
+  speechSucceededInSession = true;
+}
+
+export function hasSpeechSucceededInSession() {
+  return speechSucceededInSession;
+}
+
 export function speechServiceBlockedHelpMessage() {
-  if (isLikelyMobileChromeSpeechUi()) {
-    return "Chrome won't run voice-to-text on some phones — yours may be one of them. It's not you doing anything wrong. Just type in the box; updating Chrome or using a laptop sometimes fixes it.";
+  if (speechSucceededInSession) {
+    return "Voice typing was interrupted. Tap the mic to try again, or type instead.";
   }
   if (isAppleMobileDevice() && isLikelyHomeScreenPwa()) {
     return "Voice input may not work in this mode. Try opening Forged in Safari, or type your entry instead.";
   }
-  return "Voice typing didn't start. Allow the microphone for this site in your browser settings, or type your entry instead.";
+  return "Voice typing didn't start. Allow the microphone for this site in your browser settings, or type instead.";
 }
 
 /** User-visible message when SpeechRecognition.start() or construction fails. */
@@ -528,6 +539,7 @@ export function useSpeechInput(onFinal, opts = {}) {
     }
 
     recog.onstart = () => {
+      markSpeechSucceededInSession();
       pendingInterimRef.current = "";
       setMicBlocked(false);
       setSpeechError("");
@@ -560,7 +572,10 @@ export function useSpeechInput(onFinal, opts = {}) {
         if (row.isFinal) {
           const t = pickBestTranscriptFromResult(row);
           const polished = polishSpeechSegment(t);
-          if (polished) onFinalRef.current(polished);
+          if (polished) {
+            markSpeechSucceededInSession();
+            onFinalRef.current(polished);
+          }
           pendingInterimRef.current = "";
           setInterim("");
         } else {

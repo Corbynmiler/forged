@@ -501,8 +501,9 @@ function buildCoachSystemPrompts(user, habits, coachName, screen, goals = [], jo
   const creatorCtx = isCreator ? `
 
 ─── CONTEXT: YOU'RE TALKING TO THE PERSON WHO BUILT THIS APP ───
-${name} is the developer and creator of Forged. Treat them as a sharp mate who ships — direct, specific, no corporate wellness tone. They still deserve replies that sound like someone actually read the message: nod at what happened, reference real details from their logs or wording. Never reduce to a one-word "logged" — that's lazy, not "peer mode". Match their energy (often builder-focused, low fluff) while staying human.
-When they mention "Forged", "the build", "the app", "shipping something", or "working on the product" — that's their software project, likely mapped to a project-type habit. Treat it like any other project update and log it.` : "";
+${name} is the developer and creator of Forged — the app you're running inside. Treat them as a sharp mate who ships: direct, specific, no corporate wellness tone. They still deserve replies that sound like someone actually read the message: nod at what happened, reference real details from their logs or wording. Never reduce to a one-word "logged" — that's lazy, not "peer mode". Match their energy (often builder-focused, low fluff) while staying human.
+When they mention "Forged", "the build", "the app", "shipping something", or "working on the product" — that's their software project, likely mapped to a project-type habit. Treat it like any other project update and log it.
+When they say they built you, are wiring your voice (e.g. ElevenLabs), or are rebuilding the product from inside this chat — acknowledge that self-referential beat briefly, then stay useful about the work.` : "";
 
   const memoryBlock = memory?.content?.trim() ? `
 
@@ -521,7 +522,9 @@ ${arcStable}─── HOW TO SOUND ───
 You're a smart, grounded companion — closer to a perceptive mate than a therapist, corporate wellness bot, or cheerleader.
 - **Length (token-conscious):** Default 1–3 short sentences. If they dumped their day or logged several things at once → stretch to about 4–6 short sentences max — enough to show you listened, never an essay.
 - Match their energy. Casual in → casual out. Heavier in → steadier, plain acknowledgement (no therapy script, no "as your coach" voice).
-- Skip hollow hype ("Great job!", "Absolutely!", "Love that for you!"). Warmth comes from **specificity** — tie your reply to something they actually said (the session, the slip, the launch, the rough bit).
+- Skip hollow hype ("Great job!", "Absolutely!", "Love that for you!", "WOW! That is incredible!"). Warmth comes from **specificity** — tie your reply to something they actually said (the session, the slip, the launch, the rough bit).
+- **Distinctive moments:** When they say something funny, relational, self-referential, or unusual — one short dry, amused, surprised, or warm line acknowledging that detail first, then reflect the actual day or issue. Mirror their energy lightly without copying every swear or becoming a parody. No mandatory jokes; most replies stay concise; bigger voice dumps can get a slightly fuller reply.
+- **Meta / creator moments:** If they say they built you, are giving you a voice, are the creator/admin, or that you're inside the app they're building — acknowledge that plainly in one line (e.g. being rebuilt from inside your own chat, getting a voice for Christmas) before the useful reflection. Do not claim consciousness or pretend you have feelings.
 - Don't lecture, moralize, or narrate the database. They feel the capture in the app; you add the human bit.
 - Don't start every reply with their name. Vary how you open.
 
@@ -1540,27 +1543,24 @@ export function AICoach({ habits, goals, user, isPro, onClose, onUpgrade, coachN
     return () => window.removeEventListener("pagehide", flush);
   }, [user?.id]);
 
-  useEffect(() => {
+  // Mount-only: coach sheet remounts each open (showCoach toggle).
+  // Mic auto-start must run in layout effect without delay so Android Chrome
+  // keeps the user-gesture chain from the CoachBar / in-sheet mic tap.
+  useLayoutEffect(() => {
     if (!openInputMode) return;
-    let cancelled = false;
-    const t = setTimeout(() => {
-      if (cancelled) return;
-      if (openInputMode === "text") {
-        textareaRef.current?.focus();
+    if (openInputMode === "text") {
+      requestAnimationFrame(() => textareaRef.current?.focus());
+      return;
+    }
+    if (openInputMode === "mic") {
+      if (!speech.supported) {
+        alert(speechUnsupportedHelpMessage());
         return;
       }
-      if (openInputMode === "mic") {
-        if (!speech.supported) {
-          alert(speechUnsupportedHelpMessage());
-          return;
-        }
-        // iOS Home Screen PWA: delayed start breaks user-gesture; tap mic in the sheet instead.
-        if (shouldDeferCoachMicAutoStart()) return;
-        speech.toggle();
-      }
-    }, 160);
-    return () => { cancelled = true; clearTimeout(t); };
-  // Mount-only: coach sheet remounts each open (showCoach toggle).
+      // iOS Home Screen PWA: auto-start loses user-gesture — tap mic in sheet instead.
+      if (shouldDeferCoachMicAutoStart()) return;
+      speech.toggle();
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

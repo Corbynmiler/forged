@@ -19,7 +19,137 @@ function formatDate(ymd) {
 // (rest, recovery, sick, social, time off) rather than a genuine miss.
 const REST_DAY_NOTE_RE = /\b(rest day|rest_day|recovery|day off|took the day off|sick|ill|not feeling well|under the weather|rough day|rough physically|tired|exhausted|burnt out|burned out|injury|injured|wrist|back pain|social day|family day|travel day|planned rest|no gym|off day)\b/i;
 
-function buildGenerationPrompt({ date, habits, goals, name, existingNotes, doneTasks = [], pendingTasks = [] }) {
+function addCalendarDays(ymd, deltaDays) {
+  const [y, m, d] = ymd.split("-").map(Number);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return ymd;
+  const u = Date.UTC(y, m - 1, d + deltaDays);
+  const dt = new Date(u);
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+}
+
+function weekStartMondayFromYmd(ymd) {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const day = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  const back = day === 0 ? 6 : day - 1;
+  return addCalendarDays(ymd, -back);
+}
+
+function getLimitDayTotal(h, dateStr) {
+  const dayLogs = (h.logs || []).filter(l => l.date === dateStr && typeof l.value === "number");
+  if (!dayLogs.length) return null;
+  return dayLogs.reduce((s, l) => s + l.value, 0);
+}
+
+function getBuildDayMinutes(h, dateStr) {
+  return (h.logs || [])
+    .filter(l => l.date === dateStr)
+    .reduce((s, l) => s + (l.value?.minutes || 0), 0);
+}
+
+function qualifiesBuildDay(h, dateStr) {
+  const targetMins = h.daily_target_minutes ?? 60;
+  return getBuildDayMinutes(h, dateStr) >= targetMins;
+}
+
+function hasDailyCompletion(h, dateStr) {
+  return (h.logs || []).some(l => l.date === dateStr && l.value === true);
+}
+
+function hasRestDay(h, dateStr) {
+  return (h.logs || []).some(l => l.date === dateStr && l.value === "skip");
+}
+
+function hasAnyLogOnDate(h, dateStr) {
+  return (h.logs || []).some(l => l.date === dateStr);
+}
+
+function habitLabel(h) {
+  return `${h.emoji || ""} ${h.name}`.trim();
+}
+
+function isProofHabitForBlock(h, blockId) {
+  return !!blockId && h.is_proof_action === true && h.block_id === blockId;
+}
+
+/** Matches client Today ring satisfaction for a given calendar day. */
+function forgedRingSatisfiedOnDate(h, dateStr) {
+  if (h.habit_type === "log") return false;
+  const logs = h.logs || [];
+  if (h.habit_type === "weekly") {
+    const target = Math.max(1, Number(h.weekly_target) || 1);
+    if (hasRestDay(h, dateStr)) return true;
+    const ws = weekStartMondayFromYmd(dateStr);
+    const weekEnd = addCalendarDays(ws, 6);
+    const count = logs.filter(l => l.date >= ws && l.date <= weekEnd && l.value === true).length;
+    if (count >= target) return true;
+    return logs.some(l => l.date === dateStr && l.value === true);
+  }
+  if (h.habit_type === "daily") {
+    return hasDailyCompletion(h, dateStr) || hasRestDay(h, dateStr);
+  }
+  if (h.habit_type === "project") return qualifiesBuildDay(h, dateStr);
+  if (h.habit_type === "limit") {
+    const total = getLimitDayTotal(h, dateStr);
+    if (total == null) return false;
+    return total <= (h.daily_budget ?? Infinity);
+  }
+  return hasAnyLogOnDate(h, dateStr);
+}
+
+/** Arc proof action genuinely missed on this day (not rest, not weekly-not-yet-due, not within limit). */
+function arcProofMissedOnDate(h, dateStr) {
+  if (forgedRingSatisfiedOnDate(h, dateStr)) return false;
+  if (hasRestDay(h, dateStr)) return false;
+
+  if (h.habit_type === "weekly") {
+    const [y, m, d] = dateStr.split("-").map(Number);
+    const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+    if (dow !== 0) return false;
+    const ws = weekStartMondayFromYmd(dateStr);
+    const target = Math.max(1, Number(h.weekly_target) || 1);
+    const count = (h.logs || []).filter(l => l.date >= ws && l.date <= dateStr && l.value === true).length;
+    return count < target;
+  }
+  if (h.habit_type === "limit") {
+    const total = getLimitDayTotal(h, dateStr);
+    if (total == null) return false;
+    const goalAim = h.goal_aim ?? "maintain";
+    if (goalAim === "monitor" || goalAim === "reduce") return false;
+    return total > (h.daily_budget ?? Infinity);
+  }
+  if (h.habit_type === "project") return !qualifiesBuildDay(h, dateStr);
+  if (h.habit_type === "daily") return !hasDailyCompletion(h, dateStr);
+  return false;
+}
+
+function buildArcEvidenceLists({ date, habits, goals, activeBlock }) {
+  const blockId = activeBlock?.id;
+  const proofHabits = (habits || []).filter(
+    h => h.habit_type !== "log" && isProofHabitForBlock(h, blockId),
+  );
+  const arcProofCompleted = proofHabits
+    .filter(h => forgedRingSatisfiedOnDate(h, date))
+    .map(habitLabel);
+  const arcProofMissed = proofHabits
+    .filter(h => arcProofMissedOnDate(h, date))
+    .map(habitLabel);
+
+  const completedExtras = [];
+  for (const h of habits || []) {
+    if (h.habit_type === "log") continue;
+    if (isProofHabitForBlock(h, blockId)) continue;
+    if (forgedRingSatisfiedOnDate(h, date)) completedExtras.push(habitLabel(h));
+  }
+  for (const g of goals || []) {
+    if (g.goal_status === "completed" || g.status === "completed") continue;
+    const logged = (g.logs || []).some(l => l.date === date && typeof l.value === "number");
+    if (logged) completedExtras.push(`${g.emoji || ""} ${g.name}`.trim());
+  }
+
+  return { arcProofCompleted, arcProofMissed, completedExtras };
+}
+
+function buildGenerationPrompt({ date, habits, goals, name, existingNotes, doneTasks = [], pendingTasks = [], activeBlock = null }) {
   const displayDate = formatDate(date);
   const lines = [];
 
@@ -140,16 +270,48 @@ function buildGenerationPrompt({ date, habits, goals, name, existingNotes, doneT
     lines.push("");
   }
 
+  const hasActiveArc = !!activeBlock?.id;
+  let arcLists = null;
+  if (hasActiveArc) {
+    arcLists = buildArcEvidenceLists({ date, habits, goals, activeBlock });
+    lines.push(`ACTIVE ARC: ${activeBlock.title || activeBlock.identity || "Current Arc"}`);
+    if (activeBlock.minimum_proof) {
+      lines.push(`Bad-day minimum proof: ${activeBlock.minimum_proof}`);
+    }
+    lines.push("");
+    lines.push("Arc proof completed today (use EXACTLY for Proof shown — do not add or remove items):");
+    lines.push(arcLists.arcProofCompleted.length
+      ? arcLists.arcProofCompleted.map(n => `- ${n}`).join("\n")
+      : "- (none)");
+    lines.push("");
+    lines.push("Arc proof genuinely missed today (use EXACTLY for Missed — do not add unrelated habits):");
+    lines.push(arcLists.arcProofMissed.length
+      ? arcLists.arcProofMissed.map(n => `- ${n}`).join("\n")
+      : "- (none)");
+    lines.push("");
+    if (arcLists.completedExtras.length) {
+      lines.push("Completed non-Arc extras (use EXACTLY for Extras — context only, not failures):");
+      lines.push(arcLists.completedExtras.map(n => `- ${n}`).join("\n"));
+      lines.push("");
+    }
+    lines.push("Other tracked habits/goals today are context only — never list them under Missed.");
+    lines.push("");
+  }
+
   const dataBlock = lines.join("\n");
 
-  return `You are writing a daily journal entry for someone using Forged, a personal tracking app.
+  const formatBlock = hasActiveArc ? `Write a daily journal entry in this exact format — nothing more, nothing less:
 
-Here is today's data:
+[Title: a short (2–5 word) label for the day — e.g. "Recovery & Reset", "Solid execution", "Proof in, build moved"]
 
-${dataBlock}
----
+[2–3 sentence narrative — what kind of day this was for the Arc and the person. Be specific to the actual data and context notes. First person. Do not judge non-Arc habits.]
 
-Write a daily journal entry in this exact format — nothing more, nothing less:
+Proof shown: [comma-separated list from "Arc proof completed today" above, or "none"]
+Missed: [comma-separated list from "Arc proof genuinely missed today" ONLY, or "none"]
+${arcLists?.completedExtras?.length ? "Extras: [comma-separated list from completed non-Arc extras above]" : "Extras: [omit this entire line if there are no completed non-Arc extras]"}
+Why: [1 sentence on context if notes explain it — skip if nothing real to say]
+Pattern: [see rules below]
+Tomorrow: [see rules below]` : `Write a daily journal entry in this exact format — nothing more, nothing less:
 
 [Title: a short (2–5 word) label for the day — e.g. "Recovery & Reset", "Solid execution", "Gym missed, build moved"]
 
@@ -159,7 +321,32 @@ Wins: [comma-separated list of things completed, or "none"]
 Missed: [see rules below]
 Why: [1 sentence on context or reason if there are notes that explain it — skip this line entirely if there's nothing real to say]
 Pattern: [see rules below]
-Tomorrow: [1 specific, forward-looking suggestion — see rules below]
+Tomorrow: [1 specific, forward-looking suggestion — see rules below]`;
+
+  const missedRules = hasActiveArc ? `MISSED field rules (active Arc):
+- ONLY list items from "Arc proof genuinely missed today" above — never unrelated habits, goals, or tasks
+- If that list is "(none)", write Missed: none
+- Rest days / skips / weekly actions not yet due are already excluded — do not second-guess the list` : `MISSED field rules:
+- Only label a habit as "Missed" if the data and context suggest the user genuinely intended to do it but didn't
+- If "Day type: Rest / recovery / time off" appears above, OR the context notes indicate rest/sick/recovery/time off: list unlogged habits as "Not tracked (rest day)" or simply omit them from Missed — do not frame them as failures
+- If "Day type: No logs recorded and no context notes" appears above: write "Not tracked" rather than a list of "Missed" habits — the day went untracked, not necessarily failed
+- If some habits were completed and others weren't, list the genuinely unattended ones as Missed normally
+- "Rest days / recorded skips" above = explicitly not missed — do not list them under Missed`;
+
+  const extrasRules = hasActiveArc ? `
+EXTRAS field rules (active Arc):
+- Only completed non-Arc items from the data above
+- Never list failed or missed non-Arc habits
+- If there are no completed extras, omit the Extras line entirely — no empty heading` : "";
+
+  return `You are writing a daily journal entry for someone using Forged, a personal tracking app.
+
+Here is today's data:
+
+${dataBlock}
+---
+
+${formatBlock}
 
 Rules:
 - First person throughout ("I", "my")
@@ -167,13 +354,11 @@ Rules:
 - Tone: direct, honest, human. Like a clear-eyed friend recapping the day, not a wellness app
 - No corporate language. No "great job". No filler. No "it's important to remember"
 - If not much happened, say so plainly — a short honest entry is better than a padded one
+- FACTUAL GROUNDING: Distinguish configured maximum/capacity from actual activity (e.g. "24 emails/day limit" vs "sent 8 emails"). Never state capacity as if it happened.
+- Do not invent causal explanations (e.g. "habits disappeared because builds consumed bandwidth") unless the user said it in notes or the evidence clearly supports it. Pattern language may cautiously infer uncertainty ("might be", "looks like").
+- Do not duplicate an item across Proof shown and Extras.
 
-MISSED field rules:
-- Only label a habit as "Missed" if the data and context suggest the user genuinely intended to do it but didn't
-- If "Day type: Rest / recovery / time off" appears above, OR the context notes indicate rest/sick/recovery/time off: list unlogged habits as "Not tracked (rest day)" or simply omit them from Missed — do not frame them as failures
-- If "Day type: No logs recorded and no context notes" appears above: write "Not tracked" rather than a list of "Missed" habits — the day went untracked, not necessarily failed
-- If some habits were completed and others weren't, list the genuinely unattended ones as Missed normally
-- "Rest days / recorded skips" above = explicitly not missed — do not list them under Missed
+${missedRules}${extrasRules}
 
 PATTERN field rules:
 - Only write a Pattern line if something genuinely stands out in the actual data or notes — a streak, a recurring miss, a strong day relative to recent history, a clear recovery pattern
@@ -181,10 +366,9 @@ PATTERN field rules:
 - NEVER invent a pattern to fill space. "When nothing gets logged it usually means nothing intentional happened" is an assumption — do not write that unless the data clearly supports it
 
 TOMORROW field rules:
-- One practical, forward-looking sentence
-- If it was a rest/recovery day, suggest gently picking up specific habits again
-- If it was a productive day, suggest the next logical step
-- Not a guilt trip — just useful
+- One practical, forward-looking sentence — not a guilt trip
+- Priority order: (1) user's explicit stated intention from notes/chat, (2) the Arc's next proof action or bad-day minimum, (3) a recurring Arc-relevant pattern
+- Do NOT automatically promote unrelated non-Arc missed habits into Tomorrow
 
 - Skip "Why:", "Pattern:", and "Tomorrow:" lines entirely if there's nothing real to say for them
 - Never write speculative filler about unlogged habits. Forbidden phrases: "I'm not sure what happened", "hard to say why", "not sure why I didn't", "unclear why", "must have been", "probably just", "I guess", "not sure what got in the way". If a habit was unlogged with no context, name it once in the Missed field and move on — no editorializing.
@@ -309,7 +493,29 @@ async function handler(req, res) {
     }
   } catch { /* tasks are non-blocking — proceed without them */ }
 
-  const prompt = buildGenerationPrompt({ date, habits, goals, name, existingNotes, doneTasks, pendingTasks });
+  let activeBlock = null;
+  try {
+    const { data: blockRow } = await db
+      .from("forge_blocks")
+      .select("id, title, identity, minimum_proof, start_date, duration_days, status")
+      .eq("user_id", userId)
+      .eq("status", "active")
+      .maybeSingle();
+    if (blockRow?.id) {
+      activeBlock = {
+        id: blockRow.id,
+        title: blockRow.title,
+        identity: blockRow.identity,
+        minimum_proof: blockRow.minimum_proof,
+        startDate: blockRow.start_date,
+        durationDays: blockRow.duration_days,
+      };
+    }
+  } catch { /* non-blocking — proceed without Arc framing */ }
+
+  const prompt = buildGenerationPrompt({
+    date, habits, goals, name, existingNotes, doneTasks, pendingTasks, activeBlock,
+  });
 
   const client = new Anthropic({ apiKey: apiKey.trim() });
 
@@ -323,9 +529,11 @@ async function handler(req, res) {
         "Key rules you always follow: (1) Distinguish between habits that were genuinely missed versus habits that were simply untracked — untracked is not the same as failed. " +
         "(2) If the data or context notes indicate a rest day, sick day, recovery day, or time off, frame the entry accordingly — do not label those unlogged habits as failures. " +
         "(3) Never invent a Pattern observation without clear evidence in the data. If nothing stands out, skip the Pattern line entirely. " +
-        "(4) Keep the Tomorrow line constructive and practical, not guilt-inducing. " +
-        "(5) Plain text only — no markdown, no asterisks, no special characters. " +
-        "(6) When habits are unlogged and there are no context notes explaining why, do not speculate — unlogged is just unlogged. Never write 'I'm not sure what happened', 'hard to say why', 'not sure why I didn't', 'unclear why', or similar filler. Name the gap once in the Missed field, leave the narrative neutral, and move on.",
+        "(4) Tomorrow: prioritize the user's stated intention, then Arc proof/minimum, then Arc patterns — not unrelated missed habits. " +
+        "(5) Distinguish configured capacity/maximum from actual sends or usage — never state a limit as if it happened. " +
+        "(6) Do not invent causal stories unless notes or data support them. " +
+        "(7) Plain text only — no markdown, no asterisks, no special characters. " +
+        "(8) When habits are unlogged and there are no context notes explaining why, do not speculate — unlogged is just untracked. Never write 'I'm not sure what happened', 'hard to say why', 'not sure why I didn't', 'unclear why', or similar filler. Name the gap once in the Missed field, leave the narrative neutral, and move on.",
       messages: [{ role: "user", content: prompt }],
     });
     generatedText = (resp.content || [])

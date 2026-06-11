@@ -652,7 +652,7 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
 
   function tryParseEntry(content) {
     if (!content) return null;
-    const KEYWORDS = ["Wins:", "Missed:", "Why:", "Pattern:", "Tomorrow:"];
+    const KEYWORDS = ["Proof shown:", "Wins:", "Missed:", "Extras:", "Why:", "Pattern:", "Tomorrow:"];
     if (!KEYWORDS.some(k => content.includes(k))) return null;
     const lines = content.split("\n").map(l => l.trim()).filter(Boolean);
     if (lines.length < 3) return null;
@@ -667,7 +667,8 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
     while (i < lines.length) {
       for (const kw of KEYWORDS) {
         if (lines[i].startsWith(kw)) {
-          sections[kw.slice(0, -1).toLowerCase()] = stripMarkdown(lines[i].slice(kw.length).trim());
+          const key = kw === "Proof shown:" ? "proof" : kw.slice(0, -1).toLowerCase();
+          sections[key] = stripMarkdown(lines[i].slice(kw.length).trim());
           break;
         }
       }
@@ -675,6 +676,20 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
     }
     if (!narrativeLines.length && !Object.keys(sections).length) return null;
     return { title, narrative: narrativeLines.join(" "), ...sections };
+  }
+
+  function evidenceSectionRows(parsed) {
+    if (!parsed) return [];
+    const proofText = parsed.proof || parsed.wins;
+    const proofLabel = parsed.proof ? "Proof shown" : "Wins";
+    return [
+      proofText && proofText.toLowerCase() !== "none" && { icon:"✓", label:proofLabel, text:proofText, color:"#27ae60" },
+      parsed.missed && parsed.missed.toLowerCase() !== "none" && { icon:"✗", label:"Missed", text:parsed.missed, color:T.amber },
+      parsed.extras && parsed.extras.toLowerCase() !== "none" && { icon:"+", label:"Extras", text:parsed.extras, color:T.muted, muted:true },
+      parsed.why && { icon:"→", label:"Why", text:parsed.why, color:T.muted },
+      parsed.pattern && { icon:"◎", label:"Pattern", text:parsed.pattern, color:T.accent },
+      parsed.tomorrow && { icon:"↑", label:"Tomorrow", text:parsed.tomorrow, color:T.muted },
+    ].filter(Boolean);
   }
 
   async function generateEntry(date, { background = false } = {}) {
@@ -962,16 +977,10 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
                       <>
                         <div style={{ fontFamily:T.serif, fontSize:20, color:T.text, marginBottom:10, lineHeight:1.3 }}>{parsed.title}</div>
                         <div style={{ fontSize:14, color:T.text, lineHeight:1.75, marginBottom:14 }}>{parsed.narrative}</div>
-                        {[
-                          parsed.wins    && { icon:"✓", label:"Wins",    text:parsed.wins,    color:"#27ae60" },
-                          parsed.missed  && parsed.missed.toLowerCase() !== "none" && { icon:"✗", label:"Missed",  text:parsed.missed,  color:T.amber },
-                          parsed.why     && { icon:"→", label:"Why",     text:parsed.why,     color:T.muted },
-                          parsed.pattern && { icon:"◎", label:"Pattern", text:parsed.pattern, color:T.accent },
-                          parsed.tomorrow && { icon:"↑", label:"Tomorrow", text:parsed.tomorrow, color:T.muted },
-                        ].filter(Boolean).map(row => (
-                          <div key={row.label} style={{ display:"flex", gap:8, marginBottom:6, alignItems:"flex-start" }}>
+                        {evidenceSectionRows(parsed).map(row => (
+                          <div key={row.label} style={{ display:"flex", gap:8, marginBottom:6, alignItems:"flex-start", opacity:row.muted ? 0.88 : 1 }}>
                             <span style={{ fontSize:12, color:row.color, fontWeight:700, minWidth:14, marginTop:2 }}>{row.icon}</span>
-                            <div style={{ fontSize:13, color:T.text, lineHeight:1.5 }}>
+                            <div style={{ fontSize:row.muted ? 12.5 : 13, color:row.muted ? T.sub : T.text, lineHeight:1.5 }}>
                               <span style={{ color:T.muted, marginRight:4 }}>{row.label}:</span>
                               {row.text}
                             </div>
@@ -1089,16 +1098,10 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
                           <>
                             <div style={{ fontFamily:T.serif, fontSize:18, color:T.text, marginBottom:10, lineHeight:1.3 }}>{parsed.title}</div>
                             <div style={{ fontSize:14, color:T.text, lineHeight:1.75, marginBottom:12 }}>{parsed.narrative}</div>
-                            {[
-                              parsed.wins    && { icon:"✓", label:"Wins",    text:parsed.wins,    color:"#27ae60" },
-                              parsed.missed  && parsed.missed.toLowerCase() !== "none" && { icon:"✗", label:"Missed",  text:parsed.missed,  color:T.amber },
-                              parsed.why     && { icon:"→", label:"Why",     text:parsed.why,     color:T.muted },
-                              parsed.pattern && { icon:"◎", label:"Pattern", text:parsed.pattern, color:T.accent },
-                              parsed.tomorrow && { icon:"↑", label:"Tomorrow", text:parsed.tomorrow, color:T.muted },
-                            ].filter(Boolean).map(row => (
-                              <div key={row.label} style={{ display:"flex", gap:8, marginBottom:6, alignItems:"flex-start" }}>
+                            {evidenceSectionRows(parsed).map(row => (
+                              <div key={row.label} style={{ display:"flex", gap:8, marginBottom:6, alignItems:"flex-start", opacity:row.muted ? 0.88 : 1 }}>
                                 <span style={{ fontSize:12, color:row.color, fontWeight:700, minWidth:14, marginTop:2 }}>{row.icon}</span>
-                                <div style={{ fontSize:13, color:T.text, lineHeight:1.5 }}>
+                                <div style={{ fontSize:row.muted ? 12.5 : 13, color:row.muted ? T.sub : T.text, lineHeight:1.5 }}>
                                   <span style={{ color:T.muted, marginRight:4 }}>{row.label}:</span>
                                   {row.text}
                                 </div>
