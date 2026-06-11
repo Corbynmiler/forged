@@ -5,6 +5,7 @@ import { T } from "../theme.js";
 import { supabase, rowToForgeBlock } from "../supabase.js";
 import { getCurrentArcWeek } from "../lib/arcTimeline.js";
 import { ArcTimeline, ArcArchiveCard } from "../components/ArcTimeline.jsx";
+import { ForgeCompanion } from "../components/ForgeCompanion.jsx";
 
 function PastArcsSection({
   userId, isPro, onUpgrade, habits, goals, journalEntries, arcLedgerRows,
@@ -140,6 +141,14 @@ export function ArcScreen({
         onEditArc={onEditArc}
         initialWeek={initialWeek}
         openChronologyOnMount={openChronology}
+      />
+
+      {/* ── Forge Companion (preview-only experimental layer) ── */}
+      <ForgeCompanion
+        arc={activeBlock}
+        arcLedgerRows={arcLedgerRows}
+        userId={userId}
+        style={{ marginTop: 14 }}
       />
 
       <PastArcsSection
