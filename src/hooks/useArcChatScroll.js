@@ -2,9 +2,9 @@ import { useRef, useCallback, useEffect, useLayoutEffect } from "react";
 
 /**
  * Mobile chat scroll for Arc setup sheets.
- * Sticks to bottom unless the user has scrolled up; restores composer on keyboard open.
+ * Sticks to bottom unless the user has scrolled up.
  */
-export function useArcChatScroll(triggerDeps, { inputDockId } = {}) {
+export function useArcChatScroll(triggerDeps) {
   const scrollRef = useRef(null);
   const bottomRef = useRef(null);
   const stickBottomRef = useRef(true);
@@ -33,29 +33,10 @@ export function useArcChatScroll(triggerDeps, { inputDockId } = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, triggerDeps);
 
-  useEffect(() => {
-    if (!inputDockId) return;
-    const onVv = () => {
-      const vv = window.visualViewport;
-      const dock = document.getElementById(inputDockId);
-      if (!vv || !dock) return;
-      const pad = Math.max(10, window.innerHeight - vv.height - vv.offsetTop + 10);
-      dock.style.paddingBottom = `max(${pad}px, env(safe-area-inset-bottom, 10px))`;
-      if (stickBottomRef.current) scrollToEnd("auto", true);
-    };
-    window.visualViewport?.addEventListener("resize", onVv);
-    window.visualViewport?.addEventListener("scroll", onVv);
-    onVv();
-    return () => {
-      window.visualViewport?.removeEventListener("resize", onVv);
-      window.visualViewport?.removeEventListener("scroll", onVv);
-    };
-  }, [inputDockId, scrollToEnd]);
-
   const onComposerFocus = useCallback(() => {
     stickBottomRef.current = true;
     setTimeout(() => scrollToEnd("smooth", true), 120);
   }, [scrollToEnd]);
 
-  return { scrollRef, bottomRef, onScroll, onComposerFocus };
+  return { scrollRef, bottomRef, onScroll, onComposerFocus, scrollToEnd };
 }

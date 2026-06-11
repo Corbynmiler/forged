@@ -22,6 +22,13 @@ import { todayStr, daysAgo } from "../utils.js";
 import { useSpeechInput, MicBtn, mergeDictationIntoText, polishInterimDisplay } from "../hooks/useSpeechInput.jsx";
 import { useScrollLock } from "../hooks/useScrollLock.js";
 import { useArcChatScroll } from "../hooks/useArcChatScroll.js";
+import { useVisualViewportInset } from "../hooks/useVisualViewportInset.js";
+import {
+  captureArcComposerText,
+  arcComposerHasText,
+  resetArcComposerAfterSend,
+  makeArcSpeechFinalHandler,
+} from "../lib/arcComposerSubmit.js";
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 function cssPadXSafe(basePx) {
@@ -239,21 +246,27 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
 
   const textareaRef = useRef(null);
   const evidenceRef = useRef(null);
+  const composerTurnRef = useRef(0);
+  const evidenceTurnRef = useRef(0);
   const stepRef = useRef(step);
   stepRef.current = step;
+  const keyboardInset = useVisualViewportInset();
 
   useScrollLock(step === STEP_CHAT);
 
   const { scrollRef, bottomRef, onScroll, onComposerFocus } = useArcChatScroll(
     step === STEP_CHAT ? [msgs, sending, arcOptions, selectedIdx] : [],
-    { inputDockId: step === STEP_CHAT ? "onboard-chat-input-dock" : null },
   );
 
   const speech = useSpeechInput((text) => {
     if (stepRef.current === STEP_EVIDENCE) {
-      setEvidenceText(prev => mergeDictationIntoText(prev, text));
+      const turn = evidenceTurnRef.current;
+      queueMicrotask(() => {
+        if (turn !== evidenceTurnRef.current) return;
+        setEvidenceText(prev => mergeDictationIntoText(prev, text));
+      });
     } else {
-      setInput(prev => mergeDictationIntoText(prev, text));
+      makeArcSpeechFinalHandler(setInput, composerTurnRef)(text);
     }
   }, { autoRestart: true });
 
@@ -264,16 +277,12 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
   }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Send a chat message ────────────────────────────────────────────────────
-  async function sendMessage(overrideText) {
-    const inputText = overrideText !== undefined
-      ? normalizeChatInput(overrideText)
-      : normalizeChatInput(input);
+  async function sendMessage(forcedText) {
+    const inputText = forcedText !== undefined
+      ? normalizeChatInput(forcedText)
+      : captureArcComposerText(input, speech);
     if (!inputText || sending) return;
-    if (speech.listening) speech.toggle();
-    if (!overrideText) {
-      setInput("");
-      if (textareaRef.current) textareaRef.current.style.height = "auto";
-    }
+    resetArcComposerAfterSend({ speech, setInput, textareaRef, turnRef: composerTurnRef });
 
     const withUser = [...msgs, { role: "user", content: inputText }];
     setMsgs(withUser);
@@ -302,14 +311,14 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
       });
       if (!res.ok) throw new Error("Request failed");
       const data = await res.json();
-      setSending(false);
       const raw = data.reply || "";
       const { prose, options } = parseArcOptionsFromText(raw);
       setMsgs(p => [...p, { role: "assistant", content: prose || raw }]);
       if (options?.length) setArcOptions(options);
     } catch {
-      setSending(false);
       setMsgs(p => [...p, { role: "assistant", content: "Something went wrong on my end — say that again?" }]);
+    } finally {
+      setSending(false);
     }
   }
 
@@ -624,10 +633,7 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
 
   // ── CONVERSATION — coach chat with Arc proposals ───────────────────────────
   if (step === STEP_CHAT) {
-    const chatInputShown = speech.listening && speech.interim?.trim()
-      ? mergeDictationIntoText(input, polishInterimDisplay(speech.interim))
-      : input;
-    const canSend = chatInputShown.trim() && !sending;
+    const canSend = arcComposerHasText(input, speech) && !sending;
     const stage = inferArcCoachStage({
       msgs,
       arcPayload: {},
@@ -684,7 +690,7 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
         </div>
 
         {/* Messages */}
-        <div ref={scrollRef} onScroll={onScroll} style={{ flex:1, minHeight:0, overflowY:"auto", overflowX:"hidden", WebkitOverflowScrolling:"touch", padding:"20px 16px 8px", display:"flex", flexDirection:"column", gap:12 }}>
+        <div ref={scrollRef} onScroll={onScroll} style={{ flex:1, minHeight:0, overflowY:"auto", overflowX:"hidden", WebkitOverflowScrolling:"touch", overscrollBehavior:"contain", padding:"20px 16px 8px", display:"flex", flexDirection:"column", gap:12 }}>
           {msgs.map((msg, i) =>
             msg.role === "assistant" ? (
               <div key={i} style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
@@ -856,8 +862,13 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
 
         {/* Input bar */}
         {!showConfirmCard && (
-          <div id="onboard-chat-input-dock" style={{ flexShrink:0, borderTop:`0.5px solid ${T.border}`, padding:"10px 14px", paddingBottom:"max(10px, env(safe-area-inset-bottom, 10px))", background:T.bg }}>
+          <div style={{ flexShrink:0, borderTop:`0.5px solid ${T.border}`, padding:"10px 14px", paddingBottom:"max(10px, env(safe-area-inset-bottom, 10px))", background:T.bg, marginBottom: keyboardInset }}>
             <ArcSuggestionPills pills={pills} onPill={handleSuggestionPill} disabled={sending}/>
+            {speech.listening && speech.interim?.trim() ? (
+              <div style={{ fontSize:12, color:T.muted, marginBottom:8, lineHeight:1.45, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                {polishInterimDisplay(speech.interim)}
+              </div>
+            ) : null}
             <div style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
               {speech.supported && (
                 <div style={{ flexShrink:0, alignSelf:"flex-end", marginBottom:1 }}>
@@ -867,11 +878,11 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
               <div style={{ flex:1, position:"relative" }}>
                 <textarea
                   ref={textareaRef}
-                  value={chatInputShown}
+                  value={input}
                   onChange={e => setInput(e.target.value)}
                   onInput={e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 88) + "px"; }}
                   onFocus={onComposerFocus}
-                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(chatInputShown); } }}
+                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
                   placeholder={speech.listening ? "Listening…" : "Say it however it comes out…"}
                   disabled={sending}
                   style={{
@@ -887,7 +898,7 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
               </div>
               <button
                 type="button"
-                onClick={() => sendMessage(chatInputShown)}
+                onClick={() => sendMessage()}
                 disabled={!canSend}
                 style={{
                   width:36, height:36, borderRadius:"50%", border:`0.5px solid ${T.border}`,

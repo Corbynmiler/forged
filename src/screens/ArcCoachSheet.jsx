@@ -18,9 +18,16 @@ import {
 import { parseArcDraftFromText, parseArcOptionsFromText } from "./OnboardingScreen.jsx";
 import { ArcDurationEditor } from "../components/ArcDurationEditor.jsx";
 import ArcSuggestionPills from "../components/ArcSuggestionPills.jsx";
-import { useSpeechInput, MicBtn, mergeDictationIntoText, polishInterimDisplay } from "../hooks/useSpeechInput.jsx";
+import { useSpeechInput, MicBtn, polishInterimDisplay } from "../hooks/useSpeechInput.jsx";
 import { useScrollLock } from "../hooks/useScrollLock.js";
 import { useArcChatScroll } from "../hooks/useArcChatScroll.js";
+import { useVisualViewportInset } from "../hooks/useVisualViewportInset.js";
+import {
+  captureArcComposerText,
+  arcComposerHasText,
+  resetArcComposerAfterSend,
+  makeArcSpeechFinalHandler,
+} from "../lib/arcComposerSubmit.js";
 import {
   ARC_OPENER_EXISTING,
   ARC_EDIT_OPENER,
@@ -200,27 +207,26 @@ export default function ArcCoachSheet({
   const [showViewArc, setShowViewArc] = useState(false);
 
   const textareaRef = useRef(null);
+  const composerTurnRef = useRef(0);
   const openerFetched = useRef(false);
+  const keyboardInset = useVisualViewportInset();
   const isRunItBack = !isEdit && seedArc?.type === "runItBack" && seedArc?.block;
   const isEvolve = !isEdit && seedArc?.type === "evolve" && seedArc?.block;
 
   const { scrollRef, bottomRef, onScroll, onComposerFocus } = useArcChatScroll(
     [msgs, sending, arcDraft, arcOptions, selectedIdx, showViewArc],
-    { inputDockId: "arc-coach-input-dock" },
   );
 
-  const speech = useSpeechInput((text) => {
-    setInput(prev => mergeDictationIntoText(prev, text));
-  }, { autoRestart: true });
+  const speech = useSpeechInput(
+    makeArcSpeechFinalHandler(setInput, composerTurnRef),
+    { autoRestart: true },
+  );
 
   const coachDisplay = (coachName || "Coach").trim() || "Coach";
   const avatar = (coachIcon || "").trim() || "🤖";
   const showConfirmCard = !isEdit && selectedIdx != null && editedArc;
   const inputLocked = isEdit ? !!arcDraft : showConfirmCard;
-  const chatInputShown = speech.listening && speech.interim?.trim()
-    ? mergeDictationIntoText(input, polishInterimDisplay(speech.interim))
-    : input;
-  const canSend = chatInputShown.trim() && !sending && !inputLocked;
+  const canSend = arcComposerHasText(input, speech) && !sending && !inputLocked;
 
   const coachStage = inferArcCoachStage({
     msgs,
@@ -330,16 +336,12 @@ export default function ArcCoachSheet({
     sendMessage(pill.text);
   }
 
-  async function sendMessage(overrideText) {
-    const text = overrideText !== undefined
-      ? normalizeChatInput(overrideText)
-      : normalizeChatInput(input);
+  async function sendMessage(forcedText) {
+    const text = forcedText !== undefined
+      ? normalizeChatInput(forcedText)
+      : captureArcComposerText(input, speech);
     if (!text || sending || inputLocked) return;
-    if (speech.listening) speech.toggle();
-    if (overrideText === undefined) {
-      setInput("");
-      if (textareaRef.current) textareaRef.current.style.height = "auto";
-    }
+    resetArcComposerAfterSend({ speech, setInput, textareaRef, turnRef: composerTurnRef });
     setSaveError("");
     if (!isEdit) {
       setArcOptions(null);
@@ -564,7 +566,7 @@ export default function ArcCoachSheet({
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", WebkitOverflowScrolling: "touch", padding: "20px 16px 8px", display: "flex", flexDirection: "column", gap: 12 }}
+        style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain", padding: "20px 16px 8px", display: "flex", flexDirection: "column", gap: 12 }}
       >
         {loadingOpener && msgs.length === 0 && (
           <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
@@ -747,11 +749,80 @@ export default function ArcCoachSheet({
           </div>
         ) : null}
 
+        {!inputLocked && !showConfirmCard ? (
+          <div style={{ padding: "4px 0 8px", display: "flex", flexDirection: "column", gap: 6 }}>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                width: "100%", padding: 12, borderRadius: T.rsm,
+                border: `0.5px solid ${T.border}`, background: "none",
+                color: T.muted, fontSize: 14, cursor: "pointer", fontFamily: T.font,
+              }}
+            >
+              Cancel Arc setup
+            </button>
+            {onUseFormInstead ? (
+              <button
+                type="button"
+                onClick={onUseFormInstead}
+                disabled={saving}
+                style={{
+                  width: "100%", background: "none", border: "none",
+                  color: T.muted, fontSize: 12, fontFamily: T.font, cursor: "pointer",
+                  textDecoration: "underline", textUnderlineOffset: 3,
+                  textDecorationColor: "rgba(168,164,156,0.35)",
+                }}
+              >
+                Use the form instead
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {isEdit && arcDraft ? (
+          <div style={{ padding: "4px 0 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+            <button
+              type="button"
+              onClick={confirmArc}
+              disabled={saving}
+              style={{
+                width: "100%", padding: 15, borderRadius: T.rsm, border: "none",
+                background: T.gold, color: "#0F0F0D",
+                fontSize: 16, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer",
+                opacity: saving ? 0.7 : 1, fontFamily: T.font,
+              }}
+            >
+              {saving ? "Saving…" : "Save changes →"}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setArcDraft(null); setSaveError(""); }}
+              disabled={saving}
+              style={{
+                width: "100%", padding: 10, background: "none", border: "none",
+                color: T.muted, fontSize: 12, cursor: saving ? "default" : "pointer", fontFamily: T.font,
+              }}
+            >
+              Keep chatting first
+            </button>
+          </div>
+        ) : null}
+
         <div ref={bottomRef} />
       </div>
 
       {!inputLocked ? (
-        <div id="arc-coach-input-dock" style={{ flexShrink: 0, borderTop: `0.5px solid ${T.border}`, padding: "10px 14px", paddingBottom: "max(10px, env(safe-area-inset-bottom, 10px))", background: T.bg }}>
+        <div
+          style={{
+            flexShrink: 0,
+            borderTop: `0.5px solid ${T.border}`,
+            padding: "10px 14px",
+            paddingBottom: "max(10px, env(safe-area-inset-bottom, 10px))",
+            background: T.bg,
+            marginBottom: keyboardInset,
+          }}
+        >
           {showQuestionIndicator ? (
             <div style={{ fontSize: 11, color: T.muted, marginBottom: 8, textAlign: "center" }}>
               Question {questionNum} of up to {MAX_QUESTIONS}
@@ -762,20 +833,25 @@ export default function ArcCoachSheet({
             onPill={handleSuggestionPill}
             disabled={sending || loadingOpener}
           />
+          {speech.listening && speech.interim?.trim() ? (
+            <div style={{ fontSize: 12, color: T.muted, marginBottom: 8, lineHeight: 1.45, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {polishInterimDisplay(speech.interim)}
+            </div>
+          ) : null}
           <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
             {speech.supported ? (
               <div style={{ flexShrink: 0, alignSelf: "flex-end", marginBottom: 1 }}>
                 <MicBtn speech={speech} color={T.gold} size={44} prominent />
               </div>
             ) : null}
-            <div style={{ flex: 1, position: "relative" }}>
+            <div style={{ flex: 1, position: "relative", minWidth: 0 }}>
               <textarea
                 ref={textareaRef}
-                value={chatInputShown}
+                value={input}
                 onChange={e => setInput(e.target.value)}
                 onInput={e => { e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, 88)}px`; }}
                 onFocus={onComposerFocus}
-                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendMessage(chatInputShown); } }}
+                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendMessage(); } }}
                 placeholder={speech.listening ? "Listening…" : (loadingOpener ? "Coach is typing…" : "Your answer…")}
                 disabled={sending || loadingOpener}
                 style={{
@@ -790,7 +866,7 @@ export default function ArcCoachSheet({
             </div>
             <button
               type="button"
-              onClick={() => sendMessage(chatInputShown)}
+              onClick={() => sendMessage()}
               disabled={!canSend}
               style={{
                 width: 36, height: 36, borderRadius: "50%", border: `0.5px solid ${T.border}`,
@@ -814,35 +890,8 @@ export default function ArcCoachSheet({
         </div>
       ) : null}
 
-      <div style={{ flexShrink: 0, padding: "8px 16px", paddingBottom: "max(12px, env(safe-area-inset-bottom, 12px))", background: T.bg }}>
-        {isEdit && arcDraft ? (
-          <>
-            <button
-              type="button"
-                onClick={confirmArc}
-                disabled={saving}
-                style={{
-                  width: "100%", padding: 15, borderRadius: T.rsm, border: "none",
-                  background: T.gold, color: "#0F0F0D",
-                  fontSize: 16, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer",
-                  opacity: saving ? 0.7 : 1, fontFamily: T.font,
-                }}
-              >
-                {saving ? (isEdit ? "Saving…" : "Starting Arc…") : (isEdit ? "Save changes →" : "Use this Arc →")}
-              </button>
-            <button
-              type="button"
-              onClick={() => { setArcDraft(null); setSaveError(""); }}
-              disabled={saving}
-              style={{
-                width: "100%", marginTop: 8, padding: 10, background: "none", border: "none",
-                color: T.muted, fontSize: 12, cursor: saving ? "default" : "pointer", fontFamily: T.font,
-              }}
-            >
-              Keep chatting first
-            </button>
-          </>
-        ) : !showConfirmCard ? (
+      {isEdit && !arcDraft ? (
+        <div style={{ flexShrink: 0, padding: "8px 16px", paddingBottom: "max(12px, env(safe-area-inset-bottom, 12px))", background: T.bg, marginBottom: keyboardInset }}>
           <button
             type="button"
             onClick={onClose}
@@ -852,25 +901,10 @@ export default function ArcCoachSheet({
               color: T.muted, fontSize: 14, cursor: "pointer", fontFamily: T.font,
             }}
           >
-            {isEdit ? "Cancel" : "Cancel Arc setup"}
+            Cancel
           </button>
-        ) : null}
-        {!isEdit && onUseFormInstead && (
-          <button
-            type="button"
-            onClick={onUseFormInstead}
-            disabled={saving}
-            style={{
-              width: "100%", marginTop: 10, background: "none", border: "none",
-              color: T.muted, fontSize: 12, fontFamily: T.font, cursor: "pointer",
-              textDecoration: "underline", textUnderlineOffset: 3,
-              textDecorationColor: "rgba(168,164,156,0.35)",
-            }}
-          >
-            Use the form instead
-          </button>
-        )}
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }
