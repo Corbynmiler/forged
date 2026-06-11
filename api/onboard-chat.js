@@ -59,7 +59,19 @@ async function handler(req, res) {
     // Conversation-first onboarding: when true the coach emits 2–3 distinct
     // <arc_options> instead of a single <arc_draft>.
     multiOptions = false,
+    priorArc = null,
   } = req.body || {};
+
+  const priorArcCtx = priorArc && typeof priorArc === "object"
+    ? {
+        title: String(priorArc.title ?? "").trim(),
+        identity: String(priorArc.identity ?? "").trim(),
+        why: String(priorArc.why ?? priorArc.whyStatement ?? "").trim(),
+        oldPattern: String(priorArc.oldPattern ?? "").trim(),
+        minimumProof: String(priorArc.minimumProof ?? "").trim(),
+        durationDays: priorArc.durationDays ?? priorArc.duration_days ?? null,
+      }
+    : null;
 
   // Defense-in-depth: cap the incoming message history. Onboarding never needs
   // more than a handful of turns; this stops a malicious payload from billing
@@ -134,17 +146,38 @@ Fields filled so far: ${filledCount} of 4.`;
   const meetLine = isEditMode === true
     ? `You're helping ${name || "someone"} adjust their active Arc. They already use Forged — treat their existing habits as real. Do not suggest deleting or archiving habits.`
     : isExistingUser === true
-      ? `You're helping ${name || "someone"} start a new Arc — a finite season of change (2, 4, 8 or 12 weeks). They already use Forged — treat their existing habits as real.`
+      ? `You're helping ${name || "someone"} start a new Arc — a finite season of change (2–14 weeks; honor their stated deadline). They already use Forged — treat their existing habits as real.`
       : `You're meeting ${name || "someone"} for the first time.`;
 
-  const durationGuidance = `durationDays — length in days. Only 14, 28, 56, or 84 (2/4/8/12 weeks). Pick what genuinely fits the goal: first Arcs usually land best at 14 or 28 days (a faster, real completion loop); use 56 or 84 only when the goal truly needs that runway (e.g. marathon prep, big body-composition change, shipping something large). Never default to 8 weeks out of habit.`;
+  const durationGuidance = `durationDays — Arc length in DAYS (integer). Allowed range: 14–98 days (2–14 weeks). Honor explicit deadlines the user gives:
+- "Holiday in 6 weeks" → durationDays: 42 (do NOT snap to 28 or 56).
+- "Wedding on [date]" → count days from today to that date, clamp 14–98.
+- "By end of month" → days until that date.
+- Presets 14/28/42/56/84 are common but NOT a constraint — any value 14–98 is valid (e.g. 35, 45, 63).
+If the user corrects the length ("make it 6 weeks"), use their number in the JSON even if you agreed in prose earlier.`;
 
   // ── Conversation-first onboarding: 2–3 distinct Arc proposals ─────────────
   const optionsFinishRules = mustDraftThisTurn
     ? `\nYOU HAVE HIT YOUR QUESTION LIMIT. You MUST emit the <arc_options> block this turn — no more questions, no exceptions. Infer anything missing from what they've already said.`
     : `\nQuestions remaining: ${turnsRemaining}. The moment you can sketch real options, emit <arc_options> instead of asking another question. Two good questions is usually enough. Don't drag this out.`;
 
-  const optionsSystem = `You are ${coachName || "a habit coach"} — the AI coach inside Forged. You're meeting ${name || "someone"} in their first minutes in the app. They just answered an opening question about what they're trying to change. Your one job: a short, natural conversation, then propose 2–3 genuinely different Arcs they can pick from.
+  const priorArcBlock = priorArcCtx?.identity
+    ? `
+PRIOR COMPLETED ARC (they chose to evolve — build the NEXT season from this):
+- Title: ${priorArcCtx.title || "—"}
+- Direction: ${priorArcCtx.identity}
+- Why: ${priorArcCtx.why || "—"}
+- Old pattern: ${priorArcCtx.oldPattern || "—"}
+- Bad-day minimum: ${priorArcCtx.minimumProof || "—"}
+- Duration: ${priorArcCtx.durationDays ? `${priorArcCtx.durationDays} days` : "—"}
+Options should consciously evolve what worked — not unrelated fresh plans unless they asked for something new.
+`
+    : "";
+
+  const optionsSystem = `You are ${coachName || "a habit coach"} — the AI coach inside Forged. ${priorArcCtx?.identity
+    ? `You're helping ${name || "someone"} design their next Arc after completing one.`
+    : `You're meeting ${name || "someone"} ${isExistingUser === true ? "to define a new Arc" : "in their first minutes in the app"}.`} They just answered an opening question about what they're trying to change. Your one job: a short, natural conversation, then propose 2–3 genuinely different Arcs they can pick from.
+${priorArcBlock}
 
 An Arc is a finite season of change — a few weeks with one direction, 2–4 daily proof actions, and a bad-day minimum.
 
@@ -166,12 +199,14 @@ Write 1–2 short sentences introducing them (e.g. "Here are three ways we could
 
 Rules for the options JSON:
 - Valid JSON array of 2 or 3 objects inside the tags. Single line. No comments, no trailing commas, no markdown.
-- The options must be GENUINELY DIFFERENT — different scope, intensity, or angle on their problem. Not the same Arc reworded. Good axes: narrow-and-fast vs broader-and-steadier; attack the old pattern head-on vs build the replacement first; different durations.
-- title: 1–3 words, punchy. NEVER warrior/alpha/elite/beast. NEVER a sentence.
+- The options must be GENUINELY DIFFERENT strategies — e.g. cut spending vs earn more vs both; not the same plan reworded. Each option should use a different duration when the user's deadline allows meaningful variation.
+- title: 1–4 words, punchy, tied to their OUTCOME or deadline (e.g. "Holiday Fund Sprint", "Six Weeks to $3K", "Queenstown Runway") — NOT generic finance labels like "Spending Freeze" or "Income Boost" unless that's literally their words. NEVER warrior/alpha/elite/beast. NEVER a sentence.
 - identity: one concrete sentence, max ~140 chars, borrowing their phrasing.
 - why / oldPattern / minimumProof: short sentences in their voice ("" only if truly unknown).
 - ${durationGuidance}
-- proofActions: 2 to 4 per option, short concrete habit names (max ~30 chars) that can be done most days.
+- If they gave a real deadline ("holiday in 6 weeks", "wedding on [date]"), options MUST use that timeframe unless you clearly explain in the intro prose why a shorter preparatory Arc makes sense — never silently swap 6 weeks for 4.
+- proofActions: 3–5 items per option. Each is either a short string OR {"name":"…","cadence":"daily"|"weekly"|"limit"|"project"}.
+  PROOF ACTION RULES: specific, observable, loggable behaviour — NOT mindsets, NOT passive checks ("check balance"), NOT guilt-free spending. Match cadence to frequency: payday transfers = weekly; daily spending log = daily; weekly cap = limit; deep work block = project. No duplicate actions across an option.
 
 After the options, the app shows them as cards. Do NOT describe each option in prose — the cards do that.`;
 
@@ -227,8 +262,8 @@ Rules for the draft JSON:
 - title: 1–3 words. Natural and branded. "Arc" optional. NEVER warrior/alpha/elite/beast/grindset. NEVER a full sentence or "Someone who…". If they ask to rename, use their exact short title or suggest 3 options in prose before the draft.
 - identity: concrete, one sentence, max ~140 chars. Borrow their phrasing.
 - why, oldPattern, minimumProof: short sentences in their voice. Empty string "" is allowed only if you truly have nothing.
-- durationDays: one of 14, 28, 56, 84 — pick what fits the goal (see duration guidance above).
-- proofActions: 3 to 5 short habit names, max ~30 chars each. ${showExistingHabitsBlock ? "Use EXACT names from EXISTING HABITS when reusing — do not paraphrase into a duplicate label." : "Prefer habits the user mentioned."} When it makes sense, the first one should be the habit they already picked (${habitName || "their picked habit"}).
+- ${durationGuidance}
+- proofActions: 3 to 5 items — string or {"name":"…","cadence":"daily"|"weekly"|"limit"|"project"}. Specific observable behaviours only; set cadence correctly (weekly bank transfer ≠ daily). ${showExistingHabitsBlock ? "Use EXACT names from EXISTING HABITS when reusing." : "Prefer habits the user mentioned."}
 
 WHEN YOU EMIT THE DRAFT, write 1–2 short sentences BEFORE the block to introduce it. Examples:
 "Alright, I've got enough to build your first Arc. Here's the draft — tweak anything that feels off."

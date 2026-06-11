@@ -471,7 +471,7 @@ function AddProofActionSheet({ activeBlock, habits, onClose, onSelectHabit, onCr
   );
 }
 
-function ArcStrip({ activeBlock, onEditArc }) {
+function ArcStrip({ activeBlock, onViewArc }) {
   const { dayX, week, progress, duration, totalWeeks } = arcDayInfo(activeBlock);
   const arcTitle = resolveArcTitle(activeBlock.title, activeBlock.identity);
   const subtitle = arcHeaderSubtitle(activeBlock);
@@ -480,7 +480,7 @@ function ArcStrip({ activeBlock, onEditArc }) {
   return (
     <button
       type="button"
-      onClick={() => { if (onEditArc) onEditArc(); }}
+      onClick={() => { if (onViewArc) onViewArc(); }}
       style={{
         display: "block",
         width: "calc(100% - 28px)",
@@ -489,7 +489,7 @@ function ArcStrip({ activeBlock, onEditArc }) {
         borderRadius: T.r,
         border: "0.5px solid rgba(200,144,42,0.4)",
         background: "linear-gradient(135deg, rgba(192,57,43,0.12) 0%, rgba(200,144,42,0.08) 45%, rgba(26,26,22,0.98) 100%)",
-        cursor: onEditArc ? "pointer" : "default",
+        cursor: onViewArc ? "pointer" : "default",
         textAlign: "left",
         fontFamily: T.font,
         boxSizing: "border-box",
@@ -575,7 +575,7 @@ export function TodayScreen({
   arcLedgerRows = [],
   arcProofSyncing = false,
   onStartArc = null,
-  onEditArc = null,
+  onViewArc = null,
   onLinkProofHabit = null,
   onOpenHub = null,
 }) {
@@ -694,7 +694,7 @@ export function TodayScreen({
   return (
     <div>
       <style>{`@keyframes todayCompleteIn { from { opacity: 0.55; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }`}</style>
-      {!activeBlock && habits.length > 0 && typeof onStartArc === "function" && (
+      {!activeBlock && typeof onStartArc === "function" && (
         <button
           type="button"
           onClick={onStartArc}
@@ -704,33 +704,33 @@ export function TodayScreen({
             margin: "8px 14px 0",
             padding: "14px 16px",
             borderRadius: T.r,
-            border: "0.5px solid rgba(192,57,43,0.35)",
-            background: "linear-gradient(90deg, rgba(192,57,43,0.14), rgba(26,26,22,0.96))",
+            border: "0.5px solid rgba(200,144,42,0.4)",
+            background: "linear-gradient(90deg, rgba(200,144,42,0.10), rgba(26,26,22,0.96))",
             cursor: "pointer",
             textAlign: "left",
             fontFamily: T.font,
             boxSizing: "border-box",
           }}
         >
-          <div style={{ fontSize: 10, fontWeight: 800, color: T.accent, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 8 }}>
-            YOUR FIRST ARC
+          <div style={{ fontSize: 10, fontWeight: 800, color: T.gold, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 8 }}>
+            NO ACTIVE ARC
           </div>
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontFamily: T.serif, fontSize: 18, color: T.text, lineHeight: 1.2, marginBottom: 6 }}>
-                Start your first Arc
+                What season are you in?
               </div>
               <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.55 }}>
-                A few focused weeks with a direction — turn your habits into proof. The coach takes it from there.
+                Pick an outcome or deadline, commit for a bounded period, and collect proof — the coach helps you shape it.
               </div>
             </div>
             <div style={{ flexShrink: 0, alignSelf: "center", fontSize: 12, fontWeight: 700, color: T.gold }}>
-              Start your first Arc →
+              Define Arc →
             </div>
           </div>
         </button>
       )}
-      {arcActive && <ArcStrip activeBlock={activeBlock} onEditArc={onEditArc} />}
+      {arcActive && <ArcStrip activeBlock={activeBlock} onViewArc={onViewArc} />}
       {showProofPicker && activeBlock && (
         <AddProofActionSheet
           activeBlock={activeBlock}

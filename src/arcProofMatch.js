@@ -94,7 +94,7 @@ export function resolveProofActionHabits(proofNames, existingHabits) {
   const unmatched = [];
 
   for (const raw of proofNames || []) {
-    const proofName = String(raw || "").trim();
+    const proofName = proofActionDisplayName(raw);
     if (!proofName) continue;
     const habit = findBestHabitMatch(proofName, track, used);
     if (habit) {
@@ -116,15 +116,60 @@ export function proofNameMatchesExisting(proofName, existingHabits) {
 /** Guess habit_type for a new proof habit from its label. */
 export function inferHabitTypeFromProofName(name) {
   const n = normalizeArcName(name);
-  if (/\b(limit|reduce|cut down|cut back|fewer|less|max|cap|avoid|no more)\b/.test(n)) return "limit";
-  if (/\b(weekly|per week|times a week|each week)\b/.test(n)) return "weekly";
-  if (/\b(build|ship|project|session|deep work|code|write)\b/.test(n)) return "project";
+  if (/\b(limit|reduce|cut down|cut back|fewer|less|max|cap|avoid|no more|no spend|under the|discretionary)\b/.test(n)) return "limit";
+  if (/\b(weekly|per week|times a week|each week|payday|on payday|every week|once a week|side.work|sell|list)\b/.test(n)) return "weekly";
+  if (/\b(build|ship|project|session|deep work|code|write|minutes|hour)\b/.test(n)) return "project";
+  if (/\b(transfer|save \$|deposit)\b/.test(n)) return "weekly";
   return "daily";
 }
 
+const WEAK_PROOF_PATTERNS = [
+  /^check\s+(the\s+)?(savings\s+)?balance/i,
+  /guilt.?free/i,
+  /\b(mindset|visuali[sz]e|manifest|believe|affirm)\b/i,
+  /^remember to\b/i,
+  /^think about\b/i,
+  /^be mindful\b/i,
+];
+
+/** Reject vague proof labels the model sometimes emits. */
+export function isWeakProofAction(name) {
+  const s = String(name || "").trim();
+  if (!s || s.length < 4) return true;
+  return WEAK_PROOF_PATTERNS.some(re => re.test(s));
+}
+
+/** Normalize API / UI proof entry to { name, cadence }. */
+export function normalizeProofActionEntry(raw) {
+  if (typeof raw === "string") {
+    const name = raw.trim().slice(0, 60);
+    if (!name || isWeakProofAction(name)) return null;
+    return { name, cadence: inferHabitTypeFromProofName(name) };
+  }
+  if (raw && typeof raw === "object") {
+    const name = String(raw.name || raw.label || "").trim().slice(0, 60);
+    if (!name || isWeakProofAction(name)) return null;
+    const cad = raw.cadence || raw.habitType || raw.habit_type;
+    const cadence = ["daily", "weekly", "limit", "project"].includes(cad)
+      ? cad
+      : inferHabitTypeFromProofName(name);
+    return { name, cadence };
+  }
+  return null;
+}
+
+export function proofActionDisplayName(entry) {
+  if (typeof entry === "string") return entry.trim();
+  return String(entry?.name || "").trim();
+}
+
+export function proofActionNamesList(proofActions) {
+  return (proofActions || []).map(proofActionDisplayName).filter(Boolean);
+}
+
 /** Minimal in-app habit object for a proof action that has no existing match. */
-export function buildNewProofHabit(proofName, blockId) {
-  const habitType = inferHabitTypeFromProofName(proofName);
+export function buildNewProofHabit(proofName, blockId, habitTypeOverride = null) {
+  const habitType = habitTypeOverride || inferHabitTypeFromProofName(proofName);
   const base = {
     id: crypto.randomUUID(),
     name: String(proofName).trim().slice(0, 60),
@@ -224,27 +269,65 @@ export function truncateAtWordBoundary(text, maxLen = 110) {
   return `${slice.trimEnd()}…`;
 }
 
-const ARC_DURATION_OPTIONS = [14, 28, 56, 84];
+export const ARC_DURATION_MIN_DAYS = 14;
+export const ARC_DURATION_MAX_DAYS = 98;
+export const ARC_DURATION_PRESETS = [14, 28, 42, 56, 84];
 
-/** Normalize coach/user duration to 2 / 4 / 8 / 12 weeks (days). Default 56. */
-export function normalizeArcDuration(days) {
+/** Clamp to allowed Arc length (2–14 weeks). Preserves exact days — no snapping to presets. */
+export function clampArcDurationDays(days) {
   const n = parseInt(days, 10);
-  if (ARC_DURATION_OPTIONS.includes(n)) return n;
-  if (Number.isFinite(n)) {
-    if (n <= 21) return 14;
-    if (n <= 42) return 28;
-    if (n <= 70) return 56;
-    if (n <= 98) return 84;
-  }
-  return 56;
+  if (!Number.isFinite(n)) return 28;
+  return Math.min(ARC_DURATION_MAX_DAYS, Math.max(ARC_DURATION_MIN_DAYS, n));
 }
 
+/** @deprecated alias — use clampArcDurationDays */
+export function normalizeArcDuration(days) {
+  return clampArcDurationDays(days);
+}
+
+/** Human label for any valid duration (e.g. 42 → "6 weeks", 45 → "45 days"). */
 export function arcDurationWeeksLabel(durationDays) {
-  const d = normalizeArcDuration(durationDays);
-  if (d === 14) return "2 weeks";
-  if (d === 28) return "4 weeks";
-  if (d === 84) return "12 weeks";
-  return "8 weeks";
+  const d = clampArcDurationDays(durationDays);
+  if (d % 7 === 0) {
+    const w = d / 7;
+    return w === 1 ? "1 week" : `${w} weeks`;
+  }
+  return `${d} days`;
+}
+
+/** Build an editable Arc draft object from a stored forge block + its proof habits. */
+export function forgeBlockToArcDraft(block, proofHabits = []) {
+  if (!block) return null;
+  const identity = String(block.identity || "").trim();
+  if (!identity) return null;
+  const proofActions = (proofHabits || [])
+    .map(h => normalizeProofActionEntry({ name: h.name, cadence: h.habitType }))
+    .filter(Boolean);
+  return {
+    title: resolveArcTitle(block.title, identity),
+    identity,
+    why: String(block.whyStatement || block.why || "").trim(),
+    oldPattern: String(block.oldPattern || "").trim(),
+    minimumProof: String(block.minimumProof || "").trim(),
+    durationDays: clampArcDurationDays(block.durationDays),
+    proofActions,
+  };
+}
+
+/** End date (local YYYY-MM-DD) from start + duration days. */
+export function arcEndDateFromStart(startYmd, durationDays) {
+  const [y, m, day] = String(startYmd || "").split("-").map(Number);
+  const end = new Date(y, (m || 1) - 1, (day || 1) + clampArcDurationDays(durationDays));
+  return `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`;
+}
+
+/** Duration in days from start to end (inclusive span). */
+export function arcDurationDaysFromEndDate(startYmd, endYmd) {
+  const start = Date.parse(`${startYmd}T12:00:00`);
+  const end = Date.parse(`${endYmd}T12:00:00`);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return 28;
+  const days = Math.round((end - start) / 86400000);
+  return clampArcDurationDays(Math.max(1, days));
 }
 
 /** Obvious Arc edit intent in normal coach chat — route to ArcCoachSheet. */

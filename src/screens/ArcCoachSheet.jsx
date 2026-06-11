@@ -9,11 +9,18 @@ import {
   normalizeChatInput,
   formatCoachChatDisplay,
   resolveArcTitle,
-  normalizeArcDuration,
+  clampArcDurationDays,
   arcDurationWeeksLabel,
+  normalizeProofActionEntry,
+  proofActionDisplayName,
+  forgeBlockToArcDraft,
 } from "../arcProofMatch.js";
-import { parseArcDraftFromText } from "./OnboardingScreen.jsx";
+import { parseArcDraftFromText, parseArcOptionsFromText } from "./OnboardingScreen.jsx";
+import { ArcDurationEditor } from "../components/ArcDurationEditor.jsx";
 import ArcSuggestionPills from "../components/ArcSuggestionPills.jsx";
+import { useSpeechInput, MicBtn, mergeDictationIntoText, polishInterimDisplay } from "../hooks/useSpeechInput.jsx";
+import { useScrollLock } from "../hooks/useScrollLock.js";
+import { useArcChatScroll } from "../hooks/useArcChatScroll.js";
 import {
   ARC_OPENER_EXISTING,
   ARC_EDIT_OPENER,
@@ -22,6 +29,19 @@ import {
 } from "../arcCoachSuggestions.js";
 
 const MAX_QUESTIONS = 6;
+
+const styleInp = {
+  width: "100%",
+  boxSizing: "border-box",
+  background: T.surface,
+  border: `0.5px solid ${T.borderStrong}`,
+  borderRadius: T.rsm,
+  padding: "10px 12px",
+  fontSize: 14,
+  color: T.text,
+  fontFamily: T.font,
+  outline: "none",
+};
 
 function addDaysLocalYmd(startYmd, deltaDays) {
   const [y, m, d] = String(startYmd || "").split("-").map(Number);
@@ -39,7 +59,7 @@ function apiMessagesFromUi(msgs) {
   return trimmed;
 }
 
-function buildRequestBody({ name, coachName, messages, existingHabits, arc, isEditMode }) {
+function buildRequestBody({ name, coachName, messages, existingHabits, arc, isEditMode, multiOptions, priorArc }) {
   return {
     name: name || "there",
     coachName: coachName || "Coach",
@@ -56,6 +76,8 @@ function buildRequestBody({ name, coachName, messages, existingHabits, arc, isEd
     })),
     isExistingUser: true,
     isEditMode: !!isEditMode,
+    multiOptions: !!multiOptions,
+    priorArc: priorArc || undefined,
   };
 }
 
@@ -114,9 +136,9 @@ function ArcDraftCard({ draft, existingHabits, saveError, saving, isEdit }) {
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
             {draft.proofActions.map((p, i) => (
-              <div key={`${p}-${i}`} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+              <div key={`${proofActionDisplayName(p)}-${i}`} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
                 <span style={{ fontSize: 11, color: T.gold, fontWeight: 700, marginTop: 2, flexShrink: 0 }}>·</span>
-                <span style={{ fontSize: 13, color: T.text, lineHeight: 1.45 }}>{p}</span>
+                <span style={{ fontSize: 13, color: T.text, lineHeight: 1.45 }}>{proofActionDisplayName(p)}</span>
               </div>
             ))}
           </div>
@@ -150,7 +172,9 @@ export default function ArcCoachSheet({
   supabase,
   mode = "create",
   activeBlock = null,
+  seedArc = null,
 }) {
+  useScrollLock(true);
   const isEdit = mode === "edit" && !!activeBlock?.id;
   const arcPayload = isEdit
     ? {
@@ -166,18 +190,37 @@ export default function ArcCoachSheet({
   const [sending, setSending] = useState(false);
   const [loadingOpener, setLoadingOpener] = useState(true);
   const [arcDraft, setArcDraft] = useState(null);
+  const [arcOptions, setArcOptions] = useState(null);
+  const [selectedIdx, setSelectedIdx] = useState(null);
+  const [editedArc, setEditedArc] = useState(null);
+  const [editingArc, setEditingArc] = useState(false);
   const [priorTurns, setPriorTurns] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [showViewArc, setShowViewArc] = useState(false);
 
-  const chatEndRef = useRef(null);
   const textareaRef = useRef(null);
   const openerFetched = useRef(false);
+  const isRunItBack = !isEdit && seedArc?.type === "runItBack" && seedArc?.block;
+  const isEvolve = !isEdit && seedArc?.type === "evolve" && seedArc?.block;
+
+  const { scrollRef, bottomRef, onScroll, onComposerFocus } = useArcChatScroll(
+    [msgs, sending, arcDraft, arcOptions, selectedIdx, showViewArc],
+    { inputDockId: "arc-coach-input-dock" },
+  );
+
+  const speech = useSpeechInput((text) => {
+    setInput(prev => mergeDictationIntoText(prev, text));
+  }, { autoRestart: true });
 
   const coachDisplay = (coachName || "Coach").trim() || "Coach";
   const avatar = (coachIcon || "").trim() || "🤖";
-  const canSend = input.trim() && !sending && !arcDraft;
+  const showConfirmCard = !isEdit && selectedIdx != null && editedArc;
+  const inputLocked = isEdit ? !!arcDraft : showConfirmCard;
+  const chatInputShown = speech.listening && speech.interim?.trim()
+    ? mergeDictationIntoText(input, polishInterimDisplay(speech.interim))
+    : input;
+  const canSend = chatInputShown.trim() && !sending && !inputLocked;
 
   const coachStage = inferArcCoachStage({
     msgs,
@@ -185,7 +228,7 @@ export default function ArcCoachSheet({
     isEdit,
     priorTurns,
   });
-  const suggestionPills = !arcDraft && !loadingOpener && !sending
+  const suggestionPills = !inputLocked && !loadingOpener && !sending && !arcOptions
     ? getArcSuggestionPills(coachStage)
     : [];
 
@@ -197,14 +240,37 @@ export default function ArcCoachSheet({
   );
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [msgs, sending, arcDraft]);
-
-  useEffect(() => {
     if (openerFetched.current) return;
     openerFetched.current = true;
     if (isEdit) {
       setMsgs([{ role: "assistant", content: ARC_EDIT_OPENER }]);
+      setLoadingOpener(false);
+      return;
+    }
+    if (isRunItBack) {
+      const block = seedArc.block;
+      const proofHabits = (existingHabits || []).filter(
+        h => h?.isProofAction && h.blockId === block.id,
+      );
+      const draft = forgeBlockToArcDraft(block, proofHabits);
+      const title = resolveArcTitle(block.title, block.identity);
+      setMsgs([{
+        role: "assistant",
+        content: `Same Arc, fresh start — ${arcDurationWeeksLabel(draft?.durationDays)} from today. Review it below, tweak anything, then confirm.`,
+      }]);
+      if (draft) {
+        setEditedArc(draft);
+        setSelectedIdx(0);
+      }
+      setLoadingOpener(false);
+      return;
+    }
+    if (isEvolve) {
+      const b = seedArc.block;
+      setMsgs([{
+        role: "assistant",
+        content: `You just finished "${resolveArcTitle(b.title, b.identity)}". What's the next season — push the same direction further, or pivot? Picture the weeks ahead.`,
+      }]);
       setLoadingOpener(false);
       return;
     }
@@ -227,6 +293,15 @@ export default function ArcCoachSheet({
         existingHabits,
         arc: arcPayload,
         isEditMode: isEdit,
+        multiOptions: !isEdit,
+        priorArc: isEvolve ? {
+          title: seedArc.block.title,
+          identity: seedArc.block.identity,
+          why: seedArc.block.whyStatement,
+          oldPattern: seedArc.block.oldPattern,
+          minimumProof: seedArc.block.minimumProof,
+          durationDays: seedArc.block.durationDays,
+        } : undefined,
       })),
     });
     if (!res.ok) {
@@ -236,8 +311,17 @@ export default function ArcCoachSheet({
     return res.json();
   }
 
+  function pickOption(idx) {
+    const opt = arcOptions?.[idx];
+    if (!opt) return;
+    setSelectedIdx(idx);
+    setEditedArc({ ...opt, proofActions: [...(opt.proofActions || [])] });
+    setEditingArc(false);
+    setSaveError("");
+  }
+
   function handleSuggestionPill(pill) {
-    if (!pill || sending || arcDraft) return;
+    if (!pill || sending || inputLocked) return;
     if (pill.mode === "insert") {
       setInput(pill.text);
       textareaRef.current?.focus();
@@ -250,12 +334,18 @@ export default function ArcCoachSheet({
     const text = overrideText !== undefined
       ? normalizeChatInput(overrideText)
       : normalizeChatInput(input);
-    if (!text || sending || arcDraft) return;
+    if (!text || sending || inputLocked) return;
+    if (speech.listening) speech.toggle();
     if (overrideText === undefined) {
       setInput("");
       if (textareaRef.current) textareaRef.current.style.height = "auto";
     }
     setSaveError("");
+    if (!isEdit) {
+      setArcOptions(null);
+      setSelectedIdx(null);
+      setEditedArc(null);
+    }
 
     const withUser = [...msgs, { role: "user", content: text }];
     setMsgs(withUser);
@@ -264,9 +354,15 @@ export default function ArcCoachSheet({
     try {
       const j = await postChat(withUser);
       if (j.reply) {
-        const { prose, draft } = parseArcDraftFromText(j.reply);
-        setMsgs(p => [...p, { role: "assistant", content: formatCoachChatDisplay(prose || j.reply) }]);
-        if (draft) setArcDraft(draft);
+        if (isEdit) {
+          const { prose, draft } = parseArcDraftFromText(j.reply);
+          setMsgs(p => [...p, { role: "assistant", content: formatCoachChatDisplay(prose || j.reply) }]);
+          if (draft) setArcDraft(draft);
+        } else {
+          const { prose, options } = parseArcOptionsFromText(j.reply);
+          setMsgs(p => [...p, { role: "assistant", content: formatCoachChatDisplay(prose || j.reply) }]);
+          if (options?.length) setArcOptions(options);
+        }
       }
       if (typeof j.prior_assistant_turns === "number") setPriorTurns(j.prior_assistant_turns);
     } catch (e) {
@@ -276,8 +372,10 @@ export default function ArcCoachSheet({
     }
   }
 
-  async function applyProofActionsFromDraft(blockId, nowIso) {
-    const { matched, unmatched } = resolveProofActionHabits(arcDraft.proofActions || [], existingHabits);
+  async function applyProofActionsFromDraft(blockId, draft, nowIso) {
+    const entries = (draft.proofActions || []).map(normalizeProofActionEntry).filter(Boolean);
+    const names = entries.map(e => e.name);
+    const { matched, unmatched } = resolveProofActionHabits(names, existingHabits);
     const habitsPatch = [];
     const toLink = matched.filter(m => !(m.habit.blockId === blockId && m.habit.isProofAction));
     const matchedIds = toLink.map(m => m.habit.id);
@@ -295,7 +393,8 @@ export default function ArcCoachSheet({
     }
 
     for (const proofName of unmatched) {
-      const draftHabit = buildNewProofHabit(proofName, blockId);
+      const entry = entries.find(e => e.name === proofName);
+      const draftHabit = buildNewProofHabit(proofName, blockId, entry?.cadence);
       const { data: row, error: createErr } = await supabase
         .from("habits")
         .insert(habitToRow(draftHabit, userId))
@@ -308,14 +407,15 @@ export default function ArcCoachSheet({
   }
 
   async function confirmArc() {
-    if (!arcDraft?.identity?.trim() || !userId || !supabase || saving) return;
+    const draft = isEdit ? arcDraft : editedArc;
+    if (!draft?.identity?.trim() || !userId || !supabase || saving) return;
     setSaving(true);
     setSaveError("");
     onSyncStart?.();
 
     try {
       const nowIso = new Date().toISOString();
-      const arcTitle = resolveArcTitle(arcDraft.title, arcDraft.identity);
+      const arcTitle = resolveArcTitle(draft.title, draft.identity);
       let blockRow;
 
       if (isEdit) {
@@ -324,10 +424,10 @@ export default function ArcCoachSheet({
           .from("forge_blocks")
           .update({
             title: arcTitle,
-            identity: arcDraft.identity.trim(),
-            why_statement: (arcDraft.why || "").trim() || null,
-            old_pattern: (arcDraft.oldPattern || "").trim() || null,
-            minimum_proof: (arcDraft.minimumProof || "").trim() || null,
+            identity: draft.identity.trim(),
+            why_statement: (draft.why || "").trim() || null,
+            old_pattern: (draft.oldPattern || "").trim() || null,
+            minimum_proof: (draft.minimumProof || "").trim() || null,
             updated_at: nowIso,
           })
           .eq("id", activeBlock.id)
@@ -339,17 +439,17 @@ export default function ArcCoachSheet({
         blockRow = data;
       } else {
         const startDate = todayStr();
-        const durationDays = normalizeArcDuration(arcDraft.durationDays);
+        const durationDays = clampArcDurationDays(draft.durationDays);
         const endDate = addDaysLocalYmd(startDate, durationDays);
         const { data, error: insErr } = await supabase
           .from("forge_blocks")
           .insert({
             user_id: userId,
             title: arcTitle,
-            identity: arcDraft.identity.trim(),
-            why_statement: (arcDraft.why || "").trim() || null,
-            old_pattern: (arcDraft.oldPattern || "").trim() || null,
-            minimum_proof: (arcDraft.minimumProof || "").trim() || null,
+            identity: draft.identity.trim(),
+            why_statement: (draft.why || "").trim() || null,
+            old_pattern: (draft.oldPattern || "").trim() || null,
+            minimum_proof: (draft.minimumProof || "").trim() || null,
             start_date: startDate,
             end_date: endDate,
             status: "active",
@@ -363,7 +463,7 @@ export default function ArcCoachSheet({
         blockRow = data;
       }
 
-      const habitsPatch = await applyProofActionsFromDraft(blockRow.id, nowIso);
+      const habitsPatch = await applyProofActionsFromDraft(blockRow.id, draft, nowIso);
       if (onCreated) await onCreated({ block: blockRow, habitsPatch });
       onClose();
     } catch (e) {
@@ -374,10 +474,10 @@ export default function ArcCoachSheet({
   }
 
   const questionNum = Math.min(priorTurns + 1, MAX_QUESTIONS);
-  const showQuestionIndicator = !arcDraft && !loadingOpener;
+  const showQuestionIndicator = !inputLocked && !loadingOpener;
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 500, background: T.bg, display: "flex", flexDirection: "column", fontFamily: T.font, maxWidth: 430, margin: "0 auto" }}>
+    <div style={{ position: "fixed", inset: 0, zIndex: 500, background: T.bg, display: "flex", flexDirection: "column", fontFamily: T.font, maxWidth: 430, margin: "0 auto", overflow: "hidden", height: "100dvh" }}>
       <style>{`@keyframes arcDot{0%,60%,100%{opacity:.2;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}`}</style>
 
       <div style={{ flexShrink: 0, paddingTop: "max(16px, env(safe-area-inset-top, 16px))", paddingBottom: 12, paddingLeft: 20, paddingRight: 20, borderBottom: `0.5px solid ${T.border}`, display: "flex", alignItems: "center", gap: 12, background: T.bg }}>
@@ -461,7 +561,11 @@ export default function ArcCoachSheet({
         </div>
       ) : null}
 
-      <div style={{ flex: 1, overflowY: "auto", padding: "20px 16px 8px", display: "flex", flexDirection: "column", gap: 12 }}>
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", WebkitOverflowScrolling: "touch", padding: "20px 16px 8px", display: "flex", flexDirection: "column", gap: 12 }}
+      >
         {loadingOpener && msgs.length === 0 && (
           <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
             <div style={{ width: 28, height: 28, borderRadius: "50%", background: "rgba(200,144,42,0.15)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, flexShrink: 0 }}>{avatar}</div>
@@ -497,66 +601,221 @@ export default function ArcCoachSheet({
           </div>
         )}
 
-        {arcDraft && (
+        {isEdit && arcDraft ? (
           <ArcDraftCard draft={arcDraft} existingHabits={existingHabits} saveError={saveError} saving={saving} isEdit={isEdit} />
-        )}
+        ) : null}
 
-        <div ref={chatEndRef} />
+        {!isEdit && arcOptions && !showConfirmCard ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, margin: "4px 0 6px" }}>
+            {arcOptions.map((opt, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => pickOption(i)}
+                style={{
+                  textAlign: "left", padding: "14px 16px", borderRadius: T.r,
+                  border: "0.5px solid rgba(200,144,42,0.45)",
+                  background: "linear-gradient(180deg, rgba(200,144,42,0.08), rgba(26,26,22,0.96))",
+                  cursor: "pointer", fontFamily: T.font,
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                  <span style={{ fontFamily: T.serif, fontSize: 19, color: T.text, lineHeight: 1.2 }}>
+                    {opt.title || resolveArcTitle("", opt.identity)}
+                  </span>
+                  <span style={{ fontSize: 11, color: T.gold, fontWeight: 700, flexShrink: 0, marginLeft: 10 }}>
+                    {arcDurationWeeksLabel(opt.durationDays)}
+                  </span>
+                </div>
+                <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.5, marginBottom: 8 }}>{opt.identity}</div>
+                {opt.proofActions?.length > 0 ? (
+                  <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.55 }}>
+                    {opt.proofActions.map(p => `· ${proofActionDisplayName(p)}`).join("  ")}
+                  </div>
+                ) : null}
+                <div style={{ fontSize: 12, color: T.gold, fontWeight: 600, marginTop: 9 }}>Pick this one →</div>
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => { setArcOptions(null); setTimeout(() => textareaRef.current?.focus(), 60); }}
+              style={{ padding: "8px 0", background: "none", border: "none", color: T.muted, fontSize: 12, cursor: "pointer", fontFamily: T.font }}
+            >
+              None of these fit — keep talking
+            </button>
+          </div>
+        ) : null}
+
+        {showConfirmCard && editedArc ? (
+          <div style={{
+            margin: "4px 0 6px", padding: "16px 16px 14px", borderRadius: T.r,
+            border: "0.5px solid rgba(200,144,42,0.5)",
+            background: "linear-gradient(180deg, rgba(200,144,42,0.10), rgba(26,26,22,0.97))",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, color: T.gold, letterSpacing: "0.14em", textTransform: "uppercase" }}>
+                Your Arc
+              </div>
+              <button type="button" onClick={() => setEditingArc(e => !e)}
+                style={{ background: "none", border: "none", color: T.gold, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: T.font, padding: "2px 4px" }}>
+                {editingArc ? "Done editing" : "Edit"}
+              </button>
+            </div>
+            {editingArc ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <input style={styleInp} value={editedArc.title} maxLength={40}
+                  onChange={e => setEditedArc(a => ({ ...a, title: e.target.value }))} placeholder="Arc title" />
+                <textarea style={{ ...styleInp, minHeight: 56, resize: "vertical", lineHeight: 1.5 }} value={editedArc.identity} maxLength={250}
+                  onChange={e => setEditedArc(a => ({ ...a, identity: e.target.value }))} placeholder="Direction — one concrete sentence" />
+                <textarea style={{ ...styleInp, minHeight: 44, resize: "vertical", lineHeight: 1.5 }} value={editedArc.why} maxLength={250}
+                  onChange={e => setEditedArc(a => ({ ...a, why: e.target.value }))} placeholder="Why it matters (optional)" />
+                <input style={styleInp} value={editedArc.minimumProof} maxLength={150}
+                  onChange={e => setEditedArc(a => ({ ...a, minimumProof: e.target.value }))} placeholder="Bad-day minimum (optional)" />
+                <ArcDurationEditor
+                  durationDays={editedArc.durationDays}
+                  onChange={d => setEditedArc(a => ({ ...a, durationDays: d }))}
+                />
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: T.hint, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Proof actions</div>
+                  {editedArc.proofActions.map((p, i) => (
+                    <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                      <input style={{ ...styleInp, flex: 1, padding: "8px 10px", fontSize: 14 }} value={proofActionDisplayName(p)} maxLength={40}
+                        onChange={e => {
+                          const next = [...editedArc.proofActions];
+                          next[i] = e.target.value;
+                          setEditedArc(a => ({ ...a, proofActions: next }));
+                        }} />
+                      <button type="button" aria-label="Remove proof action"
+                        onClick={() => setEditedArc(a => ({ ...a, proofActions: a.proofActions.filter((_, j) => j !== i) }))}
+                        style={{ width: 34, borderRadius: T.rsm, border: `0.5px solid ${T.border}`, background: T.surface, color: T.muted, fontSize: 14, cursor: "pointer" }}>
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                  {editedArc.proofActions.length < 5 ? (
+                    <button type="button"
+                      onClick={() => setEditedArc(a => ({ ...a, proofActions: [...a.proofActions, ""] }))}
+                      style={{ padding: "7px 12px", borderRadius: T.rsm, border: `0.5px dashed ${T.borderStrong}`, background: "none", color: T.muted, fontSize: 12, cursor: "pointer", fontFamily: T.font }}>
+                      + Add proof action
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <>
+                <div style={{ fontFamily: T.serif, fontSize: 22, color: T.text, lineHeight: 1.2, marginBottom: 4 }}>
+                  {editedArc.title || resolveArcTitle("", editedArc.identity)}
+                </div>
+                <div style={{ fontSize: 11, color: T.muted, marginBottom: 12 }}>
+                  {arcDurationWeeksLabel(editedArc.durationDays)} · starts today
+                </div>
+                <div style={{ fontSize: 14, color: T.sub, lineHeight: 1.5, marginBottom: 12 }}>{editedArc.identity}</div>
+                {editedArc.minimumProof ? (
+                  <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.5, marginBottom: 10 }}>
+                    <span style={{ color: T.green, fontWeight: 600 }}>Bad-day minimum:</span> {editedArc.minimumProof}
+                  </div>
+                ) : null}
+                {editedArc.proofActions?.filter(p => proofActionDisplayName(p).trim()).length > 0 ? (
+                  <div style={{ marginBottom: 4 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: T.hint, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>
+                      Proof actions
+                    </div>
+                    {editedArc.proofActions.filter(p => proofActionDisplayName(p).trim()).map((p, i) => (
+                      <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 3 }}>
+                        <span style={{ fontSize: 11, color: T.gold, fontWeight: 700, marginTop: 2, flexShrink: 0 }}>·</span>
+                        <span style={{ fontSize: 13, color: T.text, lineHeight: 1.45 }}>{proofActionDisplayName(p)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </>
+            )}
+            {saveError ? (
+              <div style={{ marginTop: 10, fontSize: 12, color: T.amber, lineHeight: 1.5 }}>{saveError}</div>
+            ) : null}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
+              <button type="button" onClick={confirmArc}
+                disabled={!editedArc.identity?.trim() || saving}
+                style={{ width: "100%", padding: 14, borderRadius: T.rsm, border: "none", background: T.gold, color: "#0F0F0D", fontSize: 15, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer", opacity: saving ? 0.7 : 1, fontFamily: T.font }}>
+                {saving ? (isRunItBack ? "Restarting…" : "Starting Arc…") : (isRunItBack ? "Run it back →" : "Start this Arc →")}
+              </button>
+              <button type="button" onClick={() => { setSelectedIdx(null); setEditedArc(null); }}
+                style={{ width: "100%", padding: 8, background: "none", border: "none", color: T.muted, fontSize: 12, cursor: "pointer", fontFamily: T.font }}>
+                ← Back to the options
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        <div ref={bottomRef} />
       </div>
 
-      <div style={{ flexShrink: 0, borderTop: `0.5px solid ${T.border}`, padding: "10px 14px", background: T.bg }}>
-        {showQuestionIndicator && (
-          <div style={{ fontSize: 11, color: T.muted, marginBottom: 8, textAlign: "center" }}>
-            Question {questionNum} of up to {MAX_QUESTIONS}
-          </div>
-        )}
-        <ArcSuggestionPills
-          pills={suggestionPills}
-          onPill={handleSuggestionPill}
-          disabled={sending || loadingOpener || !!arcDraft}
-        />
-        <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
-          <div style={{ flex: 1, position: "relative" }}>
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onInput={e => { e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, 88)}px`; }}
-              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendMessage(); } }}
-              placeholder={loadingOpener ? "Coach is typing…" : "Your answer…"}
-              disabled={sending || loadingOpener || !!arcDraft}
+      {!inputLocked ? (
+        <div id="arc-coach-input-dock" style={{ flexShrink: 0, borderTop: `0.5px solid ${T.border}`, padding: "10px 14px", paddingBottom: "max(10px, env(safe-area-inset-bottom, 10px))", background: T.bg }}>
+          {showQuestionIndicator ? (
+            <div style={{ fontSize: 11, color: T.muted, marginBottom: 8, textAlign: "center" }}>
+              Question {questionNum} of up to {MAX_QUESTIONS}
+            </div>
+          ) : null}
+          <ArcSuggestionPills
+            pills={suggestionPills}
+            onPill={handleSuggestionPill}
+            disabled={sending || loadingOpener}
+          />
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+            {speech.supported ? (
+              <div style={{ flexShrink: 0, alignSelf: "flex-end", marginBottom: 1 }}>
+                <MicBtn speech={speech} color={T.gold} size={44} prominent />
+              </div>
+            ) : null}
+            <div style={{ flex: 1, position: "relative" }}>
+              <textarea
+                ref={textareaRef}
+                value={chatInputShown}
+                onChange={e => setInput(e.target.value)}
+                onInput={e => { e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, 88)}px`; }}
+                onFocus={onComposerFocus}
+                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendMessage(chatInputShown); } }}
+                placeholder={speech.listening ? "Listening…" : (loadingOpener ? "Coach is typing…" : "Your answer…")}
+                disabled={sending || loadingOpener}
+                style={{
+                  width: "100%", boxSizing: "border-box",
+                  background: T.surface, border: `0.5px solid ${T.borderStrong}`,
+                  borderRadius: T.rsm, padding: "10px 14px",
+                  fontSize: 16, color: T.text, resize: "none",
+                  fontFamily: T.font, lineHeight: 1.5, outline: "none",
+                  minHeight: "42px", maxHeight: "88px", overflowY: "auto", height: "auto",
+                }}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => sendMessage(chatInputShown)}
+              disabled={!canSend}
               style={{
-                width: "100%", boxSizing: "border-box",
-                background: T.surface, border: `0.5px solid ${T.borderStrong}`,
-                borderRadius: T.rsm, padding: "10px 14px",
-                fontSize: 16, color: T.text, resize: "none",
-                fontFamily: T.font, lineHeight: 1.5, outline: "none",
-                minHeight: "42px", maxHeight: "88px", overflowY: "auto", height: "auto",
-                opacity: arcDraft ? 0.5 : 1,
+                width: 36, height: 36, borderRadius: "50%", border: `0.5px solid ${T.border}`,
+                flexShrink: 0, alignSelf: "flex-end",
+                background: canSend ? T.gold : T.surface,
+                cursor: canSend ? "pointer" : "default",
+                display: "flex", alignItems: "center", justifyContent: "center",
               }}
-            />
+            >
+              <svg width="15" height="15" viewBox="0 0 18 18" fill="none">
+                <path d="M2 9h14M9 2l7 7-7 7" stroke={canSend ? "#1a1a16" : T.hint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => sendMessage()}
-            disabled={!canSend}
-            style={{
-              width: 36, height: 36, borderRadius: "50%", border: `0.5px solid ${T.border}`,
-              flexShrink: 0, alignSelf: "flex-end",
-              background: canSend ? T.gold : T.surface,
-              cursor: canSend ? "pointer" : "default",
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}
-          >
-            <svg width="15" height="15" viewBox="0 0 18 18" fill="none">
-              <path d="M2 9h14M9 2l7 7-7 7" stroke={canSend ? "#1a1a16" : T.hint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
+          {speech.speechError ? (
+            <div style={{ fontSize: 11, color: T.accent, marginTop: 8, lineHeight: 1.5, whiteSpace: "pre-line" }}>{speech.speechError}</div>
+          ) : null}
+          {!speech.supported ? (
+            <div style={{ fontSize: 11, color: T.muted, marginTop: 8, lineHeight: 1.5 }}>Voice typing isn&apos;t available in this browser — type instead.</div>
+          ) : null}
         </div>
-      </div>
+      ) : null}
 
       <div style={{ flexShrink: 0, padding: "8px 16px", paddingBottom: "max(12px, env(safe-area-inset-bottom, 12px))", background: T.bg }}>
-        {arcDraft ? (
+        {isEdit && arcDraft ? (
           <>
             <button
               type="button"
@@ -583,7 +842,7 @@ export default function ArcCoachSheet({
               Keep chatting first
             </button>
           </>
-        ) : (
+        ) : !showConfirmCard ? (
           <button
             type="button"
             onClick={onClose}
@@ -593,9 +852,9 @@ export default function ArcCoachSheet({
               color: T.muted, fontSize: 14, cursor: "pointer", fontFamily: T.font,
             }}
           >
-            Cancel Arc setup
+            {isEdit ? "Cancel" : "Cancel Arc setup"}
           </button>
-        )}
+        ) : null}
         {!isEdit && onUseFormInstead && (
           <button
             type="button"

@@ -2,11 +2,15 @@ import { useState, useEffect, useRef } from "react";
 import { T } from "../theme.js";
 import {
   resolveArcTitle,
-  normalizeArcDuration,
+  clampArcDurationDays,
   arcDurationWeeksLabel,
   normalizeChatInput,
   bubbleContentForDisplay,
+  normalizeProofActionEntry,
+  proofActionDisplayName,
+  inferHabitTypeFromProofName,
 } from "../arcProofMatch.js";
+import { ArcDurationEditor } from "../components/ArcDurationEditor.jsx";
 import ArcSuggestionPills from "../components/ArcSuggestionPills.jsx";
 import {
   inferArcCoachStage,
@@ -15,7 +19,9 @@ import {
 } from "../arcCoachSuggestions.js";
 import { supabase } from "../supabase.js";
 import { todayStr, daysAgo } from "../utils.js";
-import { useSpeechInput, MicBtn } from "../hooks/useSpeechInput.jsx";
+import { useSpeechInput, MicBtn, mergeDictationIntoText, polishInterimDisplay } from "../hooks/useSpeechInput.jsx";
+import { useScrollLock } from "../hooks/useScrollLock.js";
+import { useArcChatScroll } from "../hooks/useArcChatScroll.js";
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 function cssPadXSafe(basePx) {
@@ -38,14 +44,11 @@ function sanitizeArcDraftObject(parsed) {
   const identity = String(parsed.identity ?? "").trim();
   if (!identity) return null;
   const proofActions = Array.isArray(parsed.proofActions)
-    ? parsed.proofActions
-        .filter(x => typeof x === "string" && x.trim())
-        .map(x => x.trim().slice(0, 60))
-        .slice(0, 5)
+    ? parsed.proofActions.map(normalizeProofActionEntry).filter(Boolean).slice(0, 5)
     : [];
   return {
     title:        resolveArcTitle(String(parsed.title ?? "").trim(), identity),
-    durationDays: normalizeArcDuration(parsed.durationDays ?? parsed.duration_days),
+    durationDays: clampArcDurationDays(parsed.durationDays ?? parsed.duration_days),
     identity:     identity.slice(0, 250),
     why:          String(parsed.why ?? "").trim().slice(0, 250),
     oldPattern:   String(parsed.oldPattern ?? "").trim().slice(0, 200),
@@ -109,18 +112,28 @@ function emojiForProofAction(name) {
 }
 
 export function habitsFromProofActions(proofActions) {
-  return (proofActions || []).map((nameRaw, i) => {
-    const name = String(nameRaw).trim().slice(0, 40);
-    return {
+  return (proofActions || []).map((raw, i) => {
+    const norm = normalizeProofActionEntry(raw) || { name: String(raw || "").trim(), cadence: "daily" };
+    const name = norm.name.slice(0, 40);
+    const habitType = norm.cadence || inferHabitTypeFromProofName(name);
+    const base = {
       id: `${Date.now()}-${i}-${Math.random()}`,
       name,
       emoji: emojiForProofAction(name),
-      habitType: "daily",
+      habitType,
       color: PROOF_COLORS[i % PROOF_COLORS.length],
       reflection: true,
       reflectionPrompt: "How did it go today?",
       streak: 0, bestStreak: 0, logs: [],
     };
+    if (habitType === "weekly") base.weeklyTarget = 1;
+    if (habitType === "limit") {
+      base.dailyBudget = 1;
+      base.unit = "unit";
+      base.goalAim = "reduce";
+    }
+    if (habitType === "project") base.dailyTargetMinutes = 60;
+    return base;
   });
 }
 
@@ -205,7 +218,7 @@ const STEP_FINAL    = "final";
 const STEP_NUMBERS = { [STEP_WELCOME]:1, [STEP_NAME]:2, [STEP_CHAT]:3, [STEP_EVIDENCE]:4, [STEP_NOTIF]:5, [STEP_FINAL]:6 };
 const DISPLAY_TOTAL = 5; // final screen isn't a "step"
 
-export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, notifEnabled, notifLoading, notifPermission, onNotifToggle, isCoachClient = false }) {
+export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, notifEnabled, notifLoading, notifPermission, onNotifToggle, isCoachClient = false, topInset = 0 }) {
   const [step, setStep] = useState(STEP_WELCOME);
   const [name, setName] = useState("");
 
@@ -224,17 +237,25 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
   const [enteringApp,       setEnteringApp]       = useState(false);
   const [emailUpdatesOptIn, setEmailUpdatesOptIn] = useState(true);
 
-  const chatEndRef  = useRef(null);
   const textareaRef = useRef(null);
   const evidenceRef = useRef(null);
+  const stepRef = useRef(step);
+  stepRef.current = step;
 
-  const speech = useSpeechInput({
-    onTranscript: (text, isFinal) => {
-      if (!isFinal) return;
-      if (step === STEP_EVIDENCE) setEvidenceText(prev => (prev + " " + text).trim());
-      else setInput(prev => (prev + " " + text).trim());
-    },
-  });
+  useScrollLock(step === STEP_CHAT);
+
+  const { scrollRef, bottomRef, onScroll, onComposerFocus } = useArcChatScroll(
+    step === STEP_CHAT ? [msgs, sending, arcOptions, selectedIdx] : [],
+    { inputDockId: step === STEP_CHAT ? "onboard-chat-input-dock" : null },
+  );
+
+  const speech = useSpeechInput((text) => {
+    if (stepRef.current === STEP_EVIDENCE) {
+      setEvidenceText(prev => mergeDictationIntoText(prev, text));
+    } else {
+      setInput(prev => mergeDictationIntoText(prev, text));
+    }
+  }, { autoRestart: true });
 
   // Seed the coach's opening question locally (no API cost) on entering chat.
   useEffect(() => {
@@ -242,17 +263,13 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
     setMsgs([{ role: "assistant", content: onboardingConversationOpener(name) }]);
   }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [msgs, sending, arcOptions, selectedIdx]);
-
   // ── Send a chat message ────────────────────────────────────────────────────
   async function sendMessage(overrideText) {
     const inputText = overrideText !== undefined
       ? normalizeChatInput(overrideText)
       : normalizeChatInput(input);
     if (!inputText || sending) return;
-    if (speech.listening) speech.stopListening?.();
+    if (speech.listening) speech.toggle();
     if (!overrideText) {
       setInput("");
       if (textareaRef.current) textareaRef.current.style.height = "auto";
@@ -333,7 +350,7 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
           emailUpdatesOptIn,
           arc: editedArc ? {
             title:        editedArc.title || resolveArcTitle("", editedArc.identity),
-            durationDays: normalizeArcDuration(editedArc.durationDays),
+            durationDays: clampArcDurationDays(editedArc.durationDays),
             identity:     (editedArc.identity || "").trim(),
             why:          (editedArc.why || "").trim(),
             oldPattern:   (editedArc.oldPattern || "").trim(),
@@ -568,16 +585,21 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
             )}
             <textarea
               ref={evidenceRef}
-              value={evidenceText}
+              value={speech.listening && speech.interim?.trim()
+                ? mergeDictationIntoText(evidenceText, polishInterimDisplay(speech.interim))
+                : evidenceText}
               onChange={e => setEvidenceText(e.target.value)}
               onInput={e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 130) + "px"; }}
-              placeholder="e.g. Made breakfast instead of skipping it…"
+              placeholder={speech.listening ? "Listening…" : "e.g. Made breakfast instead of skipping it…"}
               style={{
                 ...styleInp, resize:"none", minHeight:64, maxHeight:130,
                 lineHeight:1.55, fontSize:16,
               }}
             />
           </div>
+          {speech.speechError ? (
+            <div style={{ fontSize:11, color:T.accent, marginTop:8, lineHeight:1.5, whiteSpace:"pre-line" }}>{speech.speechError}</div>
+          ) : null}
           <div style={{ fontSize:11, color:T.hint, marginTop:12, lineHeight:1.55 }}>
             This gets saved as the first entry in your Evidence — the trail your weekly Review is built from.
           </div>
@@ -602,7 +624,10 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
 
   // ── CONVERSATION — coach chat with Arc proposals ───────────────────────────
   if (step === STEP_CHAT) {
-    const canSend = input.trim() && !sending;
+    const chatInputShown = speech.listening && speech.interim?.trim()
+      ? mergeDictationIntoText(input, polishInterimDisplay(speech.interim))
+      : input;
+    const canSend = chatInputShown.trim() && !sending;
     const stage = inferArcCoachStage({
       msgs,
       arcPayload: {},
@@ -613,7 +638,7 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
     const showConfirmCard = selectedIdx != null && editedArc;
 
     return (
-      <div style={{ position:"fixed", inset:0, background:T.bg, display:"flex", flexDirection:"column", fontFamily:T.font, maxWidth:430, margin:"0 auto" }}>
+      <div style={{ position:"fixed", top:topInset, left:0, right:0, bottom:0, background:T.bg, display:"flex", flexDirection:"column", fontFamily:T.font, maxWidth:430, margin:"0 auto", overflow:"hidden", height:`calc(100dvh - ${topInset}px)` }}>
         <style>{`@keyframes obDot{0%,60%,100%{opacity:.2;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}`}</style>
 
         {skipConfirmVisible && (
@@ -644,22 +669,22 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
         )}
 
         {/* Header */}
-        <div style={{ flexShrink:0, paddingTop:"max(16px, env(safe-area-inset-top, 16px))", paddingBottom:12, paddingLeft:20, paddingRight:20, borderBottom:`0.5px solid ${T.border}`, display:"flex", alignItems:"center", gap:12, background:T.bg }}>
+        <div style={{ flexShrink:0, paddingTop:"max(12px, env(safe-area-inset-top, 12px))", paddingBottom:12, paddingLeft:20, paddingRight:20, borderBottom:`0.5px solid ${T.border}`, display:"flex", alignItems:"center", gap:10, background:T.bg, minWidth:0 }}>
           <div style={{ width:40, height:40, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>🤖</div>
-          <div style={{ flex:1 }}>
-            <div style={{ fontSize:14, fontWeight:600, color:T.text }}>Coach</div>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:14, fontWeight:600, color:T.text, lineHeight:1.25 }}>Coach</div>
             <div style={{ fontSize:11, color:T.gold, marginTop:1 }}>Step {STEP_NUMBERS[STEP_CHAT]} of {DISPLAY_TOTAL}</div>
           </div>
           <button
             type="button"
             onClick={() => setSkipConfirmVisible(true)}
-            style={{ flexShrink:0, background:"none", border:"none", color:T.hint, fontSize:12, cursor:"pointer", fontFamily:T.font, padding:"6px 4px" }}>
+            style={{ flexShrink:0, background:"none", border:"none", color:T.hint, fontSize:12, cursor:"pointer", fontFamily:T.font, padding:"6px 4px", whiteSpace:"nowrap" }}>
             Skip
           </button>
         </div>
 
         {/* Messages */}
-        <div style={{ flex:1, overflowY:"auto", padding:"20px 16px 8px", display:"flex", flexDirection:"column", gap:12 }}>
+        <div ref={scrollRef} onScroll={onScroll} style={{ flex:1, minHeight:0, overflowY:"auto", overflowX:"hidden", WebkitOverflowScrolling:"touch", padding:"20px 16px 8px", display:"flex", flexDirection:"column", gap:12 }}>
           {msgs.map((msg, i) =>
             msg.role === "assistant" ? (
               <div key={i} style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
@@ -711,7 +736,7 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
                   <div style={{ fontSize:13, color:T.sub, lineHeight:1.5, marginBottom:8 }}>{opt.identity}</div>
                   {opt.proofActions?.length > 0 && (
                     <div style={{ fontSize:12, color:T.muted, lineHeight:1.55 }}>
-                      {opt.proofActions.map(p => `· ${p}`).join("  ")}
+                      {opt.proofActions.map(p => `· ${proofActionDisplayName(p)}`).join("  ")}
                     </div>
                   )}
                   <div style={{ fontSize:12, color:T.gold, fontWeight:600, marginTop:9 }}>Pick this one →</div>
@@ -753,27 +778,15 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
                     onChange={e => setEditedArc(a => ({ ...a, why: e.target.value }))} placeholder="Why it matters (optional)"/>
                   <input style={styleInp} value={editedArc.minimumProof} maxLength={150}
                     onChange={e => setEditedArc(a => ({ ...a, minimumProof: e.target.value }))} placeholder="Bad-day minimum (optional)"/>
-                  <div>
-                    <div style={{ fontSize:10, fontWeight:700, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>Duration</div>
-                    <div style={{ display:"flex", gap:6 }}>
-                      {[14, 28, 56, 84].map(d => (
-                        <button key={d} type="button" onClick={() => setEditedArc(a => ({ ...a, durationDays: d }))}
-                          style={{
-                            flex:1, padding:"8px 0", borderRadius:T.rsm, fontFamily:T.font, fontSize:12, fontWeight:600, cursor:"pointer",
-                            border:`0.5px solid ${editedArc.durationDays === d ? "rgba(200,144,42,0.6)" : T.border}`,
-                            background: editedArc.durationDays === d ? "rgba(200,144,42,0.14)" : T.surface,
-                            color: editedArc.durationDays === d ? T.gold : T.muted,
-                          }}>
-                          {arcDurationWeeksLabel(d)}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  <ArcDurationEditor
+                    durationDays={editedArc.durationDays}
+                    onChange={d => setEditedArc(a => ({ ...a, durationDays: d }))}
+                  />
                   <div>
                     <div style={{ fontSize:10, fontWeight:700, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>Proof actions</div>
                     {editedArc.proofActions.map((p, i) => (
                       <div key={i} style={{ display:"flex", gap:6, marginBottom:6 }}>
-                        <input style={{ ...styleInp, flex:1, padding:"8px 10px", fontSize:14 }} value={p} maxLength={40}
+                        <input style={{ ...styleInp, flex:1, padding:"8px 10px", fontSize:14 }} value={proofActionDisplayName(p)} maxLength={40}
                           onChange={e => setEditedArc(a => {
                             const next = [...a.proofActions]; next[i] = e.target.value;
                             return { ...a, proofActions: next };
@@ -808,15 +821,15 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
                       <span style={{ color:T.green, fontWeight:600 }}>Bad-day minimum:</span> {editedArc.minimumProof}
                     </div>
                   ) : null}
-                  {editedArc.proofActions?.filter(p => p.trim()).length > 0 && (
+                  {editedArc.proofActions?.filter(p => proofActionDisplayName(p).trim()).length > 0 && (
                     <div style={{ marginBottom:4 }}>
                       <div style={{ fontSize:10, fontWeight:700, color:T.hint, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:6 }}>
                         Daily proof
                       </div>
-                      {editedArc.proofActions.filter(p => p.trim()).map((p, i) => (
+                      {editedArc.proofActions.filter(p => proofActionDisplayName(p).trim()).map((p, i) => (
                         <div key={i} style={{ display:"flex", gap:8, alignItems:"flex-start", marginBottom:3 }}>
                           <span style={{ fontSize:11, color:T.gold, fontWeight:700, marginTop:2, flexShrink:0 }}>·</span>
-                          <span style={{ fontSize:13, color:T.text, lineHeight:1.45 }}>{p}</span>
+                          <span style={{ fontSize:13, color:T.text, lineHeight:1.45 }}>{proofActionDisplayName(p)}</span>
                         </div>
                       ))}
                     </div>
@@ -838,12 +851,12 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
             </div>
           )}
 
-          <div ref={chatEndRef}/>
+          <div ref={bottomRef}/>
         </div>
 
         {/* Input bar */}
         {!showConfirmCard && (
-          <div style={{ flexShrink:0, borderTop:`0.5px solid ${T.border}`, padding:"10px 14px", paddingBottom:"max(20px, env(safe-area-inset-bottom, 20px))", background:T.bg }}>
+          <div id="onboard-chat-input-dock" style={{ flexShrink:0, borderTop:`0.5px solid ${T.border}`, padding:"10px 14px", paddingBottom:"max(10px, env(safe-area-inset-bottom, 10px))", background:T.bg }}>
             <ArcSuggestionPills pills={pills} onPill={handleSuggestionPill} disabled={sending}/>
             <div style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
               {speech.supported && (
@@ -854,11 +867,12 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
               <div style={{ flex:1, position:"relative" }}>
                 <textarea
                   ref={textareaRef}
-                  value={input}
+                  value={chatInputShown}
                   onChange={e => setInput(e.target.value)}
                   onInput={e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 88) + "px"; }}
-                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-                  placeholder="Say it however it comes out…"
+                  onFocus={onComposerFocus}
+                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(chatInputShown); } }}
+                  placeholder={speech.listening ? "Listening…" : "Say it however it comes out…"}
                   disabled={sending}
                   style={{
                     width:"100%", boxSizing:"border-box",
@@ -873,7 +887,7 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
               </div>
               <button
                 type="button"
-                onClick={() => sendMessage()}
+                onClick={() => sendMessage(chatInputShown)}
                 disabled={!canSend}
                 style={{
                   width:36, height:36, borderRadius:"50%", border:`0.5px solid ${T.border}`,
@@ -889,6 +903,12 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
                 </svg>
               </button>
             </div>
+            {speech.speechError ? (
+              <div style={{ fontSize:11, color:T.accent, marginTop:8, lineHeight:1.5, whiteSpace:"pre-line" }}>{speech.speechError}</div>
+            ) : null}
+            {!speech.supported ? (
+              <div style={{ fontSize:11, color:T.muted, marginTop:8, lineHeight:1.5 }}>Voice typing isn&apos;t available in this browser — type instead.</div>
+            ) : null}
           </div>
         )}
       </div>

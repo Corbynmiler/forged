@@ -179,6 +179,8 @@ export default function App() {
   const [completedArcBlock, setCompletedArcBlock] = useState(null);
   const [showArcCoach, setShowArcCoach] = useState(false);
   const [arcCoachMode, setArcCoachMode] = useState("create");
+  /** runItBack | evolve — pre-seeds ArcCoachSheet from a completed Arc. */
+  const [arcCoachSeed, setArcCoachSeed] = useState(null);
   const [showArcSetup, setShowArcSetup] = useState(false);
   /** Arc form opened from ArcCoachSheet — Cancel returns to chat, not full dismiss. */
   const [arcSetupFromCoach, setArcSetupFromCoach] = useState(false);
@@ -1853,49 +1855,21 @@ export default function App() {
     else await reloadForgeBlocks();
   }
 
-  async function handleArcContinue(completedBlock) {
-    const uid = userIdRef.current;
-    if (!uid || !completedBlock?.id) return;
+  function handleArcContinue(completedBlock) {
+    if (!completedBlock?.id) return;
     markArcDecided(completedBlock.id);
-    const startDate = todayStr();
-    const durationDays = normalizeArcDuration(completedBlock.durationDays);
-    const t = new Date();
-    const end = new Date(t.getFullYear(), t.getMonth(), t.getDate() + durationDays);
-    const endDate = `${end.getFullYear()}-${String(end.getMonth()+1).padStart(2,"0")}-${String(end.getDate()).padStart(2,"0")}`;
-    const { data: blockRow, error } = await supabase.from("forge_blocks").insert({
-      user_id: uid,
-      title: completedBlock.title || resolveArcTitle("", completedBlock.identity),
-      identity: completedBlock.identity,
-      why_statement: (completedBlock.whyStatement || "").trim() || null,
-      old_pattern: (completedBlock.oldPattern || "").trim() || null,
-      minimum_proof: (completedBlock.minimumProof || "").trim() || null,
-      start_date: startDate,
-      end_date: endDate,
-      status: "active",
-      duration_days: durationDays,
-    }).select().single();
-    if (error) {
-      addToast("Could not start the next Arc — try again");
-      return;
-    }
-    const proofIds = habits.filter(h => h.blockId === completedBlock.id && h.isProofAction).map(h => h.id);
-    if (blockRow?.id && proofIds.length) {
-      await supabase.from("habits").update({
-        block_id: blockRow.id,
-        is_proof_action: true,
-        updated_at: new Date().toISOString(),
-      }).in("id", proofIds);
-      setHabits(prev => prev.map(h => proofIds.includes(h.id) ? { ...h, blockId: blockRow.id, isProofAction: true } : h));
-    }
     setCompletedArcBlock(null);
-    addToast("Arc restarted");
-    await reloadForgeBlocks(uid);
+    setArcCoachSeed({ type: "runItBack", block: completedBlock });
+    setArcCoachMode("create");
+    setShowArcCoach(true);
   }
 
   function handleArcEvolve(completedBlock) {
     if (completedBlock?.id) markArcDecided(completedBlock.id);
     setCompletedArcBlock(null);
-    openArcCoachCreate();
+    setArcCoachSeed({ type: "evolve", block: completedBlock });
+    setArcCoachMode("create");
+    setShowArcCoach(true);
   }
 
   function handleArcClose(completedBlock) {
@@ -1903,6 +1877,7 @@ export default function App() {
   }
 
   function openArcCoachCreate() {
+    setArcCoachSeed(null);
     setArcCoachMode("create");
     setShowArcCoach(true);
   }
@@ -3120,8 +3095,8 @@ export default function App() {
       }}>
         🔒 Preview mode — no changes will be saved
       </div>
-      <div style={{ paddingTop: 36 }}>
         <OnboardingScreen
+          topInset={36}
           onComplete={() => setPreviewOnboarding(false)}
           onSaveProgress={() => Promise.resolve()}
           onCheckout={() => {
@@ -3135,7 +3110,7 @@ export default function App() {
           notifPermission={notifPermission}
           onNotifToggle={handleNotifToggle}
         />
-      </div></>
+      </>
     );
   }
 
@@ -4154,9 +4129,7 @@ export default function App() {
             >×</button>
           </div>
         )}
-        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} activeBlock={activeBlock} todayArcScore={todayArcScore} arcLedgerRows={arcLedgerRows} arcProofSyncing={arcProofSyncing} onStartArc={openArcCoachCreate}
-onEditArc={openArcCoachEdit}
-onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} onOpenCoachMic={() => openCoachWithMode("mic")} onOpenCoachWithDraft={openCoachWithDraft} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} onOpenGoalDetail={id => setOpenGoalId(id)} todayJournalEntry={journalEntries.find(e => e.date === todayStr()) ?? null} onGenerateReceipt={handleGenerateReceipt} generatingReceipt={generatingReceipt} onOpenJournal={() => { setJournalOpenTab("journal"); setJournalAutoGenerate(false); navigateTo("evidence"); }} onLowerBudget={handleLowerBudget} tasks={tasks} onAddTask={handleAddTask} onCompleteTask={handleCompleteTask} onPinTask={handlePinTask} onDeleteTask={handleDeleteTask} onOpenHub={() => setScreen("hub")}/>}
+        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} activeBlock={activeBlock} todayArcScore={todayArcScore} arcLedgerRows={arcLedgerRows} arcProofSyncing={arcProofSyncing} onStartArc={openArcCoachCreate} onViewArc={() => { setScreen("arc"); setArcTab("arc"); }} onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} onOpenCoachMic={() => openCoachWithMode("mic")} onOpenCoachWithDraft={openCoachWithDraft} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} onOpenGoalDetail={id => setOpenGoalId(id)} todayJournalEntry={journalEntries.find(e => e.date === todayStr()) ?? null} onGenerateReceipt={handleGenerateReceipt} generatingReceipt={generatingReceipt} onOpenJournal={() => { setJournalOpenTab("journal"); setJournalAutoGenerate(false); navigateTo("evidence"); }} onLowerBudget={handleLowerBudget} tasks={tasks} onAddTask={handleAddTask} onCompleteTask={handleCompleteTask} onPinTask={handlePinTask} onDeleteTask={handleDeleteTask} onOpenHub={() => setScreen("hub")}/>}
         {screen === "hub"      && <HubScreen
           habits={habits} goals={goals} tasks={tasks} activeBlock={activeBlock}
           onBack={() => setScreen("today")}
@@ -4541,10 +4514,13 @@ onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} o
       {/* Modals */}
       {showArcCoach && (
         <ArcCoachSheet
+          key={`arc-coach-${arcCoachMode}-${arcCoachSeed?.type || "none"}-${arcCoachSeed?.block?.id || "new"}`}
           mode={arcCoachMode}
           activeBlock={arcCoachMode === "edit" ? activeBlock : null}
+          seedArc={arcCoachSeed}
           onClose={() => {
             setArcProofSyncing(false);
+            setArcCoachSeed(null);
             setShowArcCoach(false);
             setArcSetupFromCoach(false);
             setShowArcSetup(false);

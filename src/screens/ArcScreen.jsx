@@ -53,15 +53,17 @@ function ArcDetail({ activeBlock, habits, onEditArc, onStartArc, isPro, userId, 
     return (
       <div style={{ padding: "32px 24px 24px", textAlign: "center" }}>
         <div style={{ fontSize: 40, marginBottom: 14 }}>⚒️</div>
-        <div style={{ fontFamily: T.serif, fontSize: 24, color: T.text, marginBottom: 10 }}>No Arc running</div>
-        <div style={{ fontSize: 14, color: T.muted, lineHeight: 1.7, marginBottom: 24 }}>
-          An Arc is a finite season of change — a few weeks with a direction, a handful of proof
-          actions, and an honest weekly Review.
+        <div style={{ fontFamily: T.serif, fontSize: 26, color: T.text, marginBottom: 8, lineHeight: 1.2 }}>
+          What season are you in?
+        </div>
+        <div style={{ fontSize: 15, color: T.gold, fontWeight: 600, marginBottom: 14 }}>Define your Arc</div>
+        <div style={{ fontSize: 14, color: T.muted, lineHeight: 1.7, marginBottom: 24, textAlign: "left", maxWidth: 320, margin: "0 auto 24px" }}>
+          Choose a real outcome or deadline. Commit for a bounded period. Collect proof as you go — your coach will help shape it in a short conversation.
         </div>
         {onStartArc && (
           <button type="button" onClick={onStartArc}
-            style={{ padding: "13px 26px", borderRadius: T.rsm, border: "none", background: T.accent, color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: T.font }}>
-            Start an Arc
+            style={{ padding: "14px 28px", borderRadius: T.rsm, border: "none", background: T.gold, color: "#0F0F0D", fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: T.font }}>
+            Define your Arc →
           </button>
         )}
         {hasPast && (
@@ -103,10 +105,23 @@ function ArcDetail({ activeBlock, habits, onEditArc, onStartArc, isPro, userId, 
         <div style={{ height: 4, borderRadius: 2, background: T.surface, overflow: "hidden", marginBottom: 8 }}>
           <div style={{ height: "100%", width: `${Math.round(progress * 100)}%`, background: `linear-gradient(90deg, ${T.accent}, ${T.gold})`, borderRadius: 2 }} />
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: T.muted }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11.5, color: T.muted, gap: 8 }}>
           <span>Day {dayNum} of {duration}</span>
           <span>{daysLeft === 0 ? "Final day" : `${daysLeft} day${daysLeft === 1 ? "" : "s"} left`}</span>
         </div>
+        {onEditArc ? (
+          <button
+            type="button"
+            onClick={onEditArc}
+            style={{
+              marginTop: 12, width: "100%", padding: "10px 14px", borderRadius: T.rsm,
+              border: `0.5px solid ${T.borderStrong}`, background: T.raised,
+              color: T.text, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: T.font,
+            }}
+          >
+            Edit Arc
+          </button>
+        ) : null}
       </div>
 
       {/* Identity fields */}
