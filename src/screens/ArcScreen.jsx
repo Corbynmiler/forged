@@ -1,122 +1,11 @@
 // ─── ARC SCREEN ───────────────────────────────────────────────────────────────
-// Arc journey home: hero + week-by-week timeline (evidence + reviews per week).
-// Legacy Evidence/Reviews tabs replaced by the timeline; full activity remains
-// behind an optional disclosure.
+// Arc journey home: integrated hero + connected week path + chapter detail.
 import { useState, useEffect } from "react";
 import { T } from "../theme.js";
 import { supabase, rowToForgeBlock } from "../supabase.js";
-import { isSatisfiedForTodayRing } from "../utils.js";
-import { resolveArcTitle, arcDurationWeeksLabel } from "../arcProofMatch.js";
-import { getArcDayNumber, getArcDurationDays, isProofHabitForBlock } from "../arcProgress.js";
 import { getCurrentArcWeek } from "../lib/arcTimeline.js";
 import { ArcTimeline, ArcArchiveCard } from "../components/ArcTimeline.jsx";
 import { JournalScreen } from "./JournalScreen.jsx";
-
-function FieldRow({ label, value, accent }) {
-  const v = String(value || "").trim();
-  if (!v) return null;
-  return (
-    <div style={{ marginBottom: 14 }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: accent || T.hint, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>
-        {label}
-      </div>
-      <div style={{ fontSize: 14, color: T.text, lineHeight: 1.55, minWidth: 0, overflowWrap: "break-word", wordBreak: "break-word" }}>{v}</div>
-    </div>
-  );
-}
-
-function ArcHero({ activeBlock, onEditArc }) {
-  const duration = getArcDurationDays(activeBlock);
-  const dayNum = getArcDayNumber(activeBlock);
-  const weeksTotal = Math.max(1, Math.ceil(duration / 7));
-  const weekNum = getCurrentArcWeek(activeBlock);
-  const progress = Math.min(1, Math.max(0, (dayNum - 1) / Math.max(1, duration)));
-  const arcTitle = resolveArcTitle(activeBlock.title, activeBlock.identity);
-  const daysLeft = Math.max(0, duration - dayNum);
-
-  return (
-    <div style={{
-      padding: "16px 16px 14px", borderRadius: T.r,
-      border: "0.5px solid rgba(200,144,42,0.4)",
-      background: "linear-gradient(135deg, rgba(192,57,43,0.10) 0%, rgba(200,144,42,0.06) 45%, rgba(26,26,22,0.98) 100%)",
-      marginBottom: 16,
-    }}>
-      <div style={{ fontSize: 10, fontWeight: 800, color: T.gold, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 6 }}>
-        {arcDurationWeeksLabel(duration)} · Week {weekNum} of {weeksTotal}
-      </div>
-      <div style={{ fontFamily: T.serif, fontSize: 24, color: T.text, lineHeight: 1.15, marginBottom: 6, overflowWrap: "anywhere", wordBreak: "break-word" }}>
-        {arcTitle}
-      </div>
-      {activeBlock.identity ? (
-        <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.5, marginBottom: 10, fontStyle: "italic", overflowWrap: "anywhere" }}>
-          {activeBlock.identity}
-        </div>
-      ) : null}
-      <div style={{ height: 4, borderRadius: 2, background: T.surface, overflow: "hidden", marginBottom: 8 }}>
-        <div style={{ height: "100%", width: `${Math.round(progress * 100)}%`, background: `linear-gradient(90deg, ${T.accent}, ${T.gold})`, borderRadius: 2 }} />
-      </div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11.5, color: T.muted, gap: 8, flexWrap: "wrap" }}>
-        <span>Day {dayNum} of {duration}</span>
-        <span>{daysLeft === 0 ? "Final day" : `${daysLeft} day${daysLeft === 1 ? "" : "s"} left`}</span>
-      </div>
-      {onEditArc ? (
-        <button
-          type="button"
-          onClick={onEditArc}
-          style={{
-            marginTop: 12, padding: "8px 14px", borderRadius: 8,
-            border: `0.5px solid ${T.borderStrong}`, background: T.raised,
-            color: T.sub, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: T.font,
-          }}
-        >
-          Edit Arc
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
-function ProofActionsSummary({ activeBlock, habits }) {
-  const proofHabits = (habits || []).filter(h => h.habitType !== "log" && isProofHabitForBlock(h, activeBlock.id));
-  const proofDone = proofHabits.filter(h => isSatisfiedForTodayRing(h)).length;
-  if (!proofHabits.length) return null;
-  return (
-    <div style={{
-      padding: "12px 14px", borderRadius: T.rsm, border: `0.5px solid ${T.border}`,
-      background: T.surface, marginBottom: 16, fontSize: 12.5, color: T.muted,
-    }}>
-      <span style={{ color: T.text, fontWeight: 600 }}>{proofDone}/{proofHabits.length}</span> proof actions logged today
-    </div>
-  );
-}
-
-function IdentityDisclosure({ activeBlock }) {
-  const [open, setOpen] = useState(false);
-  const hasExtra = activeBlock.whyStatement || activeBlock.oldPattern || activeBlock.minimumProof;
-  if (!hasExtra) return null;
-  return (
-    <div style={{ marginBottom: 16 }}>
-      <button
-        type="button"
-        onClick={() => setOpen(v => !v)}
-        style={{
-          width: "100%", padding: "10px 12px", borderRadius: 10,
-          border: `0.5px solid ${T.border}`, background: T.surface,
-          color: T.muted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: T.font, textAlign: "left",
-        }}
-      >
-        {open ? "▾" : "▸"} Arc details
-      </button>
-      {open ? (
-        <div style={{ padding: "14px 14px 4px", borderRadius: T.r, border: `0.5px solid ${T.border}`, borderTop: "none", marginTop: -4, background: T.raised }}>
-          <FieldRow label="Why it matters" value={activeBlock.whyStatement} />
-          <FieldRow label="Old pattern" value={activeBlock.oldPattern} accent={T.accent} />
-          <FieldRow label="Bad-day minimum" value={activeBlock.minimumProof} accent={T.green} />
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 function AllEvidencePanel({
   habits, goals, journalEntries, userId, isPro, onUpgrade, userName, coachName,
@@ -188,19 +77,18 @@ function PastArcsSection({
 
   if (!isPro) {
     return (
-      <div style={{ marginTop: 24 }}>
+      <div style={{ marginTop: 36, paddingTop: 24, borderTop: `0.5px solid rgba(255,255,255,0.05)` }}>
         <button type="button" onClick={onUpgrade}
-          style={{ width: "100%", padding: "13px 16px", borderRadius: T.rsm, border: `0.5px dashed ${T.borderStrong}`, background: T.surface, cursor: "pointer", textAlign: "left", fontFamily: T.font }}>
-          <div style={{ fontSize: 13, color: T.text, fontWeight: 500 }}>{pastArcs.length} past Arc{pastArcs.length === 1 ? "" : "s"}</div>
-          <div style={{ fontSize: 12, color: T.muted }}>Full Arc history is a <span style={{ color: T.gold, fontWeight: 600 }}>Pro</span> feature →</div>
+          style={{ width: "100%", padding: "10px 2px", background: "none", border: "none", cursor: "pointer", textAlign: "left", fontFamily: T.font }}>
+          <div style={{ fontSize: 12, color: T.muted }}>{pastArcs.length} past Arc{pastArcs.length === 1 ? "" : "s"} · <span style={{ color: T.gold }}>Pro</span> to expand →</div>
         </button>
       </div>
     );
   }
 
   return (
-    <div style={{ marginTop: 28 }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: T.hint, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10, padding: "0 4px" }}>
+    <div style={{ marginTop: 36, paddingTop: 24, borderTop: `0.5px solid rgba(255,255,255,0.05)` }}>
+      <div style={{ fontSize: 9, fontWeight: 700, color: T.hint, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 8, padding: "0 2px" }}>
         Arc history
       </div>
       {pastArcs.map(block => {
@@ -209,6 +97,7 @@ function PastArcsSection({
           <ArcArchiveCard
             key={block.id}
             block={block}
+            journalEntries={journalEntries}
             expanded={expanded}
             onToggle={() => setExpandedId(expanded ? null : block.id)}
           >
@@ -222,6 +111,7 @@ function PastArcsSection({
               userName={userName}
               isPro={isPro}
               isActive={false}
+              embedded
               onRunItBack={onRunItBack}
               onEvolve={onEvolve}
             />
@@ -239,12 +129,10 @@ export function ArcScreen({
   onStartArc, onEditArc, onRunItBack, onEvolve,
   onReflect, onDeleteJournalLog, onSaveJournalEntry, onJournalGenerated,
   journalInitialTab, journalAutoGenerate, onJournalInitialComposeDone,
-  completedArcBlock,
 }) {
   const [showAllEvidence, setShowAllEvidence] = useState(false);
   const [initialWeek, setInitialWeek] = useState(null);
 
-  // Legacy deep-links: evidence/reviews tabs → timeline or full evidence panel
   useEffect(() => {
     if (tab === "evidence") {
       setShowAllEvidence(true);
@@ -286,14 +174,6 @@ export function ArcScreen({
 
   return (
     <div style={{ padding: "4px 10px 32px", minWidth: 0, overflowX: "hidden", boxSizing: "border-box" }}>
-      <ArcHero activeBlock={activeBlock} onEditArc={onEditArc} />
-      <ProofActionsSummary activeBlock={activeBlock} habits={habits} />
-      <IdentityDisclosure activeBlock={activeBlock} />
-
-      <div style={{ fontSize: 10, fontWeight: 800, color: T.hint, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 10, padding: "0 4px" }}>
-        Your path
-      </div>
-
       <ArcTimeline
         block={activeBlock}
         habits={habits}
