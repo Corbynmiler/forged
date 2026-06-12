@@ -526,6 +526,9 @@ function BlacksmithModel({ striking, reducedMotion }) {
 
   // Build mixer + cache actions once per scene load
   useEffect(() => {
+    // Hide scene while we advance past the T-pose bind frame — prevents any flash
+    scene.visible = false;
+
     const mixer = new THREE.AnimationMixer(scene);
 
     const idleClip = THREE.AnimationClip.findByName(animations, "Idle");
@@ -541,8 +544,9 @@ function BlacksmithModel({ striking, reducedMotion }) {
       chopRef.current.clampWhenFinished = false;
     }
 
-    // Advance past the bind-pose first frame that shows as T-pose on load
-    mixer.update(0.4);
+    // Advance into the animation, then show — scene never renders in T-pose
+    mixer.update(0.5);
+    scene.visible = true;
     mixerRef.current = mixer;
 
     return () => { mixer.stopAllAction(); mixer.uncacheRoot(scene); };
