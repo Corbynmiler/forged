@@ -521,15 +521,15 @@ function BlacksmithModel({ striking, reducedMotion }) {
   const { scene, animations } = useGLTF("/forge-companion.glb");
   const { actions, mixer } = useAnimations(animations, groupRef);
 
-  // Start idle loop on mount
+  // 2H_Melee_Idle = weapon-ready stance, much better than generic Idle for a smith
   useEffect(() => {
-    actions["Idle"]?.reset().play();
+    actions["2H_Melee_Idle"]?.reset().play();
   }, [actions]);
 
-  // Trigger chop on strike, return to idle when done
+  // Trigger chop on strike, fade back to weapon-ready idle when done
   useEffect(() => {
     if (reducedMotion || !striking) return;
-    const idle = actions["Idle"];
+    const idle = actions["2H_Melee_Idle"];
     const chop = actions["2H_Melee_Attack_Chop"];
     if (!chop || !mixer) return;
 
@@ -547,7 +547,8 @@ function BlacksmithModel({ striking, reducedMotion }) {
 
   return (
     <group ref={groupRef}>
-      <primitive object={scene} position={[0, -0.9, 0]} rotation={[0, 0.15, 0]} />
+      {/* y=-0.66 puts feet at ~77% from top, matching SVG floor at y=170/222 */}
+      <primitive object={scene} scale={0.82} position={[0.1, -0.66, 0]} rotation={[0, 0.2, 0]} />
     </group>
   );
 }
@@ -731,21 +732,23 @@ function WorkshopScene({ item, progress, striking, reducedMotion, bandanaColor }
       </g>
     </svg>
 
-    {/* 3D character — overlaid on the right third of the scene */}
+    {/* 3D character — overlaid on the right ~40% of the scene */}
     <div style={{
-      position:"absolute", right:0, top:0, bottom:0, width:"38%",
+      position:"absolute", right:0, top:0, bottom:0, width:"42%",
       pointerEvents:"none",
     }}>
       <Suspense fallback={null}>
         <Canvas
           gl={{ alpha:true, antialias:false }}
           dpr={[1, 1.5]}
-          camera={{ position:[0, 0.3, 3.8], fov:50 }}
+          camera={{ position:[0, 0.1, 3.4], fov:46 }}
+          onCreated={({ gl }) => gl.setClearColor(0x000000, 0)}
           style={{ width:"100%", height:"100%", background:"transparent" }}
         >
-          <ambientLight intensity={0.5} color="#E67E22" />
-          <pointLight position={[-3, 1.5, 3]} intensity={1.5} color="#E86820" />
-          <pointLight position={[1, 2, 2]}   intensity={0.4} color="#F5C842" />
+          {/* Warm forge-fire ambient — matches SVG scene orange glow */}
+          <ambientLight intensity={0.35} color="#C04A10" />
+          <pointLight position={[-4, 0.5, 2]} intensity={2.2} color="#E86820" />
+          <pointLight position={[1, 2.5, 2]} intensity={0.5} color="#F5C842" />
           <BlacksmithModel striking={striking} reducedMotion={reducedMotion} />
         </Canvas>
       </Suspense>
