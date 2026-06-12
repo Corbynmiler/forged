@@ -94,7 +94,7 @@ export function calendarBriefKeyForArcWeek(range) {
   return weekStartFor(mid);
 }
 
-const RECEIPT_KEYWORDS = ["Proof shown:", "Wins:", "Missed:", "Extras:", "Why:", "Pattern:", "Tomorrow:"];
+const RECEIPT_KEYWORDS = ["Proof shown:", "Wins:", "Hard parts:", "Missed:", "Extras:", "Why:", "Pattern:", "Tomorrow:"];
 
 /** Parse receipt into title, pattern line, proof snippet. */
 export function parseReceiptStructured(content) {
@@ -125,8 +125,9 @@ export function parseReceiptStructured(content) {
     title: title || null,
     pattern: sections.pattern || null,
     narrative: narrativeLines.join(" ") || null,
-    proof: sections["proof shown"] || sections.wins || null,
+    proof: sections["proof shown"] || null,
     wins: sections.wins || null,
+    hardParts: sections["hard parts"] || null,
     missed: sections.missed || null,
     extras: sections.extras || null,
     why: sections.why || null,

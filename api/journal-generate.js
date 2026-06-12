@@ -309,6 +309,8 @@ function buildGenerationPrompt({ date, habits, goals, name, existingNotes, doneT
 Proof shown: [comma-separated list from "Arc proof completed today" above, or "none"]
 Missed: [comma-separated list from "Arc proof genuinely missed today" ONLY, or "none"]
 ${arcLists?.completedExtras?.length ? "Extras: [comma-separated list from completed non-Arc extras above]" : "Extras: [omit this entire line if there are no completed non-Arc extras]"}
+Wins: [comma-separated wins pulled from habit note reflections above — the "win" text attached to logs; "none" if no win notes]
+Hard parts: [comma-separated challenges pulled from habit note reflections above — the "hard part" text attached to logs; "none" if no hard-part notes]
 Why: [1 sentence on context if notes explain it — skip if nothing real to say]
 Pattern: [see rules below]
 Tomorrow: [see rules below]` : `Write a daily journal entry in this exact format — nothing more, nothing less:
@@ -317,7 +319,8 @@ Tomorrow: [see rules below]` : `Write a daily journal entry in this exact format
 
 [2–3 sentence narrative — what kind of day this was, the mood and shape of it. Be specific to the actual data and context notes. First person, as if they wrote it. If habits were unlogged and no context notes explain why, do not speculate or editorialize — simply describe what did happen and leave the gaps neutral.]
 
-Wins: [comma-separated list of things completed, or "none"]
+Wins: [comma-separated wins — draw from habit note "win" reflections if present; otherwise notable completions; "none" if nothing positive]
+Hard parts: [comma-separated challenges — draw from habit note "hard part" reflections if present; "none" if no hard-part notes]
 Missed: [see rules below]
 Why: [1 sentence on context or reason if there are notes that explain it — skip this line entirely if there's nothing real to say]
 Pattern: [see rules below]
@@ -359,6 +362,12 @@ Rules:
 - Do not duplicate an item across Proof shown and Extras.
 
 ${missedRules}${extrasRules}
+
+WINS / HARD PARTS field rules:
+- Only pull from actual habit note reflections in the data above — the quoted "win" and "hard part" text attached to individual logs
+- If no such notes exist, write "none" — do not invent wins or challenges
+- Keep each item brief (a few words) — these are labels, not sentences
+- Skip the Wins line entirely if wins is "none" and there's nothing worth surfacing; same for Hard parts
 
 PATTERN field rules:
 - Only write a Pattern line if something genuinely stands out in the actual data or notes — a streak, a recurring miss, a strong day relative to recent history, a clear recovery pattern

@@ -374,6 +374,7 @@ function ReceiptRow({ receipt, expanded, onToggle, compact }) {
 const RECEIPT_LABEL_ACCENT = {
   "Proof shown": T.gold,
   "Wins": T.green,
+  "Hard parts": "#9B7BAA",
   "Missed": T.amber,
   "Pattern": T.muted,
   "Why": T.hint,
@@ -384,6 +385,7 @@ export function ReceiptExpandedBody({ parsed, content }) {
   const sections = [
     parsed?.proof ? { label: "Proof shown", text: parsed.proof } : null,
     parsed?.wins ? { label: "Wins", text: parsed.wins } : null,
+    parsed?.hardParts ? { label: "Hard parts", text: parsed.hardParts } : null,
     parsed?.missed ? { label: "Missed", text: parsed.missed } : null,
     parsed?.pattern ? { label: "Pattern", text: parsed.pattern } : null,
     parsed?.why ? { label: "Why", text: parsed.why } : null,
