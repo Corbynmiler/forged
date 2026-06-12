@@ -527,20 +527,23 @@ function BlacksmithModel({ striking, reducedMotion }) {
   // Build mixer + cache actions once per scene load
   useEffect(() => {
     const mixer = new THREE.AnimationMixer(scene);
-    mixerRef.current = mixer;
 
     const idleClip = THREE.AnimationClip.findByName(animations, "Idle");
     const chopClip = THREE.AnimationClip.findByName(animations, "HeavyHammerSwing");
 
     if (idleClip) {
       idleRef.current = mixer.clipAction(idleClip);
-      idleRef.current.reset().play();
+      idleRef.current.play();
     }
     if (chopClip) {
       chopRef.current = mixer.clipAction(chopClip);
       chopRef.current.setLoop(THREE.LoopOnce, 1);
       chopRef.current.clampWhenFinished = false;
     }
+
+    // Advance past the bind-pose first frame that shows as T-pose on load
+    mixer.update(0.4);
+    mixerRef.current = mixer;
 
     return () => { mixer.stopAllAction(); mixer.uncacheRoot(scene); };
   }, [scene, animations]);
@@ -557,7 +560,12 @@ function BlacksmithModel({ striking, reducedMotion }) {
     chop.reset().fadeIn(0.08).play();
 
     const onDone = (e) => {
-      if (e.action === chop) idle?.reset().fadeIn(0.3).play();
+      if (e.action === chop && idle) {
+        // stop() resets time to 0; set to 0.4 to skip bind-pose on return
+        idle.stop();
+        idle.time = 0.4;
+        idle.fadeIn(0.3).play();
+      }
     };
     mixer.addEventListener("finished", onDone);
     return () => mixer.removeEventListener("finished", onDone);
@@ -685,18 +693,18 @@ function WorkshopScene({ item, progress, striking, reducedMotion, bandanaColor }
           <ItemPaths type={item.type} stage={stage}/>
         </svg>
 
-        {/* IMPACT FLASH — cx=215 matches where the 3D chop arc lands on the anvil */}
+        {/* IMPACT FLASH — cx=225 aligns with the 3D character's hammer landing on the right-side anvil */}
         {!reducedMotion && striking && (
-          <ellipse cx="215" cy="122" rx="26" ry="7"
+          <ellipse cx="225" cy="122" rx="26" ry="7"
             fill="#F5C842" className="fg-impact" style={{filter:"blur(3px)"}}/>
         )}
         {/* STRIKE SPARKS */}
         {!reducedMotion && striking && SPARK_OFFSETS.map((sp,i)=>(
-          <circle key={i} cx="215" cy="118" r={i<2?3.5:2} fill={i%2===0?"#F5C842":"#E67E22"}
+          <circle key={i} cx="225" cy="118" r={i<2?3.5:2} fill={i%2===0?"#F5C842":"#E67E22"}
             className="fg-spark" style={{"--sx":sp.sx,"--sy":sp.sy,"--del":sp.del}}/>
         ))}
         {!reducedMotion && striking && [0,1,2].map(i=>(
-          <circle key={`c${i}`} cx={213+(i-1)*8} cy="112" r="1.8" fill="#FFFBE0"
+          <circle key={`c${i}`} cx={223+(i-1)*8} cy="112" r="1.8" fill="#FFFBE0"
             className="fg-spark" style={{"--sx":`${(i-1)*12}px`,"--sy":"-34px","--del":`.28s`}}/>
         ))}
 
@@ -1017,6 +1025,9 @@ function WorkshopSheet({ arc, item, progress, userId, onClose, onSelectItem, onR
             <div style={{fontSize:12,color:T.muted,marginTop:3,fontStyle:"italic"}}>
               "{item.desc}"
             </div>
+            <div style={{fontSize:11,color:T.hint,marginTop:5,lineHeight:1.5}}>
+              Hit ≥50% of your proof habits each day to forge progress into this item.
+            </div>
           </div>
           <button type="button" onClick={onClose}
             style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,
@@ -1240,6 +1251,11 @@ function ForgeCard({ item, progress, onOpen, reducedMotion, coachIcon, weekHeat 
         <div style={{fontSize:10,color:T.muted,lineHeight:1}}>
           {statusLine}
         </div>
+        {daysForged === 0 && (
+          <div style={{fontSize:9,color:T.hint,marginTop:3,lineHeight:1.3}}>
+            Your Arc progress takes shape here — tap to open
+          </div>
+        )}
       </div>
 
       <div style={{padding:"0 12px 0 2px",fontSize:20,color:T.hint+"80",lineHeight:1,flexShrink:0}}>›</div>
