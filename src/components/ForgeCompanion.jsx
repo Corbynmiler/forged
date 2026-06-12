@@ -529,8 +529,8 @@ function BlacksmithModel({ striking, reducedMotion }) {
     const mixer = new THREE.AnimationMixer(scene);
     mixerRef.current = mixer;
 
-    const idleClip = THREE.AnimationClip.findByName(animations, "2H_Melee_Idle");
-    const chopClip = THREE.AnimationClip.findByName(animations, "2H_Melee_Attack_Chop");
+    const idleClip = THREE.AnimationClip.findByName(animations, "Idle");
+    const chopClip = THREE.AnimationClip.findByName(animations, "HeavyHammerSwing");
 
     if (idleClip) {
       idleRef.current = mixer.clipAction(idleClip);
@@ -614,12 +614,12 @@ function WorkshopScene({ item, progress, striking, reducedMotion, bandanaColor }
   const iCfg = itemVbMap[item.type] ?? itemVbMap.sword;
 
   return (
-    <div style={{position:"relative",width:"100%"}}>
+    <div style={{position:"relative",width:"100%",backgroundImage:"url('/forge-bg.png')",backgroundSize:"cover",backgroundPosition:"center"}}>
     <svg viewBox="0 0 340 222" style={{width:"100%",height:"auto",display:"block"}}>
       <defs>
         <radialGradient id="fg-amb" cx="23%" cy="76%" r="46%">
-          <stop offset="0%"  stopColor="#E67E22" stopOpacity=".38"/>
-          <stop offset="50%" stopColor="#C0392B" stopOpacity=".1"/>
+          <stop offset="0%"  stopColor="#E67E22" stopOpacity=".55"/>
+          <stop offset="50%" stopColor="#C0392B" stopOpacity=".18"/>
           <stop offset="100%" stopColor="#0D0D0B" stopOpacity="0"/>
         </radialGradient>
         <radialGradient id="fg-hot-h" cx="50%" cy="50%" r="50%">
@@ -640,25 +640,9 @@ function WorkshopScene({ item, progress, striking, reducedMotion, bandanaColor }
       </defs>
 
       <g clipPath="url(#fg-scene)">
-        {/* ── BACKGROUND — deep dark stone, no noisy seam lines ── */}
-        <rect width="340" height="222" fill="#080807"/>
-        {/* Wide forge-fire atmosphere sweeping from left across whole scene */}
-        <rect width="340" height="222" fill="url(#fg-amb)"/>
-        {/* Faint mid-floor horizon line */}
-        <line x1="0" y1="170" x2="340" y2="170" stroke="#1A1814" strokeWidth="1.5"/>
-
-        {/* ── FURNACE — simplified silhouette, no stone seams ── */}
-        {/* Chimney stack */}
-        <rect x="18" y="0" width="46" height="38" rx="3" fill="#111009"/>
-        {/* Body */}
-        <rect x="6" y="32" width="82" height="140" rx="6" fill="#111009"/>
-        {/* Arch opening */}
-        <path d="M18 170 L18 100 Q46 60 74 100 L74 170 Z" fill="#050403"/>
-        {/* Arch frame — single warm stroke */}
-        <path d="M16 102 Q46 58 76 102" fill="none" stroke="#2A2010" strokeWidth="4"/>
-        {/* Ash bed */}
-        <ellipse cx="46" cy="168" rx="22" ry="4" fill="#1A1208" opacity=".9"/>
-        {/* Fire */}
+        {/* Warm fire overlay — deepens background image colours to match scene */}
+        <rect width="340" height="222" fill="url(#fg-amb)" opacity=".7"/>
+        {/* Fire — animated flames layer over the background image furnace */}
         <path className={reducedMotion?"":"fg-fire1"} d="M26 170 L34 138 L41 154 L47 130 L53 147 L60 133 L67 170 Z" fill="#B03018" opacity=".9"/>
         <path className={reducedMotion?"":"fg-fire2"} d="M30 170 L38 122 L47 142 L55 116 L63 137 L69 170 Z"       fill="#E67E22" opacity=".7"/>
         <path className={reducedMotion?"":"fg-fire3"} d="M34 170 L42 132 L47 112 L52 128 L59 120 L65 170 Z"       fill="#F5C842" opacity=".38"/>
