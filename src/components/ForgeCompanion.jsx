@@ -44,6 +44,19 @@ const CSS = `
     0%,100%{transform:translateY(0)}
     40%{transform:translateY(-2.5px)}
   }
+  .fg-sway{animation:fg-sway 5.6s ease-in-out infinite}
+  @keyframes fg-sway{
+    0%,100%{transform:rotate(0deg)}
+    25%{transform:rotate(-.5deg)}
+    75%{transform:rotate(.4deg)}
+  }
+  .fg-head-tilt{animation:fg-htilt 7.3s ease-in-out infinite}
+  @keyframes fg-htilt{
+    0%,100%{transform:rotate(0deg)}
+    18%,82%{transform:rotate(0deg)}
+    35%{transform:rotate(-2deg)}
+    65%{transform:rotate(1.5deg)}
+  }
   .fg-strike{animation:fg-stk .72s linear 1 forwards;transform-origin:14px -62px}
   @keyframes fg-stk{
     0%  {transform:rotate(0deg);animation-timing-function:cubic-bezier(.55,0,1,1)}
@@ -83,7 +96,7 @@ const CSS = `
   @keyframes fg-cg{0%,100%{opacity:.45}50%{opacity:.82}}
   @media (prefers-reduced-motion:reduce){
     .fg-fire1,.fg-fire2,.fg-fire3,.fg-ember,.fg-glow1,.fg-glow2,.fg-item-hot,.fg-item-gold,
-    .fg-breathe,.fg-strike,.fg-arm-idle,.fg-spark,.fg-impact,.fg-card-glow{animation:none}
+    .fg-breathe,.fg-sway,.fg-head-tilt,.fg-strike,.fg-arm-idle,.fg-spark,.fg-impact,.fg-card-glow{animation:none}
   }
 `;
 
@@ -365,85 +378,80 @@ function ItemPreview({ type, stage, height = 52 }) {
 // A proper layered SVG companion character. Defined relative to foot-center (0,0).
 // Translate the group to position within the scene.
 
-function SmithCharacter({ striking = false, reducedMotion = false }) {
+function SmithCharacter({ striking = false, reducedMotion = false, bandanaColor = "#C04018" }) {
   return (
     <g>
-      {/* Shadow stays on ground — not affected by breathing */}
+      {/* Shadow stays on ground — unaffected by any body animation */}
       <ellipse cx="0" cy="1" rx="19" ry="4" fill="#000" opacity=".45"/>
-      {/* Character body with asymmetric breathing */}
-    <g className={reducedMotion ? "" : "fg-breathe"}>
-      {/* LEGS */}
-      <rect x="-13" y="-28" width="11" height="29" rx="4" fill="#2A3040"/>
-      <rect x="2"   y="-26" width="11" height="27" rx="4" fill="#2A3040"/>
-      {/* Boots */}
-      <path d="M-16-2 Q-15 2 -6 2 L-6-1 L-14-2 Z" fill="#3A2A18"/>
-      <path d="M1-1 Q1 3 10 3 L11-1 L2-2 Z" fill="#3A2A18"/>
-      {/* TORSO */}
-      <rect x="-16" y="-66" width="32" height="40" rx="7" fill="#2E3848"/>
-      {/* APRON (leather over torso) */}
-      <path d="M-12-60 L12-60 L14-28 L-14-28 Z" fill="#5C3A1C"/>
-      {/* Apron seam */}
-      <line x1="0" y1="-60" x2="0" y2="-28" stroke="#4A2E14" strokeWidth="1.5" opacity=".5"/>
-      {/* Apron pocket */}
-      <rect x="-5" y="-44" width="10" height="8" rx="2" fill="#4A2E14" opacity=".8"/>
-      {/* Apron strings over shoulders */}
-      <line x1="-12" y1="-60" x2="-8" y2="-70" stroke="#5C3A1C" strokeWidth="2.5"/>
-      <line x1="12"  y1="-60" x2="8"  y2="-70" stroke="#5C3A1C" strokeWidth="2.5"/>
-      {/* LEFT ARM + TONGS */}
-      <rect x="-24" y="-64" width="9" height="28" rx="4" fill="#B87840"/>
-      {/* Left glove */}
-      <path d="M-24-38 Q-28-36 -26-32 Q-24-28 -20-30 L-20-36 Z" fill="#8B5E3C"/>
-      {/* Tongs */}
-      <line x1="-24" y1="-32" x2="-27" y2="-18" stroke="#6A6860" strokeWidth="2.5" strokeLinecap="round"/>
-      <line x1="-22" y1="-32" x2="-24" y2="-18" stroke="#6A6860" strokeWidth="2"   strokeLinecap="round"/>
-      {/* RIGHT ARM + HAMMER (animated) */}
-      <g className={!reducedMotion ? (striking ? "fg-strike" : "fg-arm-idle") : ""} style={{transformOrigin:"14px -62px"}}>
-        <rect x="13" y="-64" width="9" height="28" rx="4" fill="#B87840"/>
-        {/* Right glove */}
-        <path d="M13-38 Q17-36 18-32 Q19-28 15-29 L13-35 Z" fill="#8B5E3C"/>
-        {/* Hammer handle */}
-        <rect x="16" y="-86" width="4.5" height="30" rx="2.25" fill="#5C3E20"/>
-        {/* Hammer head */}
-        <rect x="9"  y="-98" width="20" height="14" rx="3.5" fill="#6A6860"/>
-        {/* Hammer face sheen */}
-        <rect x="9"  y="-98" width="20" height="4"  rx="1.5" fill="#8A8880" opacity=".5"/>
-        {/* Face of hammer */}
-        <rect x="9"  y="-88" width="20" height="4"  rx="1.5" fill="#5A5858" opacity=".4"/>
-      </g>
-      {/* NECK */}
-      <rect x="-7" y="-78" width="14" height="10" rx="5" fill="#B87840"/>
-      {/* HEAD */}
-      <ellipse cx="0" cy="-90" rx="17" ry="19" fill="#C8844A"/>
-      {/* HAIR / BANDANA */}
-      <path d="M-17-97 Q-17-110 0-112 Q17-110 17-97 L13-97 Q13-108 0-110 Q-13-108 -13-97 Z" fill="#1A1412"/>
-      {/* Bandana accent stripe */}
-      <path d="M-17-97 Q-17-106 0-108 Q17-106 17-97" fill="none" stroke="#C04018" strokeWidth="3.5" opacity=".88"/>
-      {/* Bandana knot right side */}
-      <path d="M17-97 Q21-99 19-94 Q17-89 15-91" fill="#C04018" opacity=".7"/>
-      {/* FACE */}
-      {/* Eye sockets (slight shadow) */}
-      <ellipse cx="-5.5" cy="-89" rx="4" ry="3.5" fill="#B07030" opacity=".2"/>
-      <ellipse cx="5.5"  cy="-89" rx="4" ry="3.5" fill="#B07030" opacity=".2"/>
-      {/* Eyes */}
-      <circle cx="-5.5" cy="-89" r="2.8" fill="#1A1412"/>
-      <circle cx="5.5"  cy="-89" r="2.8" fill="#1A1412"/>
-      {/* Eye gleam */}
-      <circle cx="-4.5" cy="-90" r="1.1" fill="#FFF" opacity=".82"/>
-      <circle cx="6.5"  cy="-90" r="1.1" fill="#FFF" opacity=".82"/>
-      {/* Brow suggestion */}
-      <path d="M-9-93 Q-5.5-95 -2-93" fill="none" stroke="#8B4820" strokeWidth="1.5" opacity=".4"/>
-      <path d="M2-93 Q5.5-95 9-93"    fill="none" stroke="#8B4820" strokeWidth="1.5" opacity=".4"/>
-      {/* Nose */}
-      <path d="M-3-84 Q0-82 3-84" fill="none" stroke="#A06830" strokeWidth="1.5" opacity=".5"/>
-      {/* Mouth — slight focused line */}
-      <path d="M-5-78 Q0-76 5-78" fill="none" stroke="#8B4820" strokeWidth="1.6" strokeLinecap="round"/>
-      {/* Jaw shadow */}
-      <path d="M-16-96 Q-17-82 -13-76" stroke="#A06030" strokeWidth="1.5" fill="none" opacity=".25"/>
-      <path d="M16-96 Q17-82 13-76"    stroke="#A06030" strokeWidth="1.5" fill="none" opacity=".25"/>
-      {/* Cheek warm highlight */}
-      <ellipse cx="-10" cy="-83" rx="5" ry="3" fill="#E07040" opacity=".12"/>
-      <ellipse cx="10"  cy="-83" rx="5" ry="3" fill="#E07040" opacity=".12"/>
-    </g>{/* /fg-breathe */}
+      {/* Lateral body sway — slow, pivots from feet */}
+      <g className={reducedMotion ? "" : "fg-sway"}>
+        {/* Vertical breathing — asymmetric inhale/exhale */}
+        <g className={reducedMotion ? "" : "fg-breathe"}>
+          {/* LEGS */}
+          <rect x="-13" y="-28" width="11" height="29" rx="4" fill="#2A3040"/>
+          <rect x="2"   y="-26" width="11" height="27" rx="4" fill="#2A3040"/>
+          {/* Boots */}
+          <path d="M-16-2 Q-15 2 -6 2 L-6-1 L-14-2 Z" fill="#3A2A18"/>
+          <path d="M1-1 Q1 3 10 3 L11-1 L2-2 Z" fill="#3A2A18"/>
+          {/* TORSO */}
+          <rect x="-16" y="-66" width="32" height="40" rx="7" fill="#2E3848"/>
+          {/* APRON */}
+          <path d="M-12-60 L12-60 L14-28 L-14-28 Z" fill="#5C3A1C"/>
+          <line x1="0" y1="-60" x2="0" y2="-28" stroke="#4A2E14" strokeWidth="1.5" opacity=".5"/>
+          <rect x="-5" y="-44" width="10" height="8" rx="2" fill="#4A2E14" opacity=".8"/>
+          {/* Apron strings */}
+          <line x1="-12" y1="-60" x2="-8" y2="-70" stroke="#5C3A1C" strokeWidth="2.5"/>
+          <line x1="12"  y1="-60" x2="8"  y2="-70" stroke="#5C3A1C" strokeWidth="2.5"/>
+          {/* LEFT ARM + TONGS */}
+          <rect x="-24" y="-64" width="9" height="28" rx="4" fill="#B87840"/>
+          <path d="M-24-38 Q-28-36 -26-32 Q-24-28 -20-30 L-20-36 Z" fill="#8B5E3C"/>
+          <line x1="-24" y1="-32" x2="-27" y2="-18" stroke="#6A6860" strokeWidth="2.5" strokeLinecap="round"/>
+          <line x1="-22" y1="-32" x2="-24" y2="-18" stroke="#6A6860" strokeWidth="2"   strokeLinecap="round"/>
+          {/* RIGHT ARM + HAMMER — independent rotation animation */}
+          <g className={!reducedMotion ? (striking ? "fg-strike" : "fg-arm-idle") : ""} style={{transformOrigin:"14px -62px"}}>
+            <rect x="13" y="-64" width="9" height="28" rx="4" fill="#B87840"/>
+            <path d="M13-38 Q17-36 18-32 Q19-28 15-29 L13-35 Z" fill="#8B5E3C"/>
+            <rect x="16" y="-86" width="4.5" height="30" rx="2.25" fill="#5C3E20"/>
+            <rect x="9"  y="-98" width="20" height="14" rx="3.5" fill="#6A6860"/>
+            <rect x="9"  y="-98" width="20" height="4"  rx="1.5" fill="#8A8880" opacity=".5"/>
+            <rect x="9"  y="-88" width="20" height="4"  rx="1.5" fill="#5A5858" opacity=".4"/>
+          </g>
+          {/* HEAD GROUP — independent subtle tilt, pivoting at neck base */}
+          <g className={reducedMotion ? "" : "fg-head-tilt"} style={{transformOrigin:"0px -78px"}}>
+            {/* Neck */}
+            <rect x="-7" y="-78" width="14" height="10" rx="5" fill="#B87840"/>
+            {/* Head */}
+            <ellipse cx="0" cy="-90" rx="17" ry="19" fill="#C8844A"/>
+            {/* Hair */}
+            <path d="M-17-97 Q-17-110 0-112 Q17-110 17-97 L13-97 Q13-108 0-110 Q-13-108 -13-97 Z" fill="#1A1412"/>
+            {/* Bandana accent — color driven by coach identity */}
+            <path d="M-17-97 Q-17-106 0-108 Q17-106 17-97" fill="none" stroke={bandanaColor} strokeWidth="3.5" opacity=".88"/>
+            <path d="M17-97 Q21-99 19-94 Q17-89 15-91" fill={bandanaColor} opacity=".7"/>
+            {/* Eye sockets */}
+            <ellipse cx="-5.5" cy="-89" rx="4" ry="3.5" fill="#B07030" opacity=".2"/>
+            <ellipse cx="5.5"  cy="-89" rx="4" ry="3.5" fill="#B07030" opacity=".2"/>
+            {/* Eyes */}
+            <circle cx="-5.5" cy="-89" r="2.8" fill="#1A1412"/>
+            <circle cx="5.5"  cy="-89" r="2.8" fill="#1A1412"/>
+            {/* Gleams */}
+            <circle cx="-4.5" cy="-90" r="1.1" fill="#FFF" opacity=".82"/>
+            <circle cx="6.5"  cy="-90" r="1.1" fill="#FFF" opacity=".82"/>
+            {/* Brows */}
+            <path d="M-9-93 Q-5.5-95 -2-93" fill="none" stroke="#8B4820" strokeWidth="1.5" opacity=".4"/>
+            <path d="M2-93 Q5.5-95 9-93"    fill="none" stroke="#8B4820" strokeWidth="1.5" opacity=".4"/>
+            {/* Nose */}
+            <path d="M-3-84 Q0-82 3-84" fill="none" stroke="#A06830" strokeWidth="1.5" opacity=".5"/>
+            {/* Mouth */}
+            <path d="M-5-78 Q0-76 5-78" fill="none" stroke="#8B4820" strokeWidth="1.6" strokeLinecap="round"/>
+            {/* Jaw shadow */}
+            <path d="M-16-96 Q-17-82 -13-76" stroke="#A06030" strokeWidth="1.5" fill="none" opacity=".25"/>
+            <path d="M16-96 Q17-82 13-76"    stroke="#A06030" strokeWidth="1.5" fill="none" opacity=".25"/>
+            {/* Cheek highlight */}
+            <ellipse cx="-10" cy="-83" rx="5" ry="3" fill="#E07040" opacity=".12"/>
+            <ellipse cx="10"  cy="-83" rx="5" ry="3" fill="#E07040" opacity=".12"/>
+          </g>{/* /fg-head-tilt */}
+        </g>{/* /fg-breathe */}
+      </g>{/* /fg-sway */}
     </g>
   );
 }
@@ -495,7 +503,7 @@ const SPARK_OFFSETS = [
   {sx:"-12px",sy:"-50px",del:".28s"},{sx:"10px", sy:"-48px",del:".38s"},
 ];
 
-function WorkshopScene({ item, progress, striking, reducedMotion }) {
+function WorkshopScene({ item, progress, striking, reducedMotion, bandanaColor }) {
   const { stage } = progress;
   const s = SC[Math.min(stage,4)];
 
@@ -629,7 +637,7 @@ function WorkshopScene({ item, progress, striking, reducedMotion }) {
         {/* ── SMITH CHARACTER ── */}
         {/* Positioned: feet at (268,170) */}
         <g transform="translate(268,170)">
-          <SmithCharacter striking={striking} reducedMotion={reducedMotion}/>
+          <SmithCharacter striking={striking} reducedMotion={reducedMotion} bandanaColor={bandanaColor}/>
         </g>
 
         {/* ── TOOL RACK (right) ── */}
@@ -872,7 +880,7 @@ function ForgeWall({ userId }) {
 
 // ─── WORKSHOP SHEET ───────────────────────────────────────────────────────────────
 
-function WorkshopSheet({ arc, item, progress, userId, onClose, onSelectItem, onResetItem, isLocked, reducedMotion }) {
+function WorkshopSheet({ arc, item, progress, userId, onClose, onSelectItem, onResetItem, isLocked, reducedMotion, coachName, coachIcon, bandanaColor }) {
   const [striking, setStriking] = useState(false);
   const s = SC[Math.min(progress.stage,4)];
   const { daysForged, elapsedDays, consistency, pct, totalDays, stage, nextStage, daysToNext } = progress;
@@ -926,7 +934,13 @@ function WorkshopSheet({ arc, item, progress, userId, onClose, onSelectItem, onR
           <div>
             <div style={{fontSize:9,fontWeight:700,color:s.edge,letterSpacing:".17em",
               textTransform:"uppercase",marginBottom:4}}>
-              The Forge · {arc?.title?arc.title.slice(0,38)+(arc.title.length>38?"…":""):"Your Arc"}
+              The Forge
+              {coachName && coachName !== "Coach" && (
+                <span style={{textTransform:"none",letterSpacing:0,fontWeight:500,
+                  color:s.edge+"AA",marginLeft:6}}>
+                  · {coachIcon ? `${coachIcon} ` : ""}{coachName}
+                </span>
+              )}
             </div>
             <h2 style={{fontFamily:T.serif,fontSize:26,color:T.text,margin:0,lineHeight:1.1}}>
               {item.name}
@@ -945,7 +959,7 @@ function WorkshopSheet({ arc, item, progress, userId, onClose, onSelectItem, onR
 
         {/* Workshop scene */}
         <div style={{margin:"12px 0 0",borderTop:`0.5px solid ${T.border}`,borderBottom:`0.5px solid ${T.border}`}}>
-          <WorkshopScene item={item} progress={progress} striking={striking} reducedMotion={reducedMotion}/>
+          <WorkshopScene item={item} progress={progress} striking={striking} reducedMotion={reducedMotion} bandanaColor={bandanaColor}/>
         </div>
 
         <div style={{padding:"0 20px"}}>
@@ -1074,11 +1088,10 @@ function WorkshopSheet({ arc, item, progress, userId, onClose, onSelectItem, onR
 
 // ─── COMPACT CARD ─────────────────────────────────────────────────────────────────
 
-function ForgeCard({ item, progress, onOpen, reducedMotion }) {
+function ForgeCard({ item, progress, onOpen, reducedMotion, coachIcon, weekHeat }) {
   const s = SC[Math.min(progress.stage,4)];
   const { daysForged, elapsedDays, consistency, stage } = progress;
 
-  // Status line: tell the story in one line
   const statusLine = elapsedDays > 0
     ? `${daysForged} forge day${daysForged !== 1 ? "s" : ""} · ${consistency}% consistent`
     : `${daysForged} forge day${daysForged !== 1 ? "s" : ""}`;
@@ -1096,12 +1109,21 @@ function ForgeCard({ item, progress, onOpen, reducedMotion }) {
         borderRadius:"16px 0 0 16px"}}
         className={!reducedMotion&&s.hot?"fg-card-glow":""}/>
 
-      {/* Smith portrait */}
+      {/* Smith portrait — coach icon badge overlaid */}
       <div style={{width:56,minWidth:56,height:72,display:"flex",alignItems:"center",
         justifyContent:"center",background:`radial-gradient(ellipse at center,${s.edge}12 0%,transparent 65%)`}}>
-        <div style={{width:42,height:42,borderRadius:"50%",overflow:"hidden",
-          border:`1.5px solid ${s.edge}38`,flexShrink:0}}>
-          <SmithPortrait size={42}/>
+        <div style={{position:"relative"}}>
+          <div style={{width:42,height:42,borderRadius:"50%",overflow:"hidden",
+            border:`1.5px solid ${s.edge}38`,flexShrink:0}}>
+            <SmithPortrait size={42}/>
+          </div>
+          {coachIcon && (
+            <div style={{position:"absolute",bottom:-3,right:-3,
+              fontSize:12,lineHeight:1,background:T.surface,borderRadius:"50%",
+              padding:"2px",border:`1px solid ${T.border}`,userSelect:"none"}}>
+              {coachIcon}
+            </div>
+          )}
         </div>
       </div>
 
@@ -1113,7 +1135,7 @@ function ForgeCard({ item, progress, onOpen, reducedMotion }) {
 
       {/* Info */}
       <div style={{flex:1,padding:"10px 6px 10px 6px",minWidth:0}}>
-        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
           <span style={{fontFamily:T.serif,fontSize:14,color:T.text,lineHeight:1.2,letterSpacing:".01em"}}>
             {item.name}
           </span>
@@ -1123,15 +1145,30 @@ function ForgeCard({ item, progress, onOpen, reducedMotion }) {
           </span>
         </div>
         {/* Stage pips */}
-        <div style={{display:"flex",gap:3,alignItems:"center",marginBottom:5}}>
+        <div style={{display:"flex",gap:3,alignItems:"center",marginBottom:4}}>
           {FORGE_STAGES.map((_,i)=>{
             const done=i<stage,active=i===stage;
-            return <div key={i} style={{height:5,width:active?16:6,borderRadius:3,
+            return <div key={i} style={{height:4,width:active?14:5,borderRadius:3,
               background:active?s.edge:done?s.edge+"55":T.hint+"30",
               transition:"width .45s ease,background .45s ease"}}/>;
           })}
         </div>
-        <div style={{fontSize:11,color:T.muted,lineHeight:1}}>
+        {/* 7-day forge heat strip */}
+        {weekHeat && (
+          <div style={{display:"flex",gap:4,alignItems:"flex-end",marginBottom:4}}>
+            {weekHeat.map(day=>(
+              <div key={day.date} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                <div style={{width:7,height:7,borderRadius:"50%",
+                  background:day.isForge ? s.edge : T.hint+"28",
+                  boxShadow:day.isForge ? `0 0 4px ${s.edge}60` : "none"}}/>
+                <div style={{fontSize:6,color:day.isForge ? s.edge+"CC" : T.hint+"40",fontWeight:600,lineHeight:1}}>
+                  {day.dayLetter}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{fontSize:10,color:T.muted,lineHeight:1}}>
           {statusLine}
         </div>
       </div>
@@ -1143,7 +1180,7 @@ function ForgeCard({ item, progress, onOpen, reducedMotion }) {
 
 // ─── ROOT EXPORT ──────────────────────────────────────────────────────────────────
 
-export function ForgeCompanion({ arc, arcLedgerRows, userId, style }) {
+export function ForgeCompanion({ arc, arcLedgerRows, userId, style, coachName = "Coach", coachIcon = "" }) {
   const [expanded, setExpanded] = useState(false);
   const reducedMotion = useReducedMotion();
 
@@ -1189,6 +1226,35 @@ export function ForgeCompanion({ arc, arcLedgerRows, userId, style }) {
     [arcLedgerRows, arc?.id]
   );
 
+  // Last 7 calendar days with forge day status for the heat strip
+  const weekHeat = useMemo(() => {
+    const today = new Date();
+    const forgeSet = new Set(
+      arcLedgerRows.filter(r => {
+        const total = r.proofTotal ?? r.proof_total ?? 0;
+        const done  = r.proofDone  ?? r.proof_done  ?? 0;
+        return total > 0 && done / total >= 0.5;
+      }).map(r => r.date)
+    );
+    return Array.from({length:7}, (_,i) => {
+      const d = new Date(today);
+      d.setDate(d.getDate() - (6 - i));
+      const date = d.toISOString().slice(0,10);
+      return { date, dayLetter:"SMTWTFS"[d.getDay()], isForge: forgeSet.has(date) };
+    });
+  }, [arcLedgerRows, arc?.id]);
+
+  // Derive bandana color from coach icon or fall back to accent red
+  // Maps common "warm" icons to gold, "cool" to accent, otherwise accent default
+  const bandanaColor = useMemo(() => {
+    if (!coachIcon) return "#C04018";
+    const goldIcons = ["🔥","⚡","🌟","✨","💎","🎯","☀️","⭐","💫","☄️","🎵","🎸","🏹","🥊","🦾"];
+    const blueIcons = ["🌊","🧘","🌿","🔮","🏔️","⛰️","🕊️","⚓"];
+    if (goldIcons.includes(coachIcon)) return "#C8902A";
+    if (blueIcons.includes(coachIcon)) return "#2980B9";
+    return "#C04018";
+  }, [coachIcon]);
+
   function handleSelectItem(item) {
     if (isLocked) return;
     setSelectedItem(item);
@@ -1216,6 +1282,8 @@ export function ForgeCompanion({ arc, arcLedgerRows, userId, style }) {
           progress={progress}
           onOpen={()=>setExpanded(true)}
           reducedMotion={reducedMotion}
+          coachIcon={coachIcon}
+          weekHeat={weekHeat}
         />
       </div>
       {expanded && (
@@ -1229,6 +1297,9 @@ export function ForgeCompanion({ arc, arcLedgerRows, userId, style }) {
           onResetItem={handleResetItem}
           isLocked={isLocked}
           reducedMotion={reducedMotion}
+          coachName={coachName}
+          coachIcon={coachIcon}
+          bandanaColor={bandanaColor}
         />
       )}
     </>

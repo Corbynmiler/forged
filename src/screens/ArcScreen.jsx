@@ -82,6 +82,7 @@ export function ArcScreen({
   activeBlock, habits, goals, journalEntries, arcLedgerRows = [],
   isPro, onUpgrade, userId, userName,
   onStartArc, onEditArc, onRunItBack, onEvolve,
+  coachName = "Coach", coachIcon = "",
 }) {
   const [initialWeek, setInitialWeek] = useState(null);
   const [openChronology, setOpenChronology] = useState(false);
@@ -146,6 +147,8 @@ export function ArcScreen({
             arc={activeBlock}
             arcLedgerRows={arcLedgerRows}
             userId={userId}
+            coachName={coachName}
+            coachIcon={coachIcon}
             style={{ marginTop: 8, marginBottom: 8 }}
           />
         }

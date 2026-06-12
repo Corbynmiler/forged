@@ -4105,7 +4105,7 @@ export default function App() {
           activeBlock={activeBlock} habits={habits} goals={goals} journalEntries={journalEntries}
           arcLedgerRows={arcLedgerRows}
           isPro={isPro} onUpgrade={() => setShowUpgrade(true)}
-          userId={sessionUserId} userName={user.name || ""} coachName={coachName}
+          userId={sessionUserId} userName={user.name || ""} coachName={coachName} coachIcon={coachIcon}
           onStartArc={openArcCoachCreate} onEditArc={openArcCoachEdit}
           onRunItBack={handleArcContinue} onEvolve={handleArcEvolve}
           onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry}
