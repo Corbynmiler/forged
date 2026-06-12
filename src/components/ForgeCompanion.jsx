@@ -3,7 +3,7 @@
 // the Arc week rail, day spine, or timeline logic. No schema migrations.
 // Placed between ArcJourneyHero and the week rail via ArcTimeline's forgeSlot prop.
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, Suspense } from "react";
 import { T } from "../theme.js";
 import { supabase, rowToForgeBlock } from "../supabase.js";
 import {
@@ -11,6 +11,12 @@ import {
   getRecentForgeHistory, FORGE_STAGES, ALL_ITEMS,
 } from "../lib/forgeItemLogic.js";
 import { useReducedMotion } from "../hooks/useReducedMotion.js";
+import { Canvas } from "@react-three/fiber";
+import { useGLTF, useAnimations } from "@react-three/drei";
+import * as THREE from "three";
+
+// Preload GLB so it's warm when the sheet opens
+useGLTF.preload("/forge-companion.glb");
 
 // ─── STAGE COLOURS ────────────────────────────────────────────────────────────────
 const SC = [
@@ -508,6 +514,44 @@ function SmithPortrait({ size = 44 }) {
   );
 }
 
+// ─── 3D BLACKSMITH ────────────────────────────────────────────────────────────────
+
+function BlacksmithModel({ striking, reducedMotion }) {
+  const groupRef = useRef();
+  const { scene, animations } = useGLTF("/forge-companion.glb");
+  const { actions, mixer } = useAnimations(animations, groupRef);
+
+  // Start idle loop on mount
+  useEffect(() => {
+    actions["Idle"]?.reset().play();
+  }, [actions]);
+
+  // Trigger chop on strike, return to idle when done
+  useEffect(() => {
+    if (reducedMotion || !striking) return;
+    const idle = actions["Idle"];
+    const chop = actions["2H_Melee_Attack_Chop"];
+    if (!chop || !mixer) return;
+
+    chop.reset().setLoop(THREE.LoopOnce, 1);
+    chop.clampWhenFinished = false;
+    idle?.fadeOut(0.08);
+    chop.fadeIn(0.08).play();
+
+    const onDone = (e) => {
+      if (e.action === chop) idle?.reset().fadeIn(0.3).play();
+    };
+    mixer.addEventListener("finished", onDone);
+    return () => mixer.removeEventListener("finished", onDone);
+  }, [striking]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <group ref={groupRef}>
+      <primitive object={scene} position={[0, -0.9, 0]} rotation={[0, 0.15, 0]} />
+    </group>
+  );
+}
+
 // ─── WORKSHOP SCENE ───────────────────────────────────────────────────────────────
 
 const EMBERS = [
@@ -546,6 +590,7 @@ function WorkshopScene({ item, progress, striking, reducedMotion, bandanaColor }
   const iCfg = itemVbMap[item.type] ?? itemVbMap.sword;
 
   return (
+    <div style={{position:"relative",width:"100%"}}>
     <svg viewBox="0 0 340 222" style={{width:"100%",height:"auto",display:"block"}}>
       <defs>
         <radialGradient id="fg-amb" cx="23%" cy="76%" r="46%">
@@ -657,14 +702,6 @@ function WorkshopScene({ item, progress, striking, reducedMotion, bandanaColor }
             className="fg-spark" style={{"--sx":`${(i-1)*12}px`,"--sy":"-34px","--del":`.28s`}}/>
         ))}
 
-        {/* ── SMITH CHARACTER ── */}
-        {/* Positioned: feet at (248,170), to the right of the anvil.
-            Arm pivot at (262,108). At -140° CCW rotation the hammer face
-            lands at x≈244, y≈122 — the anvil surface right edge. */}
-        <g transform="translate(248,170)">
-          <SmithCharacter striking={striking} reducedMotion={reducedMotion} bandanaColor={bandanaColor}/>
-        </g>
-
         {/* ── TOOL RACK (right) ── */}
         <rect x="307" y="12"  width="4" height="158" rx="2" fill="#1C1A14"/>
         <rect x="304" y="12"  width="10" height="3" rx="1.5" fill="#242220"/>
@@ -693,6 +730,27 @@ function WorkshopScene({ item, progress, striking, reducedMotion, bandanaColor }
         </text>
       </g>
     </svg>
+
+    {/* 3D character — overlaid on the right third of the scene */}
+    <div style={{
+      position:"absolute", right:0, top:0, bottom:0, width:"38%",
+      pointerEvents:"none",
+    }}>
+      <Suspense fallback={null}>
+        <Canvas
+          gl={{ alpha:true, antialias:false }}
+          dpr={[1, 1.5]}
+          camera={{ position:[0, 0.3, 3.8], fov:50 }}
+          style={{ width:"100%", height:"100%", background:"transparent" }}
+        >
+          <ambientLight intensity={0.5} color="#E67E22" />
+          <pointLight position={[-3, 1.5, 3]} intensity={1.5} color="#E86820" />
+          <pointLight position={[1, 2, 2]}   intensity={0.4} color="#F5C842" />
+          <BlacksmithModel striking={striking} reducedMotion={reducedMotion} />
+        </Canvas>
+      </Suspense>
+    </div>
+    </div>
   );
 }
 
