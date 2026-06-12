@@ -39,8 +39,16 @@ const CSS = `
   @keyframes fg-ig{0%,100%{opacity:.35}50%{opacity:.72}}
   .fg-idle{animation:fg-idle 3.4s ease-in-out infinite}
   @keyframes fg-idle{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}
-  .fg-strike{animation:fg-stk .7s cubic-bezier(.4,0,.6,1) 1;transform-origin:14px -6px}
+  .fg-strike{animation:fg-stk .7s cubic-bezier(.4,0,.6,1) 1;transform-origin:14px -62px}
   @keyframes fg-stk{0%{transform:rotate(0)}20%{transform:rotate(-35deg)}55%{transform:rotate(22deg)}75%{transform:rotate(22deg)}100%{transform:rotate(0)}}
+  .fg-arm-idle{animation:fg-arm-auto 26s ease-in-out infinite;transform-origin:14px -62px}
+  @keyframes fg-arm-auto{
+    0%,68%{transform:rotate(0deg)}
+    72%{transform:rotate(-40deg)}
+    77%{transform:rotate(26deg)}
+    82%{transform:rotate(0deg)}
+    100%{transform:rotate(0deg)}
+  }
   .fg-spark{animation:fg-sp .55s ease-out var(--del,0s) 1 forwards;opacity:0}
   @keyframes fg-sp{0%{opacity:1;transform:translate(0,0) scale(1)}100%{opacity:0;transform:translate(var(--sx,0px),var(--sy,-20px)) scale(.3)}}
   .fg-card-glow{animation:fg-cg 3s ease-in-out infinite}
@@ -310,7 +318,7 @@ function SmithCharacter({ striking = false, reducedMotion = false }) {
       <line x1="-24" y1="-32" x2="-27" y2="-18" stroke="#6A6860" strokeWidth="2.5" strokeLinecap="round"/>
       <line x1="-22" y1="-32" x2="-24" y2="-18" stroke="#6A6860" strokeWidth="2"   strokeLinecap="round"/>
       {/* RIGHT ARM + HAMMER (animated) */}
-      <g className={striking && !reducedMotion ? "fg-strike" : ""} style={{transformOrigin:"14px -62px"}}>
+      <g className={!reducedMotion ? (striking ? "fg-strike" : "fg-arm-idle") : ""} style={{transformOrigin:"14px -62px"}}>
         <rect x="13" y="-64" width="9" height="28" rx="4" fill="#B87840"/>
         {/* Right glove */}
         <path d="M13-38 Q17-36 18-32 Q19-28 15-29 L13-35 Z" fill="#8B5E3C"/>
@@ -601,32 +609,33 @@ function StageTracker({ stage }) {
 // ─── ITEM SELECTOR ────────────────────────────────────────────────────────────────
 
 function ItemSelector({ arc, currentItem, onSelect }) {
-  const pool = useMemo(()=>getItemPool(arc),[arc?.id,arc?.duration_days,arc?.durationDays]);
+  const arcPool = useMemo(()=>getItemPool(arc),[arc?.id,arc?.duration_days,arc?.durationDays]);
   return (
-    <div style={{marginBottom:16}}>
-      <div style={{fontSize:10,fontWeight:700,color:T.hint,letterSpacing:".12em",
-        textTransform:"uppercase",marginBottom:8}}>
-        Choose your forged item
-      </div>
-      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-        {pool.map(item=>{
+    <div style={{marginBottom:4}}>
+      <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+        {ALL_ITEMS.map(item=>{
           const active=item.id===currentItem.id;
+          const inPool=arcPool.some(p=>p.id===item.id);
           return (
             <button key={item.id} type="button" onClick={()=>onSelect(item)}
-              style={{display:"flex",alignItems:"center",gap:6,padding:"7px 12px",
-                borderRadius:T.rsm,border:`1px solid ${active?T.gold+"80":T.border}`,
-                background:active?T.gold+"12":T.surface,cursor:"pointer",
-                fontFamily:T.font,fontSize:12,color:active?T.text:T.sub,fontWeight:active?600:400,
+              style={{display:"flex",alignItems:"center",gap:7,padding:"8px 13px",
+                borderRadius:T.rsm,
+                border:`1px solid ${active?T.gold+"80":inPool?T.borderMid:T.border}`,
+                background:active?T.gold+"14":inPool?T.raised:T.surface,
+                cursor:"pointer",fontFamily:T.font,fontSize:12,
+                color:active?T.text:inPool?T.sub:T.muted,
+                fontWeight:active?600:inPool?400:400,
                 boxShadow:active?`0 0 10px ${T.gold}20`:"none",
                 transition:"all .2s ease"}}>
-              <ItemPreview type={item.type} stage={4} height={22}/>
-              {item.name}
+              <ItemPreview type={item.type} stage={4} height={20}/>
+              <span>{item.name}</span>
+              {inPool&&!active&&<span style={{fontSize:9,color:T.gold+"90",fontWeight:600,marginLeft:1}}>✦</span>}
             </button>
           );
         })}
       </div>
-      <div style={{fontSize:11,color:T.hint,marginTop:6}}>
-        Preview only — saved locally, not to your account.
+      <div style={{fontSize:10,color:T.hint,marginTop:8,lineHeight:1.5}}>
+        ✦ Suggested for this Arc length. All items available in preview.
       </div>
     </div>
   );
@@ -747,24 +756,33 @@ function ForgeWall({ userId }) {
 
 function WorkshopSheet({ arc, item, progress, userId, onClose, onSelectItem, reducedMotion }) {
   const [striking, setStriking] = useState(false);
-  const [showSelector, setShowSelector] = useState(false);
   const s = SC[Math.min(progress.stage,4)];
+  const { daysForged, elapsedDays, consistency, pct, totalDays, stage, nextStage, daysToNext } = progress;
 
   // Trigger hammer strike on open
   useEffect(()=>{
     if(reducedMotion)return;
-    const t=setTimeout(()=>{setStriking(true);},500);
-    const t2=setTimeout(()=>{setStriking(false);},1800);
+    const t=setTimeout(()=>{setStriking(true);},400);
+    const t2=setTimeout(()=>{setStriking(false);},1600);
     return()=>{clearTimeout(t);clearTimeout(t2);};
   },[]);
 
   const stageNarrative=[
-    `Raw materials are assembled. The forge is lit. ${item.name} exists only as potential — the first strike hasn't landed yet.`,
-    `The metal is heating. A rough shape is beginning to emerge from the ore. The outline of ${item.name} is visible in the glow.`,
-    `The hammer has found its rhythm. Structure is set. ${item.name} is recognisably itself, waiting for refinement.`,
-    `Heat and patience are doing their work. Details are being carved in. ${item.name} is nearly complete.`,
-    `The forge work is done. ${item.name} has been quenched, tempered, and polished. This is what sustained effort looks like.`,
-  ][progress.stage]??"";
+    `The forge is lit and the ore is ready. ${item.name} exists only as raw potential — the first real proof day lands the first strike.`,
+    `The metal is hot and a rough shape has emerged from the ore. The outline of ${item.name} is taking form.`,
+    `The hammer has found its rhythm. Structure is set — ${item.name} is recognisably itself now, waiting for refinement.`,
+    `Heat and patience are doing their work. The details are being carved in. ${item.name} is close.`,
+    `The forge work is done. ${item.name} has been quenched, tempered, and polished. Sustained effort made solid.`,
+  ][stage]??"";
+
+  // Consistency label
+  const consistencyLabel = consistency >= 80 ? "Strong pace"
+    : consistency >= 55 ? "Good pace"
+    : consistency >= 35 ? "Building"
+    : consistency > 0   ? "Slow start"
+    : "";
+
+  const hasContext = elapsedDays > 0;
 
   return (
     <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(5,5,4,.88)",
@@ -784,64 +802,127 @@ function WorkshopSheet({ arc, item, progress, userId, onClose, onSelectItem, red
           <div>
             <div style={{fontSize:9,fontWeight:700,color:s.edge,letterSpacing:".17em",
               textTransform:"uppercase",marginBottom:4}}>
-              The Forge · {arc?.title?arc.title.slice(0,40)+(arc.title.length>40?"…":""):"Your Arc"}
+              The Forge · {arc?.title?arc.title.slice(0,38)+(arc.title.length>38?"…":""):"Your Arc"}
             </div>
-            <h2 style={{fontFamily:T.serif,fontSize:28,color:T.text,margin:0,lineHeight:1.1}}>
+            <h2 style={{fontFamily:T.serif,fontSize:26,color:T.text,margin:0,lineHeight:1.1}}>
               {item.name}
             </h2>
-            <div style={{fontSize:13,color:T.muted,marginTop:3,fontStyle:"italic"}}>
+            <div style={{fontSize:12,color:T.muted,marginTop:3,fontStyle:"italic"}}>
               "{item.desc}"
             </div>
           </div>
           <button type="button" onClick={onClose}
             style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:20,
-              padding:"7px 16px",color:T.sub,fontSize:13,fontFamily:T.font,cursor:"pointer",
+              padding:"7px 14px",color:T.sub,fontSize:13,fontFamily:T.font,cursor:"pointer",
               marginTop:2,flexShrink:0}}>
             Done
           </button>
         </div>
 
         {/* Workshop scene */}
-        <div style={{margin:"14px 0 0",borderTop:`0.5px solid ${T.border}`,borderBottom:`0.5px solid ${T.border}`}}>
+        <div style={{margin:"12px 0 0",borderTop:`0.5px solid ${T.border}`,borderBottom:`0.5px solid ${T.border}`}}>
           <WorkshopScene item={item} progress={progress} striking={striking} reducedMotion={reducedMotion}/>
         </div>
 
         <div style={{padding:"0 20px"}}>
           {/* Stage tracker */}
-          <div style={{padding:"18px 0 6px"}}>
-            <StageTracker stage={progress.stage}/>
+          <div style={{padding:"16px 0 4px"}}>
+            <StageTracker stage={stage}/>
           </div>
 
-          {/* Progress block */}
-          <div style={{margin:"12px 0",padding:"18px",background:T.surface,borderRadius:T.rsm,border:`1px solid ${T.border}`}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:14}}>
-              <div>
-                <div style={{fontSize:10,color:T.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>Days at the forge</div>
-                <div style={{fontFamily:T.serif,fontSize:30,color:T.text,lineHeight:1}}>
-                  {progress.daysForged}
-                  <span style={{fontFamily:T.font,fontSize:14,color:T.hint,marginLeft:5}}>/ {progress.totalDays}</span>
+          {/* Progress block — the key numbers, explained clearly */}
+          <div style={{margin:"10px 0",padding:"16px",background:T.surface,borderRadius:T.rsm,border:`1px solid ${T.border}`}}>
+
+            {/* Two numbers side by side */}
+            <div style={{display:"flex",gap:16,marginBottom:12}}>
+              <div style={{flex:1}}>
+                <div style={{fontSize:9,color:T.hint,marginBottom:3,textTransform:"uppercase",letterSpacing:".08em",fontWeight:700}}>
+                  Forge days
+                </div>
+                <div style={{fontFamily:T.serif,fontSize:28,color:T.text,lineHeight:1}}>
+                  {daysForged}
+                  {hasContext && (
+                    <span style={{fontFamily:T.font,fontSize:13,color:T.hint,marginLeft:4}}>
+                      of {elapsedDays} in Arc
+                    </span>
+                  )}
                 </div>
               </div>
-              <div style={{textAlign:"right"}}>
-                <div style={{fontSize:10,color:T.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>Complete</div>
-                <div style={{fontSize:26,fontWeight:800,color:s.edge,lineHeight:1}}>{progress.pct}%</div>
+              {hasContext && (
+                <div style={{flex:1,textAlign:"right"}}>
+                  <div style={{fontSize:9,color:T.hint,marginBottom:3,textTransform:"uppercase",letterSpacing:".08em",fontWeight:700}}>
+                    Consistency
+                  </div>
+                  <div style={{lineHeight:1}}>
+                    <span style={{fontFamily:T.serif,fontSize:28,color:s.edge}}>{consistency}%</span>
+                    {consistencyLabel && (
+                      <div style={{fontSize:10,color:T.sub,marginTop:3,fontWeight:600}}>{consistencyLabel}</div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Forge progress bar — how complete is the item */}
+            <div style={{marginBottom:10}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                <div style={{fontSize:10,color:T.muted,fontWeight:600}}>Item progress</div>
+                <div style={{fontSize:10,color:s.edge,fontWeight:700}}>{pct}%</div>
+              </div>
+              <div style={{height:6,background:T.raised,borderRadius:4,overflow:"hidden"}}>
+                <div style={{height:"100%",width:`${pct}%`,
+                  background:`linear-gradient(90deg,${s.fill},${s.edge})`,borderRadius:4,
+                  transition:reducedMotion?"none":"width .9s cubic-bezier(.4,0,.2,1)",
+                  minWidth:pct>0?6:0}}/>
               </div>
             </div>
-            <div style={{height:7,background:T.raised,borderRadius:4,overflow:"hidden",marginBottom:14}}>
-              <div style={{height:"100%",width:`${progress.pct}%`,
-                background:`linear-gradient(90deg,${s.fill},${s.edge})`,borderRadius:4,
-                transition:reducedMotion?"none":"width .9s cubic-bezier(.4,0,.2,1)",
-                minWidth:progress.pct>0?8:0}}/>
-            </div>
-            <div style={{fontSize:13,color:T.sub,lineHeight:1.65}}>
-              {stageNarrative}
-            </div>
-            {progress.nextStage&&progress.daysToNext>0&&(
-              <div style={{marginTop:10,fontSize:12,color:T.hint,borderTop:`1px solid ${T.border}`,paddingTop:10}}>
-                Next: <span style={{color:T.sub}}>{progress.nextStage.label}</span>
-                {" · "}unlock in{" "}<span style={{color:T.text,fontWeight:600}}>{progress.daysToNext} more day{progress.daysToNext!==1?"s":""}</span>
+
+            {/* Arc timeline bar (shows where user is in the Arc overall) */}
+            {hasContext && (
+              <div style={{marginBottom:12}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                  <div style={{fontSize:10,color:T.muted,fontWeight:600}}>Arc timeline</div>
+                  <div style={{fontSize:10,color:T.muted}}>
+                    Day {elapsedDays} of {totalDays}
+                  </div>
+                </div>
+                <div style={{height:6,background:T.raised,borderRadius:4,overflow:"hidden",position:"relative"}}>
+                  {/* elapsed */}
+                  <div style={{height:"100%",
+                    width:`${Math.min(100,Math.round(elapsedDays/totalDays*100))}%`,
+                    background:`${T.hint}50`,borderRadius:4}}/>
+                  {/* forge days (overlay) */}
+                  <div style={{position:"absolute",top:0,left:0,height:"100%",
+                    width:`${pct}%`,
+                    background:`linear-gradient(90deg,${s.fill}80,${s.edge}90)`,borderRadius:4,
+                    transition:reducedMotion?"none":"width .9s cubic-bezier(.4,0,.2,1)"}}/>
+                </div>
+                <div style={{fontSize:9,color:T.hint,marginTop:4,lineHeight:1.4}}>
+                  Gold fill = forge days claimed · Grey = days elapsed
+                </div>
               </div>
             )}
+
+            <div style={{fontSize:12,color:T.sub,lineHeight:1.65,borderTop:`1px solid ${T.border}`,paddingTop:12}}>
+              {stageNarrative}
+            </div>
+            {nextStage&&daysToNext>0&&(
+              <div style={{marginTop:10,fontSize:11,color:T.hint,borderTop:`1px solid ${T.border}`,paddingTop:10}}>
+                <span style={{color:T.sub}}>Next stage:</span>{" "}{nextStage.label}
+                {" · "}<span style={{color:T.text,fontWeight:600}}>{daysToNext} more forge day{daysToNext!==1?"s":""}</span> to unlock
+              </div>
+            )}
+          </div>
+
+          {/* Forge days — what counts */}
+          <div style={{margin:"0 0 14px",padding:"12px 14px",background:`${s.edge}09`,
+            borderRadius:T.rsm,borderLeft:`2px solid ${s.edge}50`}}>
+            <div style={{fontSize:10,color:s.edge,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",marginBottom:5}}>
+              What is a forge day?
+            </div>
+            <div style={{fontSize:12,color:T.sub,lineHeight:1.7}}>
+              Any day you hit ≥50% of your proof habits. Missing a day never removes progress — the work done stays in the metal. Hit enough forge days and the item completes.
+            </div>
           </div>
 
           {/* Recent forge days */}
@@ -849,28 +930,14 @@ function WorkshopSheet({ arc, item, progress, userId, onClose, onSelectItem, red
             <RecentHistory rows={progress.history} item={item}/>
           )}
 
-          {/* How it works */}
-          <div style={{margin:"0 0 16px",padding:"14px 16px",background:`${s.edge}09`,
-            borderRadius:T.rsm,borderLeft:`2px solid ${s.edge}50`}}>
-            <div style={{fontSize:10,color:s.edge,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",marginBottom:6}}>
-              How the forge works
+          {/* Item selector — always visible, clearly labelled as preview */}
+          <div style={{marginBottom:16,paddingTop:4,borderTop:`0.5px solid ${T.border}`}}>
+            <div style={{fontSize:9,fontWeight:700,color:T.hint,letterSpacing:".12em",
+              textTransform:"uppercase",margin:"14px 0 10px"}}>
+              Choose forged item <span style={{color:T.hint+"80",fontWeight:500,letterSpacing:"0",textTransform:"none",fontSize:10}}>· preview only, saved locally</span>
             </div>
-            <div style={{fontSize:12,color:T.sub,lineHeight:1.75}}>
-              Every day you hit your proof threshold, the forge advances. Missing a day never removes progress — the work stays. Each completed Arc produces a finished item.
-            </div>
-          </div>
-
-          {/* Item selector */}
-          <button type="button" onClick={()=>setShowSelector(v=>!v)}
-            style={{display:"flex",alignItems:"center",gap:6,background:"none",
-              border:`1px solid ${T.border}`,borderRadius:T.rsm,padding:"9px 14px",
-              color:T.sub,fontSize:12,fontFamily:T.font,cursor:"pointer",
-              marginBottom:16,width:"100%",justifyContent:"center"}}>
-            {showSelector?"▲ Hide item selector":"⚒ Change forged item (preview only)"}
-          </button>
-          {showSelector&&(
             <ItemSelector arc={arc} currentItem={item} onSelect={onSelectItem}/>
-          )}
+          </div>
 
           {/* Forge Wall */}
           <ForgeWall userId={userId}/>
@@ -884,12 +951,19 @@ function WorkshopSheet({ arc, item, progress, userId, onClose, onSelectItem, red
 
 function ForgeCard({ item, progress, onOpen, reducedMotion }) {
   const s = SC[Math.min(progress.stage,4)];
+  const { daysForged, elapsedDays, consistency, stage } = progress;
+
+  // Status line: tell the story in one line
+  const statusLine = elapsedDays > 0
+    ? `${daysForged} forge day${daysForged !== 1 ? "s" : ""} · ${consistency}% consistent`
+    : `${daysForged} forge day${daysForged !== 1 ? "s" : ""}`;
+
   return (
     <button type="button" onClick={onOpen}
       style={{width:"100%",display:"flex",alignItems:"center",gap:0,
         background:T.surface,border:`1px solid ${T.border}`,
         borderRadius:T.r,padding:0,cursor:"pointer",fontFamily:T.font,
-        textAlign:"left",position:"relative",overflow:"hidden",minHeight:76}}>
+        textAlign:"left",position:"relative",overflow:"hidden",minHeight:72}}>
 
       {/* Left ember accent */}
       <div style={{position:"absolute",top:0,left:0,bottom:0,width:3,
@@ -898,44 +972,46 @@ function ForgeCard({ item, progress, onOpen, reducedMotion }) {
         className={!reducedMotion&&s.hot?"fg-card-glow":""}/>
 
       {/* Smith portrait */}
-      <div style={{width:60,minWidth:60,height:76,display:"flex",alignItems:"center",
-        justifyContent:"center",background:`radial-gradient(ellipse at center,${s.edge}14 0%,transparent 68%)`}}>
-        <div style={{width:46,height:46,borderRadius:"50%",overflow:"hidden",
-          border:`1.5px solid ${s.edge}40`,flexShrink:0}}>
-          <SmithPortrait size={46}/>
+      <div style={{width:56,minWidth:56,height:72,display:"flex",alignItems:"center",
+        justifyContent:"center",background:`radial-gradient(ellipse at center,${s.edge}12 0%,transparent 65%)`}}>
+        <div style={{width:42,height:42,borderRadius:"50%",overflow:"hidden",
+          border:`1.5px solid ${s.edge}38`,flexShrink:0}}>
+          <SmithPortrait size={42}/>
         </div>
       </div>
 
       {/* Item preview */}
-      <div style={{width:52,minWidth:52,height:76,display:"flex",alignItems:"center",
+      <div style={{width:46,minWidth:46,height:72,display:"flex",alignItems:"center",
         justifyContent:"center",flexShrink:0}}>
-        <ItemPreview type={item.type} stage={progress.stage} height={52}/>
+        <ItemPreview type={item.type} stage={stage} height={48}/>
       </div>
 
       {/* Info */}
-      <div style={{flex:1,padding:"11px 6px 11px 4px",minWidth:0}}>
-        <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:4}}>
-          <span style={{fontFamily:T.serif,fontSize:15,color:T.text,lineHeight:1.2}}>
+      <div style={{flex:1,padding:"10px 6px 10px 6px",minWidth:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
+          <span style={{fontFamily:T.serif,fontSize:14,color:T.text,lineHeight:1.2,letterSpacing:".01em"}}>
             {item.name}
           </span>
+          <span style={{fontSize:9,fontWeight:700,color:s.edge,letterSpacing:".09em",
+            textTransform:"uppercase",opacity:.85,whiteSpace:"nowrap"}}>
+            {FORGE_STAGES[stage]?.label}
+          </span>
         </div>
-        <div style={{display:"flex",gap:4,marginBottom:5,alignItems:"center"}}>
+        {/* Stage pips */}
+        <div style={{display:"flex",gap:3,alignItems:"center",marginBottom:5}}>
           {FORGE_STAGES.map((_,i)=>{
-            const done=i<progress.stage,active=i===progress.stage;
-            return <div key={i} style={{height:6,width:active?18:7,borderRadius:3,
-              background:active?s.edge:done?s.edge+"55":T.hint+"38",
+            const done=i<stage,active=i===stage;
+            return <div key={i} style={{height:5,width:active?16:6,borderRadius:3,
+              background:active?s.edge:done?s.edge+"55":T.hint+"30",
               transition:"width .45s ease,background .45s ease"}}/>;
           })}
-          <span style={{fontSize:10,color:T.sub,marginLeft:2}}>{FORGE_STAGES[progress.stage]?.label}</span>
         </div>
-        <div style={{fontSize:11,color:T.muted}}>
-          {progress.daysForged} day{progress.daysForged!==1?"s":""} forged
-          <span style={{color:T.hint}}> · </span>
-          <span style={{color:s.edge,fontWeight:600}}>{progress.pct}%</span>
+        <div style={{fontSize:11,color:T.muted,lineHeight:1}}>
+          {statusLine}
         </div>
       </div>
 
-      <div style={{padding:"0 14px 0 4px",fontSize:22,color:T.hint,lineHeight:1,flexShrink:0}}>›</div>
+      <div style={{padding:"0 12px 0 2px",fontSize:20,color:T.hint+"80",lineHeight:1,flexShrink:0}}>›</div>
     </button>
   );
 }

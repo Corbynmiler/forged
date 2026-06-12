@@ -69,6 +69,17 @@ export function getForgeProgress(arc, arcLedgerRows) {
 
   const pct = Math.min(100, Math.round((daysForged / Math.max(1, totalDays)) * 100));
 
+  // Calendar context: how many days since the arc started (capped at totalDays).
+  // arc.startDate comes from rowToForgeBlock (camelCase); arc.start_date is the raw DB field.
+  const startDate = arc?.startDate ?? arc?.start_date ?? null;
+  const today = new Date().toISOString().slice(0, 10);
+  const elapsedDays = startDate
+    ? Math.min(totalDays, Math.max(1, Math.floor((Date.parse(today) - Date.parse(startDate)) / 86400000) + 1))
+    : 0;
+
+  // Consistency: what % of elapsed days had proof. More meaningful for motivation than pct.
+  const consistency = elapsedDays > 0 ? Math.round((daysForged / elapsedDays) * 100) : 0;
+
   let stage = 0;
   for (let i = FORGE_STAGES.length - 1; i >= 0; i--) {
     if (pct >= FORGE_STAGES[i].threshold) { stage = i; break; }
@@ -85,6 +96,8 @@ export function getForgeProgress(arc, arcLedgerRows) {
     stageData: FORGE_STAGES[stage],
     daysForged,
     totalDays,
+    elapsedDays,
+    consistency,
     isComplete: arc?.status === "completed",
     nextStage,
     daysToNext,
