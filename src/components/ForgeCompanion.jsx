@@ -57,31 +57,34 @@ const CSS = `
     35%{transform:rotate(-2deg)}
     65%{transform:rotate(1.5deg)}
   }
-  .fg-strike{animation:fg-stk .72s linear 1 forwards;transform-origin:14px -62px}
+  .fg-strike{animation:fg-stk .9s linear 1 forwards;transform-origin:14px -62px}
   @keyframes fg-stk{
     0%  {transform:rotate(0deg);animation-timing-function:cubic-bezier(.55,0,1,1)}
-    16% {transform:rotate(-46deg);animation-timing-function:cubic-bezier(.5,0,.3,1)}
-    19% {transform:rotate(-46deg);animation-timing-function:cubic-bezier(.88,0,.92,.8)}
-    44% {transform:rotate(28deg);animation-timing-function:cubic-bezier(.1,.88,.3,1)}
-    53% {transform:rotate(28deg);animation-timing-function:cubic-bezier(.5,0,.5,1)}
-    69% {transform:rotate(6deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
-    84% {transform:rotate(-3deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
+    14% {transform:rotate(-50deg);animation-timing-function:cubic-bezier(.5,0,.3,1)}
+    17% {transform:rotate(-50deg);animation-timing-function:cubic-bezier(.92,0,.95,.8)}
+    40% {transform:rotate(105deg);animation-timing-function:cubic-bezier(.1,.85,.3,1)}
+    50% {transform:rotate(105deg);animation-timing-function:cubic-bezier(.6,0,.5,1)}
+    63% {transform:rotate(82deg);animation-timing-function:cubic-bezier(.4,0,.5,1)}
+    76% {transform:rotate(96deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
+    88% {transform:rotate(15deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
     100%{transform:rotate(0deg)}
   }
   .fg-arm-idle{animation:fg-arm-auto 15s linear infinite;animation-delay:8s;transform-origin:14px -62px}
   @keyframes fg-arm-auto{
     0%,84%{transform:rotate(0deg)}
     85.5%{transform:rotate(-22deg);animation-timing-function:cubic-bezier(.7,0,.3,1)}
-    86.8%{transform:rotate(14deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
+    86.8%{transform:rotate(40deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
     87.5%{transform:rotate(0deg)}
     88.5%{transform:rotate(-20deg);animation-timing-function:cubic-bezier(.7,0,.3,1)}
-    89.5%{transform:rotate(14deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
+    89.5%{transform:rotate(40deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
     90%  {transform:rotate(0deg)}
-    91%  {transform:rotate(-46deg);animation-timing-function:cubic-bezier(.5,0,.2,.8)}
-    91.5%{transform:rotate(-46deg);animation-timing-function:cubic-bezier(.88,0,.92,1)}
-    93.8%{transform:rotate(28deg);animation-timing-function:cubic-bezier(.1,.88,.3,1)}
-    94.6%{transform:rotate(28deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
-    96.5%{transform:rotate(-3deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
+    91%  {transform:rotate(-50deg);animation-timing-function:cubic-bezier(.5,0,.2,.8)}
+    91.4%{transform:rotate(-50deg);animation-timing-function:cubic-bezier(.92,0,.95,1)}
+    93.5%{transform:rotate(105deg);animation-timing-function:cubic-bezier(.1,.85,.3,1)}
+    94.3%{transform:rotate(105deg);animation-timing-function:cubic-bezier(.5,0,.5,1)}
+    95.6%{transform:rotate(82deg);animation-timing-function:cubic-bezier(.4,0,.5,1)}
+    96.8%{transform:rotate(96deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
+    98.5%{transform:rotate(15deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
     100% {transform:rotate(0deg)}
   }
   .fg-spark{animation:fg-sp .88s linear var(--del,0s) 1 forwards;opacity:0}
@@ -238,15 +241,23 @@ function HelmetPaths({ stage, s }) {
 }
 
 function AxePaths({ stage, s }) {
-  if (stage === 0) return <ellipse cx="-4" cy="-4" rx="14" ry="18" fill={s.metal} style={{filter:"blur(2px)"}}/>;
+  if (stage === 0) return (
+    <>
+      <ellipse cx="-5" cy="-8" rx="13" ry="15" fill={s.metal} style={{filter:"blur(2px)"}}/>
+      <rect x="-2" y="4" width="5" height="18" rx="2" fill={s.metal} style={{filter:"blur(1px)"}} opacity=".7"/>
+    </>
+  );
   const rough = stage <= 1;
   return (
     <>
       <rect x="-3" y="-4" width="6" height="36" rx="3" fill={stage>=2?"#8B6914":"#5A4010"} opacity=".9"/>
-      <path d="M-3-4 L-18-24 Q-22-30 -12-30 L15-10 Q21-4 14 3 L-3-4 Z"
+      <path d={stage>=2
+        ? "M-3-4 L-20-22 Q-26-30 -14-32 Q-4-28 8-18 Q16-8 12 2 L-3-4 Z"
+        : "M-3-4 L-16-18 Q-20-26 -10-26 L10-12 Q16-4 12 2 L-3-4 Z"}
         fill={s.fill} opacity={rough?.85:1} style={rough?{filter:"blur(1px)"}:{}}/>
-      {stage>=3&&<line x1="-19" y1="-22" x2="13" y2="2" stroke={s.edge} strokeWidth=".6" opacity=".45"/>}
-      {stage>=4&&<text x="-4" y="-12" textAnchor="middle" fontSize="6" fill={s.edge} opacity=".7" fontFamily="serif">⟡</text>}
+      {stage>=2&&<path d="M-3 8 Q0 4 3 8 L3 18 Q0 22 -3 18 Z" fill={s.fill} opacity=".55"/>}
+      {stage>=3&&<line x1="-19" y1="-20" x2="11" y2="2" stroke={s.edge} strokeWidth=".7" opacity=".45"/>}
+      {stage>=4&&<text x="-6" y="-12" textAnchor="middle" fontSize="6" fill={s.edge} opacity=".7" fontFamily="serif">⟡</text>}
     </>
   );
 }
@@ -265,26 +276,38 @@ function PickPaths({ stage, s }) {
 }
 
 function BannerPaths({ stage, s }) {
-  if (stage === 0) return <rect x="-9" y="-16" width="18" height="32" rx="2" fill={s.metal} style={{filter:"blur(2px)"}}/>;
+  if (stage === 0) return (
+    <>
+      <rect x="-2.5" y="-22" width="5" height="44" rx="2.5" fill={s.metal} opacity=".7" style={{filter:"blur(1px)"}}/>
+      <rect x="-1" y="-18" width="22" height="28" rx="2" fill={s.metal} style={{filter:"blur(2px)"}}/>
+    </>
+  );
   return (
     <>
       <rect x="-2.5" y="-30" width="5" height="60" rx="2.5" fill={stage>=2?"#8B6914":"#5A4010"} opacity=".9"/>
-      <path d={stage>=2?"M2.5-26 L16-18 L16 6 L2.5 10 Z":"M2.5-24 L14-16 L14 3 L2.5 7 Z"}
+      <path d={stage>=2
+        ? "M2.5-26 L32-14 L32 8 L2.5 14 Z"
+        : "M2.5-22 L20-13 L20 4 L2.5 9 Z"}
         fill={s.fill} opacity={stage<=1?.85:.92}/>
-      {stage>=3&&<polygon points="0,-30 -3,-22 3,-22" fill={s.fill} opacity=".9"/>}
-      {stage>=4&&<text x="10" y="-4" textAnchor="middle" fontSize="5" fill={s.edge} opacity=".7" fontFamily="serif">⟡</text>}
+      {stage>=3&&<polygon points="0,-30 -4,-21 4,-21" fill={s.fill} opacity=".9"/>}
+      {stage>=4&&<text x="17" y="-3" textAnchor="middle" fontSize="7" fill={s.edge} opacity=".7" fontFamily="serif">⟡</text>}
     </>
   );
 }
 
 function CharmPaths({ stage, s }) {
-  if (stage === 0) return <ellipse cx="0" cy="0" rx="10" ry="10" fill={s.metal} style={{filter:"blur(2px)"}}/>;
+  if (stage === 0) return <ellipse cx="0" cy="0" rx="11" ry="10" fill={s.metal} style={{filter:"blur(2px)"}}/>;
+  if (stage === 1) return (
+    <path d="M0-12 L10-5 L10 5 L0 12 L-10 5 L-10-5 Z"
+      fill={s.fill} opacity=".85" style={{filter:"blur(.8px)"}}/>
+  );
   return (
     <>
-      <path d={`M0-${stage>=2?16:14} L${stage>=2?12:10} ${stage>=2?4:2} L${stage>=2?7:6} ${stage>=2?14:11} L-${stage>=2?7:6} ${stage>=2?14:11} L-${stage>=2?12:10} ${stage>=2?4:2} Z`}
-        fill={s.fill} opacity={stage<=1?.85:1}/>
-      {stage>=3&&<circle cx="0" cy="0" r="4" fill={s.edge} opacity=".25"/>}
-      {stage>=4&&<text x="0" y="4" textAnchor="middle" fontSize="8" fill={s.edge} opacity=".7" fontFamily="serif">✦</text>}
+      <path d="M0-15 L13-7 L13 7 L0 15 L-13 7 L-13-7 Z" fill={s.fill}/>
+      <path d="M0-15 L4-12 L13-7" fill="none" stroke="#FFF" strokeWidth=".7" opacity=".15"/>
+      {stage>=3&&<path d="M0-9 L8-4 L8 4 L0 9 L-8 4 L-8-4 Z" fill={s.edge} opacity=".2"/>}
+      {stage>=3&&<line x1="0" y1="-15" x2="0" y2="15" stroke={s.edge} strokeWidth=".5" opacity=".2"/>}
+      {stage>=4&&<text x="0" y="5" textAnchor="middle" fontSize="10" fill={s.edge} opacity=".75" fontFamily="serif">✦</text>}
     </>
   );
 }
@@ -354,7 +377,7 @@ const VB = {
   helmet: { vb:"-24 -36 48 72",  w:.74 },
   axe:    { vb:"-24 -36 48 68",  w:.72 },
   pick:   { vb:"-20 -30 40 60",  w:.68 },
-  banner: { vb:"-16 -36 32 72",  w:.55 },
+  banner: { vb:"-6 -36 44 76",   w:.65 },
   charm:  { vb:"-16 -20 32 40",  w:.78 },
   armour: { vb:"-24 -34 48 66",  w:.80 },
   aegis:  { vb:"-28 -36 56 80",  w:.80 },
@@ -405,8 +428,8 @@ function SmithCharacter({ striking = false, reducedMotion = false, bandanaColor 
           {/* LEFT ARM + TONGS */}
           <rect x="-24" y="-64" width="9" height="28" rx="4" fill="#B87840"/>
           <path d="M-24-38 Q-28-36 -26-32 Q-24-28 -20-30 L-20-36 Z" fill="#8B5E3C"/>
-          <line x1="-24" y1="-32" x2="-27" y2="-18" stroke="#6A6860" strokeWidth="2.5" strokeLinecap="round"/>
-          <line x1="-22" y1="-32" x2="-24" y2="-18" stroke="#6A6860" strokeWidth="2"   strokeLinecap="round"/>
+          <line x1="-24" y1="-32" x2="-27" y2="-47" stroke="#6A6860" strokeWidth="2.5" strokeLinecap="round"/>
+          <line x1="-22" y1="-32" x2="-24" y2="-47" stroke="#6A6860" strokeWidth="2"   strokeLinecap="round"/>
           {/* RIGHT ARM + HAMMER — independent rotation animation */}
           <g className={!reducedMotion ? (striking ? "fg-strike" : "fg-arm-idle") : ""} style={{transformOrigin:"14px -62px"}}>
             <rect x="13" y="-64" width="9" height="28" rx="4" fill="#B87840"/>
@@ -515,7 +538,7 @@ function WorkshopScene({ item, progress, striking, reducedMotion, bandanaColor }
     helmet: {vb:"-24 -36 48 72", ty:-18},
     axe:    {vb:"-24 -36 48 70", ty:-22},
     pick:   {vb:"-20 -28 40 58", ty:-16},
-    banner: {vb:"-16 -36 32 70", ty:-30},
+    banner: {vb:"-6 -36 44 76", ty:-30},
     charm:  {vb:"-16 -20 32 44", ty:-8},
     armour: {vb:"-24 -34 48 68", ty:-18},
     aegis:  {vb:"-28 -36 56 82", ty:-22},
@@ -605,38 +628,38 @@ function WorkshopScene({ item, progress, striking, reducedMotion, bandanaColor }
         <rect x="128" y="162" width="104" height="16" rx="3" fill="#302E26"/>
         <rect x="128" y="162" width="104" height="3"  rx="1.5" fill="#3A3830" opacity=".55"/>
 
-        {/* Item aura on anvil */}
-        {s.hot && <ellipse cx="192" cy="122" rx="32" ry="13" fill="url(#fg-hot-h)"
-          className={reducedMotion?"":"fg-item-hot"} style={{filter:"blur(4px)"}}/>}
-        {stage===4 && <ellipse cx="192" cy="122" rx="28" ry="11" fill="url(#fg-gold-h)"
-          className={reducedMotion?"":"fg-item-gold"} style={{filter:"blur(3px)"}}/>}
-        {stage>=2&&stage<=3 && <ellipse cx="192" cy="122" rx="24" ry="10" fill="url(#fg-cool-h)"
-          opacity=".5" style={{filter:"blur(3px)"}}/>}
-
-        {/* ── ITEM ON ANVIL ── enlarged for recognizability */}
-        <svg x="138" y="8" viewBox={iCfg.vb} width="100" height="114" preserveAspectRatio="xMidYMax meet">
+        {/* ── ITEM ON ANVIL ── glow tracks item shape via drop-shadow */}
+        <svg x="138" y="8" viewBox={iCfg.vb} width="100" height="114" preserveAspectRatio="xMidYMax meet"
+          style={{overflow:"visible", filter: s.hot
+            ? `drop-shadow(0 0 8px ${s.glow}) drop-shadow(0 0 16px ${s.glow}50)`
+            : stage===4
+              ? `drop-shadow(0 0 6px ${s.glow}90) drop-shadow(0 0 12px ${s.glow}40)`
+              : stage>=2
+                ? `drop-shadow(0 0 4px ${s.glow}60)`
+                : "none"
+          }}>
           <ItemPaths type={item.type} stage={stage}/>
         </svg>
 
-        {/* IMPACT FLASH — brief furnace brightening on hammer strike */}
+        {/* IMPACT FLASH — brief anvil surface glow on hammer strike */}
         {!reducedMotion && striking && (
-          <rect x="8" y="30" width="76" height="140" rx="5"
-            fill="#F5C842" className="fg-impact"/>
+          <ellipse cx="230" cy="122" rx="28" ry="8"
+            fill="#F5C842" className="fg-impact" style={{filter:"blur(3px)"}}/>
         )}
         {/* STRIKE SPARKS — appear at anvil surface on hammer impact */}
         {!reducedMotion && striking && SPARK_OFFSETS.map((sp,i)=>(
-          <circle key={i} cx="192" cy="118" r={i<2?3.5:2} fill={i%2===0?"#F5C842":"#E67E22"}
+          <circle key={i} cx="230" cy="118" r={i<2?3.5:2} fill={i%2===0?"#F5C842":"#E67E22"}
             className="fg-spark" style={{"--sx":sp.sx,"--sy":sp.sy,"--del":sp.del}}/>
         ))}
         {/* Extra sparks on direct impact point */}
         {!reducedMotion && striking && [0,1,2].map(i=>(
-          <circle key={`c${i}`} cx={192+(i-1)*8} cy="112" r="1.8" fill="#FFFBE0"
+          <circle key={`c${i}`} cx={228+(i-1)*8} cy="112" r="1.8" fill="#FFFBE0"
             className="fg-spark" style={{"--sx":`${(i-1)*12}px`,"--sy":"-34px","--del":`.28s`}}/>
         ))}
 
         {/* ── SMITH CHARACTER ── */}
-        {/* Positioned: feet at (268,170) */}
-        <g transform="translate(268,170)">
+        {/* Positioned: feet at (195,170) — hammer reaches anvil at x≈230 */}
+        <g transform="translate(195,170)">
           <SmithCharacter striking={striking} reducedMotion={reducedMotion} bandanaColor={bandanaColor}/>
         </g>
 
@@ -890,11 +913,11 @@ function WorkshopSheet({ arc, item, progress, userId, onClose, onSelectItem, onR
     if(reducedMotion)return;
     const ts=[
       setTimeout(()=>setStriking(true),  350),
-      setTimeout(()=>setStriking(false), 1100),
+      setTimeout(()=>setStriking(false), 1300),
       setTimeout(()=>setStriking(true),  2800),
-      setTimeout(()=>setStriking(false), 3600),
+      setTimeout(()=>setStriking(false), 3750),
       setTimeout(()=>setStriking(true),  5600),
-      setTimeout(()=>setStriking(false), 6400),
+      setTimeout(()=>setStriking(false), 6550),
     ];
     return()=>ts.forEach(clearTimeout);
   },[]);
