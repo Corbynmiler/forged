@@ -8,7 +8,7 @@ import { T } from "../theme.js";
 import { supabase, rowToForgeBlock } from "../supabase.js";
 import {
   getItemPool, getDefaultForgeItem, getForgeProgress,
-  getRecentForgeHistory, FORGE_STAGES,
+  getRecentForgeHistory, FORGE_STAGES, ALL_ITEMS,
 } from "../lib/forgeItemLogic.js";
 import { useReducedMotion } from "../hooks/useReducedMotion.js";
 
@@ -37,24 +37,26 @@ const CSS = `
   @keyframes fg-ih{0%,100%{opacity:.55;transform:scale(1)}50%{opacity:.95;transform:scale(1.12)}}
   .fg-item-gold{animation:fg-ig 3.6s ease-in-out infinite}
   @keyframes fg-ig{0%,100%{opacity:.35}50%{opacity:.72}}
-  .fg-idle{animation:fg-idle 3.4s ease-in-out infinite}
+  .fg-idle{animation:fg-idle 3.2s ease-in-out infinite}
   @keyframes fg-idle{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}
-  .fg-strike{animation:fg-stk .7s cubic-bezier(.4,0,.6,1) 1;transform-origin:14px -62px}
-  @keyframes fg-stk{0%{transform:rotate(0)}20%{transform:rotate(-35deg)}55%{transform:rotate(22deg)}75%{transform:rotate(22deg)}100%{transform:rotate(0)}}
-  .fg-arm-idle{animation:fg-arm-auto 26s ease-in-out infinite;transform-origin:14px -62px}
+  .fg-strike{animation:fg-stk .65s cubic-bezier(.35,0,.55,1.1) 1;transform-origin:14px -62px}
+  @keyframes fg-stk{0%{transform:rotate(0)}18%{transform:rotate(-42deg)}52%{transform:rotate(26deg)}72%{transform:rotate(26deg)}100%{transform:rotate(0)}}
+  .fg-arm-idle{animation:fg-arm-auto 16s ease-in-out infinite;animation-delay:8s;transform-origin:14px -62px}
   @keyframes fg-arm-auto{
-    0%,68%{transform:rotate(0deg)}
-    72%{transform:rotate(-40deg)}
-    77%{transform:rotate(26deg)}
-    82%{transform:rotate(0deg)}
-    100%{transform:rotate(0deg)}
+    0%   {transform:rotate(0deg)}
+    8%   {transform:rotate(-42deg)}
+    14%  {transform:rotate(26deg)}
+    20%  {transform:rotate(0deg)}
+    100% {transform:rotate(0deg)}
   }
-  .fg-spark{animation:fg-sp .55s ease-out var(--del,0s) 1 forwards;opacity:0}
-  @keyframes fg-sp{0%{opacity:1;transform:translate(0,0) scale(1)}100%{opacity:0;transform:translate(var(--sx,0px),var(--sy,-20px)) scale(.3)}}
+  .fg-spark{animation:fg-sp .6s ease-out var(--del,0s) 1 forwards;opacity:0}
+  @keyframes fg-sp{0%{opacity:1;transform:translate(0,0) scale(1)}100%{opacity:0;transform:translate(var(--sx,0px),var(--sy,-24px)) scale(.2)}}
+  .fg-impact{animation:fg-imp .5s ease-out 1 forwards;opacity:0}
+  @keyframes fg-imp{0%{opacity:.28}100%{opacity:0}}
   .fg-card-glow{animation:fg-cg 3s ease-in-out infinite}
   @keyframes fg-cg{0%,100%{opacity:.45}50%{opacity:.82}}
   @media (prefers-reduced-motion:reduce){
-    .fg-fire1,.fg-fire2,.fg-fire3,.fg-ember,.fg-glow,.fg-item-hot,.fg-item-gold,.fg-idle,.fg-strike,.fg-spark,.fg-card-glow{animation:none}
+    .fg-fire1,.fg-fire2,.fg-fire3,.fg-ember,.fg-glow,.fg-item-hot,.fg-item-gold,.fg-idle,.fg-strike,.fg-arm-idle,.fg-spark,.fg-impact,.fg-card-glow{animation:none}
   }
 `;
 
@@ -528,10 +530,20 @@ function WorkshopScene({ item, progress, striking, reducedMotion }) {
           <ItemPaths type={item.type} stage={stage}/>
         </svg>
 
+        {/* IMPACT FLASH — brief furnace brightening on hammer strike */}
+        {!reducedMotion && striking && (
+          <rect x="8" y="30" width="76" height="140" rx="5"
+            fill="#F5C842" className="fg-impact"/>
+        )}
         {/* STRIKE SPARKS — appear at anvil surface on hammer impact */}
         {!reducedMotion && striking && SPARK_OFFSETS.map((sp,i)=>(
-          <circle key={i} cx="192" cy="118" r="2.5" fill={i%2===0?"#F5C842":"#E67E22"}
+          <circle key={i} cx="192" cy="118" r={i<2?3.5:2} fill={i%2===0?"#F5C842":"#E67E22"}
             className="fg-spark" style={{"--sx":sp.sx,"--sy":sp.sy,"--del":sp.del}}/>
+        ))}
+        {/* Extra sparks on direct impact point */}
+        {!reducedMotion && striking && [0,1,2].map(i=>(
+          <circle key={`c${i}`} cx={192+(i-1)*8} cy="112" r="1.8" fill="#FFFBE0"
+            className="fg-spark" style={{"--sx":`${(i-1)*12}px`,"--sy":"-34px","--del":`.28s`}}/>
         ))}
 
         {/* ── SMITH CHARACTER ── */}
@@ -759,12 +771,18 @@ function WorkshopSheet({ arc, item, progress, userId, onClose, onSelectItem, red
   const s = SC[Math.min(progress.stage,4)];
   const { daysForged, elapsedDays, consistency, pct, totalDays, stage, nextStage, daysToNext } = progress;
 
-  // Trigger hammer strike on open
+  // Three opening strikes, then CSS auto-strike takes over (fg-arm-idle with 8s delay)
   useEffect(()=>{
     if(reducedMotion)return;
-    const t=setTimeout(()=>{setStriking(true);},400);
-    const t2=setTimeout(()=>{setStriking(false);},1600);
-    return()=>{clearTimeout(t);clearTimeout(t2);};
+    const ts=[
+      setTimeout(()=>setStriking(true),  350),
+      setTimeout(()=>setStriking(false), 1100),
+      setTimeout(()=>setStriking(true),  2800),
+      setTimeout(()=>setStriking(false), 3600),
+      setTimeout(()=>setStriking(true),  5600),
+      setTimeout(()=>setStriking(false), 6400),
+    ];
+    return()=>ts.forEach(clearTimeout);
   },[]);
 
   const stageNarrative=[
