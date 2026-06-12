@@ -14,11 +14,11 @@ import { useReducedMotion } from "../hooks/useReducedMotion.js";
 
 // ─── STAGE COLOURS ────────────────────────────────────────────────────────────────
 const SC = [
-  { fill:"#9B4A14", edge:"#E67E22", glow:"#E67E22", metal:"#C86820", hot:true  }, // raw ore
-  { fill:"#B03018", edge:"#E74C3C", glow:"#E74C3C", metal:"#C04020", hot:true  }, // rough
-  { fill:"#606870", edge:"#7A8890", glow:"#8096A8", metal:"#606870", hot:false }, // hammered
-  { fill:"#94A8B4", edge:"#BDD0DC", glow:"#BDD0DC", metal:"#94A8B4", hot:false }, // tempered
-  { fill:"#C8902A", edge:"#F5C842", glow:"#F5C842", metal:"#C8902A", hot:false }, // forged
+  { fill:"#5C3A18", edge:"#C07030", glow:"#C07030", metal:"#8A5228", hot:true  }, // raw ore  — earthy brown
+  { fill:"#904020", edge:"#E86820", glow:"#E86820", metal:"#B05828", hot:true  }, // rough     — hot amber-orange
+  { fill:"#606870", edge:"#7A8890", glow:"#8096A8", metal:"#606870", hot:false }, // hammered  — cool steel
+  { fill:"#94A8B4", edge:"#BDD0DC", glow:"#BDD0DC", metal:"#94A8B4", hot:false }, // tempered  — bright steel
+  { fill:"#C8902A", edge:"#F5C842", glow:"#F5C842", metal:"#C8902A", hot:false }, // forged    — gold
 ];
 
 // ─── CSS ──────────────────────────────────────────────────────────────────────────
@@ -60,31 +60,31 @@ const CSS = `
   .fg-strike{animation:fg-stk .9s linear 1 forwards;transform-origin:14px -62px}
   @keyframes fg-stk{
     0%  {transform:rotate(0deg);animation-timing-function:cubic-bezier(.55,0,1,1)}
-    14% {transform:rotate(-50deg);animation-timing-function:cubic-bezier(.5,0,.3,1)}
-    17% {transform:rotate(-50deg);animation-timing-function:cubic-bezier(.92,0,.95,.8)}
-    40% {transform:rotate(105deg);animation-timing-function:cubic-bezier(.1,.85,.3,1)}
-    50% {transform:rotate(105deg);animation-timing-function:cubic-bezier(.6,0,.5,1)}
-    63% {transform:rotate(82deg);animation-timing-function:cubic-bezier(.4,0,.5,1)}
-    76% {transform:rotate(96deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
-    88% {transform:rotate(15deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
+    14% {transform:rotate(45deg);animation-timing-function:cubic-bezier(.5,0,.3,1)}
+    17% {transform:rotate(45deg);animation-timing-function:cubic-bezier(.92,0,.95,.8)}
+    40% {transform:rotate(-140deg);animation-timing-function:cubic-bezier(.1,.85,.3,1)}
+    50% {transform:rotate(-140deg);animation-timing-function:cubic-bezier(.6,0,.5,1)}
+    63% {transform:rotate(-115deg);animation-timing-function:cubic-bezier(.4,0,.5,1)}
+    76% {transform:rotate(-128deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
+    88% {transform:rotate(-20deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
     100%{transform:rotate(0deg)}
   }
   .fg-arm-idle{animation:fg-arm-auto 15s linear infinite;animation-delay:8s;transform-origin:14px -62px}
   @keyframes fg-arm-auto{
     0%,84%{transform:rotate(0deg)}
-    85.5%{transform:rotate(-22deg);animation-timing-function:cubic-bezier(.7,0,.3,1)}
-    86.8%{transform:rotate(40deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
+    85.5%{transform:rotate(22deg);animation-timing-function:cubic-bezier(.7,0,.3,1)}
+    86.8%{transform:rotate(-50deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
     87.5%{transform:rotate(0deg)}
-    88.5%{transform:rotate(-20deg);animation-timing-function:cubic-bezier(.7,0,.3,1)}
-    89.5%{transform:rotate(40deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
+    88.5%{transform:rotate(20deg);animation-timing-function:cubic-bezier(.7,0,.3,1)}
+    89.5%{transform:rotate(-48deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
     90%  {transform:rotate(0deg)}
-    91%  {transform:rotate(-50deg);animation-timing-function:cubic-bezier(.5,0,.2,.8)}
-    91.4%{transform:rotate(-50deg);animation-timing-function:cubic-bezier(.92,0,.95,1)}
-    93.5%{transform:rotate(105deg);animation-timing-function:cubic-bezier(.1,.85,.3,1)}
-    94.3%{transform:rotate(105deg);animation-timing-function:cubic-bezier(.5,0,.5,1)}
-    95.6%{transform:rotate(82deg);animation-timing-function:cubic-bezier(.4,0,.5,1)}
-    96.8%{transform:rotate(96deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
-    98.5%{transform:rotate(15deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
+    91%  {transform:rotate(45deg);animation-timing-function:cubic-bezier(.5,0,.2,.8)}
+    91.4%{transform:rotate(45deg);animation-timing-function:cubic-bezier(.92,0,.95,1)}
+    93.5%{transform:rotate(-140deg);animation-timing-function:cubic-bezier(.1,.85,.3,1)}
+    94.3%{transform:rotate(-140deg);animation-timing-function:cubic-bezier(.5,0,.5,1)}
+    95.6%{transform:rotate(-115deg);animation-timing-function:cubic-bezier(.4,0,.5,1)}
+    96.8%{transform:rotate(-128deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
+    98.5%{transform:rotate(-20deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
     100% {transform:rotate(0deg)}
   }
   .fg-spark{animation:fg-sp .88s linear var(--del,0s) 1 forwards;opacity:0}
@@ -643,23 +643,25 @@ function WorkshopScene({ item, progress, striking, reducedMotion, bandanaColor }
 
         {/* IMPACT FLASH — brief anvil surface glow on hammer strike */}
         {!reducedMotion && striking && (
-          <ellipse cx="230" cy="122" rx="28" ry="8"
+          <ellipse cx="237" cy="122" rx="26" ry="7"
             fill="#F5C842" className="fg-impact" style={{filter:"blur(3px)"}}/>
         )}
         {/* STRIKE SPARKS — appear at anvil surface on hammer impact */}
         {!reducedMotion && striking && SPARK_OFFSETS.map((sp,i)=>(
-          <circle key={i} cx="230" cy="118" r={i<2?3.5:2} fill={i%2===0?"#F5C842":"#E67E22"}
+          <circle key={i} cx="237" cy="118" r={i<2?3.5:2} fill={i%2===0?"#F5C842":"#E67E22"}
             className="fg-spark" style={{"--sx":sp.sx,"--sy":sp.sy,"--del":sp.del}}/>
         ))}
         {/* Extra sparks on direct impact point */}
         {!reducedMotion && striking && [0,1,2].map(i=>(
-          <circle key={`c${i}`} cx={228+(i-1)*8} cy="112" r="1.8" fill="#FFFBE0"
+          <circle key={`c${i}`} cx={235+(i-1)*8} cy="112" r="1.8" fill="#FFFBE0"
             className="fg-spark" style={{"--sx":`${(i-1)*12}px`,"--sy":"-34px","--del":`.28s`}}/>
         ))}
 
         {/* ── SMITH CHARACTER ── */}
-        {/* Positioned: feet at (195,170) — hammer reaches anvil at x≈230 */}
-        <g transform="translate(195,170)">
+        {/* Positioned: feet at (248,170), to the right of the anvil.
+            Arm pivot at (262,108). At -140° CCW rotation the hammer face
+            lands at x≈244, y≈122 — the anvil surface right edge. */}
+        <g transform="translate(248,170)">
           <SmithCharacter striking={striking} reducedMotion={reducedMotion} bandanaColor={bandanaColor}/>
         </g>
 
