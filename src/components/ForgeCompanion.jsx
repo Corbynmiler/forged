@@ -31,32 +31,59 @@ const CSS = `
   @keyframes fg-f3{0%,100%{opacity:.3;transform:scaleY(.94)}50%{opacity:.55;transform:scaleY(1.1) scaleX(.94)}}
   .fg-ember{animation:fg-emb var(--dur,2.2s) ease-out infinite var(--del,0s)}
   @keyframes fg-emb{0%{opacity:.9;transform:translate(0,0) scale(1)}60%{opacity:.6}100%{opacity:0;transform:translate(var(--dx,-10px),-60px) scale(.2)}}
-  .fg-glow{animation:fg-gl 2.8s ease-in-out infinite}
-  @keyframes fg-gl{0%,100%{opacity:.3}50%{opacity:.62}}
+  .fg-glow1{animation:fg-gl1 2.3s ease-in-out infinite}
+  .fg-glow2{animation:fg-gl2 3.7s ease-in-out infinite .9s}
+  @keyframes fg-gl1{0%,100%{opacity:.2}50%{opacity:.55}}
+  @keyframes fg-gl2{0%,100%{opacity:.1}50%{opacity:.32}}
   .fg-item-hot{animation:fg-ih 2s ease-in-out infinite}
   @keyframes fg-ih{0%,100%{opacity:.55;transform:scale(1)}50%{opacity:.95;transform:scale(1.12)}}
   .fg-item-gold{animation:fg-ig 3.6s ease-in-out infinite}
   @keyframes fg-ig{0%,100%{opacity:.35}50%{opacity:.72}}
-  .fg-idle{animation:fg-idle 3.2s ease-in-out infinite}
-  @keyframes fg-idle{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}
-  .fg-strike{animation:fg-stk .65s cubic-bezier(.35,0,.55,1.1) 1;transform-origin:14px -62px}
-  @keyframes fg-stk{0%{transform:rotate(0)}18%{transform:rotate(-42deg)}52%{transform:rotate(26deg)}72%{transform:rotate(26deg)}100%{transform:rotate(0)}}
-  .fg-arm-idle{animation:fg-arm-auto 16s ease-in-out infinite;animation-delay:8s;transform-origin:14px -62px}
+  .fg-breathe{animation:fg-breathe 4.2s ease-in-out infinite}
+  @keyframes fg-breathe{
+    0%,100%{transform:translateY(0)}
+    40%{transform:translateY(-2.5px)}
+  }
+  .fg-strike{animation:fg-stk .72s linear 1 forwards;transform-origin:14px -62px}
+  @keyframes fg-stk{
+    0%  {transform:rotate(0deg);animation-timing-function:cubic-bezier(.55,0,1,1)}
+    16% {transform:rotate(-46deg);animation-timing-function:cubic-bezier(.5,0,.3,1)}
+    19% {transform:rotate(-46deg);animation-timing-function:cubic-bezier(.88,0,.92,.8)}
+    44% {transform:rotate(28deg);animation-timing-function:cubic-bezier(.1,.88,.3,1)}
+    53% {transform:rotate(28deg);animation-timing-function:cubic-bezier(.5,0,.5,1)}
+    69% {transform:rotate(6deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
+    84% {transform:rotate(-3deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
+    100%{transform:rotate(0deg)}
+  }
+  .fg-arm-idle{animation:fg-arm-auto 15s linear infinite;animation-delay:8s;transform-origin:14px -62px}
   @keyframes fg-arm-auto{
-    0%   {transform:rotate(0deg)}
-    8%   {transform:rotate(-42deg)}
-    14%  {transform:rotate(26deg)}
-    20%  {transform:rotate(0deg)}
+    0%,84%{transform:rotate(0deg)}
+    85.5%{transform:rotate(-22deg);animation-timing-function:cubic-bezier(.7,0,.3,1)}
+    86.8%{transform:rotate(14deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
+    87.5%{transform:rotate(0deg)}
+    88.5%{transform:rotate(-20deg);animation-timing-function:cubic-bezier(.7,0,.3,1)}
+    89.5%{transform:rotate(14deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
+    90%  {transform:rotate(0deg)}
+    91%  {transform:rotate(-46deg);animation-timing-function:cubic-bezier(.5,0,.2,.8)}
+    91.5%{transform:rotate(-46deg);animation-timing-function:cubic-bezier(.88,0,.92,1)}
+    93.8%{transform:rotate(28deg);animation-timing-function:cubic-bezier(.1,.88,.3,1)}
+    94.6%{transform:rotate(28deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
+    96.5%{transform:rotate(-3deg);animation-timing-function:cubic-bezier(.4,0,.6,1)}
     100% {transform:rotate(0deg)}
   }
-  .fg-spark{animation:fg-sp .6s ease-out var(--del,0s) 1 forwards;opacity:0}
-  @keyframes fg-sp{0%{opacity:1;transform:translate(0,0) scale(1)}100%{opacity:0;transform:translate(var(--sx,0px),var(--sy,-24px)) scale(.2)}}
-  .fg-impact{animation:fg-imp .5s ease-out 1 forwards;opacity:0}
-  @keyframes fg-imp{0%{opacity:.28}100%{opacity:0}}
+  .fg-spark{animation:fg-sp .88s linear var(--del,0s) 1 forwards;opacity:0}
+  @keyframes fg-sp{
+    0%  {opacity:1;transform:translate(0,0) scale(1);animation-timing-function:cubic-bezier(.2,0,.35,.65)}
+    45% {opacity:.85;transform:translate(calc(var(--sx,0px)*.65),var(--sy,-36px)) scale(.6);animation-timing-function:cubic-bezier(.65,0,1,1)}
+    100%{opacity:0;transform:translate(calc(var(--sx,0px)*1.15),calc(var(--sy,-36px) + 56px)) scale(.1)}
+  }
+  .fg-impact{animation:fg-imp .55s ease-out 1 forwards;opacity:0}
+  @keyframes fg-imp{0%{opacity:.32}60%{opacity:.14}100%{opacity:0}}
   .fg-card-glow{animation:fg-cg 3s ease-in-out infinite}
   @keyframes fg-cg{0%,100%{opacity:.45}50%{opacity:.82}}
   @media (prefers-reduced-motion:reduce){
-    .fg-fire1,.fg-fire2,.fg-fire3,.fg-ember,.fg-glow,.fg-item-hot,.fg-item-gold,.fg-idle,.fg-strike,.fg-arm-idle,.fg-spark,.fg-impact,.fg-card-glow{animation:none}
+    .fg-fire1,.fg-fire2,.fg-fire3,.fg-ember,.fg-glow1,.fg-glow2,.fg-item-hot,.fg-item-gold,
+    .fg-breathe,.fg-strike,.fg-arm-idle,.fg-spark,.fg-impact,.fg-card-glow{animation:none}
   }
 `;
 
@@ -66,46 +93,93 @@ const CSS = `
 function SwordPaths({ stage, s }) {
   if (stage === 0) return (
     <>
-      <rect x="-14" y="-8" width="28" height="16" rx="3" fill={s.metal}/>
-      <rect x="-14" y="-8" width="28" height="7" rx="2" fill={s.edge} opacity=".4"/>
-      <rect x="-14" y="-8" width="28" height="16" rx="3" fill="none" stroke={s.edge} strokeWidth=".8" opacity=".7"/>
+      {/* elongated billet — suggests sword shape even in raw ore stage */}
+      <rect x="-11" y="-26" width="22" height="44" rx="5" fill={s.metal} style={{filter:"blur(1px)"}}/>
+      <rect x="-11" y="-26" width="22" height="9" rx="3" fill={s.edge} opacity=".35"/>
+      <rect x="-11" y="-26" width="22" height="44" rx="5" fill="none" stroke={s.edge} strokeWidth=".8" opacity=".45"/>
     </>
   );
   if (stage === 1) return (
     <>
-      <path d="M-11-30 L11-30 L9 10 L0 18 L-9 10 Z" fill={s.metal} style={{filter:`blur(.8px)`}}/>
-      <path d="M-11-30 L-13-16 L-10-4 L-11 10 L0 18 L11 10 L10-4 L13-16 L11-30 Z"
-        fill="none" stroke={s.edge} strokeWidth="1" opacity=".5"/>
+      {/* rough tapered blade silhouette clearly emerging */}
+      <path d="M-10-38 L10-38 L8 12 L0 22 L-8 12 Z" fill={s.metal} style={{filter:"blur(.9px)"}}/>
+      <path d="M-10-38 L-12-24 L-9-2 L-10 12 L0 22 L10 12 L9-2 L12-24 L10-38 Z"
+        fill="none" stroke={s.edge} strokeWidth="1" opacity=".4"/>
     </>
   );
   if (stage === 2) return (
     <>
-      <path d="M-5-38 L5-38 L6 10 L0 16 L-6 10 Z" fill={s.fill}/>
-      <path d="M0-38 L3-36 L4 8 L0 14 Z" fill={s.edge} opacity=".25"/>
+      {/* defined blade, narrow and clean */}
+      <path d="M-4.5-42 L4.5-42 L5.5 12 L0 20 L-5.5 12 Z" fill={s.fill}/>
+      <line x1="0" y1="-40" x2="0" y2="10" stroke={s.edge} strokeWidth=".7" opacity=".2"/>
     </>
   );
   if (stage === 3) return (
     <>
-      <path d="M-4-40 L4-40 L5 10 L0 16 L-5 10 Z" fill={s.fill}/>
-      <line x1="0" y1="-36" x2="0" y2="8" stroke={s.edge} strokeWidth=".7" opacity=".55"/>
-      <rect x="-14" y="16" width="28" height="5" rx="2.5" fill={s.fill} opacity=".9"/>
-      <rect x="-5" y="21" width="10" height="18" rx="3.5" fill="#6B4A2A"/>
-      {[24,27,30,33,36].map(y=><line key={y} x1="-5" y1={y} x2="5" y2={y} stroke="#8B6A3A" strokeWidth="1.2" opacity=".55"/>)}
+      <path d="M-4-44 L4-44 L5 12 L0 18 L-5 12 Z" fill={s.fill}/>
+      <line x1="0" y1="-40" x2="0" y2="10" stroke={s.edge} strokeWidth=".7" opacity=".5"/>
+      <rect x="-16" y="18" width="32" height="5.5" rx="2.75" fill={s.fill} opacity=".9"/>
+      <rect x="-5" y="23.5" width="10" height="20" rx="3.5" fill="#6B4A2A"/>
+      {[25.5,28,30.5,33,35.5].map(y=><line key={y} x1="-5" y1={y} x2="5" y2={y} stroke="#8B6A3A" strokeWidth="1.2" opacity=".55"/>)}
     </>
   );
-  // stage 4
+  // stage 4 — complete sword
   return (
     <>
-      <path d="M-3.5-42 L3.5-42 L5 10 L0 16 L-5 10 Z" fill={s.fill}/>
-      <line x1="0" y1="-38" x2="0" y2="8" stroke={s.edge} strokeWidth=".7" opacity=".6"/>
-      <path d="M4 -42 L5 10 L3.5 8 L2.5-40 Z" fill={s.edge} opacity=".18"/>
-      <path d="M-16 10 L16 10 L14 16 L-14 16 Z" fill={s.fill}/>
-      <rect x="-5" y="16" width="10" height="22" rx="4" fill="#5C3E20"/>
-      {[19,22,25,28,31,34].map(y=><line key={y} x1="-5" y1={y} x2="5" y2={y} stroke="#8B6A3A" strokeWidth="1.2" opacity=".6"/>)}
-      <circle cx="0" cy="42" r="7" fill={s.fill}/>
-      <circle cx="0" cy="42" r="5" fill={s.edge} opacity=".22"/>
-      <text x="0" y="-18" textAnchor="middle" fontSize="6" fill={s.edge} opacity=".75" fontFamily="serif">⟡</text>
-      <path d="M-1-42 L-1-28 L0-28 L0-42 Z" fill="#FFFBE0" opacity=".14"/>
+      <path d="M-3.5-44 L3.5-44 L4.5 12 L0 18 L-4.5 12 Z" fill={s.fill}/>
+      <line x1="0" y1="-40" x2="0" y2="10" stroke={s.edge} strokeWidth=".7" opacity=".6"/>
+      <path d="M3.5-44 L4.5 12 L3 10 L2.5-42 Z" fill={s.edge} opacity=".18"/>
+      <path d="M-17.5 12 L17.5 12 L15.5 18 L-15.5 18 Z" fill={s.fill}/>
+      <rect x="-5" y="18" width="10" height="24" rx="4" fill="#5C3E20"/>
+      {[20,22.5,25,27.5,30,32.5].map(y=><line key={y} x1="-5" y1={y} x2="5" y2={y} stroke="#8B6A3A" strokeWidth="1.2" opacity=".6"/>)}
+      <circle cx="0" cy="46" r="8" fill={s.fill}/>
+      <circle cx="0" cy="46" r="5.5" fill={s.edge} opacity=".22"/>
+      <text x="0" y="-16" textAnchor="middle" fontSize="7" fill={s.edge} opacity=".75" fontFamily="serif">⟡</text>
+      <path d="M-1-44 L-1-28 L0-28 L0-44 Z" fill="#FFFBE0" opacity=".14"/>
+    </>
+  );
+}
+
+function DaggerPaths({ stage, s }) {
+  if (stage === 0) return (
+    <>
+      <rect x="-10" y="-10" width="20" height="22" rx="4" fill={s.metal} style={{filter:"blur(.8px)"}}/>
+      <rect x="-10" y="-10" width="20" height="7" rx="2" fill={s.edge} opacity=".3"/>
+    </>
+  );
+  if (stage === 1) return (
+    <>
+      <path d="M-8-24 L8-24 L6 8 L0 14 L-6 8 Z" fill={s.metal} style={{filter:"blur(.8px)"}}/>
+      <path d="M-8-24 L-10-12 L-8 4 L0 14 L8 4 L10-12 L8-24 Z"
+        fill="none" stroke={s.edge} strokeWidth="1" opacity=".4"/>
+    </>
+  );
+  if (stage === 2) return (
+    <>
+      <path d="M-5-28 L5-28 L5 8 L0 14 L-5 8 Z" fill={s.fill}/>
+      <line x1="0" y1="-26" x2="0" y2="8" stroke={s.edge} strokeWidth=".7" opacity=".2"/>
+    </>
+  );
+  if (stage === 3) return (
+    <>
+      <path d="M-4-30 L4-30 L4 6 L0 12 L-4 6 Z" fill={s.fill}/>
+      <line x1="0" y1="-28" x2="0" y2="4" stroke={s.edge} strokeWidth=".6" opacity=".5"/>
+      <rect x="-12" y="12" width="24" height="4.5" rx="2.25" fill={s.fill}/>
+      <rect x="-3.5" y="16.5" width="7" height="14" rx="2.5" fill="#6B4A2A"/>
+      {[18.5,21,23.5,26].map(y=><line key={y} x1="-3.5" y1={y} x2="3.5" y2={y} stroke="#8B6A3A" strokeWidth="1" opacity=".5"/>)}
+    </>
+  );
+  // stage 4 — complete dagger with pommel
+  return (
+    <>
+      <path d="M-3.5-32 L3.5-32 L3.5 6 L0 12 L-3.5 6 Z" fill={s.fill}/>
+      <line x1="0" y1="-30" x2="0" y2="4" stroke={s.edge} strokeWidth=".6" opacity=".6"/>
+      <path d="M3.5-32 L3.5 6 L2.5 4 L2-30 Z" fill={s.edge} opacity=".18"/>
+      <rect x="-13" y="12" width="26" height="5" rx="2.5" fill={s.fill}/>
+      <rect x="-3.5" y="17" width="7" height="15" rx="3" fill="#5C3E20"/>
+      {[19,21,23,25,27].map(y=><line key={y} x1="-3.5" y1={y} x2="3.5" y2={y} stroke="#8B6A3A" strokeWidth="1" opacity=".55"/>)}
+      <circle cx="0" cy="36" r="5.5" fill={s.fill}/>
+      <circle cx="0" cy="36" r="3.5" fill={s.edge} opacity=".2"/>
     </>
   );
 }
@@ -245,7 +319,8 @@ function AegisPaths({ stage, s }) {
 function ItemPaths({ type, stage }) {
   const s = SC[Math.min(stage, 4)];
   switch (type) {
-    case "sword": case "dagger": return <SwordPaths stage={stage} s={s}/>;
+    case "sword": return <SwordPaths stage={stage} s={s}/>;
+    case "dagger": return <DaggerPaths stage={stage} s={s}/>;
     case "shield": return <ShieldPaths stage={stage} s={s}/>;
     case "helmet": return <HelmetPaths stage={stage} s={s}/>;
     case "axe": return <AxePaths stage={stage} s={s}/>;
@@ -292,9 +367,11 @@ function ItemPreview({ type, stage, height = 52 }) {
 
 function SmithCharacter({ striking = false, reducedMotion = false }) {
   return (
-    <g className={reducedMotion ? "" : "fg-idle"}>
-      {/* Shadow */}
+    <g>
+      {/* Shadow stays on ground — not affected by breathing */}
       <ellipse cx="0" cy="1" rx="19" ry="4" fill="#000" opacity=".45"/>
+      {/* Character body with asymmetric breathing */}
+    <g className={reducedMotion ? "" : "fg-breathe"}>
       {/* LEGS */}
       <rect x="-13" y="-28" width="11" height="29" rx="4" fill="#2A3040"/>
       <rect x="2"   y="-26" width="11" height="27" rx="4" fill="#2A3040"/>
@@ -366,6 +443,7 @@ function SmithCharacter({ striking = false, reducedMotion = false }) {
       {/* Cheek warm highlight */}
       <ellipse cx="-10" cy="-83" rx="5" ry="3" fill="#E07040" opacity=".12"/>
       <ellipse cx="10"  cy="-83" rx="5" ry="3" fill="#E07040" opacity=".12"/>
+    </g>{/* /fg-breathe */}
     </g>
   );
 }
@@ -412,9 +490,9 @@ const EMBERS = [
 ];
 
 const SPARK_OFFSETS = [
-  {sx:"-18px",sy:"-22px",del:".32s"},{sx:"16px",sy:"-26px",del:".36s"},
-  {sx:"-24px",sy:"-14px",del:".34s"},{sx:"22px",sy:"-18px",del:".38s"},
-  {sx:"-10px",sy:"-30px",del:".3s"}, {sx:"8px", sy:"-32px",del:".4s"},
+  {sx:"-22px",sy:"-40px",del:".30s"},{sx:"18px", sy:"-44px",del:".33s"},
+  {sx:"-30px",sy:"-32px",del:".31s"},{sx:"26px", sy:"-36px",del:".35s"},
+  {sx:"-12px",sy:"-50px",del:".28s"},{sx:"10px", sy:"-48px",del:".38s"},
 ];
 
 function WorkshopScene({ item, progress, striking, reducedMotion }) {
@@ -490,9 +568,11 @@ function WorkshopScene({ item, progress, striking, reducedMotion }) {
         <path className={reducedMotion?"":"fg-fire1"} d="M26 170 L34 138 L41 154 L47 130 L53 147 L60 133 L67 170 Z" fill="#B03018" opacity=".88"/>
         <path className={reducedMotion?"":"fg-fire2"} d="M30 170 L38 122 L47 142 L55 116 L63 137 L69 170 Z"       fill="#E67E22" opacity=".65"/>
         <path className={reducedMotion?"":"fg-fire3"} d="M34 170 L42 132 L47 112 L52 128 L59 120 L65 170 Z"       fill="#F5C842" opacity=".34"/>
-        {/* Floor glow */}
+        {/* Floor glow — two layers at different frequencies for living quality */}
         <ellipse cx="46" cy="170" rx="42" ry="8" fill="#E67E22"
-          opacity={reducedMotion?.16:.2} className={reducedMotion?"":"fg-glow"} style={{filter:"blur(5px)"}}/>
+          opacity={reducedMotion?.16:.2} className={reducedMotion?"":"fg-glow1"} style={{filter:"blur(5px)"}}/>
+        <ellipse cx="46" cy="170" rx="26" ry="5" fill="#F5C842"
+          opacity={reducedMotion?.08:.12} className={reducedMotion?"":"fg-glow2"} style={{filter:"blur(3px)"}}/>
         {/* Arch interior glow */}
         <path d="M8 104 Q8 48 22 28 Q34 10 46 6 Q58 10 70 28 Q84 48 84 104 L74 104 Q74 54 46 36 Q18 54 18 104 Z"
           fill="#E67E22" opacity=".05"/>
@@ -525,8 +605,8 @@ function WorkshopScene({ item, progress, striking, reducedMotion }) {
         {stage>=2&&stage<=3 && <ellipse cx="192" cy="122" rx="24" ry="10" fill="url(#fg-cool-h)"
           opacity=".5" style={{filter:"blur(3px)"}}/>}
 
-        {/* ── ITEM ON ANVIL ── */}
-        <svg x={192-28} y={50} viewBox={iCfg.vb} width="56" height={122-50}>
+        {/* ── ITEM ON ANVIL ── enlarged for recognizability */}
+        <svg x="138" y="8" viewBox={iCfg.vb} width="100" height="114" preserveAspectRatio="xMidYMax meet">
           <ItemPaths type={item.type} stage={stage}/>
         </svg>
 
@@ -620,8 +700,34 @@ function StageTracker({ stage }) {
 
 // ─── ITEM SELECTOR ────────────────────────────────────────────────────────────────
 
-function ItemSelector({ arc, currentItem, onSelect }) {
+function ItemSelector({ arc, currentItem, onSelect, isLocked, onReset }) {
   const arcPool = useMemo(()=>getItemPool(arc),[arc?.id,arc?.duration_days,arc?.durationDays]);
+
+  if (isLocked) {
+    return (
+      <div style={{marginBottom:4}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",
+          background:T.raised,borderRadius:T.rsm,border:`1px solid ${T.gold}30`}}>
+          <ItemPreview type={currentItem.type} stage={4} height={28}/>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:13,color:T.text,fontWeight:600}}>{currentItem.name}</div>
+            <div style={{fontSize:10,color:T.muted,marginTop:2}}>Locked to this Arc 🔒</div>
+          </div>
+          {/* Dev reset — preview builds only */}
+          <button type="button" onClick={onReset}
+            style={{padding:"5px 10px",borderRadius:T.rsm,border:`1px solid ${T.border}`,
+              background:"none",color:T.hint,fontSize:10,fontFamily:T.font,cursor:"pointer",
+              flexShrink:0}}>
+            Reset
+          </button>
+        </div>
+        <div style={{fontSize:10,color:T.hint,marginTop:8,lineHeight:1.5}}>
+          Your item is set. The forge tracks progress toward this specific artifact.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{marginBottom:4}}>
       <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
@@ -636,7 +742,7 @@ function ItemSelector({ arc, currentItem, onSelect }) {
                 background:active?T.gold+"14":inPool?T.raised:T.surface,
                 cursor:"pointer",fontFamily:T.font,fontSize:12,
                 color:active?T.text:inPool?T.sub:T.muted,
-                fontWeight:active?600:inPool?400:400,
+                fontWeight:active?600:400,
                 boxShadow:active?`0 0 10px ${T.gold}20`:"none",
                 transition:"all .2s ease"}}>
               <ItemPreview type={item.type} stage={4} height={20}/>
@@ -647,7 +753,7 @@ function ItemSelector({ arc, currentItem, onSelect }) {
         })}
       </div>
       <div style={{fontSize:10,color:T.hint,marginTop:8,lineHeight:1.5}}>
-        ✦ Suggested for this Arc length. All items available in preview.
+        ✦ Suggested for this Arc length · Choosing locks this item to your Arc.
       </div>
     </div>
   );
@@ -766,7 +872,7 @@ function ForgeWall({ userId }) {
 
 // ─── WORKSHOP SHEET ───────────────────────────────────────────────────────────────
 
-function WorkshopSheet({ arc, item, progress, userId, onClose, onSelectItem, reducedMotion }) {
+function WorkshopSheet({ arc, item, progress, userId, onClose, onSelectItem, onResetItem, isLocked, reducedMotion }) {
   const [striking, setStriking] = useState(false);
   const s = SC[Math.min(progress.stage,4)];
   const { daysForged, elapsedDays, consistency, pct, totalDays, stage, nextStage, daysToNext } = progress;
@@ -948,13 +1054,14 @@ function WorkshopSheet({ arc, item, progress, userId, onClose, onSelectItem, red
             <RecentHistory rows={progress.history} item={item}/>
           )}
 
-          {/* Item selector — always visible, clearly labelled as preview */}
+          {/* Item selector */}
           <div style={{marginBottom:16,paddingTop:4,borderTop:`0.5px solid ${T.border}`}}>
             <div style={{fontSize:9,fontWeight:700,color:T.hint,letterSpacing:".12em",
               textTransform:"uppercase",margin:"14px 0 10px"}}>
-              Choose forged item <span style={{color:T.hint+"80",fontWeight:500,letterSpacing:"0",textTransform:"none",fontSize:10}}>· preview only, saved locally</span>
+              Forged item <span style={{color:T.hint+"80",fontWeight:500,letterSpacing:"0",textTransform:"none",fontSize:10}}>· preview only, saved locally</span>
             </div>
-            <ItemSelector arc={arc} currentItem={item} onSelect={onSelectItem}/>
+            <ItemSelector arc={arc} currentItem={item} onSelect={onSelectItem}
+              isLocked={isLocked} onReset={onResetItem}/>
           </div>
 
           {/* Forge Wall */}
@@ -1042,6 +1149,8 @@ export function ForgeCompanion({ arc, arcLedgerRows, userId, style }) {
 
   // localStorage-persisted item selection per arc
   const storageKey = arc?.id ? `fg_item_${arc.id}` : null;
+  const lockKey   = arc?.id ? `fg_item_locked_${arc.id}` : null;
+
   const [selectedItem, setSelectedItem] = useState(() => {
     if (!arc) return null;
     const saved = storageKey ? localStorage.getItem(storageKey) : null;
@@ -1050,6 +1159,11 @@ export function ForgeCompanion({ arc, arcLedgerRows, userId, style }) {
       return found;
     }
     return getDefaultForgeItem(arc);
+  });
+
+  // isLocked = user has made an explicit selection at least once
+  const [isLocked, setIsLocked] = useState(() => {
+    return lockKey ? !!localStorage.getItem(lockKey) : false;
   });
 
   // Recompute if arc changes
@@ -1062,7 +1176,8 @@ export function ForgeCompanion({ arc, arcLedgerRows, userId, style }) {
     } else {
       setSelectedItem(getDefaultForgeItem(arc));
     }
-  }, [arc?.id]);
+    setIsLocked(lockKey ? !!localStorage.getItem(lockKey) : false);
+  }, [arc?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const progress = useMemo(
     () => getForgeProgress(arc, arcLedgerRows),
@@ -1075,8 +1190,19 @@ export function ForgeCompanion({ arc, arcLedgerRows, userId, style }) {
   );
 
   function handleSelectItem(item) {
+    if (isLocked) return;
     setSelectedItem(item);
     if (storageKey) localStorage.setItem(storageKey, item.id);
+    // First explicit selection locks this item to this Arc
+    if (lockKey) localStorage.setItem(lockKey, "1");
+    setIsLocked(true);
+  }
+
+  function handleResetItem() {
+    if (storageKey) localStorage.removeItem(storageKey);
+    if (lockKey) localStorage.removeItem(lockKey);
+    setIsLocked(false);
+    setSelectedItem(getDefaultForgeItem(arc));
   }
 
   if (!arc || !selectedItem) return null;
@@ -1100,6 +1226,8 @@ export function ForgeCompanion({ arc, arcLedgerRows, userId, style }) {
           userId={userId}
           onClose={()=>setExpanded(false)}
           onSelectItem={handleSelectItem}
+          onResetItem={handleResetItem}
+          isLocked={isLocked}
           reducedMotion={reducedMotion}
         />
       )}
