@@ -517,16 +517,19 @@ function SmithPortrait({ size = 44 }) {
 // ─── 3D BLACKSMITH ────────────────────────────────────────────────────────────────
 
 function BlacksmithModel({ striking, reducedMotion }) {
-  const groupRef = useRef();
+  // Ref must sit on the primitive itself — the mixer needs the scene root
+  // that contains the 41 skeleton joints, not a wrapper Group
+  const sceneRef = useRef();
   const { scene, animations } = useGLTF("/forge-companion.glb");
-  const { actions, mixer } = useAnimations(animations, groupRef);
+  const { actions, mixer } = useAnimations(animations, sceneRef);
 
-  // 2H_Melee_Idle = weapon-ready stance, much better than generic Idle for a smith
+  // 2H_Melee_Idle = heavy weapon-ready stance
   useEffect(() => {
-    actions["2H_Melee_Idle"]?.reset().play();
+    if (!actions["2H_Melee_Idle"]) return;
+    actions["2H_Melee_Idle"].reset().play();
   }, [actions]);
 
-  // Trigger chop on strike, fade back to weapon-ready idle when done
+  // Trigger chop, fade back to idle when the one-shot finishes
   useEffect(() => {
     if (reducedMotion || !striking) return;
     const idle = actions["2H_Melee_Idle"];
@@ -546,10 +549,13 @@ function BlacksmithModel({ striking, reducedMotion }) {
   }, [striking]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <group ref={groupRef}>
-      {/* y=-0.66 puts feet at ~77% from top, matching SVG floor at y=170/222 */}
-      <primitive object={scene} scale={0.82} position={[0.1, -0.66, 0]} rotation={[0, 0.2, 0]} />
-    </group>
+    <primitive
+      ref={sceneRef}
+      object={scene}
+      scale={0.82}
+      position={[0.1, -0.66, 0]}
+      rotation={[0, 0.2, 0]}
+    />
   );
 }
 
@@ -617,42 +623,33 @@ function WorkshopScene({ item, progress, striking, reducedMotion, bandanaColor }
       </defs>
 
       <g clipPath="url(#fg-scene)">
-        {/* BG */}
-        <rect width="340" height="222" fill="#0D0D0B"/>
+        {/* ── BACKGROUND — deep dark stone, no noisy seam lines ── */}
+        <rect width="340" height="222" fill="#080807"/>
+        {/* Wide forge-fire atmosphere sweeping from left across whole scene */}
         <rect width="340" height="222" fill="url(#fg-amb)"/>
-        {/* Back wall — subtle stone texture lines */}
-        {[60,110,160].map(y=><line key={y} x1="0" y1={y} x2="340" y2={y} stroke="#151310" strokeWidth="1"/>)}
-        {[90,190,270].map(x=><line key={x} x1={x} y1="0" x2={x} y2="170" stroke="#151310" strokeWidth=".5" opacity=".4"/>)}
-        <line x1="0" y1="170" x2="340" y2="170" stroke="#1E1C16" strokeWidth="2"/>
+        {/* Faint mid-floor horizon line */}
+        <line x1="0" y1="170" x2="340" y2="170" stroke="#1A1814" strokeWidth="1.5"/>
 
-        {/* ── FURNACE ── */}
-        {/* Chimney */}
-        <rect x="22" y="4" width="38" height="30" rx="2" fill="#1C1A14"/>
-        <rect x="26" y="4" width="30" height="4"  rx="1" fill="#242218"/>
-        {/* Furnace body */}
-        <rect x="8" y="30" width="76" height="140" rx="5" fill="#1E1C16"/>
-        {/* Stone seams */}
-        {[66,98,130].map(y=><line key={y} x1="8" y1={y} x2="84" y2={y} stroke="#141210" strokeWidth="1"/>)}
-        <line x1="46" y1="30" x2="46" y2="170" stroke="#141210" strokeWidth=".5" opacity=".4"/>
-        {/* Arch surround */}
-        <path d="M16 104 Q46 62 76 104" fill="none" stroke="#2A2820" strokeWidth="5"/>
-        <path d="M16 104 Q46 64 76 104" fill="none" stroke="#161410" strokeWidth="2.5"/>
-        {/* Opening */}
-        <path d="M18 170 L18 104 Q46 66 74 104 L74 170 Z" fill="#090806"/>
+        {/* ── FURNACE — simplified silhouette, no stone seams ── */}
+        {/* Chimney stack */}
+        <rect x="18" y="0" width="46" height="38" rx="3" fill="#111009"/>
+        {/* Body */}
+        <rect x="6" y="32" width="82" height="140" rx="6" fill="#111009"/>
+        {/* Arch opening */}
+        <path d="M18 170 L18 100 Q46 60 74 100 L74 170 Z" fill="#050403"/>
+        {/* Arch frame — single warm stroke */}
+        <path d="M16 102 Q46 58 76 102" fill="none" stroke="#2A2010" strokeWidth="4"/>
         {/* Ash bed */}
-        <ellipse cx="46" cy="166" rx="23" ry="4" fill="#201C10" opacity=".95"/>
-        {/* Fire layers */}
-        <path className={reducedMotion?"":"fg-fire1"} d="M26 170 L34 138 L41 154 L47 130 L53 147 L60 133 L67 170 Z" fill="#B03018" opacity=".88"/>
-        <path className={reducedMotion?"":"fg-fire2"} d="M30 170 L38 122 L47 142 L55 116 L63 137 L69 170 Z"       fill="#E67E22" opacity=".65"/>
-        <path className={reducedMotion?"":"fg-fire3"} d="M34 170 L42 132 L47 112 L52 128 L59 120 L65 170 Z"       fill="#F5C842" opacity=".34"/>
-        {/* Floor glow — two overlapping orange layers for living quality */}
-        <ellipse cx="46" cy="170" rx="42" ry="8" fill="#E67E22"
-          opacity={reducedMotion?.16:.2} className={reducedMotion?"":"fg-glow1"} style={{filter:"blur(5px)"}}/>
-        <ellipse cx="46" cy="170" rx="24" ry="4" fill="#C04018"
-          opacity={reducedMotion?.06:.1} className={reducedMotion?"":"fg-glow2"} style={{filter:"blur(2px)"}}/>
-        {/* Arch interior glow */}
-        <path d="M8 104 Q8 48 22 28 Q34 10 46 6 Q58 10 70 28 Q84 48 84 104 L74 104 Q74 54 46 36 Q18 54 18 104 Z"
-          fill="#E67E22" opacity=".05"/>
+        <ellipse cx="46" cy="168" rx="22" ry="4" fill="#1A1208" opacity=".9"/>
+        {/* Fire */}
+        <path className={reducedMotion?"":"fg-fire1"} d="M26 170 L34 138 L41 154 L47 130 L53 147 L60 133 L67 170 Z" fill="#B03018" opacity=".9"/>
+        <path className={reducedMotion?"":"fg-fire2"} d="M30 170 L38 122 L47 142 L55 116 L63 137 L69 170 Z"       fill="#E67E22" opacity=".7"/>
+        <path className={reducedMotion?"":"fg-fire3"} d="M34 170 L42 132 L47 112 L52 128 L59 120 L65 170 Z"       fill="#F5C842" opacity=".38"/>
+        {/* Wide floor glow — now spans full width to wash the character too */}
+        <ellipse cx="170" cy="170" rx="170" ry="22" fill="#E67E22"
+          opacity={reducedMotion?.08:.12} className={reducedMotion?"":"fg-glow1"} style={{filter:"blur(10px)"}}/>
+        <ellipse cx="46" cy="170" rx="55" ry="10" fill="#E86820"
+          opacity={reducedMotion?.14:.2} className={reducedMotion?"":"fg-glow2"} style={{filter:"blur(4px)"}}/>
         {/* Embers */}
         {!reducedMotion && EMBERS.map((e,i)=>(
           <circle key={i} cx={e.cx} cy={e.cy} r={e.r}
@@ -661,18 +658,18 @@ function WorkshopScene({ item, progress, striking, reducedMotion, bandanaColor }
             style={{"--dur":e.dur,"--del":e.del,"--dx":e.dx}}/>
         ))}
 
-        {/* ── ANVIL ── */}
-        <ellipse cx="180" cy="176" rx="54" ry="7" fill="#000" opacity=".45" style={{filter:"blur(2px)"}}/>
+        {/* ── ANVIL — bolder, heavier silhouette ── */}
+        <ellipse cx="180" cy="177" rx="58" ry="8" fill="#000" opacity=".6" style={{filter:"blur(3px)"}}/>
         {/* Horn */}
-        <path d="M125 130 Q108 133 112 138 L125 138 Z" fill="#242220"/>
+        <path d="M123 132 Q104 135 108 140 L123 140 Z" fill="#1E1C18"/>
         {/* Top plate */}
-        <rect x="123" y="122" width="114" height="18" rx="3" fill="#302E26"/>
-        <rect x="123" y="122" width="114" height="3"  rx="1.5" fill="#3A3830" opacity=".6"/>
+        <rect x="121" y="122" width="118" height="20" rx="4" fill="#282520"/>
+        <rect x="121" y="122" width="118" height="4"  rx="2" fill="#38342C" opacity=".7"/>
         {/* Body */}
-        <rect x="142" y="140" width="78" height="22" rx="2" fill="#242220"/>
+        <rect x="140" y="142" width="82" height="22" rx="3" fill="#1C1A16"/>
         {/* Base */}
-        <rect x="128" y="162" width="104" height="16" rx="3" fill="#302E26"/>
-        <rect x="128" y="162" width="104" height="3"  rx="1.5" fill="#3A3830" opacity=".55"/>
+        <rect x="126" y="164" width="108" height="14" rx="3" fill="#242018"/>
+        <rect x="126" y="164" width="108" height="3"  rx="1.5" fill="#302C22" opacity=".6"/>
 
         {/* ── ITEM ON ANVIL ── glow tracks item shape via drop-shadow */}
         <svg x="138" y="8" viewBox={iCfg.vb} width="100" height="114" preserveAspectRatio="xMidYMax meet"
@@ -687,41 +684,24 @@ function WorkshopScene({ item, progress, striking, reducedMotion, bandanaColor }
           <ItemPaths type={item.type} stage={stage}/>
         </svg>
 
-        {/* IMPACT FLASH — brief anvil surface glow on hammer strike */}
+        {/* IMPACT FLASH — cx=215 matches where the 3D chop arc lands on the anvil */}
         {!reducedMotion && striking && (
-          <ellipse cx="237" cy="122" rx="26" ry="7"
+          <ellipse cx="215" cy="122" rx="26" ry="7"
             fill="#F5C842" className="fg-impact" style={{filter:"blur(3px)"}}/>
         )}
-        {/* STRIKE SPARKS — appear at anvil surface on hammer impact */}
+        {/* STRIKE SPARKS */}
         {!reducedMotion && striking && SPARK_OFFSETS.map((sp,i)=>(
-          <circle key={i} cx="237" cy="118" r={i<2?3.5:2} fill={i%2===0?"#F5C842":"#E67E22"}
+          <circle key={i} cx="215" cy="118" r={i<2?3.5:2} fill={i%2===0?"#F5C842":"#E67E22"}
             className="fg-spark" style={{"--sx":sp.sx,"--sy":sp.sy,"--del":sp.del}}/>
         ))}
-        {/* Extra sparks on direct impact point */}
         {!reducedMotion && striking && [0,1,2].map(i=>(
-          <circle key={`c${i}`} cx={235+(i-1)*8} cy="112" r="1.8" fill="#FFFBE0"
+          <circle key={`c${i}`} cx={213+(i-1)*8} cy="112" r="1.8" fill="#FFFBE0"
             className="fg-spark" style={{"--sx":`${(i-1)*12}px`,"--sy":"-34px","--del":`.28s`}}/>
         ))}
 
-        {/* ── TOOL RACK (right) ── */}
-        <rect x="307" y="12"  width="4" height="158" rx="2" fill="#1C1A14"/>
-        <rect x="304" y="12"  width="10" height="3" rx="1.5" fill="#242220"/>
-        <rect x="304" y="167" width="10" height="3" rx="1.5" fill="#242220"/>
-        {[28,55,82,109,136].map((y,i)=>(
-          <g key={i}>
-            <rect x="304" y={y} width="10" height="3" rx="1" fill="#2A2820"/>
-            <line x1="309" y1={y+3} x2="315" y2={y+20} stroke="#3A3830" strokeWidth="1.5"/>
-            {i%2===0
-              ? <rect x="312" y={y+18} width="7" height="14" rx="2" fill="#3A3830" opacity=".8"/>
-              : <path d={`M311 ${y+18} L319 ${y+18} L315 ${y+30} Z`} fill="#3A3830" opacity=".72"/>
-            }
-          </g>
-        ))}
-
-        {/* ── FLOOR ── */}
-        <rect x="0" y="170" width="340" height="52" fill="#141210"/>
-        {[85,170,255].map(x=><line key={x} x1={x} y1="170" x2={x} y2="222" stroke="#1C1A16" strokeWidth="1"/>)}
-        <line x1="0" y1="188" x2="340" y2="188" stroke="#1C1A16" strokeWidth=".5"/>
+        {/* ── FLOOR — dark stone, two simple depth lines ── */}
+        <rect x="0" y="170" width="340" height="52" fill="#0C0B09"/>
+        <line x1="0" y1="192" x2="340" y2="192" stroke="#161410" strokeWidth=".8"/>
 
         {/* Stage label */}
         <text x="320" y="17" textAnchor="end" fontSize="8"
@@ -971,19 +951,21 @@ function WorkshopSheet({ arc, item, progress, userId, onClose, onSelectItem, onR
   const s = SC[Math.min(progress.stage,4)];
   const { daysForged, elapsedDays, consistency, pct, totalDays, stage, nextStage, daysToNext } = progress;
 
-  // Three opening strikes, then CSS auto-strike takes over (fg-arm-idle with 8s delay)
+  // Three opening strikes, then keep firing every 10s so the 3D animation never idles out
   useEffect(()=>{
     if(reducedMotion)return;
+    const fire = () => {
+      setStriking(true);
+      setTimeout(()=>setStriking(false), 950);
+    };
     const ts=[
-      setTimeout(()=>setStriking(true),  350),
-      setTimeout(()=>setStriking(false), 1300),
-      setTimeout(()=>setStriking(true),  2800),
-      setTimeout(()=>setStriking(false), 3750),
-      setTimeout(()=>setStriking(true),  5600),
-      setTimeout(()=>setStriking(false), 6550),
+      setTimeout(fire,  350),
+      setTimeout(fire, 2800),
+      setTimeout(fire, 5600),
     ];
-    return()=>ts.forEach(clearTimeout);
-  },[]);
+    const loop = setInterval(fire, 10000);
+    return()=>{ ts.forEach(clearTimeout); clearInterval(loop); };
+  },[reducedMotion]);
 
   const stageNarrative=[
     `The forge is lit and the ore is ready. ${item.name} exists only as raw potential — the first real proof day lands the first strike.`,
