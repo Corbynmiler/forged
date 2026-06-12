@@ -11,8 +11,8 @@ import {
   getRecentForgeHistory, FORGE_STAGES, ALL_ITEMS,
 } from "../lib/forgeItemLogic.js";
 import { useReducedMotion } from "../hooks/useReducedMotion.js";
-import { Canvas } from "@react-three/fiber";
-import { useGLTF, useAnimations } from "@react-three/drei";
+import { Canvas, useFrame } from "@react-three/fiber";
+import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 
 // Preload GLB so it's warm when the sheet opens
@@ -517,40 +517,57 @@ function SmithPortrait({ size = 44 }) {
 // ─── 3D BLACKSMITH ────────────────────────────────────────────────────────────────
 
 function BlacksmithModel({ striking, reducedMotion }) {
-  // Ref must sit on the primitive itself — the mixer needs the scene root
-  // that contains the 41 skeleton joints, not a wrapper Group
-  const sceneRef = useRef();
   const { scene, animations } = useGLTF("/forge-companion.glb");
-  const { actions, mixer } = useAnimations(animations, sceneRef);
 
-  // 2H_Melee_Idle = heavy weapon-ready stance
+  // Drive the mixer directly — bypasses useAnimations timing quirks entirely
+  const mixerRef    = useRef(null);
+  const idleRef     = useRef(null);
+  const chopRef     = useRef(null);
+
+  // Build mixer + cache actions once per scene load
   useEffect(() => {
-    if (!actions["2H_Melee_Idle"]) return;
-    actions["2H_Melee_Idle"].reset().play();
-  }, [actions]);
+    const mixer = new THREE.AnimationMixer(scene);
+    mixerRef.current = mixer;
 
-  // Trigger chop, fade back to idle when the one-shot finishes
+    const idleClip = THREE.AnimationClip.findByName(animations, "2H_Melee_Idle");
+    const chopClip = THREE.AnimationClip.findByName(animations, "2H_Melee_Attack_Chop");
+
+    if (idleClip) {
+      idleRef.current = mixer.clipAction(idleClip);
+      idleRef.current.reset().play();
+    }
+    if (chopClip) {
+      chopRef.current = mixer.clipAction(chopClip);
+      chopRef.current.setLoop(THREE.LoopOnce, 1);
+      chopRef.current.clampWhenFinished = false;
+    }
+
+    return () => { mixer.stopAllAction(); mixer.uncacheRoot(scene); };
+  }, [scene, animations]);
+
+  // Fire the chop on each strike trigger
   useEffect(() => {
     if (reducedMotion || !striking) return;
-    const idle = actions["2H_Melee_Idle"];
-    const chop = actions["2H_Melee_Attack_Chop"];
+    const idle = idleRef.current;
+    const chop = chopRef.current;
+    const mixer = mixerRef.current;
     if (!chop || !mixer) return;
 
-    chop.reset().setLoop(THREE.LoopOnce, 1);
-    chop.clampWhenFinished = false;
     idle?.fadeOut(0.08);
-    chop.fadeIn(0.08).play();
+    chop.reset().fadeIn(0.08).play();
 
     const onDone = (e) => {
       if (e.action === chop) idle?.reset().fadeIn(0.3).play();
     };
     mixer.addEventListener("finished", onDone);
     return () => mixer.removeEventListener("finished", onDone);
-  }, [striking]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [striking, reducedMotion]);
+
+  // Advance mixer every frame
+  useFrame((_, delta) => mixerRef.current?.update(delta));
 
   return (
     <primitive
-      ref={sceneRef}
       object={scene}
       scale={0.82}
       position={[0.1, -0.66, 0]}
