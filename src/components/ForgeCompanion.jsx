@@ -568,11 +568,11 @@ function WorkshopScene({ item, progress, striking, reducedMotion }) {
         <path className={reducedMotion?"":"fg-fire1"} d="M26 170 L34 138 L41 154 L47 130 L53 147 L60 133 L67 170 Z" fill="#B03018" opacity=".88"/>
         <path className={reducedMotion?"":"fg-fire2"} d="M30 170 L38 122 L47 142 L55 116 L63 137 L69 170 Z"       fill="#E67E22" opacity=".65"/>
         <path className={reducedMotion?"":"fg-fire3"} d="M34 170 L42 132 L47 112 L52 128 L59 120 L65 170 Z"       fill="#F5C842" opacity=".34"/>
-        {/* Floor glow — two layers at different frequencies for living quality */}
+        {/* Floor glow — two overlapping orange layers for living quality */}
         <ellipse cx="46" cy="170" rx="42" ry="8" fill="#E67E22"
           opacity={reducedMotion?.16:.2} className={reducedMotion?"":"fg-glow1"} style={{filter:"blur(5px)"}}/>
-        <ellipse cx="46" cy="170" rx="26" ry="5" fill="#F5C842"
-          opacity={reducedMotion?.08:.12} className={reducedMotion?"":"fg-glow2"} style={{filter:"blur(3px)"}}/>
+        <ellipse cx="46" cy="170" rx="24" ry="4" fill="#C04018"
+          opacity={reducedMotion?.06:.1} className={reducedMotion?"":"fg-glow2"} style={{filter:"blur(2px)"}}/>
         {/* Arch interior glow */}
         <path d="M8 104 Q8 48 22 28 Q34 10 46 6 Q58 10 70 28 Q84 48 84 104 L74 104 Q74 54 46 36 Q18 54 18 104 Z"
           fill="#E67E22" opacity=".05"/>
