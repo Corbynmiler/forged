@@ -1527,17 +1527,19 @@ export default function App() {
     const uid = userIdRef.current;
     const { data: { session } } = await supabase.auth.getSession();
     const token = session?.access_token;
-    if (!token || !uid) return;
+    if (!token || !uid) return false;
     setGeneratingReceipt(true);
     try {
-      await fetch("/api/journal-generate", {
+      const res = await fetch("/api/journal-generate", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ date: todayStr(), habits, goals, name: user.name || "" }),
       });
       await handleJournalGenerated();
+      return res.ok;
     } catch (err) {
       console.error("[Forged] generateReceipt:", err);
+      return false;
     } finally {
       setGeneratingReceipt(false);
     }
@@ -4565,8 +4567,8 @@ export default function App() {
             setCoachOpenMode(null);
             setCoachPendingMsg(null);
             setCoachDraftInput(null);
-            await handleGenerateReceipt();
-            addToast("Entry added to today's Arc.");
+            const ok = await handleGenerateReceipt();
+            addToast(ok ? "Entry added to today's Arc." : "Couldn't create entry — try again from Today.");
           }}
         />}
 
