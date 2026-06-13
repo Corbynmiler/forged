@@ -813,46 +813,9 @@ function WeekDetail({
         <div style={{ fontSize: 13, color: T.muted, marginTop: 10, fontStyle: "italic" }}>Not started yet</div>
       ) : null}
 
-      {week.chapterSummary ? (
-        <div style={{ fontSize: 13, color: T.sub, marginTop: 6, lineHeight: 1.5, overflowWrap: "anywhere" }}>
-          {week.chapterSummary}
-        </div>
-      ) : null}
-
       {statusLine ? (
         <div style={{ fontSize: 12, color: T.sub, marginTop: 8, lineHeight: 1.4 }}>{statusLine}</div>
       ) : null}
-
-      {week.briefText && !week.chapterSummary ? (
-        <div style={{ marginTop: 10 }}>
-          <div style={{ fontSize: 9, fontWeight: 700, color: T.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>
-            Weekly review
-          </div>
-          <div style={{
-            fontSize: 12.5, color: T.sub, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere",
-            overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical",
-          }}>
-            {week.briefText}
-          </div>
-        </div>
-      ) : week.status === "current" && onGenerateBrief && !week.briefText ? (
-        <div style={{ marginTop: 10 }}>
-          <button
-            type="button"
-            disabled={generatingBrief}
-            onClick={() => onGenerateBrief(week)}
-            style={{
-              padding: "6px 12px", borderRadius: 8, border: `0.5px solid rgba(200,144,42,0.35)`,
-              background: "rgba(200,144,42,0.08)", color: T.gold, fontSize: 11.5, fontWeight: 600,
-              cursor: "pointer", fontFamily: T.font, opacity: generatingBrief ? 0.6 : 1,
-            }}
-          >
-            {generatingBrief ? "Writing review…" : "Write weekly review"}
-          </button>
-        </div>
-      ) : null}
-
-      {briefError ? <div style={{ fontSize: 11, color: T.accent, marginTop: 6 }}>{briefError}</div> : null}
 
       <WeekDayJourney
         week={week}

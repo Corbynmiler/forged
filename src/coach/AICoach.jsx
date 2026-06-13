@@ -288,6 +288,7 @@ function buildArcStableBlock(activeBlock) {
   const arcTitle = resolveArcTitle(activeBlock.title, activeBlock.identity);
 
   return `─── ACTIVE ARC ───
+Arc ID: ${activeBlock.id}
 Title: ${arcTitle}
 Day ${dayNum} of ${duration} (${arcDurationWeeksLabel(duration)}, week ${weekNum} of ${weeksTotal})
 Started: ${activeBlock.startDate}
@@ -299,7 +300,7 @@ Bad-day minimum proof: ${(activeBlock.minimumProof || "").trim() || dash}
 ARC RULES FOR THIS CHAT:
 - Proof actions are the main focus during an active Arc. Other habits are secondary.
 - When they mention something that matches a proof action, log that habit with log_habit. Do not mark non-proof habits as proof.
-- create_habit never makes a proof action — proof linking happens in the Arc editor only.
+- If the user explicitly asks to create a proof action for this Arc (e.g. "I want to add a new proof action for this Arc"), use create_habit with is_proof_action:true and block_id set to the Arc ID above. Do NOT attach is_proof_action to unrelated habit requests.
 - If they ask to change Arc title, identity, proof list, or minimum: do NOT pretend to edit here. Tell them to tap "Edit my Arc" (or you will route them).
 - Arc length (weeks/days) CANNOT be changed after the Arc has started. If they ask to shorten/lengthen the Arc, say duration is locked for this Arc — they can still edit the fields above.
 - If they ask "what is my Arc" or "summarise my Arc", answer from this block in plain language.

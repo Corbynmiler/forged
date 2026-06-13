@@ -35,6 +35,7 @@ const COACH_TOOLS = [
       "Ask one clarifying question first if type or key details are ambiguous. " +
       "For LIMIT habits: before creating, ask what their aim is if they haven't made it clear — " +
       "'stay under this limit' (maintain), 'gradually reduce over time' (reduce), or 'just keep track' (monitor). " +
+      "PROOF ACTIONS: if the user explicitly asks to create a proof action for their active Arc, set is_proof_action:true and block_id to the Arc ID from the system prompt. Do NOT set these unless the user specifically requested a proof action. " +
       "If this tool returns success:false, tell the user it failed.",
     input_schema: {
       type: "object",
@@ -56,6 +57,8 @@ const COACH_TOOLS = [
         unit:          { type: "string",  description: "e.g. km, mins, calories, pouches, L" },
         target_date:   { type: "string",  description: "Optional deadline YYYY-MM-DD." },
         color:         { type: "string",  description: "#C0392B red, #27AE60 green, #2980B9 blue, #E67E22 orange, #8E44AD purple." },
+        is_proof_action: { type: "boolean", description: "Set true ONLY when user explicitly asks to create a proof action for their active Arc." },
+        block_id:      { type: "string",  description: "Active Arc block ID from the ACTIVE ARC section of the system prompt. Only set when is_proof_action is true." },
       },
       required: ["name", "habit_type"],
     },
@@ -453,6 +456,8 @@ async function executeCreateHabit(input, userId, db) {
     goal_aim:             goalAim,
     original_budget:      originalBudget,
     updated_at:           new Date().toISOString(),
+    is_proof_action:      input.is_proof_action === true || false,
+    block_id:             (input.is_proof_action === true && input.block_id) ? input.block_id : null,
   };
   const { data, error } = await db.from("habits").insert(row).select().single();
   if (error) throw new Error(`Insert failed: ${error.message}`);
