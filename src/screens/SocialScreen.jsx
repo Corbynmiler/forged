@@ -239,13 +239,6 @@ export function AddActionSheet({ onAddHabit, onAddGoal, onAddLog, onClose }) {
             <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>Outcomes with numbers (weight, savings, PRs) — not the same as daily habits or limits</div>
           </div>
         </button>
-        <button type="button" onClick={onAddLog} style={{ display:"flex", alignItems:"center", gap:14, width:"100%", padding:"14px 16px", borderRadius:T.r, border:`0.5px solid ${T.borderStrong}`, background:T.surface, marginBottom:10, cursor:"pointer", textAlign:"left" }}>
-          <span style={{ fontSize:22 }}>📓</span>
-          <div>
-            <div style={{ fontSize:15, fontWeight:500, color:T.text }}>Write in journal</div>
-            <div style={{ fontSize:12, color:T.muted, marginTop:2 }}>Freeform daily entries — thoughts, feelings, events. No streaks, no stats.</div>
-          </div>
-        </button>
         <button type="button" onClick={onClose} style={{ width:"100%", padding:"13px", borderRadius:T.rsm, border:"none", background:T.surface, color:T.muted, fontSize:14, cursor:"pointer", marginTop:4 }}>Cancel</button>
       </div>
     </div>

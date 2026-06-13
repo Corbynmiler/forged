@@ -324,7 +324,7 @@ function LooseEndsSection({ tasks = [], today, onAdd, onComplete, onPin, onDelet
         background: "none", border: "none", cursor: "pointer", padding: "4px 6px",
         color: T.hint, fontSize: 14, lineHeight: 1, flexShrink: 0,
       }}
-      aria-label="Delete loose end"
+      aria-label="Delete quick task"
     >
       ✕
     </button>
@@ -336,7 +336,7 @@ function LooseEndsSection({ tasks = [], today, onAdd, onComplete, onPin, onDelet
     <div style={{ margin: "0 14px 10px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, marginTop: 2 }}>
         <div style={{ fontSize: 10, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>
-          Loose Ends
+          Quick tasks
         </div>
         {done.length > 0 && (
           <div style={{ fontSize: 11, color: T.muted, fontWeight: 500 }}>
@@ -348,7 +348,7 @@ function LooseEndsSection({ tasks = [], today, onAdd, onComplete, onPin, onDelet
       {all.length === 0 && !inputOpen && (
         <button type="button" onClick={openInput}
           style={{ width: "100%", padding: "11px 14px", borderRadius: T.rsm, border: `0.5px dashed ${T.border}`, background: "none", color: T.hint, fontSize: 13, cursor: "pointer", textAlign: "left", fontFamily: T.font }}>
-          + Add a loose end
+          + Add a quick task
         </button>
       )}
 
@@ -407,7 +407,7 @@ function LooseEndsSection({ tasks = [], today, onAdd, onComplete, onPin, onDelet
             value={inputText}
             onChange={e => setInputText(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); submitAdd(); } if (e.key === "Escape") { setInputOpen(false); setInputText(""); } }}
-            placeholder="What needs clearing?"
+            placeholder="What needs doing?"
             maxLength={120}
             style={{ flex: 1, padding: "9px 12px", borderRadius: T.rsm, border: `0.5px solid ${T.borderStrong}`, background: T.surface, color: T.text, fontSize: 14, fontFamily: T.font, outline: "none", boxSizing: "border-box" }}
           />
@@ -602,6 +602,7 @@ export function TodayScreen({
   onViewArc = null,
   onLinkProofHabit = null,
   onOpenHub = null,
+  onCreateProofAction = null,
 }) {
   const [showProofPicker, setShowProofPicker] = useState(false);
   const [justCompleted, setJustCompleted] = useState(false);
@@ -764,7 +765,7 @@ export function TodayScreen({
             setShowProofPicker(false);
             if (onLinkProofHabit) await onLinkProofHabit(id);
           }}
-          onCreateNew={() => { setShowProofPicker(false); onAdd?.(); }}
+          onCreateNew={() => { setShowProofPicker(false); onCreateProofAction ? onCreateProofAction() : onAdd?.(); }}
         />
       )}
       {onOpenCoachMic && !arcActive && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic} habitCompletionPercentage={pct} habitsLoggedTodayCount={loggedCount} totalTrackables={totalTrackables}/>}
@@ -976,8 +977,8 @@ export function TodayScreen({
           onDelete={onDeleteTask}
         />
       )}
-      {/* Hub link — appears when an Arc is active so the user can still reach
-          their other habits, goals, and loose ends. Quiet by design. */}
+      {/* Hub link — appears when an Arc is active so users can reach their
+          other habits, goals, and quick tasks without leaving Arc focus. */}
       {arcActive && onOpenHub && (
         <button
           type="button"
@@ -985,16 +986,17 @@ export function TodayScreen({
           style={{
             display: "flex", alignItems: "center", justifyContent: "space-between",
             width: "calc(100% - 28px)", margin: "8px 14px 0",
-            padding: "11px 14px", borderRadius: T.rsm,
-            background: "rgba(255,255,255,0.025)", border: `0.5px solid ${T.border}`,
+            padding: "12px 14px", borderRadius: T.rsm,
+            background: "rgba(255,255,255,0.05)", border: `0.5px solid ${T.borderStrong}`,
             cursor: "pointer", fontFamily: T.font, textAlign: "left", boxSizing: "border-box",
           }}
-          aria-label="Open Hub — all habits, goals, and loose ends"
+          aria-label="Open Hub — all habits, goals, and quick tasks"
         >
-          <span style={{ fontSize: 12, color: T.muted, fontWeight: 500 }}>
-            All habits & goals
-          </span>
-          <span style={{ fontSize: 12, color: T.sub, fontWeight: 600 }}>→</span>
+          <div>
+            <div style={{ fontSize: 13, color: T.sub, fontWeight: 600 }}>All habits &amp; goals</div>
+            <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>Non-Arc habits, goals &amp; quick tasks</div>
+          </div>
+          <span style={{ fontSize: 14, color: T.sub, fontWeight: 600 }}>→</span>
         </button>
       )}
       <div style={{ height:16 }}/>
