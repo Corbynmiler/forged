@@ -182,7 +182,15 @@ async function setupMocks(page, mockMap) {
       await route.abort('failed');
     }
   });
-  await page.addInitScript(([k,v]) => localStorage.setItem(k,v), ['sb-apdmvbzfjuvxworjepze-auth-token', SESSION]);
+  await page.addInitScript(([k,v,uid]) => {
+    localStorage.setItem(k, v);
+    localStorage.setItem('forged_coach_opened', '1');
+    localStorage.setItem('forged_notif_nudge_dismissed', '1');
+    // Mark first-time page guides as already seen so they don't overlay proof cards
+    for (const pg of ['today','arc','social','journal','insights']) {
+      localStorage.setItem(`forged_ai_page_guide_seen:${uid}:${pg}`, '1');
+    }
+  }, ['sb-apdmvbzfjuvxworjepze-auth-token', SESSION, UID]);
 }
 
 async function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -207,7 +215,7 @@ async function loadPage(page, url = 'http://localhost:5173') {
   } catch {
     // Take the page as-is if timeout (it may be loading screen still)
   }
-  await wait(1500);
+  await wait(3500);
   await dismissCoachBubble(page);
   await wait(300);
 }
@@ -261,7 +269,7 @@ async function launchMobile(userData, label) {
   const { ctx: ctx2, page: page2 } = await launchMobile(
     buildMockMap(buildHabits(2), ARC_SCORES_TODAY_2), '2of5');
   await loadPage(page2);
-  await page2.evaluate(() => window.scrollTo(0, 280));
+  await page2.evaluate(() => window.scrollTo(0, 0));
   await wait(200);
   await shot(page2, 'B1_proof_2of5_cards');
   await ctx2.close();
@@ -273,7 +281,7 @@ async function launchMobile(userData, label) {
   const { ctx: ctx3, page: page3 } = await launchMobile(
     buildMockMap(buildHabits(3), ARC_SCORES_TODAY_2), '3of5');
   await loadPage(page3);
-  await page3.evaluate(() => window.scrollTo(0, 280));
+  await page3.evaluate(() => window.scrollTo(0, 0));
   await wait(200);
   await shot(page3, 'C1_proof_3of5_cards');
   await ctx3.close();
