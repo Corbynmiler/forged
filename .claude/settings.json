@@ -27,5 +27,29 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "mcp__a192d419-0282-4ef8-900e-c8fd9016413e__balance",
+      "mcp__a192d419-0282-4ef8-900e-c8fd9016413e__generate_image",
+      "mcp__a192d419-0282-4ef8-900e-c8fd9016413e__generate_video",
+      "mcp__a192d419-0282-4ef8-900e-c8fd9016413e__generate_audio",
+      "mcp__a192d419-0282-4ef8-900e-c8fd9016413e__media_upload",
+      "mcp__a192d419-0282-4ef8-900e-c8fd9016413e__media_confirm",
+      "mcp__a192d419-0282-4ef8-900e-c8fd9016413e__media_import_url",
+      "mcp__a192d419-0282-4ef8-900e-c8fd9016413e__job_display",
+      "mcp__a192d419-0282-4ef8-900e-c8fd9016413e__show_generations",
+      "mcp__a192d419-0282-4ef8-900e-c8fd9016413e__show_medias",
+      "mcp__a192d419-0282-4ef8-900e-c8fd9016413e__show_marketing_studio",
+      "mcp__a192d419-0282-4ef8-900e-c8fd9016413e__models_explore",
+      "mcp__a192d419-0282-4ef8-900e-c8fd9016413e__show_plans_and_credits",
+      "mcp__a192d419-0282-4ef8-900e-c8fd9016413e__transactions",
+      "mcp__a192d419-0282-4ef8-900e-c8fd9016413e__motion_control",
+      "mcp__a192d419-0282-4ef8-900e-c8fd9016413e__upscale_video",
+      "mcp__a192d419-0282-4ef8-900e-c8fd9016413e__media_upload_widget",
+      "mcp__a192d419-0282-4ef8-900e-c8fd9016413e__personal_clipper_create",
+      "mcp__a192d419-0282-4ef8-900e-c8fd9016413e__personal_clipper_status",
+      "mcp__a192d419-0282-4ef8-900e-c8fd9016413e__personal_clipper_jobs"
+    ]
   }
 }
