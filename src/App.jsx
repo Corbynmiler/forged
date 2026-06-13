@@ -3417,7 +3417,7 @@ export default function App() {
           if (!localStorage.getItem(nudgeKey)) {
             localStorage.setItem(nudgeKey, '1');
             const nid = ++coachNudgeSeqRef.current;
-            setCoachPageNudge({ id: nid, text: "Want to add context? Tell me what happened — I'll keep what matters." });
+            setCoachPageNudge({ id: nid, text: "Got context? Tell me here — I'll turn it into the record." });
             setTimeout(() => setCoachPageNudge(prev => (prev?.id === nid ? null : prev)), COACH_NUDGE_DURATION_MS);
           }
         } catch { /* ignore */ }
@@ -4560,14 +4560,13 @@ export default function App() {
                 .then(({ data: jRows }) => { if (jRows) setJournalEntries(jRows); });
             }
           }}
-          onWrapToday={() => {
+          onWrapToday={async () => {
             setShowCoach(false);
             setCoachOpenMode(null);
             setCoachPendingMsg(null);
             setCoachDraftInput(null);
-            setJournalOpenTab("journal");
-            setJournalAutoGenerate(true);
-            navigateTo("evidence");
+            await handleGenerateReceipt();
+            addToast("Entry added to today's Arc.");
           }}
         />}
 
