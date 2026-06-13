@@ -4250,7 +4250,7 @@ export default function App() {
                 <div
                   style={{
                     position:"fixed",
-                    left:14,
+                    left:"max(14px, calc(50% - 201px))",
                     bottom:aboveCoachBar,
                     zIndex:102,
                     display:"flex",
@@ -4258,7 +4258,7 @@ export default function App() {
                     alignItems:"flex-end",
                     justifyContent:"flex-start",
                     gap:10,
-                    maxWidth:"calc(100vw - 28px)",
+                    maxWidth:"calc(min(430px, 100vw) - 28px)",
                   }}
                 >
                   {pageGuide && pageGuide.page === screen ? (
@@ -4353,7 +4353,7 @@ export default function App() {
                   title="Add habit or goal"
                   style={{
                     position:"fixed",
-                    right:14,
+                    right:"max(14px, calc(50% - 201px))",
                     bottom:aboveCoachBar,
                     zIndex:102,
                     height:44,
