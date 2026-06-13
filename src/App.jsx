@@ -222,6 +222,10 @@ export default function App() {
   const [coachPendingMsg, setCoachPendingMsg] = useState(null);
   /** Pre-fills the coach text input on open (not auto-sent). Cleared on close. */
   const [coachDraftInput, setCoachDraftInput] = useState(null);
+  /** Guards duplicate auto-send when Add proof action → Create new habit is tapped twice. */
+  const proofCoachLaunchRef = useRef(false);
+  /** After coach creates a habit in the proof-action flow, link it to the active Arc. */
+  const proofActionLinkNextRef = useRef(false);
   /** Ephemeral bubble above the coach FAB: `{ id, text }` while visible; `id` ties to the navigation that triggered it. */
   const [coachPageNudge, setCoachPageNudge] = useState(null);
   const coachNudgeSeqRef = useRef(0);
@@ -3690,6 +3694,28 @@ export default function App() {
     setShowCoach(true);
   }
 
+  /** Opens coach and auto-sends the first message (AICoach pendingMessage path). */
+  function openCoachWithPendingMessage(text, { linkNextHabitAsProof = false } = {}) {
+    const trimmed = String(text ?? "").trim();
+    if (!trimmed) return;
+    if (proofCoachLaunchRef.current && showCoach) return;
+    proofCoachLaunchRef.current = true;
+    proofActionLinkNextRef.current = !!linkNextHabitAsProof;
+    try { localStorage.setItem("forged_coach_opened", "1"); } catch { /* ignore */ }
+    setCoachEverOpened(true);
+    setCoachDraftInput(null);
+    setCoachPendingMsg(trimmed);
+    setCoachOpenMode("text");
+    setShowCoach(true);
+  }
+
+  function openCoachForProofAction() {
+    openCoachWithPendingMessage(
+      "I want to add a new proof action for this Arc.",
+      { linkNextHabitAsProof: true },
+    );
+  }
+
   // Gate adding habits at 5 for free users
   function handleStartAdd() {
     if (demoBounce()) return;
@@ -4044,7 +4070,8 @@ export default function App() {
   // the You screen. navigateTo maps legacy screen ids onto the new structure so
   // older deep links (coach receipts, notifications) keep working.
   function navigateTo(target) {
-    if (target === "journal" || target === "evidence") { setArcTab("evidence"); setScreen("arc"); return; }
+    // Legacy "evidence"/"journal" routes → Arc timeline (current week), not chronology archive.
+    if (target === "journal" || target === "evidence") { setArcTab("arc"); setScreen("arc"); return; }
     if (target === "insights" || target === "reviews") { setArcTab("reviews");  setScreen("arc"); return; }
     if (target === "arc") { setArcTab("arc"); setScreen("arc"); return; }
     setScreen(target);
@@ -4098,7 +4125,7 @@ export default function App() {
             >×</button>
           </div>
         )}
-        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} activeBlock={activeBlock} todayArcScore={todayArcScore} arcLedgerRows={arcLedgerRows} arcProofSyncing={arcProofSyncing} onStartArc={openArcCoachCreate} onViewArc={() => { setScreen("arc"); setArcTab("arc"); }} onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} onOpenCoachMic={() => openCoachWithMode("mic")} onOpenCoachWithDraft={openCoachWithDraft} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} onOpenGoalDetail={id => setOpenGoalId(id)} todayJournalEntry={journalEntries.find(e => e.date === todayStr()) ?? null} onGenerateReceipt={handleGenerateReceipt} generatingReceipt={generatingReceipt} onOpenJournal={() => { setJournalOpenTab("journal"); setJournalAutoGenerate(false); navigateTo("evidence"); }} onLowerBudget={handleLowerBudget} tasks={tasks} onAddTask={handleAddTask} onCompleteTask={handleCompleteTask} onPinTask={handlePinTask} onDeleteTask={handleDeleteTask} onOpenHub={() => setScreen("hub")} onCreateProofAction={() => openCoachWithDraft("I want to add a new proof action for this Arc.")}/>}
+        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} activeBlock={activeBlock} todayArcScore={todayArcScore} arcLedgerRows={arcLedgerRows} arcProofSyncing={arcProofSyncing} onStartArc={openArcCoachCreate} onViewArc={() => { setScreen("arc"); setArcTab("arc"); }} onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} onOpenCoachMic={() => openCoachWithMode("mic")} onOpenCoachWithDraft={openCoachWithDraft} onCreateProofViaCoach={openCoachForProofAction} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} onOpenGoalDetail={id => setOpenGoalId(id)} todayJournalEntry={journalEntries.find(e => e.date === todayStr()) ?? null} onGenerateReceipt={handleGenerateReceipt} generatingReceipt={generatingReceipt} onOpenJournal={() => { setJournalOpenTab("journal"); setJournalAutoGenerate(false); navigateTo("arc"); }} onLowerBudget={handleLowerBudget} tasks={tasks} onAddTask={handleAddTask} onCompleteTask={handleCompleteTask} onPinTask={handlePinTask} onDeleteTask={handleDeleteTask} onOpenHub={() => setScreen("hub")}/>}
         {screen === "hub"      && <HubScreen
           habits={habits} goals={goals} tasks={tasks} activeBlock={activeBlock}
           onBack={() => setScreen("today")}
@@ -4518,7 +4545,7 @@ export default function App() {
         // going through the Add action sheet instead of the Habits tab.
         if (!isPro && habits.length >= 5) setShowUpgrade(true);
         else setShowAdd(true);
-      }} onAddGoal={() => { setShowAddChoice(false); setShowAddGoal(true); }} onAddLog={() => { setShowAddChoice(false); setJournalAutoGenerate(false); setShowJournalCompose(true); navigateTo("evidence"); }} onClose={() => setShowAddChoice(false)}/>}
+      }} onAddGoal={() => { setShowAddChoice(false); setShowAddGoal(true); }} onAddLog={() => { setShowAddChoice(false); setJournalAutoGenerate(false); setShowJournalCompose(true); navigateTo("arc"); }} onClose={() => setShowAddChoice(false)}/>}
       {showCoachTeaser && <CoachComingSoonSheet onClose={() => setShowCoachTeaser(false)} coachName={coachName} context={screen}/>}
       {logGoalId     && (() => { const g = resolveGoalForModal(logGoalId, goals, habits); return g ? <LogGoalModal goal={g} onClose={() => setLogGoalId(null)} onLog={(id, val, note) => { handleLogGoal(id, val, note); setLogGoalId(null); }}/> : null; })()}
       {editGoalId    && (() => { const g = resolveGoalForModal(editGoalId, goals, habits); return g ? <EditGoalModal goal={g} onClose={() => setEditGoalId(null)} onSave={handleEditGoalSave}/> : null; })()}
@@ -4532,13 +4559,26 @@ export default function App() {
           draftInput={coachDraftInput}
           habits={habits} goals={goals} user={user} isPro={isPro} activeBlock={activeBlock}
           onOpenEditArc={openArcCoachEdit}
-          onClose={() => { setShowCoach(false); setCoachOpenMode(null); setCoachPendingMsg(null); setCoachDraftInput(null); }}
+          onClose={() => {
+            setShowCoach(false);
+            setCoachOpenMode(null);
+            setCoachPendingMsg(null);
+            setCoachDraftInput(null);
+            proofCoachLaunchRef.current = false;
+            proofActionLinkNextRef.current = false;
+          }}
           onUpgrade={() => setShowUpgrade(true)} coachName={coachName}
           coachIcon={coachIcon}
           coachAccentColor={habits.find(h => h.habitType !== "log")?.color || T.accent}
           currentScreen={screen}
           onNavigateTo={navigateTo}
-          onHabitCreated={h  => setHabits(p => p.some(x => String(x.id) === String(h.id)) ? p.map(x => String(x.id) === String(h.id) ? h : x) : [...p, h])}
+          onHabitCreated={h => {
+            setHabits(p => p.some(x => String(x.id) === String(h.id)) ? p.map(x => String(x.id) === String(h.id) ? h : x) : [...p, h]);
+            if (proofActionLinkNextRef.current && activeBlock?.id && h?.id) {
+              proofActionLinkNextRef.current = false;
+              void linkHabitAsProof(h.id);
+            }
+          }}
           onGoalCreated={g   => setGoals(p  => p.some(x => String(x.id) === String(g.id)) ? p.map(x => String(x.id) === String(g.id) ? g : x) : [...p, g])}
           previewNormalCoachGreeting={previewNormalCoachGreeting}
           onCoachLogsApplied={applyCoachLogsBatch}
@@ -4567,6 +4607,8 @@ export default function App() {
             setCoachOpenMode(null);
             setCoachPendingMsg(null);
             setCoachDraftInput(null);
+            proofCoachLaunchRef.current = false;
+            proofActionLinkNextRef.current = false;
             const ok = await handleGenerateReceipt();
             addToast(ok ? "Entry added to today's Arc." : "Couldn't create entry — try again from Today.");
           }}

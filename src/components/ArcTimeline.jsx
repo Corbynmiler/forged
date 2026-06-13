@@ -1386,19 +1386,6 @@ export function ArcTimeline({
         </div>
       ) : null}
 
-      {!embedded ? (
-        <div style={{ marginTop: 8, paddingTop: 16, borderTop: `0.5px solid rgba(255,255,255,0.06)` }}>
-          <button
-            type="button"
-            onClick={() => setShowChronology(true)}
-            style={SECONDARY_BTN}
-          >
-            <span>All evidence chronology</span>
-            <span style={{ color: T.muted, fontSize: 11 }}>{journalEntries.length} entries ▸</span>
-          </button>
-        </div>
-      ) : null}
-
       {showChronology ? (
         <EvidenceChronologySheet
           journalEntries={journalEntries}
