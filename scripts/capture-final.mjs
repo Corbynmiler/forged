@@ -21,10 +21,10 @@ const USER_OBJ = {
 
 const SESSION = JSON.stringify({
   access_token: ACCESS_TOKEN, token_type: 'bearer', expires_in: 3600,
-  expires_at: 1781324573, refresh_token: '', user: USER_OBJ,
+  expires_at: Math.floor(Date.now() / 1000) + 86400 * 365, refresh_token: 'mock-refresh', user: USER_OBJ,
 });
 
-const PROFILE = [{id:UID,name:'Molly',avatar_url:'🐼',created_at:'2026-04-25T13:22:24.215124+00:00',updated_at:'2026-06-13T03:17:11.131+00:00'}];
+const PROFILE = [{id:UID,name:'Molly',avatar_url:'🐼',onboarded:true,created_at:'2026-04-25T13:22:24.215124+00:00',updated_at:'2026-06-13T03:17:11.131+00:00'}];
 
 const FORGE_BLOCKS = [{
   id:BLOCK_ID,user_id:UID,
@@ -117,7 +117,7 @@ async function setupMocks(page) {
     const url = new URL(route.request().url());
     const p = url.pathname;
     if (p.includes('/auth/v1/')) {
-      await route.fulfill({status:200,contentType:'application/json',headers:{'Access-Control-Allow-Origin':'*'},body:JSON.stringify(p.includes('/user')?USER_OBJ:{access_token:ACCESS_TOKEN,token_type:'bearer',expires_in:3600,expires_at:1781324573,refresh_token:'',user:USER_OBJ})});
+      await route.fulfill({status:200,contentType:'application/json',headers:{'Access-Control-Allow-Origin':'*'},body:JSON.stringify(p.includes('/user')?USER_OBJ:{access_token:ACCESS_TOKEN,token_type:'bearer',expires_in:3600,expires_at:Math.floor(Date.now()/1000)+86400*365,refresh_token:'mock-refresh',user:USER_OBJ})});
     } else if (p.includes('/realtime/')) {
       await route.abort('failed');
     } else if (p.includes('/rest/v1/')) {
