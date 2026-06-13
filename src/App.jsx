@@ -3409,6 +3409,19 @@ export default function App() {
         next.add(awardKey);
         return next;
       });
+
+      // First proof tap of the day → one-shot nudge toward the coach for context
+      if (isProof && !wasLogged) {
+        try {
+          const nudgeKey = `forged_proof_ctx_nudge:${sessionUserId}:${today}`;
+          if (!localStorage.getItem(nudgeKey)) {
+            localStorage.setItem(nudgeKey, '1');
+            const nid = ++coachNudgeSeqRef.current;
+            setCoachPageNudge({ id: nid, text: "Want to add context? Tell me what happened — I'll keep what matters." });
+            setTimeout(() => setCoachPageNudge(prev => (prev?.id === nid ? null : prev)), COACH_NUDGE_DURATION_MS);
+          }
+        } catch { /* ignore */ }
+      }
     }
   }
 
