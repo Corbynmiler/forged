@@ -137,6 +137,14 @@ const JOURNAL_ENTRIES = [
   {id:'8f07f3fb-b061-4b06-84c9-fba1af3e54f8',user_id:UID,date:'2026-06-10',content:"Proof shown: Deep work (80 min), run 4km ✓, no doom scroll ✓, evening check-in ✓. 4/5. (Missed the post again.)\n\nWins: Best deep work session in two weeks — 80 minutes felt like 30. Flow state showing up more consistently.\n\nHard parts: Posting is becoming my weak spot. Need to rethink how I'm generating output worth sharing.\n\nPattern: Deep work is building well. But deep work without visible output is just spinning. Need to close more loops publicly.\n\nTomorrow: Whatever comes out of deep work tomorrow goes out that day. Rough draft is fine.",daily_context:[],is_ai_generated:true,manually_edited:false,created_at:'2026-06-13T02:05:29.900687+00:00'},
 ];
 
+// Today's generated receipt — used for "after Generate Entry" states
+const JOURNAL_ENTRY_TODAY = {
+  id:'ae4b2912-a1b2-4c3d-8e9f-0123456789ab',user_id:UID,date:TODAY,
+  content:"Proof shown: Deep work (72 min) ✓, run 5km ✓, no doom scroll ✓, posted rough draft ✓, evening check-in ✓. 5/5. Fifth perfect day.\n\nWins: Locked in from the first 5 minutes. That's been the hardest part — starting. Today it clicked immediately.\n\nHard parts: Almost skipped the post. Shipped it anyway. Rough and published beats polished and stuck.\n\nPattern: The system is building momentum. Each proof action feeds the next. This is what evidence over motivation looks like in practice.\n\nTomorrow: Day 22. Keep the chain.",
+  daily_context:[],is_ai_generated:true,manually_edited:false,created_at:'2026-06-13T21:05:00.000Z',
+};
+const JOURNAL_ENTRIES_WITH_TODAY = [...JOURNAL_ENTRIES, JOURNAL_ENTRY_TODAY];
+
 const WEEKLY_BRIEFS = [
   {user_id:UID,week_start:'2026-06-01',brief_text:"Week 2 complete. Proof rate: 69% — including a bad day on arc day 11 (1/5, work emergency) and a clean bounce back the next morning. That recovery pattern is the clearest proof in the arc so far. Week 2 also had a second perfect day (arc day 15). Deep work is now Molly's most reliable habit — 6 of 7 days and the sessions are getting longer. Posting publicly is the consistent gap: she's shipping less than her other proof actions. The system is real. The output valve needs work."},
   {user_id:UID,week_start:'2026-05-25',brief_text:"Week 1 of Build the System is in. Molly held a 71% proof rate across 7 days — including her first perfect day on Saturday. She hit the deep work session on 6 of 7 days and ran more than she has in months. The real signal this week: she showed up on Wednesday with 2/5 instead of abandoning the arc entirely. That floor-holding is new. The morning sequence is forming. The system has a heartbeat."},
@@ -158,9 +166,9 @@ function jsonResp(data) {
 }
 function emptyResp() { return {status:200,contentType:'application/json',headers:{'Access-Control-Allow-Origin':'*'},body:'[]'}; }
 
-function buildMockMap(habits, arcScores) {
+function buildMockMap(habits, arcScores, journalEntries = JOURNAL_ENTRIES) {
   return { profiles: PROFILE, habits, forge_blocks: FORGE_BLOCKS,
-    arc_daily_scores: arcScores, journal_entries: JOURNAL_ENTRIES,
+    arc_daily_scores: arcScores, journal_entries: journalEntries,
     weekly_brief_generation_usage: WEEKLY_BRIEFS, coach_memory: COACH_MEMORY };
 }
 
@@ -304,7 +312,7 @@ async function launchMobile(userData, label) {
   // ARC SCREEN — overview, timeline, details (from the 5/5 context)
   // ═══════════════════════════════════════════════════════════════════════════
   console.log('[ ARC screen ]');
-  const arcBtn = page5.locator('button:has-text("Arc")').first();
+  const arcBtn = page5.locator('[data-tour="nav"] button:has-text("Arc"), nav button:has-text("Arc")').first();
   if (await arcBtn.count() > 0) {
     await arcBtn.click();
     await wait(2500);
@@ -327,7 +335,7 @@ async function launchMobile(userData, label) {
   // ═══════════════════════════════════════════════════════════════════════════
   console.log('[ Journal receipt ]');
   await loadPage(page5);
-  const hubBtn = page5.locator('[aria-label="Open Hub — all habits, goals, and loose ends"]').first();
+  const hubBtn = page5.locator('[aria-label="Open Hub — all habits, goals, and quick tasks"]').first();
   if (await hubBtn.count() > 0) {
     await hubBtn.click();
     await wait(1500);
@@ -370,6 +378,62 @@ async function launchMobile(userData, label) {
   if (!chatFound) console.log('  ⚠️ Coach chat button not found');
 
   await ctx5.close();
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // STATE 5: 5/5 + TODAY'S RECEIPT — after Generate Entry
+  // ═══════════════════════════════════════════════════════════════════════════
+  console.log('[ 5/5 + receipt — after Generate Entry ]');
+  const { ctx: ctx5r, page: page5r } = await launchMobile(
+    buildMockMap(buildHabits(5), ARC_DAILY_SCORES, JOURNAL_ENTRIES_WITH_TODAY), '5of5r');
+  await loadPage(page5r);
+  await page5r.evaluate(() => window.scrollTo(0, 0));
+  await wait(200);
+  await shot(page5r, 'D3_receipt_top');
+  // Scroll down to where the TodayReceiptCard typically appears (below proof section)
+  await page5r.evaluate(() => window.scrollTo(0, 500));
+  await wait(400);
+  await shot(page5r, 'D4_receipt_card');
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ARC WITH TODAY'S EVIDENCE — week view showing today's receipt dot
+  // ═══════════════════════════════════════════════════════════════════════════
+  console.log('[ Arc with today\'s evidence ]');
+  const arcBtn5r = page5r.locator('[data-tour="nav"] button:has-text("Arc"), nav button:has-text("Arc")').first();
+  if (await arcBtn5r.count() > 0) {
+    await page5r.evaluate(() => window.scrollTo(0, 0));
+    await wait(200);
+    await arcBtn5r.click();
+    await wait(2500);
+    await dismissCoachBubble(page5r);
+    await shot(page5r, 'E4_arc_today_evidence_overview');
+    await page5r.evaluate(() => window.scrollBy(0, 200));
+    await wait(400);
+    await shot(page5r, 'E5_arc_today_evidence_timeline');
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // HUB PAGE — All habits & goals
+  // Navigate back to Today first, then click "All habits & goals" button
+  // ═══════════════════════════════════════════════════════════════════════════
+  console.log('[ Hub page ]');
+  // Go back to Today screen via nav
+  await loadPage(page5r);
+  await wait(500);
+  // Now find and click the "All habits & goals" hub shortcut
+  const hubShortcut = page5r.locator('[aria-label="Open Hub — all habits, goals, and quick tasks"]').first();
+  if (await hubShortcut.count() > 0) {
+    await hubShortcut.click();
+    await wait(1800);
+    await dismissCoachBubble(page5r);
+    await shot(page5r, 'I1_hub_top');
+    await page5r.evaluate(() => window.scrollTo(0, 300));
+    await wait(300);
+    await shot(page5r, 'I2_hub_habits');
+  } else {
+    console.log('  ⚠️ Hub shortcut not found on Today — app may not have arcActive');
+  }
+
+  await ctx5r.close();
 
   // ═══════════════════════════════════════════════════════════════════════════
   // DESKTOP — hero shot of today + arc

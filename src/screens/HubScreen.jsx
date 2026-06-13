@@ -91,7 +91,7 @@ function HubLooseEnds({ tasks = [], today, onAdd, onComplete, onPin, onDelete })
       {all.length > 0 && !inputOpen && (
         <button type="button" onClick={openInput}
           style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 0 2px", background: "none", border: "none", cursor: "pointer", color: T.hint, fontSize: 12, fontFamily: T.font }}>
-          <span style={{ fontSize: 16, lineHeight: 1 }}>+</span> Add a loose end
+          <span style={{ fontSize: 16, lineHeight: 1 }}>+</span> Add a quick task
         </button>
       )}
       {inputOpen && (
@@ -181,7 +181,7 @@ export function HubScreen({
         <div style={{ padding: "32px 28px", textAlign: "center" }}>
           <div style={{ fontSize: 36, marginBottom: 12 }}>⚒️</div>
           <div style={{ fontSize: 14, color: T.muted, lineHeight: 1.65 }}>
-            Nothing in the Hub yet. Your proof actions stay on Today; non-proof habits, goals, and loose ends will show up here.
+            Nothing in the Hub yet. Your proof actions stay on Today; non-proof habits, goals, and quick tasks will show up here.
           </div>
           {onAdd && (
             <button type="button" onClick={onAdd}
