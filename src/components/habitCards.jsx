@@ -230,7 +230,7 @@ function dailyLogConfirmMessage(h) {
 }
 
 // ─── DAILY CARD ───────────────────────────────────────────────────────────────
-export function DailyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit }) {
+export function DailyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit, proofMode = false }) {
   const tLog  = latestTodayLog(habit);
   const logged = isLoggedToday(habit);
   const isSkip = tLog?.value === "skip";
@@ -313,9 +313,9 @@ export function DailyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDele
           {tLog?.note?.trim() ? <div style={{ fontSize:12, color:T.sub, lineHeight:1.5, paddingLeft:24, fontStyle:"italic" }}>{tLog.note.trim()}</div> : null}
         </div>
       )}
-      {logged && !isSkip && <DoneBanner habit={habit}/>}
-      {logged && !isSkip && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote}/>}
-      {!logged && (
+      {!proofMode && logged && !isSkip && <DoneBanner habit={habit}/>}
+      {!proofMode && logged && !isSkip && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote}/>}
+      {!proofMode && !logged && (
         <div style={{ padding:"0 15px 12px" }}>
           {restOpen ? (
             <div style={{ borderRadius:T.rsm, border:`0.5px solid ${T.borderMid}`, background:T.surface, padding:"12px 12px 10px" }}>
@@ -342,7 +342,7 @@ export function DailyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDele
 }
 
 // ─── WEEKLY CARD ──────────────────────────────────────────────────────────────
-export function WeeklyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit }) {
+export function WeeklyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit, proofMode = false }) {
   const t = todayStr();
   const isSkip = hasRestDay(habit, t);
   const sessionToday = habit.logs.some(l => l.date === t && l.value === true);
@@ -394,9 +394,9 @@ export function WeeklyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDel
           ) : null}
         </div>
       )}
-      {sessionToday && !isSkip && <DoneBanner habit={habit}/>}
-      {sessionToday && !isSkip && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote}/>}
-      {!sessionToday && !isSkip && !targetMet && (
+      {!proofMode && sessionToday && !isSkip && <DoneBanner habit={habit}/>}
+      {!proofMode && sessionToday && !isSkip && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote}/>}
+      {!proofMode && !sessionToday && !isSkip && !targetMet && (
         <div style={{ padding:"0 15px 12px" }}>
           {restOpen ? (
             <div style={{ borderRadius:T.rsm, border:`0.5px solid ${T.borderMid}`, background:T.surface, padding:"12px 12px 10px" }}>
@@ -423,7 +423,7 @@ export function WeeklyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDel
 }
 
 // ─── PROJECT CARD ─────────────────────────────────────────────────────────────
-export function ProjectCard({ habit, onOpenLog, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit }) {
+export function ProjectCard({ habit, onOpenLog, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit, proofMode = false }) {
   const stats = getProjectStats(habit);
   const tLogs = todayLogs(habit);
   const logged = tLogs.length > 0;
@@ -473,14 +473,14 @@ export function ProjectCard({ habit, onOpenLog, onAddNote, onEditHabit, onDelete
           <div title={lastWin.value.win} style={{ fontSize:12, color:T.sub, lineHeight:1.5 }}>{latestWinDisplay}</div>
         </div>
       )}
-      {logged && <DoneBanner habit={habit}/>}
-      {logged && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote}/>}
+      {!proofMode && logged && <DoneBanner habit={habit}/>}
+      {!proofMode && logged && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote}/>}
     </div>
   );
 }
 
 // ─── LIMIT CARD ───────────────────────────────────────────────────────────────
-export function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit, onLowerBudget, onOpenCoachWithDraft }) {
+export function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit, onLowerBudget, onOpenCoachWithDraft, proofMode = false }) {
   const todayLogsArr = habit.logs.filter(l => l.date === todayStr() && l.value !== "quicknote");
   const used   = todayLogsArr.reduce((s, l) => s + (typeof l.value === "number" ? l.value : 0), 0);
   const budget = habit.dailyBudget || 60;
@@ -598,7 +598,7 @@ export function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHa
           )}
         </div>
       )}
-      {logged && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote}/>}
+      {!proofMode && logged && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote}/>}
     </div>
   );
 }
