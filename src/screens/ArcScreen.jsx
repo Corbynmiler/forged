@@ -87,7 +87,8 @@ export function ArcScreen({
 
   useEffect(() => {
     if (tab === "evidence") {
-      setOpenChronology(true);
+      setInitialWeek(getCurrentArcWeek(activeBlock));
+      setOpenChronology(false);
       onTabChange?.("arc");
     } else if (tab === "reviews") {
       setInitialWeek(getCurrentArcWeek(activeBlock));

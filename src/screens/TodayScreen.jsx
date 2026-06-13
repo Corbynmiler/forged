@@ -582,6 +582,7 @@ export function TodayScreen({
   onEditHabit, onDeleteHabit, onShareHabit, sharingHabitId,
   onAdd, onSaveLogEntry,
   onOpenCoachMic, onOpenCoachWithDraft,
+  onCreateProofViaCoach = null,
   coachName, coachIcon, coachHabitColor, onOpenGoalDetail,
   onLowerBudget = null,
   todayJournalEntry = null,
@@ -602,7 +603,6 @@ export function TodayScreen({
   onViewArc = null,
   onLinkProofHabit = null,
   onOpenHub = null,
-  onCreateProofAction = null,
 }) {
   const [showProofPicker, setShowProofPicker] = useState(false);
   const [justCompleted, setJustCompleted] = useState(false);
@@ -765,7 +765,11 @@ export function TodayScreen({
             setShowProofPicker(false);
             if (onLinkProofHabit) await onLinkProofHabit(id);
           }}
-          onCreateNew={() => { setShowProofPicker(false); onCreateProofAction ? onCreateProofAction() : onAdd?.(); }}
+          onCreateNew={() => {
+            setShowProofPicker(false);
+            if (onCreateProofViaCoach) onCreateProofViaCoach();
+            else onAdd?.();
+          }}
         />
       )}
       {onOpenCoachMic && !arcActive && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic} habitCompletionPercentage={pct} habitsLoggedTodayCount={loggedCount} totalTrackables={totalTrackables}/>}
