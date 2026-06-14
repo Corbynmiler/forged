@@ -542,6 +542,23 @@ function useViewportDayFocus(dayRefs, reducedMotion) {
   return { focusedDate, scrollToDay };
 }
 
+// Pick the shortest meaningful headline for a day receipt.
+// Avoids the raw "Proof shown: ..." first line — uses pattern or narrative opener instead.
+function dayDisplayTitle(parsed) {
+  if (!parsed) return null;
+  if (parsed.pattern?.trim()) return parsed.pattern.trim();
+  if (parsed.narrative?.trim()) {
+    const first = parsed.narrative.split(/(?<=[.!?])\s+/)[0]?.trim();
+    if (first) return first;
+  }
+  // Strip the "Proof shown: ..." prefix as a last resort — take text after the first sentence
+  if (parsed.title) {
+    const clean = parsed.title.replace(/^Proof shown:\s*/i, "").trim();
+    return clean.split(/(?<=[.!?])\s+/)[0]?.trim() || clean;
+  }
+  return null;
+}
+
 function WeekDayJourney({ week, arcLedgerRows, journalEntries, reducedMotion }) {
   const days = useMemo(
     () => buildWeekDayJourney(week, { arcLedgerRows, journalEntries }),
@@ -613,11 +630,11 @@ function WeekDayJourney({ week, arcLedgerRows, journalEntries, reducedMotion }) 
                 >
                   {/* Ring + text side by side */}
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    {/* Mini proof ring */}
+                    {/* Mini proof ring — 36px, same visual as Today screen */}
                     {day.state !== "future" && day.proofTotal > 0 ? (
-                      <div style={{ position: "relative", width: 30, height: 30, flexShrink: 0 }}>
+                      <div style={{ position: "relative", width: 36, height: 36, flexShrink: 0 }}>
                         <ProofRing
-                          size={30}
+                          size={36}
                           percent={Math.round((day.proofDone / day.proofTotal) * 100)}
                           active={day.state === "today"}
                           complete={day.proofDone === day.proofTotal}
@@ -627,7 +644,7 @@ function WeekDayJourney({ week, arcLedgerRows, journalEntries, reducedMotion }) 
                           display: "flex", alignItems: "center", justifyContent: "center",
                         }}>
                           <span style={{
-                            fontSize: 7.5, fontWeight: 700, lineHeight: 1,
+                            fontSize: 8.5, fontWeight: 700, lineHeight: 1,
                             color: day.proofDone === day.proofTotal ? T.gold : T.sub,
                           }}>
                             {day.proofDone}/{day.proofTotal}
@@ -636,12 +653,12 @@ function WeekDayJourney({ week, arcLedgerRows, journalEntries, reducedMotion }) 
                       </div>
                     ) : (
                       <div style={{
-                        width: 30, height: 30, flexShrink: 0, borderRadius: "50%",
+                        width: 36, height: 36, flexShrink: 0, borderRadius: "50%",
                         border: "2px solid rgba(255,255,255,0.06)",
                       }} />
                     )}
 
-                    {/* Date + title */}
+                    {/* Date + catchy title (single line) */}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{
                         fontSize: 10, fontWeight: 500,
@@ -649,16 +666,18 @@ function WeekDayJourney({ week, arcLedgerRows, journalEntries, reducedMotion }) 
                       }}>
                         {day.label}
                       </div>
-                      {day.hasReceipt && day.parsed?.title ? (
-                        <div style={{
-                          fontSize: 13, fontWeight: 600, color: T.text,
-                          marginTop: 1, lineHeight: 1.3,
-                          overflow: "hidden", display: "-webkit-box",
-                          WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
-                        }}>
-                          {day.parsed.title}
-                        </div>
-                      ) : day.state === "partial" ? (
+                      {day.hasReceipt ? (() => {
+                        const headline = dayDisplayTitle(day.parsed);
+                        return headline ? (
+                          <div style={{
+                            fontSize: 13, fontWeight: 600, color: T.text,
+                            marginTop: 2, lineHeight: 1.3,
+                            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                          }}>
+                            {headline}
+                          </div>
+                        ) : null;
+                      })() : day.state === "partial" ? (
                         <div style={{ fontSize: 11, color: T.hint, marginTop: 1 }}>Proof logged · no receipt</div>
                       ) : day.state === "today" && !day.hasProof ? (
                         <div style={{ fontSize: 11, color: T.hint, marginTop: 1 }}>No evidence yet</div>
@@ -672,7 +691,7 @@ function WeekDayJourney({ week, arcLedgerRows, journalEntries, reducedMotion }) 
 
                   {/* Expanded receipt on tap */}
                   {expandedDate === day.date && day.hasReceipt ? (
-                    <div onClick={e => e.stopPropagation()} style={{ marginTop: 10, paddingLeft: 40 }}>
+                    <div onClick={e => e.stopPropagation()} style={{ marginTop: 10, paddingLeft: 46 }}>
                       <ReceiptExpandedBody parsed={day.parsed} content={day.journal.content} />
                       <button type="button" onClick={() => setExpandedDate(null)}
                         style={{ marginTop: 6, padding: 0, background: "none", border: "none", color: T.sub, fontSize: 11, cursor: "pointer", fontFamily: T.font }}>
