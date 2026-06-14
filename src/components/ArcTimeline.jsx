@@ -124,17 +124,19 @@ function useRailCenterSelection(railRef, onSegment, reducedMotion) {
 
 function ProofRing({ percent, size = 40, active, complete }) {
   const p = percent == null ? 0 : Math.max(0, Math.min(100, percent));
-  const r = (size - 5) / 2;
+  const sw = Math.max(3.5, size * 0.115);
+  const r = (size - sw) / 2;
   const c = 2 * Math.PI * r;
   const offset = c - (p / 100) * c;
-  const stroke = active ? T.gold : complete ? "#3d9b5f" : "rgba(255,255,255,0.12)";
+  const stroke = complete ? T.goldBright : (p > 0 || active) ? T.gold : "rgba(255,255,255,0.18)";
   return (
-    <svg width={size} height={size} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="2.5" />
+    <svg width={size} height={size} style={{ position: "absolute", inset: 0, pointerEvents: "none",
+      filter: complete ? `drop-shadow(0 0 4px ${T.goldBright}66)` : "none" }}>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={T.surface} strokeWidth={sw} />
       {(p > 0 || active) ? (
         <circle
           cx={size / 2} cy={size / 2} r={r} fill="none"
-          stroke={stroke} strokeWidth="2.5" strokeLinecap="round"
+          stroke={stroke} strokeWidth={sw} strokeLinecap="round"
           strokeDasharray={c} strokeDashoffset={offset}
           transform={`rotate(-90 ${size / 2} ${size / 2})`}
         />
@@ -645,7 +647,7 @@ function WeekDayJourney({ week, arcLedgerRows, journalEntries, reducedMotion }) 
                         }}>
                           <span style={{
                             fontSize: 8.5, fontWeight: 700, lineHeight: 1,
-                            color: day.proofDone === day.proofTotal ? T.gold : T.sub,
+                            color: day.proofDone === day.proofTotal ? T.goldBright : T.text,
                           }}>
                             {day.proofDone}/{day.proofTotal}
                           </span>
