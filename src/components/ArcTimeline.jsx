@@ -87,11 +87,9 @@ function useRailCenterSelection(railRef, onSegment, reducedMotion) {
     const el = rail?.querySelector(`[data-segment="${segment}"]`);
     if (!el) return;
     skipRef.current = true;
-    el.scrollIntoView({
-      behavior: reducedMotion ? "auto" : "smooth",
-      inline: "center",
-      block: "nearest",
-    });
+    // Use scrollTo on the rail element only — never touches vertical page scroll
+    const targetLeft = el.offsetLeft - rail.clientWidth / 2 + el.offsetWidth / 2;
+    rail.scrollTo({ left: targetLeft, behavior: reducedMotion ? "auto" : "smooth" });
     const delay = reducedMotion ? 60 : 380;
     window.setTimeout(() => {
       skipRef.current = false;
@@ -1188,10 +1186,6 @@ export function ArcTimeline({
 
   const handleSelectSegment = useCallback((seg) => {
     scrollToSegment(seg);
-    // Scroll page back to arc top so new week's content starts fresh from the top
-    setTimeout(() => {
-      containerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 50);
   }, [scrollToSegment]);
 
   useEffect(() => {

@@ -298,7 +298,7 @@ export function DailyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDele
           : <CheckBtn logged={logged} habit={habit} onClick={handleCheckTap}/>
         }
       </div>
-      {confirmMsg && (
+      {!proofMode && confirmMsg && (
         <p style={{ fontSize:12, color:T.gold, margin:0, padding:"0 15px 10px", lineHeight:1.4, opacity:confirmFading?0:1, transition:"opacity 0.35s ease" }}>
           {confirmMsg}
         </p>
