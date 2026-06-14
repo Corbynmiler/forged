@@ -93,7 +93,7 @@ const ARC_DAILY_SCORES = [
 
 const JOURNAL_ENTRIES = [
   { id: '24f6c304', user_id: UID, date: '2026-06-12', content: "Proof shown: Deep work (75 min), run 4km ✓, no doom scroll ✓, posted (mental model thread — got replies), evening check-in ✓. 5/5. Fourth perfect day.\n\nThe system is working. But a system without an output valve just accumulates. Shipping is part of the proof, not extra credit.\n\nTomorrow: Day 21.", daily_context: [], is_ai_generated: true, manually_edited: false, created_at: '2026-06-13T02:05:29.900687+00:00' },
-  { id: 'dbcdd0ea', user_id: UID, date: '2026-06-11', content: "3/5 again. Deep work, move, check-in on autopilot now. Consistently miss the post.", daily_context: [], is_ai_generated: false, manually_edited: false, created_at: '2026-06-13T02:04:50.311091+00:00' },
+  { id: 'dbcdd0ea', user_id: UID, date: '2026-06-11', content: "Deep work and movement are locked in.\n\nThree proof actions completed on autopilot now. The post is still the gap — fourth day in a row. Naming it here so tomorrow has no excuse.", daily_context: [], is_ai_generated: false, manually_edited: false, created_at: '2026-06-13T02:04:50.311091+00:00' },
   { id: '8f07f3fb', user_id: UID, date: '2026-06-10', content: "Proof shown: Deep work (80 min), run 4km ✓, no doom scroll ✓, evening check-in ✓. 4/5.\n\nBest deep work session in two weeks — 80 minutes felt like 30. Flow state showing up more consistently.", daily_context: [], is_ai_generated: true, manually_edited: false, created_at: '2026-06-13T02:05:29.900687+00:00' },
   { id: '681972d4', user_id: UID, date: '2026-06-07', content: "Proof shown: Deep work (85 min), 6km run, phone-free until 9am, posted one useful breakdown, evening reflection. 5/5. Third perfect day.\n\nRan the furthest I have in months without planning to.", daily_context: [], is_ai_generated: true, manually_edited: false, created_at: '2026-06-13T02:05:29.900687+00:00' },
   { id: '3569eab2', user_id: UID, date: '2026-05-31', content: "Proof shown: Deep work (90 min), 5km run, no doom scroll until 9:30am, posted two useful things, evening check-in complete. First 5/5 day.\n\nStringing all five together felt different. Not just completing items — actually building something that resembles a system.", daily_context: [], is_ai_generated: true, manually_edited: false, created_at: '2026-06-13T02:05:29.900687+00:00' },
@@ -146,14 +146,41 @@ async function setupMocks(page) {
 
 async function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// Smoothly scroll by scrolling in small increments
-async function smoothScroll(page, targetY, durationMs = 1800) {
+// Node-level smooth vertical scroll — each step awaited so headless renders every frame
+async function smoothScroll(page, targetY, durationMs = 2000) {
   const startY = await page.evaluate(() => window.scrollY);
   const distance = targetY - startY;
-  const steps = Math.max(20, Math.round(durationMs / 50));
+  const steps = Math.max(30, Math.round(durationMs / 40));
   for (let i = 1; i <= steps; i++) {
-    const y = startY + distance * (i / steps);
+    const t = i / steps;
+    const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+    const y = startY + distance * ease;
     await page.evaluate((yy) => window.scrollTo(0, yy), y);
+    await wait(durationMs / steps);
+  }
+}
+
+// Node-level smooth horizontal rail scroll — drives scrollLeft directly, no rAF lag
+async function smoothScrollRail(page, durationMs = 3800) {
+  const maxScroll = await page.evaluate(() => {
+    const btn = document.querySelector('[data-segment]');
+    if (!btn) return 0;
+    let rail = btn.parentElement;
+    while (rail && getComputedStyle(rail).overflowX !== 'auto') rail = rail.parentElement;
+    return rail ? (rail.scrollWidth - rail.clientWidth) : 0;
+  });
+  if (!maxScroll) return;
+  const steps = Math.max(40, Math.round(durationMs / 40));
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+    await page.evaluate((sl) => {
+      const btn = document.querySelector('[data-segment]');
+      if (!btn) return;
+      let rail = btn.parentElement;
+      while (rail && getComputedStyle(rail).overflowX !== 'auto') rail = rail.parentElement;
+      if (rail) rail.scrollLeft = sl;
+    }, Math.round(ease * maxScroll));
     await wait(durationMs / steps);
   }
 }
@@ -229,50 +256,32 @@ fs.mkdirSync(TMP_DIR, { recursive: true });
   });
   await wait(2000);
 
-  // ── Scroll rail left → right across all weeks ───────────────────────────────
+  // ── Scroll rail left → right (Node-level, no rAF lag) ──────────────────────
   console.log('  Scrolling rail left → right...');
-  await page.evaluate(() => {
-    const btn = document.querySelector('[data-segment]');
-    if (!btn) return;
-    let rail = btn.parentElement;
-    while (rail && getComputedStyle(rail).overflowX !== 'auto') rail = rail.parentElement;
-    if (!rail) return;
-    const maxScroll = rail.scrollWidth - rail.clientWidth;
-    const duration = 3200;
-    const start = performance.now();
-    const tick = (now) => {
-      const t = Math.min((now - start) / duration, 1);
-      // ease-in-out
-      const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-      rail.scrollLeft = ease * maxScroll;
-      if (t < 1) requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  });
-  await wait(3400); // let animation finish
+  await smoothScrollRail(page, 3800);
+  await wait(800); // settle on last week
 
-  // ── Tap week-3 (current week — has receipts + 4/7 days completed) ──────────
+  // ── Tap week-3 (has receipts + ring data) ───────────────────────────────────
   console.log('  Tapping week 3...');
   const w3 = page.locator('[data-segment="week-3"]').first();
   if (await w3.count() > 0) {
     await w3.click();
   } else {
-    // fallback: click the 3rd week-N segment button
     const segs = page.locator('[data-segment^="week-"]');
     const n = await segs.count();
     if (n >= 3) await segs.nth(2).click();
     else if (n > 0) await segs.last().click();
   }
-  await wait(1500); // let detail panel expand
+  await wait(2500); // wait for week panel + rings to fully render
 
-  // ── Scroll page down to reveal the daily evidence spine ────────────────────
-  console.log('  Scrolling down to daily evidence...');
-  await smoothScroll(page, 400, 1800);
-  await wait(600);
-  await smoothScroll(page, 800, 2000);
-  await wait(700);
-  await smoothScroll(page, 1200, 1800);
-  await wait(1000);
+  // ── Scroll down through daily evidence spine ─────────────────────────────────
+  console.log('  Scrolling down through evidence...');
+  await smoothScroll(page, 350, 2000);
+  await wait(800);
+  await smoothScroll(page, 700, 2200);
+  await wait(800);
+  await smoothScroll(page, 1050, 2000);
+  await wait(1200);
 
   // ── Close context — this flushes the video ──────────────────────────────────
   console.log('  Closing context and flushing video...');
