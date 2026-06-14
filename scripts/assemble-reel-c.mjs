@@ -1,20 +1,20 @@
 /**
  * Forged — Reel C assembly
- * Source: public/SCREENRECORDING.MP4 (iPhone, 1170×2532 HEVC, 80.5s, real device Day 22)
+ * Source: public/SCREENRECORDING.MP4 (iPhone, 1170×2532 HEVC, 63.2s, real device Day 22)
  *
  * Outputs:
  *   marketing/reels/forged_reel_C_captioned.mp4       — with captions
  *   marketing/reels/forged_reel_C_nocaption.mp4       — clean template (no captions, no gradient)
  *
  * Cut plan (all from SCREENRECORDING.MP4):
- *   Beat 1 ss=0.0   dur=2.0  — Today 0/5 hook
- *   Beat 2 ss=2.5   dur=3.5  — Proof taps ring filling 1→2/5
- *   Beat 3 ss=11.0  dur=2.5  — 5/5 complete gold ring
- *   Beat 4 ss=27.0  dur=3.0  — W2 Arc evidence spine (real entries)
- *   Beat 5 ss=56.0  dur=3.5  — W3 expanded receipt (WINS/HARD PARTS/PATTERN)
+ *   Beat 1 ss=0.0   dur=2.0  — Today 0/5 hook — "Day 22."
+ *   Beat 2 ss=1.8   dur=5.2  — Proof taps 0→2→3→5/5 completing
+ *   Beat 3 ss=8.0   dur=4.0  — Arc weeks (W4 active → scrolling to show evidence)
+ *   Beat 4 ss=22.0  dur=4.0  — W3 evidence receipt (daily entries, receipts)
+ *   Beat 5 ss=54.0  dur=3.5  — Arlo: "three weeks in... you're just shipping."
  *   Beat 6          dur=2.2  — End card
  *
- * Total: ~15.2s (within 12–16s spec)
+ * Total: ~19.4s (with 5 xfades of 0.3s each)
  */
 import { spawnSync } from 'child_process';
 import path from 'path';
@@ -174,8 +174,8 @@ function xfadeConcat(segs, durs, finalOut) {
 }
 
 // ── Beat timings ──────────────────────────────────────────────────────────────
-// Raw: 2.0+3.5+2.5+3.0+3.5+2.2 = 16.7s → 5×0.3 xfades = 15.2s
-const DURS = [2.0, 3.5, 2.5, 3.0, 3.5, 2.2];
+// Raw: 2.0+5.2+4.0+4.0+3.5+2.2 = 20.9s → 5×0.3 xfades = 19.4s
+const DURS = [2.0, 5.2, 4.0, 4.0, 3.5, 2.2];
 
 ;(async () => {
   console.log('\n✨ Forged — Reel C assembly (real device footage)\n');
@@ -187,11 +187,11 @@ const DURS = [2.0, 3.5, 2.5, 3.0, 3.5, 2.2];
   console.log('[ Reel C — captioned ]');
   const C = [1,2,3,4,5,6].map(n => path.join(TMP, `C_s${n}.mp4`));
 
-  iSeg('C·s1 hook (0/5)',        0.0, 2.0, ["I nearly skipped today.",     { color: WHITE,    size: 56 }], C[0]);
-  iSeg('C·s2 proof taps (→2/5)', 2.5, 3.5, ["So I logged proof instead.", { color: GOLD_HEX, size: 52 }], C[1]);
-  iSeg('C·s3 complete (5/5)',    11.0, 2.5, ["Not perfect. Recorded.",      { color: WHITE,    size: 58 }], C[2]);
-  iSeg('C·s4 arc evidence W2',  27.0, 3.0, ["22 days. All on record.",     { color: GOLD_HEX, size: 52 }], C[3]);
-  iSeg('C·s5 receipt W3',       56.0, 3.5, ["The day didn't disappear.",   { color: WHITE,    size: 52 }], C[4]);
+  iSeg('C·s1 hook (0/5)',         0.0,  2.0, ["Day 22.",                          { color: WHITE,    size: 72 }], C[0]);
+  iSeg('C·s2 proof taps (0→5/5)', 1.8,  5.2, ["5 proof actions. Logged.",         { color: GOLD_HEX, size: 52 }], C[1]);
+  iSeg('C·s3 arc weeks spine',    8.0,  4.0, ["22 days of evidence.",             { color: GOLD_HEX, size: 52 }], C[2]);
+  iSeg('C·s4 receipt W3',        22.0,  4.0, ["Every day on record.",             { color: WHITE,    size: 54 }], C[3]);
+  iSeg('C·s5 arlo response',     54.0,  3.5, ["You're just shipping.",            { color: WHITE,    size: 60 }], C[4]);
   endCard(null, C[5]);
 
   const captionedOut = path.join(OUT, 'forged_reel_C_captioned.mp4');
@@ -201,11 +201,11 @@ const DURS = [2.0, 3.5, 2.5, 3.0, 3.5, 2.2];
   console.log('\n[ Reel C — no-caption template ]');
   const N = [1,2,3,4,5,6].map(n => path.join(TMP, `N_s${n}.mp4`));
 
-  iSeg('N·s1 hook',        0.0,  2.0, null, N[0]);
-  iSeg('N·s2 proof taps',  2.5,  3.5, null, N[1]);
-  iSeg('N·s3 complete',   11.0,  2.5, null, N[2]);
-  iSeg('N·s4 arc W2',     27.0,  3.0, null, N[3]);
-  iSeg('N·s5 receipt W3', 56.0,  3.5, null, N[4]);
+  iSeg('N·s1 hook',         0.0,  2.0, null, N[0]);
+  iSeg('N·s2 proof taps',   1.8,  5.2, null, N[1]);
+  iSeg('N·s3 arc weeks',    8.0,  4.0, null, N[2]);
+  iSeg('N·s4 receipt W3',  22.0,  4.0, null, N[3]);
+  iSeg('N·s5 arlo',        54.0,  3.5, null, N[4]);
   endCard(null, N[5]);   // end card always keeps wordmark
 
   const nocapOut = path.join(OUT, 'forged_reel_C_nocaption.mp4');
