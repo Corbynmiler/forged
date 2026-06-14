@@ -3381,11 +3381,15 @@ export default function App() {
         tapped = { ...base, logs: [...logsNoToday, { date: today, value: true, note: "" }] };
       }
     }
-    const saved = await syncHabit(tapped);
-    if (!saved) return;
+    // Optimistic update — show result immediately, revert if save fails
     const nextHabits = habits.map(h => h.id === id ? tapped : h);
     setHabits(nextHabits);
     syncLastActive();
+    const saved = await syncHabit(tapped);
+    if (!saved) {
+      setHabits(prev => prev.map(h => h.id === id ? base : h));
+      return;
+    }
 
     const today = todayStr();
     const block = activeBlock;

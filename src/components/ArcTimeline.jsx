@@ -1095,6 +1095,7 @@ export function ArcTimeline({
   embedded = false,
 }) {
   const railRef = useRef(null);
+  const containerRef = useRef(null);
   const reducedMotion = useReducedMotion();
   const [weeklyBriefs, setWeeklyBriefs] = useState({});
   const [briefsLoading, setBriefsLoading] = useState(true);
@@ -1187,6 +1188,10 @@ export function ArcTimeline({
 
   const handleSelectSegment = useCallback((seg) => {
     scrollToSegment(seg);
+    // Scroll page back to arc top so new week's content starts fresh from the top
+    setTimeout(() => {
+      containerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
   }, [scrollToSegment]);
 
   useEffect(() => {
@@ -1291,7 +1296,7 @@ export function ArcTimeline({
   let nodeIndex = 0;
 
   return (
-    <div style={{ minWidth: 0, overflow: "hidden", maxWidth: "100%" }}>
+    <div ref={containerRef} style={{ minWidth: 0, overflow: "hidden", maxWidth: "100%" }}>
       <style>{ARC_MOTION_CSS}</style>
 
       {isActive && !embedded ? (
