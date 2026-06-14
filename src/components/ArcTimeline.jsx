@@ -599,7 +599,7 @@ function WeekDayJourney({ week, arcLedgerRows, journalEntries, reducedMotion }) 
                 ) : null}
               </div>
 
-              <div style={{ flex: 1, minWidth: 0, paddingBottom: day.isLast ? 4 : 10 }}>
+              <div style={{ flex: 1, minWidth: 0, paddingBottom: day.isLast ? 4 : 12 }}>
                 <button
                   type="button"
                   onClick={() => {
@@ -611,51 +611,58 @@ function WeekDayJourney({ week, arcLedgerRows, journalEntries, reducedMotion }) 
                     padding: 0, cursor: "pointer", fontFamily: T.font,
                   }}
                 >
-                  <div style={{
-                    fontSize: 11, fontWeight: focused ? 600 : 500,
-                    color: focused ? T.text : T.muted, lineHeight: 1.3,
-                  }}>
-                    {day.label}
+                  {/* Row 1: date label + proof dots */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                    <div style={{
+                      fontSize: 11, fontWeight: focused ? 600 : 500,
+                      color: focused ? T.text : T.muted, lineHeight: 1.3, flexShrink: 0,
+                    }}>
+                      {day.label}
+                    </div>
+                    {day.proofTotal > 0 && day.state !== "future" ? (
+                      <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
+                        {Array.from({ length: day.proofTotal }).map((_, i) => (
+                          <span key={i} style={{
+                            width: 5, height: 5, borderRadius: "50%", display: "block",
+                            background: i < day.proofDone
+                              ? (day.proofDone === day.proofTotal ? T.gold : "rgba(200,144,42,0.75)")
+                              : "rgba(255,255,255,0.1)",
+                          }} />
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
 
-                  {day.hasReceipt && day.parsed ? (
-                    <>
-                      {day.parsed.title ? (
-                        <div style={{
-                          fontSize: 13, fontWeight: 600, color: T.text,
-                          marginTop: 3, lineHeight: 1.35, overflowWrap: "anywhere",
-                        }}>
-                          {day.parsed.title}
-                        </div>
-                      ) : null}
-                      {expandedDate === day.date ? (
-                        <div onClick={e => e.stopPropagation()} style={{ marginTop: 4 }}>
-                          <ReceiptExpandedBody parsed={day.parsed} content={day.journal.content} />
-                          <button type="button" onClick={() => setExpandedDate(null)}
-                            style={{ marginTop: 4, padding: 0, background: "none", border: "none", color: T.sub, fontSize: 11, cursor: "pointer", fontFamily: T.font }}>
-                            Collapse ▴
-                          </button>
-                        </div>
-                      ) : day.parsed.narrative ? (
-                        <div style={{
-                          fontSize: 12, color: T.sub, marginTop: 3, lineHeight: 1.45,
-                          overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical",
-                        }}>
-                          {day.parsed.narrative}
-                        </div>
-                      ) : null}
-                    </>
-                  ) : day.state === "partial" ? (
-                    <div style={{ fontSize: 12, color: T.sub, marginTop: 3, lineHeight: 1.4 }}>
-                      Proof logged{day.proofTotal > 0 ? ` · ${day.proofDone}/${day.proofTotal}` : ""} · no receipt
+                  {/* Row 2: receipt title only (no raw narrative) */}
+                  {day.hasReceipt && day.parsed?.title ? (
+                    <div style={{
+                      fontSize: 13, fontWeight: 600, color: T.text,
+                      marginTop: 3, lineHeight: 1.35,
+                      overflow: "hidden", display: "-webkit-box",
+                      WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+                    }}>
+                      {day.parsed.title}
                     </div>
+                  ) : day.state === "partial" ? (
+                    <div style={{ fontSize: 11, color: T.hint, marginTop: 2 }}>Proof logged · no receipt</div>
                   ) : day.state === "future" ? (
-                    <div style={{ fontSize: 12, color: T.hint, marginTop: 3, fontStyle: "italic" }}>Ahead</div>
+                    <div style={{ fontSize: 11, color: T.hint, marginTop: 2, fontStyle: "italic" }}>Ahead</div>
                   ) : day.state === "today" && !day.hasReceipt && !day.hasProof ? (
-                    <div style={{ fontSize: 12, color: T.muted, marginTop: 3 }}>No evidence yet today</div>
-                  ) : (
-                    <div style={{ fontSize: 12, color: T.hint, marginTop: 3 }}>No evidence captured</div>
-                  )}
+                    <div style={{ fontSize: 11, color: T.hint, marginTop: 2 }}>No evidence yet</div>
+                  ) : day.state === "empty" ? (
+                    <div style={{ fontSize: 11, color: T.hint, marginTop: 2, opacity: 0.5 }}>—</div>
+                  ) : null}
+
+                  {/* Expanded receipt on tap */}
+                  {expandedDate === day.date && day.hasReceipt ? (
+                    <div onClick={e => e.stopPropagation()} style={{ marginTop: 8 }}>
+                      <ReceiptExpandedBody parsed={day.parsed} content={day.journal.content} />
+                      <button type="button" onClick={() => setExpandedDate(null)}
+                        style={{ marginTop: 6, padding: 0, background: "none", border: "none", color: T.sub, fontSize: 11, cursor: "pointer", fontFamily: T.font }}>
+                        Collapse ▴
+                      </button>
+                    </div>
+                  ) : null}
                 </button>
               </div>
             </div>
