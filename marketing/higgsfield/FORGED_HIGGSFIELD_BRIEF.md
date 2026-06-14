@@ -108,6 +108,7 @@ Upload files to Higgsfield in this exact order:
 | 6 | `07_screenshot_receipt_verdict.png` | Screenshot: TODAY'S VERDICT receipt card | Evidence beat |
 | 7 | `08_screenshot_arc_evidence.png` | Screenshot: Arc evidence overview | Optional closing beat (can replace or supplement receipt) |
 | 8 | `10_forged_logo_1254x1254.png` | Forged icon/logo | End card branding |
+| 9 | `11_recording_arc_week_timeline_scroll.webm` | Screen recording: Arc page scrolling W1→W2→W3 evidence spine | Feature showcase — shows the full timeline of evidence building across weeks |
 
 > **Upload `01_reel_B_polished_REFERENCE.mp4` first** — this is the reference edit. Higgsfield uses it to understand intended pacing and structure, then upgrades it.
 
@@ -316,6 +317,7 @@ Only re-run capture scripts if the product UI has changed.
 | `08_screenshot_arc_evidence.png` | `scripts/captures/E4_arc_today_evidence_overview.png` | 780×1688, Arc evidence spine |
 | `09_screenshot_arc_timeline.png` | `scripts/captures/E5_arc_today_evidence_timeline.png` | 780×1688, scrolled timeline |
 | `10_forged_logo_1254x1254.png` | `public/logo-icon.png` | App icon — use for end card branding |
+| `11_recording_arc_week_timeline_scroll.webm` | `scripts/recordings/R5_arc_week_timeline_scroll.webm` | ~12s — Arc page smooth scroll W1→W2→W3 evidence spine, 390×844 @2× |
 
 **Missing:** No standalone wordmark SVG exists. The app uses "Forged" set in DM Serif Display (Google Font). For a text wordmark in Higgsfield, either use the icon (`10_forged_logo_1254x1254.png`) or set the text manually as a text overlay.
 
