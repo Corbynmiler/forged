@@ -5,7 +5,6 @@ import { T } from "../theme.js";
 import { supabase, rowToForgeBlock } from "../supabase.js";
 import { getCurrentArcWeek } from "../lib/arcTimeline.js";
 import { ArcTimeline, ArcArchiveCard } from "../components/ArcTimeline.jsx";
-import { ForgeCompanion } from "../components/ForgeCompanion.jsx";
 
 function PastArcsSection({
   userId, isPro, onUpgrade, habits, goals, journalEntries, arcLedgerRows,
@@ -82,14 +81,14 @@ export function ArcScreen({
   activeBlock, habits, goals, journalEntries, arcLedgerRows = [],
   isPro, onUpgrade, userId, userName,
   onStartArc, onEditArc, onRunItBack, onEvolve,
-  coachName = "Coach", coachIcon = "",
 }) {
   const [initialWeek, setInitialWeek] = useState(null);
   const [openChronology, setOpenChronology] = useState(false);
 
   useEffect(() => {
     if (tab === "evidence") {
-      setOpenChronology(true);
+      setInitialWeek(getCurrentArcWeek(activeBlock));
+      setOpenChronology(false);
       onTabChange?.("arc");
     } else if (tab === "reviews") {
       setInitialWeek(getCurrentArcWeek(activeBlock));
@@ -142,16 +141,6 @@ export function ArcScreen({
         onEditArc={onEditArc}
         initialWeek={initialWeek}
         openChronologyOnMount={openChronology}
-        forgeSlot={
-          <ForgeCompanion
-            arc={activeBlock}
-            arcLedgerRows={arcLedgerRows}
-            userId={userId}
-            coachName={coachName}
-            coachIcon={coachIcon}
-            style={{ marginTop: 8, marginBottom: 8 }}
-          />
-        }
       />
 
       <PastArcsSection

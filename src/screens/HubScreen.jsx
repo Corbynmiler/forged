@@ -6,7 +6,7 @@
 //
 // All callbacks are the same ones Today uses, threaded through App.jsx.
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { T } from "../theme.js";
 import { todayStr, getStreak, isSatisfiedForTodayRing } from "../utils.js";
 import { SLabel } from "../components/ui.jsx";
@@ -50,13 +50,13 @@ function HubLooseEnds({ tasks = [], today, onAdd, onComplete, onPin, onDelete })
     <button type="button" onClick={() => onDelete(task.id)} title="Delete"
       style={{ background: "none", border: "none", cursor: "pointer", padding: "4px 6px",
         color: T.hint, fontSize: 14, lineHeight: 1, flexShrink: 0 }}
-      aria-label="Delete loose end">✕</button>
+      aria-label="Delete quick task">✕</button>
   );
 
   return (
     <div style={{ margin: "0 14px 10px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-        <div style={{ fontSize: 10, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Loose Ends</div>
+        <div style={{ fontSize: 10, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Quick tasks</div>
         {done.length > 0 && (
           <div style={{ fontSize: 11, color: T.muted, fontWeight: 500 }}>{done.length} cleared</div>
         )}
@@ -64,7 +64,7 @@ function HubLooseEnds({ tasks = [], today, onAdd, onComplete, onPin, onDelete })
       {all.length === 0 && !inputOpen && (
         <button type="button" onClick={openInput}
           style={{ width: "100%", padding: "11px 14px", borderRadius: T.rsm, border: `0.5px dashed ${T.border}`, background: "none", color: T.hint, fontSize: 13, cursor: "pointer", textAlign: "left", fontFamily: T.font }}>
-          + Add a loose end
+          + Add a quick task
         </button>
       )}
       {pending.map(task => (
@@ -99,7 +99,7 @@ function HubLooseEnds({ tasks = [], today, onAdd, onComplete, onPin, onDelete })
           <input ref={inputRef} type="text" value={inputText}
             onChange={e => setInputText(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); submitAdd(); } if (e.key === "Escape") { setInputOpen(false); setInputText(""); } }}
-            placeholder="What needs clearing?" maxLength={120}
+            placeholder="What needs doing?" maxLength={120}
             style={{ flex: 1, padding: "9px 12px", borderRadius: T.rsm, border: `0.5px solid ${T.borderStrong}`, background: T.surface, color: T.text, fontSize: 14, fontFamily: T.font, outline: "none", boxSizing: "border-box" }}/>
           <button type="button" onClick={submitAdd}
             style={{ padding: "9px 14px", borderRadius: T.rsm, border: "none", background: T.accent, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: T.font, flexShrink: 0 }}>
@@ -132,6 +132,8 @@ export function HubScreen({
   // Task callbacks
   onAddTask, onCompleteTask, onPinTask, onDeleteTask,
 }) {
+  useEffect(() => { window.scrollTo(0, 0); }, []);
+
   const today = todayStr();
   const arcActive = !!activeBlock?.id;
   const activeGoals = goals.filter(g => g.status !== "completed");
@@ -163,7 +165,7 @@ export function HubScreen({
           </div>
           <div style={{ fontSize: 12, color: T.muted, marginTop: 6, lineHeight: 1.45, maxWidth: 380 }}>
             {arcActive
-              ? "Today's screen is focused on Arc proof. Everything else still lives here — habits, goals, and loose ends."
+              ? "Today's screen is focused on Arc proof. Everything else still lives here — habits, goals, and quick tasks."
               : "Everything you track. Add a new habit, goal, or quick task."}
           </div>
         </div>

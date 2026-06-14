@@ -87,11 +87,9 @@ function useRailCenterSelection(railRef, onSegment, reducedMotion) {
     const el = rail?.querySelector(`[data-segment="${segment}"]`);
     if (!el) return;
     skipRef.current = true;
-    el.scrollIntoView({
-      behavior: reducedMotion ? "auto" : "smooth",
-      inline: "center",
-      block: "nearest",
-    });
+    // Use scrollTo on the rail element only — never touches vertical page scroll
+    const targetLeft = el.offsetLeft - rail.clientWidth / 2 + el.offsetWidth / 2;
+    rail.scrollTo({ left: targetLeft, behavior: reducedMotion ? "auto" : "smooth" });
     const delay = reducedMotion ? 60 : 380;
     window.setTimeout(() => {
       skipRef.current = false;
@@ -124,17 +122,19 @@ function useRailCenterSelection(railRef, onSegment, reducedMotion) {
 
 function ProofRing({ percent, size = 40, active, complete }) {
   const p = percent == null ? 0 : Math.max(0, Math.min(100, percent));
-  const r = (size - 5) / 2;
+  const sw = Math.max(3.5, size * 0.115);
+  const r = (size - sw) / 2;
   const c = 2 * Math.PI * r;
   const offset = c - (p / 100) * c;
-  const stroke = active ? T.gold : complete ? "#3d9b5f" : "rgba(255,255,255,0.12)";
+  const stroke = complete ? T.goldBright : (p > 0 || active) ? T.gold : "rgba(255,255,255,0.18)";
   return (
-    <svg width={size} height={size} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="2.5" />
+    <svg width={size} height={size} style={{ position: "absolute", inset: 0, pointerEvents: "none",
+      filter: complete ? `drop-shadow(0 0 4px ${T.goldBright}66)` : "none" }}>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={T.surface} strokeWidth={sw} />
       {(p > 0 || active) ? (
         <circle
           cx={size / 2} cy={size / 2} r={r} fill="none"
-          stroke={stroke} strokeWidth="2.5" strokeLinecap="round"
+          stroke={stroke} strokeWidth={sw} strokeLinecap="round"
           strokeDasharray={c} strokeDashoffset={offset}
           transform={`rotate(-90 ${size / 2} ${size / 2})`}
         />
@@ -542,6 +542,23 @@ function useViewportDayFocus(dayRefs, reducedMotion) {
   return { focusedDate, scrollToDay };
 }
 
+// Pick the shortest meaningful headline for a day receipt.
+// Avoids the raw "Proof shown: ..." first line — uses pattern or narrative opener instead.
+function dayDisplayTitle(parsed) {
+  if (!parsed) return null;
+  if (parsed.pattern?.trim()) return parsed.pattern.trim();
+  if (parsed.narrative?.trim()) {
+    const first = parsed.narrative.split(/(?<=[.!?])\s+/)[0]?.trim();
+    if (first) return first;
+  }
+  // Strip the "Proof shown: ..." prefix as a last resort — take text after the first sentence
+  if (parsed.title) {
+    const clean = parsed.title.replace(/^Proof shown:\s*/i, "").trim();
+    return clean.split(/(?<=[.!?])\s+/)[0]?.trim() || clean;
+  }
+  return null;
+}
+
 function WeekDayJourney({ week, arcLedgerRows, journalEntries, reducedMotion }) {
   const days = useMemo(
     () => buildWeekDayJourney(week, { arcLedgerRows, journalEntries }),
@@ -599,7 +616,7 @@ function WeekDayJourney({ week, arcLedgerRows, journalEntries, reducedMotion }) 
                 ) : null}
               </div>
 
-              <div style={{ flex: 1, minWidth: 0, paddingBottom: day.isLast ? 4 : 10 }}>
+              <div style={{ flex: 1, minWidth: 0, paddingBottom: day.isLast ? 4 : 14 }}>
                 <button
                   type="button"
                   onClick={() => {
@@ -611,51 +628,77 @@ function WeekDayJourney({ week, arcLedgerRows, journalEntries, reducedMotion }) 
                     padding: 0, cursor: "pointer", fontFamily: T.font,
                   }}
                 >
-                  <div style={{
-                    fontSize: 11, fontWeight: focused ? 600 : 500,
-                    color: focused ? T.text : T.muted, lineHeight: 1.3,
-                  }}>
-                    {day.label}
+                  {/* Ring + text side by side */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    {/* Mini proof ring — 36px, same visual as Today screen */}
+                    {day.state !== "future" && day.proofTotal > 0 ? (
+                      <div style={{ position: "relative", width: 36, height: 36, flexShrink: 0 }}>
+                        <ProofRing
+                          size={36}
+                          percent={Math.round((day.proofDone / day.proofTotal) * 100)}
+                          active={day.state === "today"}
+                          complete={day.proofDone === day.proofTotal}
+                        />
+                        <div style={{
+                          position: "absolute", inset: 0,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                        }}>
+                          <span style={{
+                            fontSize: 8.5, fontWeight: 700, lineHeight: 1,
+                            color: day.proofDone === day.proofTotal ? T.goldBright : T.text,
+                          }}>
+                            {day.proofDone}/{day.proofTotal}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{
+                        width: 36, height: 36, flexShrink: 0, borderRadius: "50%",
+                        border: "2px solid rgba(255,255,255,0.06)",
+                      }} />
+                    )}
+
+                    {/* Date + catchy title (single line) */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        fontSize: 10, fontWeight: 500,
+                        color: focused ? T.text : T.muted, lineHeight: 1.3,
+                      }}>
+                        {day.label}
+                      </div>
+                      {day.hasReceipt ? (() => {
+                        const headline = dayDisplayTitle(day.parsed);
+                        return headline ? (
+                          <div style={{
+                            fontSize: 13, fontWeight: 600, color: T.text,
+                            marginTop: 2, lineHeight: 1.3,
+                            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                          }}>
+                            {headline}
+                          </div>
+                        ) : null;
+                      })() : day.state === "partial" ? (
+                        <div style={{ fontSize: 11, color: T.hint, marginTop: 1 }}>Proof logged · no receipt</div>
+                      ) : day.state === "today" && !day.hasProof ? (
+                        <div style={{ fontSize: 11, color: T.hint, marginTop: 1 }}>No evidence yet</div>
+                      ) : day.state === "future" ? (
+                        <div style={{ fontSize: 10, color: T.hint, marginTop: 1, fontStyle: "italic" }}>Ahead</div>
+                      ) : day.state === "empty" ? (
+                        <div style={{ fontSize: 11, color: T.hint, marginTop: 1, opacity: 0.4 }}>—</div>
+                      ) : null}
+                    </div>
                   </div>
 
-                  {day.hasReceipt && day.parsed ? (
-                    <>
-                      {day.parsed.title ? (
-                        <div style={{
-                          fontSize: 13, fontWeight: 600, color: T.text,
-                          marginTop: 3, lineHeight: 1.35, overflowWrap: "anywhere",
-                        }}>
-                          {day.parsed.title}
-                        </div>
-                      ) : null}
-                      {expandedDate === day.date ? (
-                        <div onClick={e => e.stopPropagation()} style={{ marginTop: 4 }}>
-                          <ReceiptExpandedBody parsed={day.parsed} content={day.journal.content} />
-                          <button type="button" onClick={() => setExpandedDate(null)}
-                            style={{ marginTop: 4, padding: 0, background: "none", border: "none", color: T.sub, fontSize: 11, cursor: "pointer", fontFamily: T.font }}>
-                            Collapse ▴
-                          </button>
-                        </div>
-                      ) : day.parsed.narrative ? (
-                        <div style={{
-                          fontSize: 12, color: T.sub, marginTop: 3, lineHeight: 1.45,
-                          overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical",
-                        }}>
-                          {day.parsed.narrative}
-                        </div>
-                      ) : null}
-                    </>
-                  ) : day.state === "partial" ? (
-                    <div style={{ fontSize: 12, color: T.sub, marginTop: 3, lineHeight: 1.4 }}>
-                      Proof logged{day.proofTotal > 0 ? ` · ${day.proofDone}/${day.proofTotal}` : ""} · no receipt
+                  {/* Expanded receipt on tap */}
+                  {expandedDate === day.date && day.hasReceipt ? (
+                    <div onClick={e => e.stopPropagation()} style={{ marginTop: 10, paddingLeft: 46 }}>
+                      <ReceiptExpandedBody parsed={day.parsed} content={day.journal.content} />
+                      <button type="button" onClick={() => setExpandedDate(null)}
+                        style={{ marginTop: 6, padding: 0, background: "none", border: "none", color: T.sub, fontSize: 11, cursor: "pointer", fontFamily: T.font }}>
+                        Collapse ▴
+                      </button>
                     </div>
-                  ) : day.state === "future" ? (
-                    <div style={{ fontSize: 12, color: T.hint, marginTop: 3, fontStyle: "italic" }}>Ahead</div>
-                  ) : day.state === "today" && !day.hasReceipt && !day.hasProof ? (
-                    <div style={{ fontSize: 12, color: T.muted, marginTop: 3 }}>No evidence yet today</div>
-                  ) : (
-                    <div style={{ fontSize: 12, color: T.hint, marginTop: 3 }}>No evidence captured</div>
-                  )}
+                  ) : null}
                 </button>
               </div>
             </div>
@@ -813,46 +856,9 @@ function WeekDetail({
         <div style={{ fontSize: 13, color: T.muted, marginTop: 10, fontStyle: "italic" }}>Not started yet</div>
       ) : null}
 
-      {week.chapterSummary ? (
-        <div style={{ fontSize: 13, color: T.sub, marginTop: 6, lineHeight: 1.5, overflowWrap: "anywhere" }}>
-          {week.chapterSummary}
-        </div>
-      ) : null}
-
       {statusLine ? (
         <div style={{ fontSize: 12, color: T.sub, marginTop: 8, lineHeight: 1.4 }}>{statusLine}</div>
       ) : null}
-
-      {week.briefText && !week.chapterSummary ? (
-        <div style={{ marginTop: 10 }}>
-          <div style={{ fontSize: 9, fontWeight: 700, color: T.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>
-            Weekly review
-          </div>
-          <div style={{
-            fontSize: 12.5, color: T.sub, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere",
-            overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical",
-          }}>
-            {week.briefText}
-          </div>
-        </div>
-      ) : week.status === "current" && onGenerateBrief && !week.briefText ? (
-        <div style={{ marginTop: 10 }}>
-          <button
-            type="button"
-            disabled={generatingBrief}
-            onClick={() => onGenerateBrief(week)}
-            style={{
-              padding: "6px 12px", borderRadius: 8, border: `0.5px solid rgba(200,144,42,0.35)`,
-              background: "rgba(200,144,42,0.08)", color: T.gold, fontSize: 11.5, fontWeight: 600,
-              cursor: "pointer", fontFamily: T.font, opacity: generatingBrief ? 0.6 : 1,
-            }}
-          >
-            {generatingBrief ? "Writing review…" : "Write weekly review"}
-          </button>
-        </div>
-      ) : null}
-
-      {briefError ? <div style={{ fontSize: 11, color: T.accent, marginTop: 6 }}>{briefError}</div> : null}
 
       <WeekDayJourney
         week={week}
@@ -1085,9 +1091,9 @@ export function ArcTimeline({
   initialWeek = null,
   openChronologyOnMount = false,
   embedded = false,
-  forgeSlot = null,
 }) {
   const railRef = useRef(null);
+  const containerRef = useRef(null);
   const reducedMotion = useReducedMotion();
   const [weeklyBriefs, setWeeklyBriefs] = useState({});
   const [briefsLoading, setBriefsLoading] = useState(true);
@@ -1284,7 +1290,7 @@ export function ArcTimeline({
   let nodeIndex = 0;
 
   return (
-    <div style={{ minWidth: 0, overflow: "hidden", maxWidth: "100%" }}>
+    <div ref={containerRef} style={{ minWidth: 0, overflow: "hidden", maxWidth: "100%" }}>
       <style>{ARC_MOTION_CSS}</style>
 
       {isActive && !embedded ? (
@@ -1306,8 +1312,6 @@ export function ArcTimeline({
           {detailsFields}
         </ArcJourneyHero>
       ) : null}
-
-      {forgeSlot}
 
       <div
         ref={railRef}
@@ -1423,19 +1427,6 @@ export function ArcTimeline({
               Evolve Arc
             </button>
           ) : null}
-        </div>
-      ) : null}
-
-      {!embedded ? (
-        <div style={{ marginTop: 8, paddingTop: 16, borderTop: `0.5px solid rgba(255,255,255,0.06)` }}>
-          <button
-            type="button"
-            onClick={() => setShowChronology(true)}
-            style={SECONDARY_BTN}
-          >
-            <span>All evidence chronology</span>
-            <span style={{ color: T.muted, fontSize: 11 }}>{journalEntries.length} entries ▸</span>
-          </button>
         </div>
       ) : null}
 

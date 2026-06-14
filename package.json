@@ -12,15 +12,12 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.88.0",
-    "@react-three/drei": "^10.7.7",
-    "@react-three/fiber": "^9.6.1",
     "@sentry/node": "^10.50.0",
     "@supabase/supabase-js": "^2.49.4",
     "@vercel/analytics": "^2.0.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "stripe": "^21.0.1",
-    "three": "^0.184.0",
     "web-push": "^3.6.7"
   },
   "devDependencies": {
