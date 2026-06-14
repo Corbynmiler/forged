@@ -9,7 +9,28 @@ import fs from 'fs';
 
 const UID      = 'ac1e6500-0511-4ce2-801a-eccf7a328027';
 const BLOCK_ID = 'a0600001-0001-4001-8001-000000000001';
-const ACCESS_TOKEN = 'eyJhbGciOiJFUzI1NiIsImtpZCI6IjkyOWY2ZWU3LThhOGYtNGJiZC1hNDhkLTRjZDI0NGYxYzY1OCIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL2FwZG12YnpmanV2eHdvcmplcHplLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiJhYzFlNjUwMC0wNTExLTRjZTItODAxYS1lY2NmN2EzMjgwMjciLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzgxMzI0NTczLCJpYXQiOjE3ODEzMjA5NzMsImVtYWlsIjoiY2hlZXNlZmluZ2Vyc2F0aG90bWFpbC5jby5uQGdtYWlsLmNvbSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWwiOiJjaGVlc2VmaW5nZXJzYXRob3RtYWlsLmNvLm5AZ21haWwuY29tIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsInBob25lX3ZlcmlmaWVkIjpmYWxzZSwic3ViIjoiYWMxZTY1MDAtMDUxMS00Y2UyLTgwMWEtZWNjZjdhMzI4MDI3In0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3ODEzMjA5NzN9XSwic2Vzc2lvbl9pZCI6IjYzYjhkZDAxLTJlMzgtNGQ1Yy05ZWJkLTFkYmJmOGM5OTQ0ZSIsImlzX2Fub255bW91cyI6ZmFsc2V9.ZyMpMIAJ8fmeQ-9HgGFO4EHIJZZ3izzlKe3QOKxiFCmUffm4PbHEd1PP_j7I3A3XwbAppKaI0b-lXHcCRSVWwA';
+
+// Generate a fresh JWT at runtime — the Supabase JS client checks exp locally,
+// so a hardcoded token that has expired causes an auth error screen.
+function makeJWT() {
+  const now = Math.floor(Date.now() / 1000);
+  const b64 = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');
+  const header  = b64({ alg: 'HS256', typ: 'JWT' });
+  const payload = b64({
+    iss: 'https://apdmvbzfjuvxworjepze.supabase.co/auth/v1',
+    sub: UID, aud: 'authenticated',
+    exp: now + 86400 * 365, iat: now,
+    email: 'cheesefingersathotmail.co.n@gmail.com', phone: '',
+    app_metadata: { provider: 'email', providers: ['email'] },
+    user_metadata: { email: 'cheesefingersathotmail.co.n@gmail.com', email_verified: true, phone_verified: false, sub: UID },
+    role: 'authenticated', aal: 'aal1',
+    amr: [{ method: 'password', timestamp: now }],
+    session_id: '63b8dd01-2e38-4d5c-9ebd-1dbbf8c9944e',
+    is_anonymous: false,
+  });
+  return `${header}.${payload}.ZmFrZXNpZ25hdHVyZQ`;
+}
+const ACCESS_TOKEN = makeJWT();
 
 const USER_OBJ = {
   id: UID, aud: 'authenticated', role: 'authenticated',
