@@ -2382,14 +2382,7 @@ export default function App() {
                 setAccountDataReady(false);
                 userIdRef.current = null;
                 if (mounted) {
-                  if (!shownDemoRef.current) {
-                    shownDemoRef.current = true;
-                    setHabits(buildDemoHabits());
-                    setUser({ name:"", avatarUrl:null });
-                    setDemoMode(true);
-                  } else {
-                    setAuthScreen(true);
-                  }
+                  setAuthScreen(true);
                 }
               }
             }
