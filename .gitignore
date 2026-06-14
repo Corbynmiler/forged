@@ -36,6 +36,3 @@ public/Screenshot*.png
 .staging/
 scripts/captures/
 scripts/recordings/
-marketing/reels/
-# Higgsfield upload pack — large binaries, regenerate from source assets
-marketing/higgsfield/upload_pack/
