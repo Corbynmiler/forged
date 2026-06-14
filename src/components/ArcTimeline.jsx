@@ -599,7 +599,7 @@ function WeekDayJourney({ week, arcLedgerRows, journalEntries, reducedMotion }) 
                 ) : null}
               </div>
 
-              <div style={{ flex: 1, minWidth: 0, paddingBottom: day.isLast ? 4 : 12 }}>
+              <div style={{ flex: 1, minWidth: 0, paddingBottom: day.isLast ? 4 : 14 }}>
                 <button
                   type="button"
                   onClick={() => {
@@ -611,51 +611,68 @@ function WeekDayJourney({ week, arcLedgerRows, journalEntries, reducedMotion }) 
                     padding: 0, cursor: "pointer", fontFamily: T.font,
                   }}
                 >
-                  {/* Row 1: date label + proof dots */}
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                    <div style={{
-                      fontSize: 11, fontWeight: focused ? 600 : 500,
-                      color: focused ? T.text : T.muted, lineHeight: 1.3, flexShrink: 0,
-                    }}>
-                      {day.label}
-                    </div>
-                    {day.proofTotal > 0 && day.state !== "future" ? (
-                      <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
-                        {Array.from({ length: day.proofTotal }).map((_, i) => (
-                          <span key={i} style={{
-                            width: 5, height: 5, borderRadius: "50%", display: "block",
-                            background: i < day.proofDone
-                              ? (day.proofDone === day.proofTotal ? T.gold : "rgba(200,144,42,0.75)")
-                              : "rgba(255,255,255,0.1)",
-                          }} />
-                        ))}
+                  {/* Ring + text side by side */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    {/* Mini proof ring */}
+                    {day.state !== "future" && day.proofTotal > 0 ? (
+                      <div style={{ position: "relative", width: 30, height: 30, flexShrink: 0 }}>
+                        <ProofRing
+                          size={30}
+                          percent={Math.round((day.proofDone / day.proofTotal) * 100)}
+                          active={day.state === "today"}
+                          complete={day.proofDone === day.proofTotal}
+                        />
+                        <div style={{
+                          position: "absolute", inset: 0,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                        }}>
+                          <span style={{
+                            fontSize: 7.5, fontWeight: 700, lineHeight: 1,
+                            color: day.proofDone === day.proofTotal ? T.gold : T.sub,
+                          }}>
+                            {day.proofDone}/{day.proofTotal}
+                          </span>
+                        </div>
                       </div>
-                    ) : null}
-                  </div>
+                    ) : (
+                      <div style={{
+                        width: 30, height: 30, flexShrink: 0, borderRadius: "50%",
+                        border: "2px solid rgba(255,255,255,0.06)",
+                      }} />
+                    )}
 
-                  {/* Row 2: receipt title only (no raw narrative) */}
-                  {day.hasReceipt && day.parsed?.title ? (
-                    <div style={{
-                      fontSize: 13, fontWeight: 600, color: T.text,
-                      marginTop: 3, lineHeight: 1.35,
-                      overflow: "hidden", display: "-webkit-box",
-                      WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
-                    }}>
-                      {day.parsed.title}
+                    {/* Date + title */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        fontSize: 10, fontWeight: 500,
+                        color: focused ? T.text : T.muted, lineHeight: 1.3,
+                      }}>
+                        {day.label}
+                      </div>
+                      {day.hasReceipt && day.parsed?.title ? (
+                        <div style={{
+                          fontSize: 13, fontWeight: 600, color: T.text,
+                          marginTop: 1, lineHeight: 1.3,
+                          overflow: "hidden", display: "-webkit-box",
+                          WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+                        }}>
+                          {day.parsed.title}
+                        </div>
+                      ) : day.state === "partial" ? (
+                        <div style={{ fontSize: 11, color: T.hint, marginTop: 1 }}>Proof logged · no receipt</div>
+                      ) : day.state === "today" && !day.hasProof ? (
+                        <div style={{ fontSize: 11, color: T.hint, marginTop: 1 }}>No evidence yet</div>
+                      ) : day.state === "future" ? (
+                        <div style={{ fontSize: 10, color: T.hint, marginTop: 1, fontStyle: "italic" }}>Ahead</div>
+                      ) : day.state === "empty" ? (
+                        <div style={{ fontSize: 11, color: T.hint, marginTop: 1, opacity: 0.4 }}>—</div>
+                      ) : null}
                     </div>
-                  ) : day.state === "partial" ? (
-                    <div style={{ fontSize: 11, color: T.hint, marginTop: 2 }}>Proof logged · no receipt</div>
-                  ) : day.state === "future" ? (
-                    <div style={{ fontSize: 11, color: T.hint, marginTop: 2, fontStyle: "italic" }}>Ahead</div>
-                  ) : day.state === "today" && !day.hasReceipt && !day.hasProof ? (
-                    <div style={{ fontSize: 11, color: T.hint, marginTop: 2 }}>No evidence yet</div>
-                  ) : day.state === "empty" ? (
-                    <div style={{ fontSize: 11, color: T.hint, marginTop: 2, opacity: 0.5 }}>—</div>
-                  ) : null}
+                  </div>
 
                   {/* Expanded receipt on tap */}
                   {expandedDate === day.date && day.hasReceipt ? (
-                    <div onClick={e => e.stopPropagation()} style={{ marginTop: 8 }}>
+                    <div onClick={e => e.stopPropagation()} style={{ marginTop: 10, paddingLeft: 40 }}>
                       <ReceiptExpandedBody parsed={day.parsed} content={day.journal.content} />
                       <button type="button" onClick={() => setExpandedDate(null)}
                         style={{ marginTop: 6, padding: 0, background: "none", border: "none", color: T.sub, fontSize: 11, cursor: "pointer", fontFamily: T.font }}>
