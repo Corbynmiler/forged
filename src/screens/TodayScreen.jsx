@@ -574,6 +574,92 @@ function GoalsCollapsible({ children, defaultOpen = false }) {
   return <SectionCollapsible label="Goals" defaultOpen={defaultOpen}>{children}</SectionCollapsible>;
 }
 
+function ReorderProofSheet({ habits, onClose, onSave }) {
+  const [items, setItems] = useState(habits);
+  const dragIdx = useRef(null);
+
+  function onDragStart(i) { dragIdx.current = i; }
+  function onDragEnter(i) {
+    if (dragIdx.current === null || dragIdx.current === i) return;
+    setItems(prev => {
+      const next = [...prev];
+      const [moved] = next.splice(dragIdx.current, 1);
+      next.splice(i, 0, moved);
+      dragIdx.current = i;
+      return next;
+    });
+  }
+  function onDragEnd() { dragIdx.current = null; }
+
+  // Touch drag support
+  const touchStartY = useRef(0);
+  const touchDragIdx = useRef(null);
+  function onTouchStart(e, i) {
+    touchStartY.current = e.touches[0].clientY;
+    touchDragIdx.current = i;
+    dragIdx.current = i;
+  }
+  function onTouchMove(e) {
+    e.preventDefault();
+    const el = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
+    const idx = el?.closest("[data-drag-idx]")?.dataset?.dragIdx;
+    if (idx != null) onDragEnter(Number(idx));
+  }
+  function onTouchEnd() { dragIdx.current = null; touchDragIdx.current = null; }
+
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:1200, display:"flex", flexDirection:"column", justifyContent:"flex-end" }} onClick={onClose}>
+      <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.5)", backdropFilter:"blur(4px)" }}/>
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ position:"relative", background:T.bg, borderRadius:"20px 20px 0 0", padding:"0 0 max(24px,env(safe-area-inset-bottom,0px))", fontFamily:T.font, maxHeight:"80vh", overflowY:"auto" }}
+      >
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"18px 18px 12px" }}>
+          <span style={{ fontSize:16, fontWeight:700, color:T.text }}>Edit order</span>
+          <button type="button" onClick={onClose} style={{ background:"none", border:"none", color:T.muted, fontSize:22, cursor:"pointer", lineHeight:1, padding:"0 4px" }}>×</button>
+        </div>
+        <p style={{ margin:"0 18px 14px", fontSize:12, color:T.muted, lineHeight:1.5 }}>Drag to rearrange your proof actions.</p>
+        <div style={{ padding:"0 14px" }}>
+          {items.map((h, i) => (
+            <div
+              key={h.id}
+              data-drag-idx={i}
+              draggable
+              onDragStart={() => onDragStart(i)}
+              onDragEnter={() => onDragEnter(i)}
+              onDragEnd={onDragEnd}
+              onDragOver={e => e.preventDefault()}
+              onTouchStart={e => onTouchStart(e, i)}
+              onTouchMove={onTouchMove}
+              onTouchEnd={onTouchEnd}
+              style={{
+                display:"flex", alignItems:"center", gap:12,
+                padding:"12px 14px", marginBottom:8,
+                background:T.surface, borderRadius:T.rsm,
+                border:`0.5px solid ${T.border}`,
+                cursor:"grab", userSelect:"none", touchAction:"none",
+              }}
+            >
+              <span style={{ color:T.muted, fontSize:18, lineHeight:1 }}>☰</span>
+              <span style={{ flex:1, fontSize:14, fontWeight:500, color:T.text, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{h.name}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{ display:"flex", gap:10, padding:"14px 14px 0" }}>
+          <button type="button" onClick={onClose}
+            style={{ flex:1, padding:"13px", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:"none", color:T.muted, fontFamily:T.font, fontSize:14, fontWeight:600, cursor:"pointer" }}>
+            Cancel
+          </button>
+          <button type="button" onClick={() => onSave(items)}
+            style={{ flex:2, padding:"13px", borderRadius:T.rsm, border:"none", background:T.gold, color:"#1a1a16", fontFamily:T.font, fontSize:14, fontWeight:700, cursor:"pointer" }}>
+            Save order
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── TodayScreen ────────────────────────────────────────────────────────────
 export function TodayScreen({
   habits, goals = [],
@@ -604,6 +690,10 @@ export function TodayScreen({
   onOpenHub = null,
 }) {
   const [showProofPicker, setShowProofPicker] = useState(false);
+  const [showReorder, setShowReorder] = useState(false);
+  const [proofOrder, setProofOrder] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("forged_proof_order") || "null") || null; } catch { return null; }
+  });
   const [justCompleted, setJustCompleted] = useState(false);
   const prevProofDoneRef = useRef(null);
 
@@ -618,6 +708,13 @@ export function TodayScreen({
   const otherTrackHabits = arcActive
     ? trackHabits.filter(h => !isProofForArc(h, activeBlock.id))
     : trackHabits;
+  const proofHabitsSorted = proofOrder
+    ? [...proofHabits].sort((a, b) => {
+        const ai = proofOrder.indexOf(a.id);
+        const bi = proofOrder.indexOf(b.id);
+        return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+      })
+    : proofHabits;
   const proofDone      = proofHabits.filter(h => isSatisfiedForTodayRing(h)).length;
   const proofTotal     = proofHabits.length;
   const arcDayComplete = arcActive && proofTotal > 0 && proofDone === proofTotal;
@@ -659,10 +756,10 @@ export function TodayScreen({
   const limit   = habitsForSections.filter(h => h.habitType === "limit");
   const weekly  = habitsForSections.filter(h => h.habitType === "weekly");
   const project = habitsForSections.filter(h => h.habitType === "project");
-  const proofDaily   = proofHabits.filter(h => h.habitType === "daily");
-  const proofLimit   = proofHabits.filter(h => h.habitType === "limit");
-  const proofWeekly  = proofHabits.filter(h => h.habitType === "weekly");
-  const proofProject = proofHabits.filter(h => h.habitType === "project");
+  const proofDaily   = proofHabitsSorted.filter(h => h.habitType === "daily");
+  const proofLimit   = proofHabitsSorted.filter(h => h.habitType === "limit");
+  const proofWeekly  = proofHabitsSorted.filter(h => h.habitType === "weekly");
+  const proofProject = proofHabitsSorted.filter(h => h.habitType === "project");
   const ringSummary = arcActive
     ? (proofTotal ? `${proofDone} of ${proofTotal} proof actions` : "")
     : totalTrackables
@@ -765,6 +862,18 @@ export function TodayScreen({
             if (onLinkProofHabit) await onLinkProofHabit(id);
           }}
           onCreateNew={() => { setShowProofPicker(false); onAdd?.(); }}
+        />
+      )}
+      {showReorder && proofHabits.length > 0 && (
+        <ReorderProofSheet
+          habits={proofHabitsSorted}
+          onClose={() => setShowReorder(false)}
+          onSave={(ordered) => {
+            const ids = ordered.map(h => h.id);
+            setProofOrder(ids);
+            try { localStorage.setItem("forged_proof_order", JSON.stringify(ids)); } catch { /* ignore */ }
+            setShowReorder(false);
+          }}
         />
       )}
       {onOpenCoachMic && !arcActive && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic} habitCompletionPercentage={pct} habitsLoggedTodayCount={loggedCount} totalTrackables={totalTrackables}/>}
@@ -918,11 +1027,21 @@ export function TodayScreen({
           proofTotal === 0
             ? <div key="proof-empty">{proofSyncCard || proofEmptyCard}</div>
             : <>
-                <SLabel>Proof actions</SLabel>
-                {proofDaily.map(h => <DailyCard key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} proofMode={true}/>)}
-                {proofLimit.map(h => <LimitCard key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} onLowerBudget={onLowerBudget} onOpenCoachWithDraft={onOpenCoachWithDraft} proofMode={true}/>)}
-                {proofWeekly.map(h => <WeeklyCard key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} proofMode={true}/>)}
-                {proofProject.map(h => <ProjectCard key={h.id} habit={h} onOpenLog={onOpenLog} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} proofMode={true}/>)}
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 14px", marginBottom:6 }}>
+                  <span style={{ fontSize:11, fontWeight:600, letterSpacing:"0.08em", color:T.sub, textTransform:"uppercase" }}>Proof actions</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowReorder(true)}
+                    style={{ fontSize:11, fontWeight:600, color:T.muted, background:"rgba(255,255,255,0.06)", border:"0.5px solid rgba(255,255,255,0.1)", borderRadius:20, padding:"3px 10px", cursor:"pointer", letterSpacing:"0.04em", fontFamily:T.font }}
+                  >Edit order</button>
+                </div>
+                {proofHabitsSorted.map(h => {
+                  if (h.habitType === "daily")   return <DailyCard key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} proofMode={true}/>;
+                  if (h.habitType === "limit")   return <LimitCard key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} onLowerBudget={onLowerBudget} onOpenCoachWithDraft={onOpenCoachWithDraft} proofMode={true}/>;
+                  if (h.habitType === "weekly")  return <WeeklyCard key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} proofMode={true}/>;
+                  if (h.habitType === "project") return <ProjectCard key={h.id} habit={h} onOpenLog={onOpenLog} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} proofMode={true}/>;
+                  return null;
+                })}
                 {onLinkProofHabit && (
                   <button
                     type="button"
