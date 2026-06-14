@@ -215,35 +215,64 @@ fs.mkdirSync(TMP_DIR, { recursive: true });
     if (await x.count() > 0) { await x.click(); await wait(300); }
   } catch {}
 
-  // ── Hold on Arc overview for 2s (recording has been running since ctx open) ─
+  // ── Hold on Arc overview (rail at far left) ────────────────────────────────
   console.log('  Holding on Arc overview...');
   await page.evaluate(() => window.scrollTo(0, 0));
+
+  // Make sure the rail is scrolled to the start
+  await page.evaluate(() => {
+    const btn = document.querySelector('[data-segment]');
+    if (!btn) return;
+    let el = btn.parentElement;
+    while (el && getComputedStyle(el).overflowX !== 'auto') el = el.parentElement;
+    if (el) el.scrollLeft = 0;
+  });
   await wait(2000);
 
-  // ── Scroll slowly through the week timeline ─────────────────────────────────
-  // Arc page layout: header at top, then week cards stacked vertically.
-  // Scroll through ~800px to reveal W1→W2→W3 in sequence.
-  console.log('  Scrolling through week timeline...');
+  // ── Scroll rail left → right across all weeks ───────────────────────────────
+  console.log('  Scrolling rail left → right...');
+  await page.evaluate(() => {
+    const btn = document.querySelector('[data-segment]');
+    if (!btn) return;
+    let rail = btn.parentElement;
+    while (rail && getComputedStyle(rail).overflowX !== 'auto') rail = rail.parentElement;
+    if (!rail) return;
+    const maxScroll = rail.scrollWidth - rail.clientWidth;
+    const duration = 3200;
+    const start = performance.now();
+    const tick = (now) => {
+      const t = Math.min((now - start) / duration, 1);
+      // ease-in-out
+      const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+      rail.scrollLeft = ease * maxScroll;
+      if (t < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  await wait(3400); // let animation finish
 
-  // Slow scroll to 250px — reveals top of week list
-  await smoothScroll(page, 250, 1500);
+  // ── Tap week-3 (current week — has receipts + 4/7 days completed) ──────────
+  console.log('  Tapping week 3...');
+  const w3 = page.locator('[data-segment="week-3"]').first();
+  if (await w3.count() > 0) {
+    await w3.click();
+  } else {
+    // fallback: click the 3rd week-N segment button
+    const segs = page.locator('[data-segment^="week-"]');
+    const n = await segs.count();
+    if (n >= 3) await segs.nth(2).click();
+    else if (n > 0) await segs.last().click();
+  }
+  await wait(1500); // let detail panel expand
+
+  // ── Scroll page down to reveal the daily evidence spine ────────────────────
+  console.log('  Scrolling down to daily evidence...');
+  await smoothScroll(page, 400, 1800);
   await wait(600);
-
-  // Continue to ~500px — W1 / W2 cards visible
-  await smoothScroll(page, 500, 1800);
+  await smoothScroll(page, 800, 2000);
   await wait(700);
-
-  // Continue to ~750px — W2 / W3 cards visible
-  await smoothScroll(page, 750, 1800);
-  await wait(700);
-
-  // Continue to ~1000px — W3 / evidence spine
-  await smoothScroll(page, 1000, 1600);
-  await wait(800);
-
-  // Gentle scroll back up slightly to land on a clean resting frame
-  await smoothScroll(page, 850, 1000);
-  await wait(1200);
+  await smoothScroll(page, 1200, 1800);
+  await wait(1000);
 
   // ── Close context — this flushes the video ──────────────────────────────────
   console.log('  Closing context and flushing video...');
