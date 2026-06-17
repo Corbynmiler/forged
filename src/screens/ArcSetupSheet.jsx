@@ -110,7 +110,7 @@ export default function ArcSetupSheet({
 
   const selectedCount = selected.size;
   const softCapHint = selectedCount > 5;
-  const canStart = !!identity.trim() && !saving;
+  const canStart = !!identity.trim() && !!minimumProof.trim() && !saving;
 
   function toggleHabit(id) {
     setSelected((prev) => {
@@ -258,17 +258,17 @@ export default function ArcSetupSheet({
         </div>
 
         <div style={{ marginBottom: 6 }}>
-          <label style={arcLbl}>On a bad day, what still counts as proof? (optional)</label>
+          <label style={arcLbl}>On a bad day, what still counts as proof?</label>
           <input
             value={minimumProof}
             onChange={(e) => setMinimumProof(e.target.value.slice(0, 150))}
             maxLength={150}
             placeholder="e.g. Eat breakfast and one small build action."
-            style={{ ...inp, fontSize: 15 }}
+            style={{ ...inp, fontSize: 15, border: !minimumProof.trim() ? "0.5px solid rgba(200,144,42,0.45)" : inp.border }}
           />
         </div>
         <div style={{ ...arcHint, marginBottom: 18 }}>
-          The bare minimum the coach falls back to on rough days.
+          Required — this is the bare minimum the coach falls back to on rough days.
         </div>
 
         <div style={{ marginBottom: 10 }}>
