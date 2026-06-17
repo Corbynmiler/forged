@@ -347,6 +347,13 @@ function applyCoachName(body, coachName) {
   return body.replace(/\{coach\}/g, coachName || "Forged");
 }
 
+/** Trim an Arc identity sentence down to something that fits inline in a push body. */
+function identityShortPhrase(identity) {
+  const idt = String(identity || "").trim();
+  if (!idt) return "";
+  return idt.length > 56 ? idt.slice(0, 53) + "…" : idt;
+}
+
 /**
  * Message picker for normal users — time-slot aware, weekday/weekend aware,
  * coach-name personalised. Evening slot branches on whether the user has
@@ -391,17 +398,33 @@ function pickNormalMessage(habits, goals, todayYmd, localHour, coachName, arcBlo
     return { title: "Forged", body: resolve(lines[Math.abs(seed) % lines.length]) };
   }
 
-  // Evening + no proof yet + minimum on file — surface the bare minimum.
+  // Evening + no proof yet + minimum on file — surface the bare minimum, identity-led when possible.
   if (arcActive && slot === "evening" && proofDone === 0 && minimum) {
     const trimmed = minimum.length > 60 ? minimum.slice(0, 57) + "…" : minimum;
-    return {
-      title: "Forged",
-      body: resolve(`Day ${arcDayX}. Bad day version: ${trimmed} — {coach}`),
-    };
+    const idtShort = identityShortPhrase(arcBlock.identity);
+    const body = idtShort
+      ? `Day ${arcDayX}. This is the day you said you'd become ${idtShort}. It's slipping — ${trimmed} saves it. — {coach}`
+      : `Day ${arcDayX}. Bad day version: ${trimmed} — {coach}`;
+    return { title: "Forged", body: resolve(body) };
   }
 
-  // Morning during an Arc — anchor the day with a small ask.
+  // Morning during an Arc — anchor the day with a small ask. If yesterday had
+  // proof actions and none landed, lead with that instead of the generic line.
   if (arcActive && slot === "morning") {
+    const yesterdayYmd = daysAgoFrom(todayYmd, 1);
+    const yesterdayMissed = arcDayX > 1
+      && yesterdayYmd >= arcBlock.start_date
+      && proofTotal > 0
+      && proofRows.filter(h => forgedRingSatisfiedTodayRow(h, yesterdayYmd)).length === 0;
+
+    if (yesterdayMissed) {
+      const idtShort = identityShortPhrase(arcBlock.identity);
+      return {
+        title: "Forged",
+        body: resolve(`Yesterday didn't happen. Today still counts — one piece of proof for ${idtShort || "the Arc"}. — {coach}`),
+      };
+    }
+
     const lines = [
       `Day ${arcDayX}/${arcDur}. One proof action today. Small counts. — {coach}`,
       `Day ${arcDayX}. Pick the easiest piece of proof first. — {coach}`,
@@ -409,7 +432,18 @@ function pickNormalMessage(habits, goals, todayYmd, localHour, coachName, arcBlo
     return { title: "Forged", body: resolve(lines[Math.abs(seed) % lines.length]) };
   }
 
-  // Midday during an Arc — gentle proof nudge.
+  // Partial proof already shown today (noon/evening) — affirm what's banked,
+  // not just what's missing. This is the "saved" status made into copy.
+  if (arcActive && proofTotal > 0 && proofDone > 0 && proofDone < proofTotal) {
+    const idtShort = identityShortPhrase(arcBlock.identity);
+    const lines = [
+      `Day ${arcDayX}. Slow start, but you showed up — that's ${idtShort || "the identity"} talking. — {coach}`,
+      `Day ${arcDayX}. ${proofDone} of ${proofTotal} in. Today's already saved. — {coach}`,
+    ];
+    return { title: "Forged", body: resolve(lines[Math.abs(seed) % lines.length]) };
+  }
+
+  // Midday during an Arc — gentle proof nudge (no proof at all yet today).
   if (arcActive && proofPending > 0) {
     const lines = [
       `Day ${arcDayX}. ${proofPending} proof action${proofPending === 1 ? "" : "s"} left. — {coach}`,

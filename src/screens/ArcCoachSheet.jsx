@@ -411,6 +411,7 @@ export default function ArcCoachSheet({
   async function confirmArc() {
     const draft = isEdit ? arcDraft : editedArc;
     if (!draft?.identity?.trim() || !userId || !supabase || saving) return;
+    if (!isEdit && !draft?.minimumProof?.trim()) return;
     setSaving(true);
     setSaveError("");
     onSyncStart?.();
@@ -672,7 +673,7 @@ export default function ArcCoachSheet({
                 <textarea style={{ ...styleInp, minHeight: 44, resize: "vertical", lineHeight: 1.5 }} value={editedArc.why} maxLength={250}
                   onChange={e => setEditedArc(a => ({ ...a, why: e.target.value }))} placeholder="Why it matters (optional)" />
                 <input style={styleInp} value={editedArc.minimumProof} maxLength={150}
-                  onChange={e => setEditedArc(a => ({ ...a, minimumProof: e.target.value }))} placeholder="Bad-day minimum (optional)" />
+                  onChange={e => setEditedArc(a => ({ ...a, minimumProof: e.target.value }))} placeholder="Bad-day minimum — the least that still counts" />
                 <ArcDurationEditor
                   durationDays={editedArc.durationDays}
                   onChange={d => setEditedArc(a => ({ ...a, durationDays: d }))}
@@ -716,7 +717,24 @@ export default function ArcCoachSheet({
                   <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.5, marginBottom: 10 }}>
                     <span style={{ color: T.green, fontWeight: 600 }}>Bad-day minimum:</span> {editedArc.minimumProof}
                   </div>
-                ) : null}
+                ) : (
+                  <div style={{
+                    marginBottom: 12, padding: "10px 12px", borderRadius: T.rsm,
+                    border: "0.5px solid rgba(200,144,42,0.45)", background: "rgba(200,144,42,0.08)",
+                  }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: T.gold, marginBottom: 6 }}>
+                      Set a bad-day minimum to start this Arc
+                    </div>
+                    <input
+                      style={{ ...styleInp, padding: "8px 10px", fontSize: 14 }}
+                      value={editedArc.minimumProof || ""}
+                      maxLength={150}
+                      onChange={e => setEditedArc(a => ({ ...a, minimumProof: e.target.value }))}
+                      placeholder="The least that still counts on a bad day"
+                      autoFocus
+                    />
+                  </div>
+                )}
                 {editedArc.proofActions?.filter(p => proofActionDisplayName(p).trim()).length > 0 ? (
                   <div style={{ marginBottom: 4 }}>
                     <div style={{ fontSize: 10, fontWeight: 700, color: T.hint, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>
@@ -737,8 +755,8 @@ export default function ArcCoachSheet({
             ) : null}
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
               <button type="button" onClick={confirmArc}
-                disabled={!editedArc.identity?.trim() || saving}
-                style={{ width: "100%", padding: 14, borderRadius: T.rsm, border: "none", background: T.gold, color: "#0F0F0D", fontSize: 15, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer", opacity: saving ? 0.7 : 1, fontFamily: T.font }}>
+                disabled={!editedArc.identity?.trim() || !editedArc.minimumProof?.trim() || saving}
+                style={{ width: "100%", padding: 14, borderRadius: T.rsm, border: "none", background: T.gold, color: "#0F0F0D", fontSize: 15, fontWeight: 700, cursor: (saving || !editedArc.identity?.trim() || !editedArc.minimumProof?.trim()) ? "default" : "pointer", opacity: (saving || !editedArc.identity?.trim() || !editedArc.minimumProof?.trim()) ? 0.6 : 1, fontFamily: T.font, transition: "opacity 0.15s" }}>
                 {saving ? (isRunItBack ? "Restarting…" : "Starting Arc…") : (isRunItBack ? "Run it back →" : "Start this Arc →")}
               </button>
               <button type="button" onClick={() => { setSelectedIdx(null); setEditedArc(null); }}

@@ -3,6 +3,7 @@
  */
 
 import { todayStr, parseLocal, isSatisfiedForTodayRing } from "./utils.js";
+import { T } from "./theme.js";
 
 export const ARC_DAILY_XP_CAP = 40;
 export const ARC_BASE_POOL = 30;
@@ -143,4 +144,36 @@ export function lifetimeXpForHabitLog({ hasActiveArc, isProof }) {
   if (!hasActiveArc) return LIFETIME_XP_DEFAULT;
   if (isProof) return LIFETIME_XP_DEFAULT;
   return LIFETIME_XP_DURING_ARC_NON_PROOF;
+}
+
+/** Local hour after which an undone proof day is "at risk" rather than just "alive". */
+export const ARC_RISK_HOUR = 15;
+
+export const ARC_STATUS_META = {
+  alive:   { key: "alive",   label: "Alive",   color: T.green,      glyph: "●" },
+  at_risk: { key: "at_risk", label: "At risk",  color: T.gold,       glyph: "▲" },
+  saved:   { key: "saved",   label: "Saved",    color: T.goldBright, glyph: "✓" },
+  missed:  { key: "missed",  label: "Missed",   color: T.muted,      glyph: "—" },
+};
+
+/**
+ * Today's Arc-day status, derived entirely from proof counts already in scope —
+ * no extra fetch, no schema change.
+ *
+ * - `alive`: no proof required yet, or already fully proved.
+ * - `at_risk`: past the risk hour, proof outstanding, nothing logged yet today.
+ * - `saved`: partial proof already logged today (or a finalized past day with some proof).
+ * - `missed`: a finalized past day with zero proof logged.
+ */
+export function getArcDayStatus({ proofTotal, proofDone, hour = new Date().getHours(), isFinalized = false }) {
+  const total = Math.max(0, Number(proofTotal) || 0);
+  const done = Math.max(0, Math.min(Number(proofDone) || 0, total));
+
+  if (total === 0) return "alive";
+  if (done >= total) return "alive";
+
+  if (isFinalized) return done > 0 ? "saved" : "missed";
+
+  if (hour < ARC_RISK_HOUR) return "alive";
+  return done > 0 ? "saved" : "at_risk";
 }

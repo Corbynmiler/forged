@@ -10,6 +10,7 @@ import {
 import { resolveArcTitle, arcHeaderSubtitle, arcDurationWeeksLabel } from "../arcProofMatch.js";
 import { parseReceiptStructured } from "../lib/arcTimeline.js";
 import { ReceiptExpandedBody } from "../components/ArcTimeline.jsx";
+import { getArcDayStatus, ARC_STATUS_META } from "../arcProgress.js";
 
 // ── Coach greeting helpers (deterministic, no AI) ──────────────────────────
 function coachGreetingDaysLeft(targetYmd) {
@@ -495,11 +496,27 @@ function AddProofActionSheet({ activeBlock, habits, onClose, onSelectHabit, onCr
   );
 }
 
-function ArcStrip({ activeBlock, onViewArc }) {
+function ArcStatusPill({ status }) {
+  const meta = ARC_STATUS_META[status] || ARC_STATUS_META.alive;
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 5, flexShrink: 0,
+      padding: "2px 9px 2px 7px", borderRadius: 20,
+      background: `${meta.color}1F`, border: `0.5px solid ${meta.color}66`,
+      fontSize: 10, fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase",
+      color: meta.color, fontFamily: T.font, lineHeight: 1.6, whiteSpace: "nowrap",
+    }}>
+      <span style={{ fontSize: 9 }}>{meta.glyph}</span>{meta.label}
+    </span>
+  );
+}
+
+function ArcStrip({ activeBlock, onViewArc, proofTotal = 0, proofDone = 0, hour = new Date().getHours() }) {
   const { dayX, week, progress, duration, totalWeeks } = arcDayInfo(activeBlock);
   const arcTitle = resolveArcTitle(activeBlock.title, activeBlock.identity);
   const subtitle = arcHeaderSubtitle(activeBlock);
   const weeksLabel = arcDurationWeeksLabel(duration);
+  const status = getArcDayStatus({ proofTotal, proofDone, hour });
 
   return (
     <button
@@ -519,8 +536,11 @@ function ArcStrip({ activeBlock, onViewArc }) {
         boxSizing: "border-box",
       }}
     >
-      <div style={{ fontSize: 10, fontWeight: 800, color: T.gold, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 8 }}>
-        {weeksLabel} · Day {dayX} of {duration} · Week {week}/{totalWeeks}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+        <div style={{ fontSize: 10, fontWeight: 800, color: T.gold, letterSpacing: "0.12em", textTransform: "uppercase", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {weeksLabel} · Day {dayX} of {duration} · Week {week}/{totalWeeks}
+        </div>
+        {proofTotal > 0 && <ArcStatusPill status={status} />}
       </div>
       <div style={{ fontFamily: T.serif, fontSize: 22, color: T.text, lineHeight: 1.2, marginBottom: subtitle ? 6 : 10, minWidth: 0, overflowWrap: "break-word", wordBreak: "break-word" }}>
         {arcTitle}
@@ -542,6 +562,63 @@ function ArcStrip({ activeBlock, onViewArc }) {
         <div style={{ height: "100%", width: `${Math.round(progress * 100)}%`, background: `linear-gradient(90deg, ${T.accent}, ${T.gold})`, borderRadius: 2, transition: "width 0.4s ease" }} />
       </div>
     </button>
+  );
+}
+
+function DriftCard({ activeBlock, pendingHabits, status, onTap, onClose }) {
+  const meta = ARC_STATUS_META[status] || ARC_STATUS_META.at_risk;
+  const identity = (activeBlock?.identity || "").trim();
+  const minimum = (activeBlock?.minimumProof || "").trim();
+  const headline = status === "at_risk"
+    ? (identity ? `Drifting from ${identity}?` : "Drifting today?")
+    : "Feeling off today?";
+
+  return (
+    <div style={{
+      margin: "0 14px 10px", padding: "16px 16px 14px", borderRadius: T.r,
+      border: `0.5px solid ${meta.color}55`,
+      background: `linear-gradient(135deg, ${meta.color}14 0%, rgba(26,26,22,0.97) 60%)`,
+      fontFamily: T.font, boxSizing: "border-box",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <ArcStatusPill status={status} />
+        <button
+          type="button"
+          onClick={onClose}
+          style={{ border: "none", background: "none", color: T.muted, fontSize: 12, cursor: "pointer", fontFamily: T.font, padding: "10px 4px", margin: "-10px -4px", minHeight: 40 }}
+        >
+          Dismiss
+        </button>
+      </div>
+      <div style={{ fontFamily: T.serif, fontSize: 17, color: T.text, lineHeight: 1.3, marginBottom: 6 }}>
+        {headline}
+      </div>
+      <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.5, marginBottom: 12 }}>
+        {minimum
+          ? <>The minimum you set: <span style={{ color: T.text, fontWeight: 600 }}>{minimum}</span></>
+          : "One piece of proof still saves today."}
+      </div>
+      {pendingHabits.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {pendingHabits.map(h => (
+            <button
+              key={h.id}
+              type="button"
+              onClick={(e) => onTap(h.id, e)}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                width: "100%", padding: "11px 14px", borderRadius: T.rsm,
+                border: `0.5px solid ${meta.color}40`, background: "rgba(255,255,255,0.04)",
+                cursor: "pointer", textAlign: "left", fontFamily: T.font, boxSizing: "border-box",
+              }}
+            >
+              <span style={{ fontSize: 14, fontWeight: 600, color: T.text, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.name}</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: meta.color, flexShrink: 0, marginLeft: 10 }}>Log now →</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -695,6 +772,7 @@ export function TodayScreen({
     try { return JSON.parse(localStorage.getItem("forged_proof_order") || "null") || null; } catch { return null; }
   });
   const [justCompleted, setJustCompleted] = useState(false);
+  const [driftOpen, setDriftOpen] = useState(false);
   const prevProofDoneRef = useRef(null);
 
   const activeGoals    = goals.filter(g => g.status !== "completed");
@@ -767,7 +845,9 @@ export function TodayScreen({
       : logHabits.length
         ? "Logs below — ring is for habits & goals"
         : "";
-  const showMinimumHint = arcActive && hr >= 19 && proofDone === 0 && !!(activeBlock.minimumProof || "").trim();
+  const arcStatus = arcActive && proofTotal > 0 ? getArcDayStatus({ proofTotal, proofDone, hour: hr }) : null;
+  const proofIncomplete = arcActive && proofTotal > 0 && proofDone < proofTotal;
+  const showDriftCard = proofIncomplete && (arcStatus === "at_risk" || driftOpen);
   const ringCenterMain = arcActive && proofTotal > 0 ? `${proofDone}/${proofTotal}` : undefined;
   const ringCenterSub = arcActive && proofTotal > 0 ? "proof" : undefined;
   const today = todayStr();
@@ -851,7 +931,7 @@ export function TodayScreen({
           </div>
         </button>
       )}
-      {arcActive && <ArcStrip activeBlock={activeBlock} onViewArc={onViewArc} />}
+      {arcActive && <ArcStrip activeBlock={activeBlock} onViewArc={onViewArc} proofTotal={proofTotal} proofDone={proofDone} hour={hr} />}
       {showProofPicker && activeBlock && (
         <AddProofActionSheet
           activeBlock={activeBlock}
@@ -877,12 +957,29 @@ export function TodayScreen({
         />
       )}
       {onOpenCoachMic && !arcActive && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic} habitCompletionPercentage={pct} habitsLoggedTodayCount={loggedCount} totalTrackables={totalTrackables}/>}
-      {showMinimumHint && (
-        <div style={{ margin:"0 14px 8px", padding:"11px 14px", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:T.surface }}>
-          <div style={{ fontSize:13, color:T.sub, lineHeight:1.5 }}>
-            Bad day? Minimum is: <span style={{ color:T.text, fontWeight:500 }}>{activeBlock.minimumProof.trim()}</span>
-          </div>
-        </div>
+      {showDriftCard && (
+        <DriftCard
+          activeBlock={activeBlock}
+          pendingHabits={proofHabitsSorted.filter(h => !isSatisfiedForTodayRing(h))}
+          status={arcStatus}
+          onTap={onTap}
+          onClose={() => setDriftOpen(false)}
+        />
+      )}
+      {proofIncomplete && !showDriftCard && (
+        <button
+          type="button"
+          onClick={() => setDriftOpen(true)}
+          style={{
+            display: "block", margin: "0 14px 0", padding: "10px 0",
+            border: "none", background: "none", cursor: "pointer",
+            fontFamily: T.font, fontSize: 12, fontWeight: 600, color: T.muted,
+            textDecoration: "underline", textUnderlineOffset: 3, textDecorationColor: "rgba(168,164,156,0.4)",
+            minHeight: 40, textAlign: "left",
+          }}
+        >
+          Feeling off today? →
+        </button>
       )}
       <div data-tour="today-summary" style={{
         margin:"6px 14px 12px", background:T.raised, borderRadius:T.r,
