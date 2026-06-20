@@ -3,8 +3,8 @@ import { T } from "../theme.js";
 import { supabase } from "../supabase.js";
 import { parseLocal, fmtEntryDate, isSatisfiedForTodayRing } from "../utils.js";
 import { resolveArcTitle, arcDurationWeeksLabel } from "../arcProofMatch.js";
-import { getArcDayNumber, getArcDurationDays, isProofHabitForBlock, ARC_RANKS } from "../arcProgress.js";
-import { computeArcTrajectory, MOMENTUM_COPY } from "../lib/arcTrajectory.js";
+import { getArcDayNumber, getArcDurationDays, isProofHabitForBlock } from "../arcProgress.js";
+import { ArcTrajectoryFork } from "./ArcTrajectoryFork.jsx";
 import { useReducedMotion } from "../hooks/useReducedMotion.js";
 import {
   buildArcTimeline,
@@ -1010,76 +1010,9 @@ function EvidenceChronologySheet({ journalEntries, block, onClose, reducedMotion
   );
 }
 
-/**
- * Trajectory Layer — momentum read + a faint "ghost" rank ladder showing
- * where the Arc is projected to land if the current pace holds. Sits inside
- * the existing hero, beneath the time-progress bar. No second timeline.
- */
-function ArcTrajectoryStrip({ trajectory, reducedMotion }) {
-  if (!trajectory) return null;
-  const { momentum, currentRank, projectedRank } = trajectory;
-  const momentumCopy = MOMENTUM_COPY[momentum];
-  const momentumColor = momentum === "rising" ? T.green : momentum === "fading" ? T.accent : T.muted;
-  const currentIdx = ARC_RANKS.indexOf(currentRank);
-  const projectedIdx = ARC_RANKS.indexOf(projectedRank);
-
-  return (
-    <div style={{ marginTop: 14, paddingTop: 12, borderTop: `0.5px solid ${T.border}` }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 9 }}>
-        <span style={{ fontSize: 12, color: momentumColor, lineHeight: 1 }}>{momentumCopy.glyph}</span>
-        <span style={{ fontSize: 10, fontWeight: 700, color: momentumColor, letterSpacing: "0.1em", textTransform: "uppercase" }}>
-          {momentumCopy.label}
-        </span>
-      </div>
-      <div style={{ fontSize: 13, color: T.text, lineHeight: 1.45, marginBottom: 11 }}>
-        {trajectory.sentence}
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
-        {ARC_RANKS.map((r, i) => {
-          const isCurrent = i === currentIdx;
-          const isGhost = i === projectedIdx && projectedIdx !== currentIdx;
-          const isPast = i < currentIdx;
-          const dotSize = isCurrent ? 9 : 6;
-          return (
-            <div key={r.label} style={{ display: "flex", alignItems: "center", flex: i < ARC_RANKS.length - 1 ? 1 : "0 0 auto" }}>
-              <div style={{ position: "relative", width: dotSize, height: dotSize, flexShrink: 0 }}>
-                <div style={{
-                  position: "absolute", inset: 0, borderRadius: "50%",
-                  background: isCurrent || isPast ? r.color : "rgba(255,255,255,0.10)",
-                  boxShadow: isCurrent ? `0 0 9px ${r.color}80` : "none",
-                  transition: reducedMotion ? undefined : "background 0.4s ease",
-                }} />
-                {isGhost ? (
-                  <div style={{
-                    position: "absolute", top: -4, left: -4, width: dotSize + 8, height: dotSize + 8,
-                    borderRadius: "50%", border: `1.5px dashed ${r.color}90`, opacity: 0.85,
-                  }} />
-                ) : null}
-              </div>
-              {i < ARC_RANKS.length - 1 ? (
-                <div style={{
-                  flex: 1, height: 1, margin: "0 3px",
-                  background: isPast ? r.color : "rgba(255,255,255,0.08)",
-                  opacity: isPast ? 0.6 : 1,
-                }} />
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 9.5, color: T.hint, letterSpacing: "0.02em" }}>
-        <span>{currentRank.label} now</span>
-        {projectedIdx !== currentIdx ? (
-          <span style={{ color: `${projectedRank.color}cc` }}>{projectedRank.label} projected</span>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
 function ArcJourneyHero({
   block, dayNum, duration, weekNum, weeksTotal, daysLeft, progress,
-  proofDone, proofTotal, trajectory, onEditArc, onToggleDetails, detailsOpen, reducedMotion, children,
+  proofDone, proofTotal, onEditArc, onToggleDetails, detailsOpen, reducedMotion, children,
 }) {
   const arcTitle = resolveArcTitle(block.title, block.identity);
 
@@ -1112,8 +1045,6 @@ function ArcJourneyHero({
         <span>Day {dayNum} of {duration}</span>
         <span>{proofTotal > 0 ? `${proofDone}/${proofTotal} proof today` : (daysLeft === 0 ? "Final day" : `${daysLeft} days left`)}</span>
       </div>
-
-      <ArcTrajectoryStrip trajectory={trajectory} reducedMotion={reducedMotion} />
 
       <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
         {onEditArc ? (
@@ -1239,12 +1170,6 @@ export function ArcTimeline({
   const proofHabits = (habits || []).filter(h => h.habitType !== "log" && isProofHabitForBlock(h, block?.id));
   const proofDone = proofHabits.filter(h => isSatisfiedForTodayRing(h)).length;
   const proofTotal = proofHabits.length;
-
-  const trajectory = useMemo(() => computeArcTrajectory({
-    ledgerRows,
-    currentPercent: block.completionScore,
-    daysLeft,
-  }), [ledgerRows, block.completionScore, daysLeft]);
 
   const defaultSegment = initialWeek != null ? SEG.week(initialWeek) : SEG.week(currentWeek);
 
@@ -1380,7 +1305,6 @@ export function ArcTimeline({
           progress={progress}
           proofDone={proofDone}
           proofTotal={proofTotal}
-          trajectory={trajectory}
           onEditArc={onEditArc}
           onToggleDetails={(block.whyStatement || block.oldPattern || block.minimumProof) ? () => setDetailsOpen(v => !v) : null}
           detailsOpen={detailsOpen}
@@ -1388,6 +1312,17 @@ export function ArcTimeline({
         >
           {detailsFields}
         </ArcJourneyHero>
+      ) : null}
+
+      {isActive && !embedded ? (
+        <ArcTrajectoryFork
+          block={block}
+          ledgerRows={ledgerRows}
+          dayNum={dayNum}
+          duration={duration}
+          daysLeft={daysLeft}
+          reducedMotion={reducedMotion}
+        />
       ) : null}
 
       <div

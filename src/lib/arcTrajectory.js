@@ -4,6 +4,7 @@
  * on "where is this Arc heading if the last week keeps going."
  */
 import { ARC_RANKS, getArcRankFromPercent } from "../arcProgress.js";
+import { ymdAddDays } from "./arcTimeline.js";
 
 const MIN_DAYS_FOR_TRAJECTORY = 4;
 const RISING_THRESHOLD = 6;
@@ -90,3 +91,49 @@ export const MOMENTUM_COPY = {
   steady: { glyph: "→", label: "Momentum holding" },
   fading: { glyph: "↘", label: "Momentum fading" },
 };
+
+/**
+ * Day-by-day series for the Trajectory Fork visual.
+ * "Current Path" = what was actually logged, one point per day with proof data.
+ * "Chosen Path" = the flat ceiling — full proof, every day, the identity stated on day 1.
+ * Days after today carry no real data; the caller draws those as a dashed
+ * projection toward `projectedPercent`, not as fact.
+ *
+ * @returns {{ day, date, percent: number|null, hasData: boolean, isToday: boolean, isFuture: boolean, missed: boolean }[]}
+ */
+export function buildDualPathSeries({ block, ledgerRows, duration, dayNum }) {
+  const start = block?.startDate;
+  const map = new Map();
+  for (const r of ledgerRows || []) {
+    const total = r.proofTotal ?? r.proof_total ?? 0;
+    const done = r.proofDone ?? r.proof_done ?? 0;
+    const date = r.date || r.dateStr;
+    if (!date) continue;
+    map.set(date, total > 0 ? (done / total) * 100 : null);
+  }
+
+  const days = [];
+  for (let i = 1; i <= duration; i++) {
+    const date = start ? ymdAddDays(start, i - 1) : null;
+    const hasData = date ? map.has(date) && map.get(date) != null : false;
+    const percent = hasData ? map.get(date) : null;
+    days.push({
+      day: i,
+      date,
+      percent,
+      hasData,
+      isToday: i === dayNum,
+      isFuture: i > dayNum,
+      missed: hasData && percent === 0,
+    });
+  }
+  return days;
+}
+
+/** Color read for the Current Path based on where it sits relative to the chosen ceiling. */
+export function currentPathTone(percent) {
+  if (percent == null) return "neutral";
+  if (percent >= 65) return "aligned";
+  if (percent >= 35) return "drifting";
+  return "off-path";
+}
