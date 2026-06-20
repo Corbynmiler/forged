@@ -1,16 +1,25 @@
 // ─── TIMELINE SPLIT ───────────────────────────────────────────────────────────
-// One flagship visual, not a third rail: a single fork from "You are here."
-// Top branch = Chosen Timeline (bright, alive). Bottom branch = Current
-// Timeline (dim, drifting). Today's real proof state decides which one glows.
+// A navigation display, not a chart: one origin, one flat default future, and
+// a Chosen Future whose curve is reshaped — visibly, dramatically — by exactly
+// how much proof was logged today. Zero proof barely lifts off the baseline.
+// A strong day bends it hard. That's the whole idea: today rewrites tomorrow.
 import { useId, useMemo } from "react";
 import { T } from "../theme.js";
 import { todayStr } from "../utils.js";
 
 const VB_W = 600;
-const VB_H = 200;
-const ORIGIN = { x: 56, y: 100 };
-const CHOSEN_END = { x: 560, y: 38 };
-const CURRENT_END = { x: 560, y: 162 };
+const VB_H = 240;
+const ORIGIN = { x: 50, y: 150 };
+const END_X = 568;
+// Capped so chosenEnd.y (ORIGIN.y - rise) never gets close enough to the
+// viewBox top to push the "Future You" label into the text above the chart.
+const MAX_RISE = 108;
+const BASE_RISE = 9;
+const DEFAULT_DROOP = 22;
+
+function easeOutCubic(x) {
+  return 1 - (1 - x) ** 3;
+}
 
 function cubicPoint(p0, p1, p2, p3, t) {
   const mt = 1 - t;
@@ -19,45 +28,51 @@ function cubicPoint(p0, p1, p2, p3, t) {
   return { x, y };
 }
 
-/** Today's real proof state from arc_daily_scores — the only signal this visual uses. */
-function todayProofState(ledgerRows) {
+/** Today's real proof count from arc_daily_scores — the only input this visual reshapes around. */
+function todayProof(ledgerRows) {
   const today = todayStr();
   const row = (ledgerRows || []).find(r => r.date === today);
   const total = row?.proofTotal ?? row?.proof_total ?? 0;
   const done = row?.proofDone ?? row?.proof_done ?? 0;
-  if (total === 0) return "unlogged";
-  if (done >= total) return "aligned";
-  if (done > 0) return "partial";
-  return "unlogged";
+  return { total, done: Math.max(0, Math.min(done, total || done)) };
 }
 
-const STATE_COPY = {
-  aligned: { line: "Today's proof pulled you toward the life you chose.", color: "green", winner: "chosen" },
-  partial: { line: "Today can pull you closer.", color: "gold", winner: "chosen" },
-  unlogged: { line: "No proof logged yet. The default path is winning today.", color: "accent", winner: "current" },
-};
+const TIERS = [
+  { min: 0, label: "The future is still wide open.", confidence: "Unwritten" },
+  { min: 1, label: "You're starting to bend it.", confidence: "Building" },
+  { min: 3, label: "The future is curving toward you.", confidence: "Rising" },
+  { min: 6, label: "You're reshaping where this goes.", confidence: "Strong" },
+  { min: 9, label: "This is a different future now.", confidence: "Dramatic" },
+];
 
-export function ArcTimelineSplit({ ledgerRows }) {
+function tierFor(done) {
+  let t = TIERS[0];
+  for (const tier of TIERS) if (done >= tier.min) t = tier;
+  return t;
+}
+
+export function ArcTimelineSplit({ ledgerRows, reducedMotion }) {
   const gradId = useId().replace(/[^a-zA-Z0-9]/g, "");
 
-  const state = useMemo(() => todayProofState(ledgerRows), [ledgerRows]);
-  const copy = STATE_COPY[state];
-  const winningChosen = copy.winner === "chosen";
+  const { done } = useMemo(() => todayProof(ledgerRows), [ledgerRows]);
+  const steepness = easeOutCubic(Math.min(1, done / 9));
+  const rise = BASE_RISE + MAX_RISE * steepness;
+  const tier = tierFor(done);
+  const isLit = done > 0;
 
-  const chosenCtrl1 = { x: ORIGIN.x + 160, y: ORIGIN.y - 4 };
-  const chosenCtrl2 = { x: CHOSEN_END.x - 160, y: CHOSEN_END.y };
-  const chosenD = `M ${ORIGIN.x} ${ORIGIN.y} C ${chosenCtrl1.x} ${chosenCtrl1.y}, ${chosenCtrl2.x} ${chosenCtrl2.y}, ${CHOSEN_END.x} ${CHOSEN_END.y}`;
+  const chosenEnd = { x: END_X, y: ORIGIN.y - rise };
+  // Control points launch progressively earlier/harder as steepness increases —
+  // not just a higher endpoint, but a more dramatic sweep off the origin.
+  const chosenCtrl1 = { x: ORIGIN.x + 90 + 60 * (1 - steepness), y: ORIGIN.y - rise * 0.55 };
+  const chosenCtrl2 = { x: chosenEnd.x - 170, y: chosenEnd.y + (1 - steepness) * 30 };
+  const chosenD = `M ${ORIGIN.x} ${ORIGIN.y} C ${chosenCtrl1.x} ${chosenCtrl1.y}, ${chosenCtrl2.x} ${chosenCtrl2.y}, ${chosenEnd.x} ${chosenEnd.y}`;
 
-  const currentCtrl1 = { x: ORIGIN.x + 150, y: ORIGIN.y + 10 };
-  const currentCtrl2 = { x: CURRENT_END.x - 170, y: CURRENT_END.y };
-  const currentD = `M ${ORIGIN.x} ${ORIGIN.y} C ${currentCtrl1.x} ${currentCtrl1.y}, ${currentCtrl2.x} ${currentCtrl2.y}, ${CURRENT_END.x} ${CURRENT_END.y}`;
+  const defaultEnd = { x: END_X, y: ORIGIN.y + DEFAULT_DROOP };
+  const defaultCtrl1 = { x: ORIGIN.x + 180, y: ORIGIN.y + 6 };
+  const defaultCtrl2 = { x: defaultEnd.x - 180, y: defaultEnd.y - 4 };
+  const defaultD = `M ${ORIGIN.x} ${ORIGIN.y} C ${defaultCtrl1.x} ${defaultCtrl1.y}, ${defaultCtrl2.x} ${defaultCtrl2.y}, ${defaultEnd.x} ${defaultEnd.y}`;
 
-  const chosenNodeTs = [0.32, 0.62, 0.92];
-  const currentNodeTs = [0.32, 0.62, 0.92];
-  const chosenNodes = chosenNodeTs.map(t => cubicPoint(ORIGIN, chosenCtrl1, chosenCtrl2, CHOSEN_END, t));
-  const currentNodes = currentNodeTs.map(t => cubicPoint(ORIGIN, currentCtrl1, currentCtrl2, CURRENT_END, t));
-
-  const lineColor = copy.color === "green" ? T.green : copy.color === "gold" ? T.gold : T.accent;
+  const particleTs = [0, 0.33, 0.66];
 
   return (
     <div style={{
@@ -66,101 +81,129 @@ export function ArcTimelineSplit({ ledgerRows }) {
       borderRadius: T.r,
       position: "relative",
       overflow: "hidden",
-      background: "radial-gradient(130% 150% at 8% 50%, rgba(245,200,66,0.10) 0%, rgba(15,15,13,0) 50%), radial-gradient(130% 150% at 95% 85%, rgba(192,57,43,0.08) 0%, rgba(15,15,13,0) 55%), linear-gradient(165deg, #14140F 0%, #0A0A09 100%)",
+      background: "radial-gradient(140% 160% at 6% 60%, rgba(245,200,66,0.11) 0%, rgba(15,15,13,0) 55%), radial-gradient(120% 140% at 96% 95%, rgba(255,255,255,0.04) 0%, rgba(15,15,13,0) 50%), linear-gradient(165deg, #14140F 0%, #0A0A09 100%)",
       border: `0.5px solid ${T.borderMid}`,
       boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04), 0 18px 50px rgba(0,0,0,0.45)",
       padding: "18px 16px 16px",
     }}>
+      <style>{`
+        @keyframes splitDraw { from { stroke-dashoffset: 900; } to { stroke-dashoffset: 0; } }
+        @keyframes splitNodePulse { 0%, 100% { opacity: 0.55; r: 4.5; } 50% { opacity: 1; r: 6.5; } }
+        @media (prefers-reduced-motion: reduce) {
+          .split-draw { animation: none !important; stroke-dashoffset: 0 !important; }
+        }
+      `}</style>
+
       <div style={{ fontSize: 9.5, fontWeight: 800, color: T.hint, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 6 }}>
         Timeline Split
       </div>
-      <div style={{ fontFamily: T.serif, fontSize: 19, color: T.text, lineHeight: 1.2, marginBottom: 14 }}>
-        Every proof action chooses which version gets stronger.
+      <div style={{ fontFamily: T.serif, fontSize: 19, color: T.text, lineHeight: 1.25, marginBottom: 6, transition: "opacity 0.3s ease" }}>
+        {tier.label}
+      </div>
+      <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.5, marginBottom: 14 }}>
+        Every proof action pulls your future off the default path.
       </div>
 
-      <div style={{ position: "relative", width: "100%", height: 190 }}>
-      <svg viewBox={`0 0 ${VB_W} ${VB_H}`} preserveAspectRatio="none" style={{ width: "100%", height: 190, display: "block" }}>
-        <defs>
-          <filter id={`${gradId}-glow`} filterUnits="userSpaceOnUse" x={-60} y={-60} width={VB_W + 120} height={VB_H + 120}>
-            <feGaussianBlur stdDeviation="5" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-          <linearGradient id={`${gradId}-chosen`} gradientUnits="userSpaceOnUse" x1={ORIGIN.x} y1="0" x2={CHOSEN_END.x} y2="0">
-            <stop offset="0%" stopColor={T.gold} />
-            <stop offset="100%" stopColor={T.green} />
-          </linearGradient>
-        </defs>
+      <div style={{ position: "relative", width: "100%", height: 210 }}>
+        <svg viewBox={`0 0 ${VB_W} ${VB_H}`} preserveAspectRatio="none" style={{ width: "100%", height: 210, display: "block" }}>
+          <defs>
+            <filter id={`${gradId}-glow`} filterUnits="userSpaceOnUse" x={-80} y={-80} width={VB_W + 160} height={VB_H + 160}>
+              <feGaussianBlur stdDeviation={4 + steepness * 3} result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+            <linearGradient id={`${gradId}-chosen`} gradientUnits="userSpaceOnUse" x1={ORIGIN.x} y1="0" x2={chosenEnd.x} y2="0">
+              <stop offset="0%" stopColor={T.gold} />
+              <stop offset="100%" stopColor={T.green} />
+            </linearGradient>
+          </defs>
 
-        {/* Current Timeline — dim, drawn first so the chosen path reads on top at the origin */}
-        <path d={currentD} fill="none" stroke={winningChosen ? "rgba(192,57,43,0.35)" : T.accent} strokeWidth={winningChosen ? 2.4 : 3.4}
-          strokeDasharray={winningChosen ? "1 5" : "5 4"} strokeLinecap="round"
-          filter={winningChosen ? undefined : `url(#${gradId}-glow)`}
-          opacity={winningChosen ? 0.55 : 0.9} />
+          {/* default future — flat-to-declining, the path of nothing changing */}
+          <path d={defaultD} fill="none" stroke="rgba(255,255,255,0.22)" strokeWidth={1.6}
+            strokeDasharray="2 6" strokeLinecap="round" opacity={0.7} />
 
-        {/* Chosen Timeline — bright, alive */}
-        <path d={chosenD} fill="none" stroke={`url(#${gradId}-chosen)`} strokeWidth={winningChosen ? 4 : 2.6}
-          strokeLinecap="round" filter={winningChosen ? `url(#${gradId}-glow)` : undefined}
-          opacity={winningChosen ? 1 : 0.45} />
+          {/* chosen future — reshaped live by today's proof count */}
+          <path
+            className={reducedMotion ? "" : "split-draw"}
+            d={chosenD} fill="none" stroke={`url(#${gradId}-chosen)`}
+            strokeWidth={2.6 + steepness * 2.6} strokeLinecap="round"
+            filter={`url(#${gradId}-glow)`}
+            opacity={0.55 + steepness * 0.45}
+            style={reducedMotion ? undefined : {
+              strokeDasharray: 900, strokeDashoffset: 0,
+              animation: "splitDraw 1.1s cubic-bezier(0.22, 1, 0.36, 1) both",
+            }}
+          />
 
-        {/* proof nodes along each branch */}
-        {currentNodes.map((p, i) => (
-          <circle key={`cur-${i}`} cx={p.x} cy={p.y} r={winningChosen ? 2.6 : 4} fill={T.accent}
-            opacity={winningChosen ? 0.4 : 0.85} />
-        ))}
-        {chosenNodes.map((p, i) => (
-          <circle key={`ch-${i}`} cx={p.x} cy={p.y} r={winningChosen ? 4.4 : 2.8} fill={lineColor}
-            opacity={winningChosen ? 1 : 0.45} filter={winningChosen ? `url(#${gradId}-glow)` : undefined} />
-        ))}
+          {/* particles flowing along the chosen path — only once there's something to flow toward */}
+          {!reducedMotion && isLit ? particleTs.map((t, i) => (
+            <circle key={i} r={2.4} fill={T.goldBright} opacity={0}>
+              <animateMotion dur="3.2s" begin={`${i * 1.05}s`} repeatCount="indefinite" path={chosenD} />
+              <animate attributeName="opacity" values="0;0.9;0" dur="3.2s" begin={`${i * 1.05}s`} repeatCount="indefinite" />
+            </circle>
+          )) : null}
 
-        {/* origin: You are here */}
-        <circle cx={ORIGIN.x} cy={ORIGIN.y} r={7} fill={T.text} filter={`url(#${gradId}-glow)`} />
-        <circle cx={ORIGIN.x} cy={ORIGIN.y} r={7} fill="none" stroke={lineColor} strokeWidth={1.5}>
-          <animate attributeName="r" values="7;18;7" dur="2.6s" repeatCount="indefinite" />
-          <animate attributeName="opacity" values="0.8;0;0.8" dur="2.6s" repeatCount="indefinite" />
-        </circle>
+          {/* origin: Current You */}
+          <circle cx={ORIGIN.x} cy={ORIGIN.y} r={6.5} fill={T.text} filter={`url(#${gradId}-glow)`} />
+          {!reducedMotion ? (
+            <circle cx={ORIGIN.x} cy={ORIGIN.y} r={6.5} fill="none" stroke={T.goldBright} strokeWidth={1.4}>
+              <animate attributeName="r" values="6.5;17;6.5" dur="2.4s" repeatCount="indefinite" />
+              <animate attributeName="opacity" values="0.8;0;0.8" dur="2.4s" repeatCount="indefinite" />
+            </circle>
+          ) : null}
 
-        {/* end-of-path arrows */}
-        <circle cx={CHOSEN_END.x} cy={CHOSEN_END.y} r={winningChosen ? 5 : 3} fill={T.green} opacity={winningChosen ? 1 : 0.45} />
-        <circle cx={CURRENT_END.x} cy={CURRENT_END.y} r={winningChosen ? 3 : 5} fill={T.accent} opacity={winningChosen ? 0.4 : 0.9} />
-      </svg>
+          {/* future node — brightens and grows with steepness */}
+          <circle
+            cx={chosenEnd.x} cy={chosenEnd.y} r={4.5 + steepness * 2.5}
+            fill={steepness > 0.5 ? T.green : T.goldBright}
+            filter={`url(#${gradId}-glow)`}
+            opacity={0.6 + steepness * 0.4}
+            style={!reducedMotion && isLit ? { animation: "splitNodePulse 2.2s ease-in-out infinite" } : undefined}
+          />
+          <circle cx={defaultEnd.x} cy={defaultEnd.y} r={3} fill="rgba(255,255,255,0.35)" />
+        </svg>
 
-      {/* labels positioned by the same viewBox ratios as the path endpoints, so they
-          stay locked to the curve ends regardless of the card's rendered width */}
+        {/* labels locked to the same viewBox ratios as the path endpoints */}
+        <div style={{
+          position: "absolute", right: 4,
+          top: `${(chosenEnd.y / VB_H) * 100}%`, transform: "translateY(-160%)",
+          fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase",
+          color: T.goldBright, whiteSpace: "nowrap", transition: "top 0.4s ease",
+        }}>
+          Future You
+        </div>
+        <div style={{
+          position: "absolute", right: 4,
+          top: `${(defaultEnd.y / VB_H) * 100}%`, transform: "translateY(20%)",
+          fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase",
+          color: T.hint, whiteSpace: "nowrap", opacity: 0.7,
+        }}>
+          Default — if nothing changes
+        </div>
+        <div style={{
+          position: "absolute", left: `${(ORIGIN.x / VB_W) * 100}%`,
+          top: `${(ORIGIN.y / VB_H) * 100}%`, transform: "translate(-50%, -190%)",
+          fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", color: T.muted,
+          textTransform: "uppercase", whiteSpace: "nowrap",
+        }}>
+          Current You
+        </div>
+      </div>
+
       <div style={{
-        position: "absolute", right: 4,
-        top: `${(CHOSEN_END.y / VB_H) * 100}%`, transform: "translateY(-130%)",
-        fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase",
-        color: winningChosen ? T.goldBright : `${T.goldBright}77`, whiteSpace: "nowrap",
+        display: "flex", justifyContent: "space-between", alignItems: "baseline",
+        marginTop: 18, paddingTop: 14, borderTop: `0.5px solid ${T.border}`,
       }}>
-        Chosen Timeline
-      </div>
-      <div style={{
-        position: "absolute", right: 4,
-        top: `${(CURRENT_END.y / VB_H) * 100}%`, transform: "translateY(30%)",
-        fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase",
-        color: winningChosen ? `${T.accent}77` : T.accent, whiteSpace: "nowrap",
-      }}>
-        Current Timeline
-      </div>
-      <div style={{
-        position: "absolute", left: `${(ORIGIN.x / VB_W) * 100}%`,
-        top: `${(ORIGIN.y / VB_H) * 100}%`, transform: "translate(-50%, -180%)",
-        fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", color: T.muted,
-        textTransform: "uppercase", whiteSpace: "nowrap",
-      }}>
-        You are here
-      </div>
-      </div>
-
-      <div style={{
-        marginTop: 28, paddingTop: 14, borderTop: `0.5px solid ${T.border}`,
-        fontSize: 13.5, lineHeight: 1.5,
-        color: lineColor,
-      }}>
-        {copy.line}
+        <div style={{ fontSize: 12.5, color: T.sub, lineHeight: 1.5, maxWidth: 380 }}>
+          {done === 0
+            ? "Nothing logged yet today — the default path is still in control."
+            : `${done} proof action${done === 1 ? "" : "s"} logged today. The future just moved.`}
+        </div>
+        <div style={{ fontSize: 10, fontWeight: 700, color: T.goldBright, letterSpacing: "0.04em", whiteSpace: "nowrap", marginLeft: 12 }}>
+          {tier.confidence}
+        </div>
       </div>
     </div>
   );

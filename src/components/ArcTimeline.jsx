@@ -1315,7 +1315,7 @@ export function ArcTimeline({
       ) : null}
 
       {isActive && !embedded ? (
-        <ArcTimelineSplit ledgerRows={ledgerRows} />
+        <ArcTimelineSplit ledgerRows={ledgerRows} reducedMotion={reducedMotion} />
       ) : null}
 
       <div
