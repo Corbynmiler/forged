@@ -4,6 +4,7 @@ import { supabase } from "../supabase.js";
 import { parseLocal, fmtEntryDate, isSatisfiedForTodayRing } from "../utils.js";
 import { resolveArcTitle, arcDurationWeeksLabel } from "../arcProofMatch.js";
 import { getArcDayNumber, getArcDurationDays, isProofHabitForBlock } from "../arcProgress.js";
+import { ArcTimelineSplit } from "./ArcTimelineSplit.jsx";
 import { useReducedMotion } from "../hooks/useReducedMotion.js";
 import {
   buildArcTimeline,
@@ -1311,6 +1312,16 @@ export function ArcTimeline({
         >
           {detailsFields}
         </ArcJourneyHero>
+      ) : null}
+
+      {isActive && !embedded ? (
+        <ArcTimelineSplit
+          segments={segmentList.map(seg => ({ key: seg, weekNum: SEG.parseWeek(seg) }))}
+          weeks={timeline.weeks}
+          ledgerRows={ledgerRows}
+          selectedSegment={selectedSegment}
+          reducedMotion={reducedMotion}
+        />
       ) : null}
 
       <div
