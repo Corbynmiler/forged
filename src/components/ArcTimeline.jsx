@@ -1316,9 +1316,10 @@ export function ArcTimeline({
 
       {isActive && !embedded ? (
         <ArcTimelineSplit
+          segments={segmentList.map(seg => ({ key: seg, weekNum: SEG.parseWeek(seg) }))}
           weeks={timeline.weeks}
           ledgerRows={ledgerRows}
-          activeWeekNum={selectedWeekNum ?? currentWeek}
+          selectedSegment={selectedSegment}
           reducedMotion={reducedMotion}
         />
       ) : null}

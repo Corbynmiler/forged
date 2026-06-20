@@ -2,22 +2,24 @@
 // A standalone visualization, separate from the week rail below it. Three
 // persistent lines span the whole Arc: Future You (green, fixed, top) and
 // Default Path (red, fixed, bottom) never move. You/Actual (gold) is the
-// hero — a smooth organic curve through each completed week's real proof
-// score (completedProofActions / possibleProofActions, computed directly
-// from arc_daily_scores). A glowing marker tracks whichever week is selected
-// in the rail beneath this card; the rail drives the marker, not the other
-// way around.
+// hero — a smooth organic curve through each segment's real proof score
+// (completed proof actions / possible proof actions, computed directly
+// from arc_daily_scores). Column order always matches the week rail below:
+// before → start → week 1..N → finish, left to right. The rail drives the
+// marker position (by exact segment key, not by guessing); this component
+// never accepts user scroll/drag input.
 import { useId, useMemo, useRef, useEffect } from "react";
 import { T } from "../theme.js";
 
 const SVG_H = 200;
 const GREEN_Y = 30;
 const RED_Y = SVG_H - 30;
-// Matches CHECKPOINT_W in ArcTimeline.jsx so week spacing here lines up
+const NEUTRAL_Y = (GREEN_Y + RED_Y) / 2;
+// Matches CHECKPOINT_W in ArcTimeline.jsx so column spacing here lines up
 // with the spacing of the week rail directly beneath this card.
 const COL_W = 80;
 
-/** completedProofActions / possibleProofActions for the week's date range, straight from the ledger. */
+/** completed/possible proof actions for the week's date range, straight from the ledger. */
 function weeklyScore(week, ledgerRows) {
   if (!week?.startDate || !week?.endDate) return null;
   let done = 0;
@@ -29,11 +31,11 @@ function weeklyScore(week, ledgerRows) {
     done += row.proofDone ?? row.proof_done ?? 0;
   }
   if (total === 0) return null;
-  return Math.round((done / total) * 100);
+  return { done, total, percent: Math.round((done / total) * 100) };
 }
 
 function yForPercent(percent) {
-  const clamped = Math.max(4, Math.min(96, percent ?? 0));
+  const clamped = Math.max(4, Math.min(96, percent ?? 50));
   return GREEN_Y + (1 - clamped / 100) * (RED_Y - GREEN_Y);
 }
 
@@ -54,24 +56,49 @@ function smoothPathD(points) {
   return d;
 }
 
-export function ArcTimelineSplit({ weeks = [], ledgerRows = [], activeWeekNum, reducedMotion }) {
+export function ArcTimelineSplit({ segments = [], weeks = [], ledgerRows = [], selectedSegment, reducedMotion }) {
   const rawId = useId().replace(/[^a-zA-Z0-9]/g, "");
   const scrollRef = useRef(null);
 
-  const points = useMemo(() => weeks.map((week, i) => {
-    const score = week.status === "upcoming" ? null : weeklyScore(week, ledgerRows);
-    return { week, x: (i + 0.5) * COL_W, y: yForPercent(score), score };
-  }), [weeks, ledgerRows]);
+  const weekByNum = useMemo(() => {
+    const map = new Map();
+    weeks.forEach(w => map.set(w.weekNum, w));
+    return map;
+  }, [weeks]);
 
-  const liveWeeks = weeks.filter(w => w.status !== "upcoming");
-  if (!liveWeeks.length) return null;
+  // One column per rail segment, in the exact order the rail renders them:
+  // before → start → week 1..N → finish. This is the only source of x position,
+  // so the curve and marker can never appear out of order or jump.
+  const points = useMemo(() => segments.map((seg, i) => {
+    const x = (i + 0.5) * COL_W;
+    if (seg.weekNum != null) {
+      const week = weekByNum.get(seg.weekNum);
+      const score = week && week.status !== "upcoming" ? weeklyScore(week, ledgerRows) : null;
+      // Future/unstarted weeks stay neutral (mid-line) rather than dropping to
+      // the default path — they only move once real proof data exists.
+      const y = score ? yForPercent(score.percent) : NEUTRAL_Y;
+      return { key: seg.key, x, y, score, hasData: !!score };
+    }
+    // before / start / finish have no weekly score of their own — neutral anchor
+    return { key: seg.key, x, y: NEUTRAL_Y, score: null, hasData: false };
+  }), [segments, weekByNum, ledgerRows]);
 
-  const width = Math.max(1, weeks.length * COL_W);
-  const livePoints = points.filter(p => p.week.status !== "upcoming" && p.score != null);
-  const goldD = smoothPathD(livePoints.map(p => ({ x: p.x, y: p.y })));
+  if (import.meta.env?.DEV) {
+    points.forEach(p => {
+      if (p.score) {
+        // eslint-disable-next-line no-console
+        console.debug(`[TimelineSplit] ${p.key}: ${p.score.done}/${p.score.total} = ${p.score.percent}% → y=${p.y.toFixed(1)}`);
+      }
+    });
+  }
 
-  const activeIndex = points.findIndex(p => p.week.weekNum === activeWeekNum);
-  const marker = activeIndex >= 0 ? points[activeIndex] : livePoints[livePoints.length - 1];
+  if (!points.length) return null;
+
+  const width = Math.max(1, points.length * COL_W);
+  const goldD = smoothPathD(points.map(p => ({ x: p.x, y: p.y })));
+
+  const markerIndex = points.findIndex(p => p.key === selectedSegment);
+  const marker = markerIndex >= 0 ? points[markerIndex] : null;
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -113,7 +140,7 @@ export function ArcTimelineSplit({ weeks = [], ledgerRows = [], activeWeekNum, r
           </div>
           <div style={{
             position: "absolute", left: 0, right: 0,
-            top: `${((GREEN_Y + RED_Y) / 2 / SVG_H) * 100}%`, transform: "translateY(-50%)",
+            top: `${(NEUTRAL_Y / SVG_H) * 100}%`, transform: "translateY(-50%)",
           }}>
             <div style={{ fontSize: 10.5, fontWeight: 800, color: T.goldBright, letterSpacing: "0.04em" }}>YOU (ACTUAL)</div>
             <div style={{ fontSize: 10, color: T.muted, marginTop: 2, lineHeight: 1.3 }}>Your real path</div>
@@ -127,7 +154,14 @@ export function ArcTimelineSplit({ weeks = [], ledgerRows = [], activeWeekNum, r
           </div>
         </div>
 
-        <div ref={scrollRef} style={{ flex: 1, minWidth: 0, overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+        {/* Display only — the week rail below is the only navigation. No manual scroll/drag. */}
+        <div
+          ref={scrollRef}
+          style={{
+            flex: 1, minWidth: 0, overflow: "hidden",
+            touchAction: "none", userSelect: "none", pointerEvents: "none",
+          }}
+        >
           <svg viewBox={`0 0 ${width} ${SVG_H}`} style={{ width, height: SVG_H, display: "block" }}>
             <defs>
               <filter id={`${rawId}-glow`} filterUnits="userSpaceOnUse" x={-40} y={-40} width={width + 80} height={SVG_H + 80}>
@@ -145,9 +179,9 @@ export function ArcTimelineSplit({ weeks = [], ledgerRows = [], activeWeekNum, r
             <text x={width} y={GREEN_Y} textAnchor="end" dominantBaseline="middle" fontSize={13} fill={T.green}>✦</text>
             <text x={width} y={RED_Y} textAnchor="end" dominantBaseline="middle" fontSize={13} fill={T.accent}>✦</text>
 
-            {/* quiet per-week ticks on the fixed lines */}
+            {/* quiet per-column ticks on the fixed lines */}
             {points.map(p => (
-              <g key={`ticks-${p.week.weekNum}`}>
+              <g key={`ticks-${p.key}`}>
                 <circle cx={p.x} cy={GREEN_Y} r={1.6} fill={T.green} opacity={0.5} />
                 <circle cx={p.x} cy={RED_Y} r={1.6} fill={T.accent} opacity={0.45} />
               </g>
@@ -166,17 +200,17 @@ export function ArcTimelineSplit({ weeks = [], ledgerRows = [], activeWeekNum, r
               />
             ) : null}
 
-            {livePoints.map(p => (
-              <circle key={`node-${p.week.weekNum}`} cx={p.x} cy={p.y} r={4} fill={T.gold} opacity={0.85} />
+            {points.filter(p => p.hasData).map(p => (
+              <circle key={`node-${p.key}`} cx={p.x} cy={p.y} r={4} fill={T.gold} opacity={0.85} />
             ))}
 
-            {/* weeks with no proof logged yet, or not yet started — faint, not yet written */}
-            {points.filter(p => p.score == null).map(p => (
-              <circle key={`ghost-${p.week.weekNum}`} cx={p.x} cy={(GREEN_Y + RED_Y) / 2} r={3}
+            {/* columns with no proof data yet — faint, sitting neutral, not yet written */}
+            {points.filter(p => !p.hasData).map(p => (
+              <circle key={`ghost-${p.key}`} cx={p.x} cy={p.y} r={3}
                 fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth={1.2} strokeDasharray="2 2" opacity={0.5} />
             ))}
 
-            {/* glowing marker — the rail below drives this position */}
+            {/* glowing marker — the rail below drives this position by exact segment key */}
             {marker ? (
               <circle
                 cx={marker.x} cy={marker.y} r={7.5} fill={T.goldBright}
@@ -196,13 +230,13 @@ export function ArcTimelineSplit({ weeks = [], ledgerRows = [], activeWeekNum, r
           </svg>
 
           <div style={{ display: "flex", width, marginTop: 2 }}>
-            {weeks.map(week => (
-              <div key={week.weekNum} style={{
+            {segments.map(seg => (
+              <div key={seg.key} style={{
                 width: COL_W, flexShrink: 0, textAlign: "center", fontSize: 9, fontWeight: 700,
-                color: week.weekNum === activeWeekNum ? T.gold : T.hint,
-                opacity: week.status === "upcoming" ? 0.45 : 0.85,
+                color: seg.key === selectedSegment ? T.gold : T.hint,
+                opacity: 0.85,
               }}>
-                W{week.weekNum}
+                {seg.weekNum != null ? `W${seg.weekNum}` : seg.key.toUpperCase()}
               </div>
             ))}
           </div>
