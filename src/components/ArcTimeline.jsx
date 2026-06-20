@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef, useMemo, useCallback, useId } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { T } from "../theme.js";
 import { supabase } from "../supabase.js";
 import { parseLocal, fmtEntryDate, isSatisfiedForTodayRing } from "../utils.js";
 import { resolveArcTitle, arcDurationWeeksLabel } from "../arcProofMatch.js";
 import { getArcDayNumber, getArcDurationDays, isProofHabitForBlock } from "../arcProgress.js";
+import { ArcTimelineSplit } from "./ArcTimelineSplit.jsx";
 import { useReducedMotion } from "../hooks/useReducedMotion.js";
 import {
   buildArcTimeline,
@@ -43,15 +44,10 @@ const ARC_MOTION_CSS = `
   0%, 100% { box-shadow: 0 0 0 0 rgba(200,144,42,0.3); }
   50% { box-shadow: 0 0 0 5px rgba(200,144,42,0); }
 }
-@keyframes trajDraw {
-  from { stroke-dashoffset: 900; }
-  to { stroke-dashoffset: 0; }
-}
 @media (prefers-reduced-motion: reduce) {
   @keyframes arcPathReveal { from, to { transform: none; opacity: 1; } }
   @keyframes arcChapterIn { from, to { transform: none; opacity: 1; } }
   @keyframes arcPulse { from, to { box-shadow: none; } }
-  @keyframes trajDraw { from, to { stroke-dashoffset: 0; } }
 }
 `;
 
@@ -252,134 +248,22 @@ function StartNode({ startDate, selected, adjacent, onSelect, reducedMotion, ind
   );
 }
 
-// ─── TRAJECTORY ───────────────────────────────────────────────────────────────
-// Three persistent lines spanning the whole Arc, merged directly into the week
-// rail so scrubbing through weeks and watching the journey are one system.
-// Green (Future You) and red (Default Path) are fixed reference lines that
-// never move. Gold (You, actual) is a smooth curve through each completed
-// week's real proof%, drawn only up to the current week — future weeks show
-// as faint placeholders ahead, not yet written.
-const TRAJ_H = 92;
-const TRAJ_GREEN_Y = 18;
-const TRAJ_RED_Y = TRAJ_H - 18;
-
-const TRAJ_TONE_COLOR = {
-  aligned: T.green,
-  drifting: T.gold,
-  "off-path": T.accent,
-  upcoming: "rgba(255,255,255,0.16)",
-};
-
-function trajToneForWeek(week) {
-  if (week.status === "upcoming") return "upcoming";
-  const p = week.proofPercent ?? 0;
-  if (p >= 65) return "aligned";
-  if (p >= 35) return "drifting";
-  return "off-path";
-}
-
-function trajYForPercent(percent) {
-  const clamped = Math.max(4, Math.min(96, percent ?? 0));
-  return TRAJ_GREEN_Y + (1 - clamped / 100) * (TRAJ_RED_Y - TRAJ_GREEN_Y);
-}
-
-/** Smooth polyline through points using quadratic "T" chaining — organic, not jagged. */
-function trajSmoothPathD(points) {
-  if (!points.length) return "";
-  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
-  let d = `M ${points[0].x} ${points[0].y}`;
-  for (let i = 1; i < points.length; i++) {
-    const p0 = points[i - 1];
-    const p1 = points[i];
-    const mx = (p0.x + p1.x) / 2;
-    const my = (p0.y + p1.y) / 2;
-    d += ` Q ${p0.x} ${p0.y} ${mx} ${my}`;
-  }
-  const last = points[points.length - 1];
-  d += ` T ${last.x} ${last.y}`;
-  return d;
-}
-
-function ArcTrajectorySvg({ weeks, selectedWeekNum, checkpointWidth, reducedMotion, onSelectWeek }) {
-  const rawId = useId().replace(/[^a-zA-Z0-9]/g, "");
-  const width = Math.max(1, weeks.length * checkpointWidth);
-
-  const points = weeks.map((week, i) => ({
-    week,
-    x: (i + 0.5) * checkpointWidth,
-    y: trajYForPercent(week.proofPercent),
-    tone: trajToneForWeek(week),
-  }));
-  const livePoints = points.filter(p => p.week.status !== "upcoming");
-  const goldD = trajSmoothPathD(livePoints.map(p => ({ x: p.x, y: p.y })));
-  const selectedIndex = weeks.findIndex(w => w.weekNum === selectedWeekNum);
-
-  return (
-    <svg viewBox={`0 0 ${width} ${TRAJ_H}`} preserveAspectRatio="none" style={{ width, height: TRAJ_H, display: "block" }}>
-      <defs>
-        <filter id={`${rawId}-glow`} filterUnits="userSpaceOnUse" x={-40} y={-40} width={width + 80} height={TRAJ_H + 80}>
-          <feGaussianBlur stdDeviation="3" result="blur" />
-          <feMerge>
-            <feMergeNode in="blur" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
-      </defs>
-
-      {/* fixed reference lines — Future You and Default Path never move */}
-      <line x1={0} y1={TRAJ_GREEN_Y} x2={width} y2={TRAJ_GREEN_Y} stroke={T.green} strokeWidth={1.4} opacity={0.55} />
-      <line x1={0} y1={TRAJ_RED_Y} x2={width} y2={TRAJ_RED_Y} stroke={T.accent} strokeWidth={1.4} opacity={0.5} />
-
-      {selectedIndex >= 0 ? (
-        <line x1={points[selectedIndex].x} y1={TRAJ_GREEN_Y} x2={points[selectedIndex].x} y2={TRAJ_RED_Y}
-          stroke={T.gold} strokeWidth={1} strokeDasharray="2 4" opacity={0.4} />
-      ) : null}
-
-      {/* You (actual) — the hero line, smoothly drawn through real weekly proof% */}
-      {goldD ? (
-        <path
-          d={goldD} fill="none" stroke={T.gold} strokeWidth={2.6}
-          strokeLinecap="round" strokeLinejoin="round"
-          filter={`url(#${rawId}-glow)`}
-          style={reducedMotion ? undefined : {
-            strokeDasharray: 900, strokeDashoffset: 0,
-            animation: "trajDraw 1.1s cubic-bezier(0.22, 1, 0.36, 1) both",
-          }}
-        />
-      ) : null}
-
-      {points.map((p, i) => {
-        const isUpcoming = p.week.status === "upcoming";
-        const isSelected = i === selectedIndex;
-        const color = TRAJ_TONE_COLOR[p.tone];
-        return (
-          <g key={p.week.weekNum} onClick={() => onSelectWeek(p.week.weekNum)} style={{ cursor: "pointer" }}>
-            <circle
-              cx={p.x} cy={p.y} r={isSelected ? 7 : isUpcoming ? 3 : 5}
-              fill={isUpcoming ? "transparent" : color}
-              stroke={isUpcoming ? "rgba(255,255,255,0.22)" : "none"}
-              strokeWidth={isUpcoming ? 1.4 : 0}
-              strokeDasharray={isUpcoming ? "2 2" : undefined}
-              opacity={isUpcoming ? 0.55 : 1}
-              filter={isSelected ? `url(#${rawId}-glow)` : undefined}
-            />
-            {/* generous invisible tap target */}
-            <circle cx={p.x} cy={p.y} r={checkpointWidth / 2} fill="transparent" />
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
-
-function TrajectoryWeekNode({ week, selected, adjacent, onSelect, reducedMotion, index }) {
+function WeekNode({ week, selected, adjacent, onSelect, reducedMotion, index }) {
   const isCurrent = week.status === "current";
+  const isComplete = week.status === "complete";
   const isUpcoming = week.status === "upcoming";
-  const color = TRAJ_TONE_COLOR[trajToneForWeek(week)];
+  const segment = SEG.week(week.weekNum);
+
+  const nodeBg = selected
+    ? "rgba(200,144,42,0.22)"
+    : isComplete ? "rgba(61,155,95,0.10)" : "rgba(255,255,255,0.03)";
+  const borderColor = selected
+    ? T.gold
+    : isComplete ? "rgba(61,155,95,0.5)" : isCurrent ? "rgba(200,144,42,0.55)" : "rgba(255,255,255,0.1)";
 
   return (
     <RailCheckpoint
-      segment={SEG.week(week.weekNum)}
+      segment={segment}
       selected={selected}
       adjacent={adjacent}
       onSelect={onSelect}
@@ -393,13 +277,25 @@ function TrajectoryWeekNode({ week, selected, adjacent, onSelect, reducedMotion,
       )}
       sublabel={week.evidenceLabel || (week.chapterTitle && !isUpcoming ? week.chapterTitle : null)}
     >
-      <div style={{
-        width: 14, height: 14, borderRadius: "50%", margin: "0 auto",
-        background: isUpcoming ? "transparent" : `${color}33`,
-        border: `2px solid ${selected ? T.gold : isUpcoming ? "rgba(255,255,255,0.18)" : color}`,
-        boxShadow: selected ? `0 0 10px ${T.gold}55` : "none",
-        animation: isCurrent && !reducedMotion ? "arcPulse 2.8s ease-in-out infinite" : undefined,
-      }} />
+      <div style={{ position: "relative", width: NODE, height: NODE, margin: "0 auto" }}>
+        <ProofRing percent={week.proofPercent} size={NODE} active={selected || isCurrent} complete={isComplete && !selected} />
+        <div style={{
+          position: "absolute", inset: 5, borderRadius: "50%",
+          background: nodeBg, border: `2px solid ${borderColor}`,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          boxShadow: selected ? `0 0 12px ${T.gold}44` : "none",
+          animation: isCurrent && selected && !reducedMotion ? "arcPulse 2.8s ease-in-out infinite" : undefined,
+          zIndex: 2,
+        }}>
+          {isComplete && week.isGenuinelyComplete ? (
+            <span style={{ fontSize: 13, color: "#4ade80", fontWeight: 700 }}>✓</span>
+          ) : isCurrent ? (
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: T.gold }} />
+          ) : (
+            <span style={{ fontSize: 11, fontWeight: 700, color: T.muted }}>{week.weekNum}</span>
+          )}
+        </div>
+      </div>
     </RailCheckpoint>
   );
 }
@@ -1418,20 +1314,13 @@ export function ArcTimeline({
         </ArcJourneyHero>
       ) : null}
 
-      <div style={{ display: "flex", gap: 14, padding: "2px 6px 8px", fontSize: 9.5, color: T.hint }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 7, height: 7, borderRadius: "50%", background: T.green, display: "inline-block" }} />
-          Future You
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 7, height: 7, borderRadius: "50%", background: T.gold, display: "inline-block" }} />
-          You
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 7, height: 7, borderRadius: "50%", background: T.accent, display: "inline-block" }} />
-          Default
-        </div>
-      </div>
+      {isActive && !embedded ? (
+        <ArcTimelineSplit
+          weeks={timeline.weeks}
+          activeWeekNum={selectedWeekNum ?? currentWeek}
+          reducedMotion={reducedMotion}
+        />
+      ) : null}
 
       <div
         ref={railRef}
@@ -1458,6 +1347,12 @@ export function ArcTimeline({
             const pushConnector = (active) => {
               if (nodes.length > 0) nodes.push(<RailConnector key={`c-${nodes.length}`} active={active} />);
             };
+            const weekSegIndex = (n) => {
+              const idx = segmentList.indexOf(SEG.week(n));
+              const cur = segmentList.indexOf(SEG.week(currentWeek));
+              return idx >= 0 && cur >= 0 && idx <= cur;
+            };
+
             if (unassigned.length > 0) {
               nodes.push(
                 <BeforeArcNode
@@ -1485,42 +1380,21 @@ export function ArcTimeline({
               />,
             );
 
-            pushConnector(false);
-            nodes.push(
-              <div
-                key="weeks-trajectory"
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  flex: `0 0 ${timeline.weeks.length * CHECKPOINT_W}px`,
-                  width: timeline.weeks.length * CHECKPOINT_W,
-                }}
-              >
-                <ArcTrajectorySvg
-                  weeks={timeline.weeks}
-                  selectedWeekNum={selectedWeekNum}
-                  checkpointWidth={CHECKPOINT_W}
+            timeline.weeks.forEach((week) => {
+              const seg = SEG.week(week.weekNum);
+              pushConnector(weekSegIndex(week.weekNum));
+              nodes.push(
+                <WeekNode
+                  key={week.weekNum}
+                  week={week}
+                  selected={selectedSegment === seg}
+                  adjacent={isAdjacent(seg)}
+                  onSelect={handleSelectSegment}
                   reducedMotion={reducedMotion}
-                  onSelectWeek={(n) => handleSelectSegment(SEG.week(n))}
-                />
-                <div style={{ display: "flex" }}>
-                  {timeline.weeks.map((week) => {
-                    const seg = SEG.week(week.weekNum);
-                    return (
-                      <TrajectoryWeekNode
-                        key={week.weekNum}
-                        week={week}
-                        selected={selectedSegment === seg}
-                        adjacent={isAdjacent(seg)}
-                        onSelect={handleSelectSegment}
-                        reducedMotion={reducedMotion}
-                        index={nodeIndex++}
-                      />
-                    );
-                  })}
-                </div>
-              </div>,
-            );
+                  index={nodeIndex++}
+                />,
+              );
+            });
 
             pushConnector(currentWeek >= timeline.weekCount);
             nodes.push(
