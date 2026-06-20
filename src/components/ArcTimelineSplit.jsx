@@ -96,9 +96,24 @@ export function ArcTimelineSplit({ segments = [], weeks = [], ledgerRows = [], s
 
   const width = Math.max(1, points.length * COL_W);
   const goldD = smoothPathD(points.map(p => ({ x: p.x, y: p.y })));
+  const goldPathId = `${rawId}-goldpath`;
+  const goldGradId = `${rawId}-goldgrad`;
+
+  // Real data is always contiguous from the start of the arc — fade the line
+  // softly past the last scored week instead of letting it look broken.
+  const dataPoints = points.filter(p => p.hasData);
+  const lastDataX = dataPoints.length ? dataPoints[dataPoints.length - 1].x : points[0].x;
+  const fadeStart = Math.min(width, lastDataX + COL_W * 0.35);
+  const fadeEnd = Math.min(width, lastDataX + COL_W * 1.1);
+
+  // Best week — the highest real score on the curve, called out quietly.
+  const bestPoint = dataPoints.length
+    ? dataPoints.reduce((best, p) => (p.score.percent > best.score.percent ? p : best), dataPoints[0])
+    : null;
 
   const markerIndex = points.findIndex(p => p.key === selectedSegment);
   const marker = markerIndex >= 0 ? points[markerIndex] : null;
+  const showBestBadge = bestPoint && (!marker || marker.key !== bestPoint.key) && dataPoints.length > 1;
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -171,26 +186,37 @@ export function ArcTimelineSplit({ segments = [], weeks = [], ledgerRows = [], s
                   <feMergeNode in="SourceGraphic" />
                 </feMerge>
               </filter>
+              <filter id={`${rawId}-softglow`} filterUnits="userSpaceOnUse" x={-20} y={-20} width={width + 40} height={SVG_H + 40}>
+                <feGaussianBlur stdDeviation="1.6" />
+              </filter>
+              {/* Real data is solid; the tail past the last scored week fades softly rather than cutting off. */}
+              <linearGradient id={goldGradId} gradientUnits="userSpaceOnUse" x1={0} y1={0} x2={width} y2={0}>
+                <stop offset="0" stopColor={T.gold} stopOpacity="1" />
+                <stop offset={Math.max(0, fadeStart / width)} stopColor={T.gold} stopOpacity="1" />
+                <stop offset={Math.min(1, fadeEnd / width)} stopColor={T.gold} stopOpacity="0.32" />
+                <stop offset="1" stopColor={T.gold} stopOpacity="0.32" />
+              </linearGradient>
             </defs>
 
-            {/* fixed reference lines — never move */}
-            <line x1={0} y1={GREEN_Y} x2={width - 14} y2={GREEN_Y} stroke={T.green} strokeWidth={1.6} opacity={0.6} />
-            <line x1={0} y1={RED_Y} x2={width - 14} y2={RED_Y} stroke={T.accent} strokeWidth={1.6} opacity={0.55} />
-            <text x={width} y={GREEN_Y} textAnchor="end" dominantBaseline="middle" fontSize={13} fill={T.green}>✦</text>
-            <text x={width} y={RED_Y} textAnchor="end" dominantBaseline="middle" fontSize={13} fill={T.accent}>✦</text>
+            {/* fixed reference lines — quiet, supporting the gold hero line */}
+            <line x1={0} y1={GREEN_Y} x2={width - 14} y2={GREEN_Y} stroke={T.green} strokeWidth={1.3} opacity={0.42} />
+            <line x1={0} y1={RED_Y} x2={width - 14} y2={RED_Y} stroke={T.accent} strokeWidth={1.3} opacity={0.38} />
+            <text x={width} y={GREEN_Y} textAnchor="end" dominantBaseline="middle" fontSize={12} fill={T.green} opacity={0.85}>✦</text>
+            <text x={width} y={RED_Y} textAnchor="end" dominantBaseline="middle" fontSize={12} fill={T.accent} opacity={0.85}>✦</text>
 
             {/* quiet per-column ticks on the fixed lines */}
             {points.map(p => (
               <g key={`ticks-${p.key}`}>
-                <circle cx={p.x} cy={GREEN_Y} r={1.6} fill={T.green} opacity={0.5} />
-                <circle cx={p.x} cy={RED_Y} r={1.6} fill={T.accent} opacity={0.45} />
+                <circle cx={p.x} cy={GREEN_Y} r={1.4} fill={T.green} opacity={0.35} />
+                <circle cx={p.x} cy={RED_Y} r={1.4} fill={T.accent} opacity={0.32} />
               </g>
             ))}
 
             {/* You (actual) — the hero line, a smooth curve through real weekly proof scores */}
             {goldD ? (
               <path
-                d={goldD} fill="none" stroke={T.gold} strokeWidth={2.8}
+                id={goldPathId}
+                d={goldD} fill="none" stroke={`url(#${goldGradId})`} strokeWidth={3}
                 strokeLinecap="round" strokeLinejoin="round"
                 filter={`url(#${rawId}-glow)`}
                 style={reducedMotion ? undefined : {
@@ -200,31 +226,52 @@ export function ArcTimelineSplit({ segments = [], weeks = [], ledgerRows = [], s
               />
             ) : null}
 
+            {/* a faint traveling light along the actual path — alive, not distracting */}
+            {goldD && !reducedMotion ? (
+              <circle r={2.2} fill="#fff" opacity={0.85} filter={`url(#${rawId}-softglow)`}>
+                <animateMotion dur="5.5s" repeatCount="indefinite" rotate="auto" calcMode="linear">
+                  <mpath href={`#${goldPathId}`} />
+                </animateMotion>
+                <animate attributeName="opacity" values="0;0.85;0.85;0" dur="5.5s" repeatCount="indefinite" />
+              </circle>
+            ) : null}
+
             {points.filter(p => p.hasData).map(p => (
-              <circle key={`node-${p.key}`} cx={p.x} cy={p.y} r={4} fill={T.gold} opacity={0.85} />
+              <circle key={`node-${p.key}`} cx={p.x} cy={p.y} r={3.6} fill={T.gold} opacity={0.9} />
             ))}
 
             {/* columns with no proof data yet — faint, sitting neutral, not yet written */}
             {points.filter(p => !p.hasData).map(p => (
-              <circle key={`ghost-${p.key}`} cx={p.x} cy={p.y} r={3}
-                fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth={1.2} strokeDasharray="2 2" opacity={0.5} />
+              <circle key={`ghost-${p.key}`} cx={p.x} cy={p.y} r={2.6}
+                fill="none" stroke="rgba(255,255,255,0.16)" strokeWidth={1.1} strokeDasharray="2 2" opacity={0.4} />
             ))}
+
+            {/* best week — a quiet callout on the highest real score, never on top of the selected marker */}
+            {showBestBadge ? (
+              <g style={{ transition: "opacity 0.3s" }}>
+                <circle cx={bestPoint.x} cy={bestPoint.y} r={9} fill="none" stroke={T.goldBright} strokeWidth={1} opacity={0.4} strokeDasharray="2 3" />
+                <text x={bestPoint.x} y={bestPoint.y - 14} textAnchor="middle" fontSize={7.5} fontWeight={700}
+                  fill={T.goldBright} opacity={0.65} letterSpacing="0.04em">
+                  BEST WEEK
+                </text>
+              </g>
+            ) : null}
 
             {/* glowing marker — the rail below drives this position by exact segment key */}
             {marker ? (
               <circle
-                cx={marker.x} cy={marker.y} r={7.5} fill={T.goldBright}
+                cx={marker.x} cy={marker.y} r={7} fill={T.goldBright}
                 filter={`url(#${rawId}-glow)`}
-                style={reducedMotion ? undefined : { transition: "cx 0.5s cubic-bezier(0.22, 1, 0.36, 1), cy 0.5s cubic-bezier(0.22, 1, 0.36, 1)" }}
+                style={reducedMotion ? undefined : { transition: "cx 0.55s cubic-bezier(0.22, 1, 0.36, 1), cy 0.55s cubic-bezier(0.22, 1, 0.36, 1)" }}
               />
             ) : null}
             {marker && !reducedMotion ? (
               <circle
-                cx={marker.x} cy={marker.y} r={7.5} fill="none" stroke={T.goldBright} strokeWidth={1.4}
-                style={{ transition: "cx 0.5s cubic-bezier(0.22, 1, 0.36, 1), cy 0.5s cubic-bezier(0.22, 1, 0.36, 1)" }}
+                cx={marker.x} cy={marker.y} r={7} fill="none" stroke={T.goldBright} strokeWidth={1.2}
+                style={{ transition: "cx 0.55s cubic-bezier(0.22, 1, 0.36, 1), cy 0.55s cubic-bezier(0.22, 1, 0.36, 1)" }}
               >
-                <animate attributeName="r" values="7.5;16;7.5" dur="2.4s" repeatCount="indefinite" />
-                <animate attributeName="opacity" values="0.8;0;0.8" dur="2.4s" repeatCount="indefinite" />
+                <animate attributeName="r" values="7;13;7" dur="2.8s" repeatCount="indefinite" />
+                <animate attributeName="opacity" values="0.65;0;0.65" dur="2.8s" repeatCount="indefinite" />
               </circle>
             ) : null}
           </svg>
