@@ -1317,6 +1317,7 @@ export function ArcTimeline({
       {isActive && !embedded ? (
         <ArcTimelineSplit
           weeks={timeline.weeks}
+          ledgerRows={ledgerRows}
           activeWeekNum={selectedWeekNum ?? currentWeek}
           reducedMotion={reducedMotion}
         />

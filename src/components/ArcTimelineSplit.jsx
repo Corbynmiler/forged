@@ -3,15 +3,34 @@
 // persistent lines span the whole Arc: Future You (green, fixed, top) and
 // Default Path (red, fixed, bottom) never move. You/Actual (gold) is the
 // hero — a smooth organic curve through each completed week's real proof
-// score. A glowing marker tracks whichever week is selected in the rail
-// beneath this card; the rail drives the marker, not the other way around.
-import { useId } from "react";
+// score (completedProofActions / possibleProofActions, computed directly
+// from arc_daily_scores). A glowing marker tracks whichever week is selected
+// in the rail beneath this card; the rail drives the marker, not the other
+// way around.
+import { useId, useMemo, useRef, useEffect } from "react";
 import { T } from "../theme.js";
 
 const SVG_H = 200;
 const GREEN_Y = 30;
 const RED_Y = SVG_H - 30;
-const COL_W = 110;
+// Matches CHECKPOINT_W in ArcTimeline.jsx so week spacing here lines up
+// with the spacing of the week rail directly beneath this card.
+const COL_W = 80;
+
+/** completedProofActions / possibleProofActions for the week's date range, straight from the ledger. */
+function weeklyScore(week, ledgerRows) {
+  if (!week?.startDate || !week?.endDate) return null;
+  let done = 0;
+  let total = 0;
+  for (const row of ledgerRows || []) {
+    const date = row.date || row.dateStr;
+    if (!date || date < week.startDate || date > week.endDate) continue;
+    total += row.proofTotal ?? row.proof_total ?? 0;
+    done += row.proofDone ?? row.proof_done ?? 0;
+  }
+  if (total === 0) return null;
+  return Math.round((done / total) * 100);
+}
 
 function yForPercent(percent) {
   const clamped = Math.max(4, Math.min(96, percent ?? 0));
@@ -35,23 +54,31 @@ function smoothPathD(points) {
   return d;
 }
 
-export function ArcTimelineSplit({ weeks = [], activeWeekNum, reducedMotion }) {
+export function ArcTimelineSplit({ weeks = [], ledgerRows = [], activeWeekNum, reducedMotion }) {
   const rawId = useId().replace(/[^a-zA-Z0-9]/g, "");
+  const scrollRef = useRef(null);
+
+  const points = useMemo(() => weeks.map((week, i) => {
+    const score = week.status === "upcoming" ? null : weeklyScore(week, ledgerRows);
+    return { week, x: (i + 0.5) * COL_W, y: yForPercent(score), score };
+  }), [weeks, ledgerRows]);
+
   const liveWeeks = weeks.filter(w => w.status !== "upcoming");
   if (!liveWeeks.length) return null;
 
   const width = Math.max(1, weeks.length * COL_W);
-
-  const points = weeks.map((week, i) => ({
-    week,
-    x: (i + 0.5) * COL_W,
-    y: yForPercent(week.proofPercent),
-  }));
-  const livePoints = points.filter(p => p.week.status !== "upcoming");
+  const livePoints = points.filter(p => p.week.status !== "upcoming" && p.score != null);
   const goldD = smoothPathD(livePoints.map(p => ({ x: p.x, y: p.y })));
 
   const activeIndex = points.findIndex(p => p.week.weekNum === activeWeekNum);
   const marker = activeIndex >= 0 ? points[activeIndex] : livePoints[livePoints.length - 1];
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !marker) return;
+    const target = marker.x - el.clientWidth / 2;
+    el.scrollTo({ left: Math.max(0, target), behavior: reducedMotion ? "auto" : "smooth" });
+  }, [marker?.x, reducedMotion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div style={{
@@ -100,8 +127,8 @@ export function ArcTimelineSplit({ weeks = [], activeWeekNum, reducedMotion }) {
           </div>
         </div>
 
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <svg viewBox={`0 0 ${width} ${SVG_H}`} preserveAspectRatio="none" style={{ width: "100%", height: SVG_H, display: "block" }}>
+        <div ref={scrollRef} style={{ flex: 1, minWidth: 0, overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+          <svg viewBox={`0 0 ${width} ${SVG_H}`} style={{ width, height: SVG_H, display: "block" }}>
             <defs>
               <filter id={`${rawId}-glow`} filterUnits="userSpaceOnUse" x={-40} y={-40} width={width + 80} height={SVG_H + 80}>
                 <feGaussianBlur stdDeviation="3.4" result="blur" />
@@ -126,15 +153,15 @@ export function ArcTimelineSplit({ weeks = [], activeWeekNum, reducedMotion }) {
               </g>
             ))}
 
-            {/* You (actual) — the hero line */}
+            {/* You (actual) — the hero line, a smooth curve through real weekly proof scores */}
             {goldD ? (
               <path
                 d={goldD} fill="none" stroke={T.gold} strokeWidth={2.8}
                 strokeLinecap="round" strokeLinejoin="round"
                 filter={`url(#${rawId}-glow)`}
                 style={reducedMotion ? undefined : {
-                  strokeDasharray: 1400, strokeDashoffset: 0,
-                  animation: "trajSplitDraw 1.1s cubic-bezier(0.22, 1, 0.36, 1) both",
+                  strokeDasharray: 2000, strokeDashoffset: 0,
+                  animation: "trajSplitDraw 1.2s cubic-bezier(0.22, 1, 0.36, 1) both",
                 }}
               />
             ) : null}
@@ -143,8 +170,8 @@ export function ArcTimelineSplit({ weeks = [], activeWeekNum, reducedMotion }) {
               <circle key={`node-${p.week.weekNum}`} cx={p.x} cy={p.y} r={4} fill={T.gold} opacity={0.85} />
             ))}
 
-            {/* future weeks — faint, not yet written */}
-            {points.filter(p => p.week.status === "upcoming").map(p => (
+            {/* weeks with no proof logged yet, or not yet started — faint, not yet written */}
+            {points.filter(p => p.score == null).map(p => (
               <circle key={`ghost-${p.week.weekNum}`} cx={p.x} cy={(GREEN_Y + RED_Y) / 2} r={3}
                 fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth={1.2} strokeDasharray="2 2" opacity={0.5} />
             ))}
@@ -168,10 +195,10 @@ export function ArcTimelineSplit({ weeks = [], activeWeekNum, reducedMotion }) {
             ) : null}
           </svg>
 
-          <div style={{ display: "flex", marginTop: 2 }}>
+          <div style={{ display: "flex", width, marginTop: 2 }}>
             {weeks.map(week => (
               <div key={week.weekNum} style={{
-                flex: 1, textAlign: "center", fontSize: 9, fontWeight: 700,
+                width: COL_W, flexShrink: 0, textAlign: "center", fontSize: 9, fontWeight: 700,
                 color: week.weekNum === activeWeekNum ? T.gold : T.hint,
                 opacity: week.status === "upcoming" ? 0.45 : 0.85,
               }}>
@@ -183,7 +210,7 @@ export function ArcTimelineSplit({ weeks = [], activeWeekNum, reducedMotion }) {
       </div>
 
       <style>{`
-        @keyframes trajSplitDraw { from { stroke-dashoffset: 1400; } to { stroke-dashoffset: 0; } }
+        @keyframes trajSplitDraw { from { stroke-dashoffset: 2000; } to { stroke-dashoffset: 0; } }
         @media (prefers-reduced-motion: reduce) {
           @keyframes trajSplitDraw { from, to { stroke-dashoffset: 0; } }
         }
