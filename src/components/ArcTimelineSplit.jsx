@@ -1,203 +1,63 @@
 // ─── TIMELINE SPLIT ───────────────────────────────────────────────────────────
-// Two parallel rails through the same Arc, built from the same node/connector
-// language as the existing week rail — not a chart. Top rail is the Builder
-// You (the ideal: full proof, every day). Bottom rail is Current You (what
-// was actually logged). A beam joins them per week/day: tight and bright when
-// proof closed the gap, broken and dim when it didn't.
-import { useMemo } from "react";
+// One flagship visual, not a third rail: a single fork from "You are here."
+// Top branch = Chosen Timeline (bright, alive). Bottom branch = Current
+// Timeline (dim, drifting). Today's real proof state decides which one glows.
+import { useId, useMemo } from "react";
 import { T } from "../theme.js";
-import { buildWeekDayJourney } from "../lib/arcTimeline.js";
+import { todayStr } from "../utils.js";
 
-const WEEK_NODE = 26;
-const DAY_NODE = 16;
+const VB_W = 600;
+const VB_H = 200;
+const ORIGIN = { x: 56, y: 100 };
+const CHOSEN_END = { x: 560, y: 38 };
+const CURRENT_END = { x: 560, y: 162 };
 
-function tone(percent) {
-  if (percent == null) return "unknown";
-  if (percent >= 80) return "aligned";
-  if (percent >= 40) return "drifting";
-  return "off-path";
+function cubicPoint(p0, p1, p2, p3, t) {
+  const mt = 1 - t;
+  const x = mt ** 3 * p0.x + 3 * mt ** 2 * t * p1.x + 3 * mt * t ** 2 * p2.x + t ** 3 * p3.x;
+  const y = mt ** 3 * p0.y + 3 * mt ** 2 * t * p1.y + 3 * mt * t ** 2 * p2.y + t ** 3 * p3.y;
+  return { x, y };
 }
 
-const TONE_COLOR = {
-  aligned: T.green,
-  drifting: T.gold,
-  "off-path": T.accent,
-  unknown: T.hint,
+/** Today's real proof state from arc_daily_scores — the only signal this visual uses. */
+function todayProofState(ledgerRows) {
+  const today = todayStr();
+  const row = (ledgerRows || []).find(r => r.date === today);
+  const total = row?.proofTotal ?? row?.proof_total ?? 0;
+  const done = row?.proofDone ?? row?.proof_done ?? 0;
+  if (total === 0) return "unlogged";
+  if (done >= total) return "aligned";
+  if (done > 0) return "partial";
+  return "unlogged";
+}
+
+const STATE_COPY = {
+  aligned: { line: "Today's proof pulled you toward the life you chose.", color: "green", winner: "chosen" },
+  partial: { line: "Today can pull you closer.", color: "gold", winner: "chosen" },
+  unlogged: { line: "No proof logged yet. The default path is winning today.", color: "accent", winner: "current" },
 };
 
-/** Vertical beam between the chosen node and the current node — shorter & brighter = closer. */
-function Beam({ percent, status }) {
-  const t = tone(percent);
-  const color = TONE_COLOR[t];
-  const known = status !== "upcoming" && percent != null;
-  const gap = !known ? 26 : t === "aligned" ? 10 : t === "drifting" ? 18 : 26;
+export function ArcTimelineSplit({ ledgerRows }) {
+  const gradId = useId().replace(/[^a-zA-Z0-9]/g, "");
 
-  return (
-    <div style={{
-      width: 2, height: gap, margin: "1px auto",
-      background: known
-        ? (t === "aligned" ? color : `repeating-linear-gradient(180deg, ${color} 0 3px, transparent 3px 7px)`)
-        : "repeating-linear-gradient(180deg, rgba(255,255,255,0.12) 0 2px, transparent 2px 5px)",
-      opacity: known ? (t === "aligned" ? 0.9 : 0.65) : 0.4,
-      boxShadow: known && t === "aligned" ? `0 0 6px ${color}99` : "none",
-      transition: "height 0.4s ease",
-    }} />
-  );
-}
+  const state = useMemo(() => todayProofState(ledgerRows), [ledgerRows]);
+  const copy = STATE_COPY[state];
+  const winningChosen = copy.winner === "chosen";
 
-function ChosenWeekNode({ weekNum, isPast }) {
-  return (
-    <div style={{
-      width: WEEK_NODE, height: WEEK_NODE, borderRadius: "50%",
-      border: `2px solid ${T.goldBright}`,
-      background: "rgba(245,200,66,0.14)",
-      boxShadow: `0 0 8px ${T.goldBright}55`,
-      display: "flex", alignItems: "center", justifyContent: "center",
-      flexShrink: 0,
-    }}>
-      <span style={{ fontSize: 11, color: T.goldBright, fontWeight: 700 }}>✓</span>
-    </div>
-  );
-}
+  const chosenCtrl1 = { x: ORIGIN.x + 160, y: ORIGIN.y - 4 };
+  const chosenCtrl2 = { x: CHOSEN_END.x - 160, y: CHOSEN_END.y };
+  const chosenD = `M ${ORIGIN.x} ${ORIGIN.y} C ${chosenCtrl1.x} ${chosenCtrl1.y}, ${chosenCtrl2.x} ${chosenCtrl2.y}, ${CHOSEN_END.x} ${CHOSEN_END.y}`;
 
-function CurrentWeekNode({ week }) {
-  const isComplete = week.status === "complete";
-  const isCurrent = week.status === "current";
-  const t = tone(week.proofPercent);
-  const color = TONE_COLOR[t];
+  const currentCtrl1 = { x: ORIGIN.x + 150, y: ORIGIN.y + 10 };
+  const currentCtrl2 = { x: CURRENT_END.x - 170, y: CURRENT_END.y };
+  const currentD = `M ${ORIGIN.x} ${ORIGIN.y} C ${currentCtrl1.x} ${currentCtrl1.y}, ${currentCtrl2.x} ${currentCtrl2.y}, ${CURRENT_END.x} ${CURRENT_END.y}`;
 
-  if (week.status === "upcoming") {
-    return (
-      <div style={{
-        width: WEEK_NODE, height: WEEK_NODE, borderRadius: "50%",
-        border: "2px solid rgba(255,255,255,0.12)", background: "transparent",
-        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-      }}>
-        <span style={{ fontSize: 10, color: T.hint, fontWeight: 700 }}>{week.weekNum}</span>
-      </div>
-    );
-  }
+  const chosenNodeTs = [0.32, 0.62, 0.92];
+  const currentNodeTs = [0.32, 0.62, 0.92];
+  const chosenNodes = chosenNodeTs.map(t => cubicPoint(ORIGIN, chosenCtrl1, chosenCtrl2, CHOSEN_END, t));
+  const currentNodes = currentNodeTs.map(t => cubicPoint(ORIGIN, currentCtrl1, currentCtrl2, CURRENT_END, t));
 
-  return (
-    <div style={{
-      width: WEEK_NODE, height: WEEK_NODE, borderRadius: "50%",
-      border: `2px solid ${color}`,
-      background: `${color}1F`,
-      boxShadow: isCurrent ? `0 0 8px ${color}66` : "none",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      flexShrink: 0,
-      animation: isCurrent ? "arcPulse 2.8s ease-in-out infinite" : undefined,
-    }}>
-      {isComplete && week.isGenuinelyComplete && t === "aligned" ? (
-        <span style={{ fontSize: 11, color, fontWeight: 700 }}>✓</span>
-      ) : (
-        <span style={{ width: 6, height: 6, borderRadius: "50%", background: color, display: "block" }} />
-      )}
-    </div>
-  );
-}
-
-function WeekColumn({ week, isLast }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center" }}>
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 40, flexShrink: 0 }}>
-        <div style={{ fontSize: 8, fontWeight: 800, letterSpacing: "0.08em", color: T.hint, marginBottom: 4 }}>
-          W{week.weekNum}
-        </div>
-        <ChosenWeekNode weekNum={week.weekNum} />
-        <Beam percent={week.proofPercent} status={week.status} />
-        <CurrentWeekNode week={week} />
-      </div>
-      {!isLast ? (
-        <div style={{ flex: 1, minWidth: 10, display: "flex", flexDirection: "column", gap: WEEK_NODE + 26 + 16 }}>
-          <div style={{ height: 1, background: "rgba(245,200,66,0.25)" }} />
-          <div style={{ height: 1, background: "rgba(255,255,255,0.08)" }} />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function DayTick({ day, percent, status }) {
-  const t = tone(percent);
-  const color = TONE_COLOR[t];
-  const known = status !== "upcoming" && percent != null;
-  return (
-    <div style={{
-      width: 2, height: 10, margin: "1px auto",
-      background: known && t !== "unknown"
-        ? color
-        : "repeating-linear-gradient(180deg, rgba(255,255,255,0.14) 0 2px, transparent 2px 4px)",
-      opacity: known ? 0.85 : 0.4,
-    }} />
-  );
-}
-
-function ChosenDayDot({ isFuture }) {
-  return (
-    <div style={{
-      width: DAY_NODE, height: DAY_NODE, borderRadius: "50%",
-      border: `1.6px solid ${T.goldBright}`,
-      background: isFuture ? "transparent" : "rgba(245,200,66,0.16)",
-      opacity: isFuture ? 0.45 : 1,
-      display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-    }}>
-      {!isFuture ? <span style={{ fontSize: 8, color: T.goldBright, fontWeight: 700 }}>✓</span> : null}
-    </div>
-  );
-}
-
-function CurrentDayDot({ day }) {
-  const isEvidence = day.state === "evidence";
-  const isPartial = day.state === "partial" || (day.state === "today" && day.hasProof);
-  const isToday = day.state === "today";
-  const isFuture = day.state === "future";
-  const isEmpty = day.state === "empty";
-  const missed = isEmpty && !isToday;
-
-  let border = "rgba(255,255,255,0.14)";
-  let bg = "transparent";
-  let inner = null;
-  if (isEvidence) { border = T.green; bg = `${T.green}26`; inner = <span style={{ fontSize: 8, color: T.green, fontWeight: 700 }}>✓</span>; }
-  else if (isPartial) { border = T.gold; bg = `${T.gold}22`; inner = <span style={{ width: 5, height: 5, borderRadius: "50%", background: T.gold }} />; }
-  else if (isToday) { border = T.gold; bg = `${T.gold}14`; inner = <span style={{ width: 5, height: 5, borderRadius: "50%", background: T.gold }} />; }
-  else if (missed) { border = T.accent; bg = `${T.accent}1A`; inner = <span style={{ width: 4, height: 4, borderRadius: "50%", background: T.accent }} />; }
-
-  return (
-    <div style={{
-      width: DAY_NODE, height: DAY_NODE, borderRadius: "50%",
-      border: `1.6px solid ${border}`, background: bg,
-      opacity: isFuture ? 0.35 : 1,
-      display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-    }}>
-      {inner}
-    </div>
-  );
-}
-
-export function ArcTimelineSplit({ timeline, block, ledgerRows, journalEntries }) {
-  const weeks = timeline?.weeks || [];
-  const currentWeek = useMemo(
-    () => weeks.find(w => w.weekNum === timeline.currentWeek) || weeks[weeks.length - 1],
-    [weeks, timeline?.currentWeek],
-  );
-
-  const days = useMemo(
-    () => (currentWeek ? buildWeekDayJourney(currentWeek, { arcLedgerRows: ledgerRows, journalEntries }) : []),
-    [currentWeek, ledgerRows, journalEntries],
-  );
-
-  if (!weeks.length || !currentWeek) return null;
-
-  const connectedDays = days.filter(d => d.hasProof || d.hasReceipt).length;
-  const possibleDays = days.filter(d => d.state !== "future").length;
-  const missingDays = Math.max(0, possibleDays - connectedDays);
-
-  const sentence = missingDays === 0 && possibleDays > 0
-    ? "Every day this week matches the life you chose."
-    : possibleDays === 0
-      ? "This week just opened. Today decides which path it joins."
-      : `${missingDays} of ${possibleDays} day${possibleDays === 1 ? "" : "s"} this week ${missingDays === 1 ? "is" : "are"} still missing from the life you chose.`;
+  const lineColor = copy.color === "green" ? T.green : copy.color === "gold" ? T.gold : T.accent;
 
   return (
     <div style={{
@@ -205,66 +65,102 @@ export function ArcTimelineSplit({ timeline, block, ledgerRows, journalEntries }
       marginBottom: 4,
       borderRadius: T.r,
       position: "relative",
-      background: "radial-gradient(120% 140% at 15% 0%, rgba(245,200,66,0.09) 0%, rgba(15,15,13,0) 45%), radial-gradient(120% 140% at 85% 100%, rgba(192,57,43,0.07) 0%, rgba(15,15,13,0) 50%), linear-gradient(165deg, #14140F 0%, #0C0C0A 100%)",
+      overflow: "hidden",
+      background: "radial-gradient(130% 150% at 8% 50%, rgba(245,200,66,0.10) 0%, rgba(15,15,13,0) 50%), radial-gradient(130% 150% at 95% 85%, rgba(192,57,43,0.08) 0%, rgba(15,15,13,0) 55%), linear-gradient(165deg, #14140F 0%, #0A0A09 100%)",
       border: `0.5px solid ${T.borderMid}`,
       boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04), 0 18px 50px rgba(0,0,0,0.45)",
-      padding: "16px 14px 16px",
+      padding: "18px 16px 16px",
     }}>
       <div style={{ fontSize: 9.5, fontWeight: 800, color: T.hint, letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 6 }}>
         Timeline Split
       </div>
-      <div style={{ fontFamily: T.serif, fontSize: 19, color: T.text, lineHeight: 1.2, marginBottom: 6 }}>
-        Builder You <span style={{ color: T.hint, fontFamily: T.font, fontSize: 14, fontWeight: 500 }}>vs</span> Current You
-      </div>
-      <div style={{ fontSize: 12.5, color: T.sub, lineHeight: 1.5, marginBottom: 16, maxWidth: 520 }}>
-        Every proof action pulls you closer to the version you chose.
+      <div style={{ fontFamily: T.serif, fontSize: 19, color: T.text, lineHeight: 1.2, marginBottom: 14 }}>
+        Every proof action chooses which version gets stronger.
       </div>
 
-      {/* Weekly rail: two parallel rows of nodes joined by a beam per week */}
-      <div style={{ display: "flex", alignItems: "flex-start", overflowX: "auto", paddingBottom: 4, marginBottom: 18 }}>
-        {weeks.map((w, i) => (
-          <WeekColumn key={w.weekNum} week={w} isLast={i === weeks.length - 1} />
+      <div style={{ position: "relative", width: "100%", height: 190 }}>
+      <svg viewBox={`0 0 ${VB_W} ${VB_H}`} preserveAspectRatio="none" style={{ width: "100%", height: 190, display: "block" }}>
+        <defs>
+          <filter id={`${gradId}-glow`} filterUnits="userSpaceOnUse" x={-60} y={-60} width={VB_W + 120} height={VB_H + 120}>
+            <feGaussianBlur stdDeviation="5" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          <linearGradient id={`${gradId}-chosen`} gradientUnits="userSpaceOnUse" x1={ORIGIN.x} y1="0" x2={CHOSEN_END.x} y2="0">
+            <stop offset="0%" stopColor={T.gold} />
+            <stop offset="100%" stopColor={T.green} />
+          </linearGradient>
+        </defs>
+
+        {/* Current Timeline — dim, drawn first so the chosen path reads on top at the origin */}
+        <path d={currentD} fill="none" stroke={winningChosen ? "rgba(192,57,43,0.35)" : T.accent} strokeWidth={winningChosen ? 2.4 : 3.4}
+          strokeDasharray={winningChosen ? "1 5" : "5 4"} strokeLinecap="round"
+          filter={winningChosen ? undefined : `url(#${gradId}-glow)`}
+          opacity={winningChosen ? 0.55 : 0.9} />
+
+        {/* Chosen Timeline — bright, alive */}
+        <path d={chosenD} fill="none" stroke={`url(#${gradId}-chosen)`} strokeWidth={winningChosen ? 4 : 2.6}
+          strokeLinecap="round" filter={winningChosen ? `url(#${gradId}-glow)` : undefined}
+          opacity={winningChosen ? 1 : 0.45} />
+
+        {/* proof nodes along each branch */}
+        {currentNodes.map((p, i) => (
+          <circle key={`cur-${i}`} cx={p.x} cy={p.y} r={winningChosen ? 2.6 : 4} fill={T.accent}
+            opacity={winningChosen ? 0.4 : 0.85} />
         ))}
-      </div>
+        {chosenNodes.map((p, i) => (
+          <circle key={`ch-${i}`} cx={p.x} cy={p.y} r={winningChosen ? 4.4 : 2.8} fill={lineColor}
+            opacity={winningChosen ? 1 : 0.45} filter={winningChosen ? `url(#${gradId}-glow)` : undefined} />
+        ))}
 
-      {/* This week, day by day — the part that actually moves */}
-      <div style={{ paddingTop: 14, borderTop: `0.5px solid ${T.border}` }}>
-        <div style={{ fontSize: 9.5, fontWeight: 700, color: T.hint, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 10 }}>
-          Week {currentWeek.weekNum} · day by day
-        </div>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 4 }}>
-          {days.map(d => {
-            const isFuture = d.state === "future";
-            return (
-              <div key={d.date} style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1, minWidth: 0 }}>
-                <ChosenDayDot isFuture={isFuture} />
-                <DayTick day={d} percent={d.proofTotal > 0 ? Math.round((d.proofDone / d.proofTotal) * 100) : (d.hasProof ? 100 : (isFuture ? null : 0))} status={d.state} />
-                <CurrentDayDot day={d} />
-                <div style={{ fontSize: 8.5, color: d.state === "today" ? T.gold : T.hint, marginTop: 4, fontWeight: d.state === "today" ? 700 : 500 }}>
-                  {d.label}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        {/* origin: You are here */}
+        <circle cx={ORIGIN.x} cy={ORIGIN.y} r={7} fill={T.text} filter={`url(#${gradId}-glow)`} />
+        <circle cx={ORIGIN.x} cy={ORIGIN.y} r={7} fill="none" stroke={lineColor} strokeWidth={1.5}>
+          <animate attributeName="r" values="7;18;7" dur="2.6s" repeatCount="indefinite" />
+          <animate attributeName="opacity" values="0.8;0;0.8" dur="2.6s" repeatCount="indefinite" />
+        </circle>
+
+        {/* end-of-path arrows */}
+        <circle cx={CHOSEN_END.x} cy={CHOSEN_END.y} r={winningChosen ? 5 : 3} fill={T.green} opacity={winningChosen ? 1 : 0.45} />
+        <circle cx={CURRENT_END.x} cy={CURRENT_END.y} r={winningChosen ? 3 : 5} fill={T.accent} opacity={winningChosen ? 0.4 : 0.9} />
+      </svg>
+
+      {/* labels positioned by the same viewBox ratios as the path endpoints, so they
+          stay locked to the curve ends regardless of the card's rendered width */}
+      <div style={{
+        position: "absolute", right: 4,
+        top: `${(CHOSEN_END.y / VB_H) * 100}%`, transform: "translateY(-130%)",
+        fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase",
+        color: winningChosen ? T.goldBright : `${T.goldBright}77`, whiteSpace: "nowrap",
+      }}>
+        Chosen Timeline
+      </div>
+      <div style={{
+        position: "absolute", right: 4,
+        top: `${(CURRENT_END.y / VB_H) * 100}%`, transform: "translateY(30%)",
+        fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase",
+        color: winningChosen ? `${T.accent}77` : T.accent, whiteSpace: "nowrap",
+      }}>
+        Current Timeline
+      </div>
+      <div style={{
+        position: "absolute", left: `${(ORIGIN.x / VB_W) * 100}%`,
+        top: `${(ORIGIN.y / VB_H) * 100}%`, transform: "translate(-50%, -180%)",
+        fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", color: T.muted,
+        textTransform: "uppercase", whiteSpace: "nowrap",
+      }}>
+        You are here
+      </div>
       </div>
 
       <div style={{
-        marginTop: 16, paddingTop: 14, borderTop: `0.5px solid ${T.border}`,
-        fontSize: 13, color: missingDays > 0 ? T.text : T.green, lineHeight: 1.5,
+        marginTop: 28, paddingTop: 14, borderTop: `0.5px solid ${T.border}`,
+        fontSize: 13.5, lineHeight: 1.5,
+        color: lineColor,
       }}>
-        {sentence}
-      </div>
-
-      <div style={{ display: "flex", gap: 16, marginTop: 12, fontSize: 10.5, color: T.muted }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 8, height: 8, borderRadius: "50%", border: `1.6px solid ${T.goldBright}`, display: "inline-block" }} />
-          Builder You — the ideal
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 8, height: 8, borderRadius: "50%", border: `1.6px solid ${T.green}`, background: `${T.green}33`, display: "inline-block" }} />
-          Current You — what you logged
-        </div>
+        {copy.line}
       </div>
     </div>
   );

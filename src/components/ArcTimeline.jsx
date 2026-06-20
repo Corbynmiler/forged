@@ -1315,12 +1315,7 @@ export function ArcTimeline({
       ) : null}
 
       {isActive && !embedded ? (
-        <ArcTimelineSplit
-          timeline={timeline}
-          block={block}
-          ledgerRows={ledgerRows}
-          journalEntries={journalInArc}
-        />
+        <ArcTimelineSplit ledgerRows={ledgerRows} />
       ) : null}
 
       <div
