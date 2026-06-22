@@ -565,59 +565,43 @@ function ArcStrip({ activeBlock, onViewArc, proofTotal = 0, proofDone = 0, hour 
   );
 }
 
-function DriftCard({ activeBlock, pendingHabits, status, onTap, onClose }) {
-  const meta = ARC_STATUS_META[status] || ARC_STATUS_META.at_risk;
-  const identity = (activeBlock?.identity || "").trim();
+// Plain text-only nudge — no pills, no per-habit action list. The rest-day
+// button lives on each proof action's own card (see habitCards.jsx); this
+// card just names the option.
+function DriftCard({ activeBlock, onClose }) {
   const minimum = (activeBlock?.minimumProof || "").trim();
-  const headline = status === "at_risk"
-    ? (identity ? `Drifting from ${identity}?` : "Drifting today?")
-    : "Feeling off today?";
 
   return (
     <div style={{
-      margin: "0 14px 10px", padding: "16px 16px 14px", borderRadius: T.r,
-      border: `0.5px solid ${meta.color}55`,
-      background: `linear-gradient(135deg, ${meta.color}14 0%, rgba(26,26,22,0.97) 60%)`,
+      margin: "0 14px 10px", padding: "13px 14px", borderRadius: T.r,
+      border: `0.5px solid ${T.border}`, background: T.surface,
       fontFamily: T.font, boxSizing: "border-box",
     }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-        <ArcStatusPill status={status} />
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 500, color: T.text, marginBottom: 4 }}>
+            Feeling off today?
+          </div>
+          <div style={{ fontSize: 12.5, color: T.sub, lineHeight: 1.5 }}>
+            {minimum
+              ? <>Minimum still counts: <span style={{ color: T.text, fontWeight: 500 }}>{minimum}</span></>
+              : "One small piece of proof still saves today — or take the rest day on whichever habit needs it."}
+          </div>
+        </div>
         <button
           type="button"
           onClick={onClose}
-          style={{ border: "none", background: "none", color: T.muted, fontSize: 12, cursor: "pointer", fontFamily: T.font, padding: "10px 4px", margin: "-10px -4px", minHeight: 40 }}
+          aria-label="Dismiss"
+          style={{
+            flexShrink: 0, border: "none", background: "none", color: T.muted, fontSize: 15,
+            cursor: "pointer", fontFamily: T.font, lineHeight: 1,
+            width: 40, height: 40, margin: "-8px -8px 0 0",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
         >
-          Dismiss
+          ✕
         </button>
       </div>
-      <div style={{ fontFamily: T.serif, fontSize: 17, color: T.text, lineHeight: 1.3, marginBottom: 6 }}>
-        {headline}
-      </div>
-      <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.5, marginBottom: 12 }}>
-        {minimum
-          ? <>The minimum you set: <span style={{ color: T.text, fontWeight: 600 }}>{minimum}</span></>
-          : "One piece of proof still saves today."}
-      </div>
-      {pendingHabits.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {pendingHabits.map(h => (
-            <button
-              key={h.id}
-              type="button"
-              onClick={(e) => onTap(h.id, e)}
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "space-between",
-                width: "100%", padding: "11px 14px", borderRadius: T.rsm,
-                border: `0.5px solid ${meta.color}40`, background: "rgba(255,255,255,0.04)",
-                cursor: "pointer", textAlign: "left", fontFamily: T.font, boxSizing: "border-box",
-              }}
-            >
-              <span style={{ fontSize: 14, fontWeight: 600, color: T.text, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.name}</span>
-              <span style={{ fontSize: 12, fontWeight: 700, color: meta.color, flexShrink: 0, marginLeft: 10 }}>Log now →</span>
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -773,6 +757,9 @@ export function TodayScreen({
   });
   const [justCompleted, setJustCompleted] = useState(false);
   const [driftOpen, setDriftOpen] = useState(false);
+  const [driftDismissedDate, setDriftDismissedDate] = useState(() => {
+    try { return localStorage.getItem("forged_drift_dismissed_date") || null; } catch { return null; }
+  });
   const prevProofDoneRef = useRef(null);
 
   const activeGoals    = goals.filter(g => g.status !== "completed");
@@ -845,12 +832,23 @@ export function TodayScreen({
       : logHabits.length
         ? "Logs below — ring is for habits & goals"
         : "";
+  const today = todayStr();
   const arcStatus = arcActive && proofTotal > 0 ? getArcDayStatus({ proofTotal, proofDone, hour: hr }) : null;
   const proofIncomplete = arcActive && proofTotal > 0 && proofDone < proofTotal;
-  const showDriftCard = proofIncomplete && (arcStatus === "at_risk" || driftOpen);
+  const driftDismissedToday = driftDismissedDate === today;
+  const showDriftCard = proofIncomplete && !driftDismissedToday && (arcStatus === "at_risk" || driftOpen);
+  function dismissDrift() {
+    setDriftOpen(false);
+    setDriftDismissedDate(today);
+    try { localStorage.setItem("forged_drift_dismissed_date", today); } catch { /* ignore */ }
+  }
+  function reopenDrift() {
+    setDriftOpen(true);
+    setDriftDismissedDate(null);
+    try { localStorage.removeItem("forged_drift_dismissed_date"); } catch { /* ignore */ }
+  }
   const ringCenterMain = arcActive && proofTotal > 0 ? `${proofDone}/${proofTotal}` : undefined;
   const ringCenterSub = arcActive && proofTotal > 0 ? "proof" : undefined;
-  const today = todayStr();
   const doneTasksCount = tasks.filter(t => t.done).length;
   const totalTasksCount = tasks.length;
 
@@ -960,16 +958,13 @@ export function TodayScreen({
       {showDriftCard && (
         <DriftCard
           activeBlock={activeBlock}
-          pendingHabits={proofHabitsSorted.filter(h => !isSatisfiedForTodayRing(h))}
-          status={arcStatus}
-          onTap={onTap}
-          onClose={() => setDriftOpen(false)}
+          onClose={dismissDrift}
         />
       )}
       {proofIncomplete && !showDriftCard && (
         <button
           type="button"
-          onClick={() => setDriftOpen(true)}
+          onClick={reopenDrift}
           style={{
             display: "block", margin: "0 14px 0", padding: "10px 0",
             border: "none", background: "none", cursor: "pointer",

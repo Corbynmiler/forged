@@ -315,7 +315,7 @@ export function DailyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDele
       )}
       {!proofMode && logged && !isSkip && <DoneBanner habit={habit}/>}
       {!proofMode && logged && !isSkip && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote}/>}
-      {!proofMode && !logged && (
+      {!logged && (
         <div style={{ padding:"0 15px 12px" }}>
           {restOpen ? (
             <div style={{ borderRadius:T.rsm, border:`0.5px solid ${T.borderMid}`, background:T.surface, padding:"12px 12px 10px" }}>
@@ -396,7 +396,7 @@ export function WeeklyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDel
       )}
       {!proofMode && sessionToday && !isSkip && <DoneBanner habit={habit}/>}
       {!proofMode && sessionToday && !isSkip && <NoteStrip habitId={habit.id} habit={habit} onAddNote={onAddNote}/>}
-      {!proofMode && !sessionToday && !isSkip && !targetMet && (
+      {!sessionToday && !isSkip && !targetMet && (
         <div style={{ padding:"0 15px 12px" }}>
           {restOpen ? (
             <div style={{ borderRadius:T.rsm, border:`0.5px solid ${T.borderMid}`, background:T.surface, padding:"12px 12px 10px" }}>
