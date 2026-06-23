@@ -428,7 +428,7 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
               <div style={{ fontSize:14, color:T.muted, lineHeight:1.7, maxWidth:300, margin:"0 auto 28px" }}>
                 {editedArc
                   ? <>“{editedArc.title || "Your Arc"}” — {arcDurationWeeksLabel(editedArc.durationDays)}, starting today. Show proof, talk to your coach, and let the weekly Review tell you the truth.</>
-                  : "Track what matters, talk to your coach, and start an Arc whenever you're ready."}
+                  : <>Track what matters and talk to your coach now. Whenever you're ready, start an <strong style={{ color:T.sub }}>Arc</strong> — a focused stretch of time built around one identity, where daily <strong style={{ color:T.sub }}>proof actions</strong> show you're living it.</>}
               </div>
             </div>
 
@@ -632,7 +632,8 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
               onClick={e => e.stopPropagation()}>
               <div style={{ fontSize:17, fontWeight:700, color:T.text, marginBottom:10 }}>Skip the setup?</div>
               <div style={{ fontSize:13, color:T.sub, lineHeight:1.65, marginBottom:22 }}>
-                This conversation is how your first Arc gets built. Skipping means starting with a blank app — you can set up an Arc later from Today.
+                This conversation is how your first Arc gets built — a focused stretch of time with daily proof actions
+                that show you're living it. Skipping means starting with a blank app — you can set up an Arc later from Today.
               </div>
               <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
                 <button

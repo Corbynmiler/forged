@@ -167,7 +167,7 @@ function TodayReceiptCard({ entry, loggedCount, generating, onGenerate, onOpenJo
   const identity = arcActive ? String(activeBlock.identity || "").trim() : "";
   const minimum = arcActive ? String(activeBlock.minimumProof || "").trim() : "";
   const minHit = arcActive && loggedCount > 0 && !!minimum; // simple heuristic; refined in Phase 2
-  const eyebrowLabel = arcActive ? (isNight ? "Tonight's audit" : "Today's verdict") : "Today's receipt";
+  const eyebrowLabel = arcActive ? (isNight ? "Tonight's verdict" : "Today's verdict") : "Today's receipt";
   const eyebrowColor = arcActive ? T.gold : T.hint;
   const borderColor = arcActive ? "rgba(200,144,42,0.4)" : T.border;
 
@@ -444,16 +444,17 @@ function isProofForArc(habit, blockId) {
 }
 
 // ── Arc strip + detail modal ───────────────────────────────────────────────
-function AddProofActionSheet({ activeBlock, habits, onClose, onSelectHabit, onCreateNew }) {
-  const linkable = (habits || []).filter(
-    h => h.habitType !== "log" && !(h.isProofAction === true && h.blockId === activeBlock.id),
-  );
+function AddProofActionSheet({ activeBlock, habits, goals = [], onClose, onSelectHabit, onCreateNew }) {
+  const linkable = [
+    ...(habits || []).filter(h => h.habitType !== "log"),
+    ...(goals || []).filter(g => g.status !== "completed"),
+  ].filter(item => !(item.isProofAction === true && item.blockId === activeBlock.id));
 
   return (
     <Modal onClose={onClose}>
       <div style={{ fontFamily: T.serif, fontSize: 20, color: T.text, marginBottom: 8 }}>Add proof action</div>
       <div style={{ fontSize: 13, color: T.muted, lineHeight: 1.6, marginBottom: 16 }}>
-        Pick an existing habit to count toward this Arc, or create a new one.
+        Pick an existing habit or goal to count toward this Arc, or create a new one.
       </div>
       {linkable.length > 0 ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
@@ -477,7 +478,7 @@ function AddProofActionSheet({ activeBlock, habits, onClose, onSelectHabit, onCr
         </div>
       ) : (
         <div style={{ fontSize: 13, color: T.muted, lineHeight: 1.55, marginBottom: 14, padding: "10px 12px", borderRadius: T.rsm, border: `0.5px dashed ${T.border}`, background: T.surface }}>
-          No other habits to link yet.
+          No other habits or goals to link yet.
         </div>
       )}
       <button
@@ -748,6 +749,7 @@ export function TodayScreen({
   onStartArc = null,
   onViewArc = null,
   onLinkProofHabit = null,
+  onUnlinkProofItem = null,
   onOpenHub = null,
 }) {
   const [showProofPicker, setShowProofPicker] = useState(false);
@@ -770,18 +772,23 @@ export function TodayScreen({
   const proofHabits    = arcActive
     ? trackHabits.filter(h => isProofForArc(h, activeBlock.id))
     : [];
+  const proofGoals     = arcActive
+    ? activeGoals.filter(g => isProofForArc(g, activeBlock.id))
+    : [];
+  const proofItems     = [...proofHabits, ...proofGoals];
   const otherTrackHabits = arcActive
     ? trackHabits.filter(h => !isProofForArc(h, activeBlock.id))
     : trackHabits;
-  const proofHabitsSorted = proofOrder
-    ? [...proofHabits].sort((a, b) => {
+  const proofItemsSorted = proofOrder
+    ? [...proofItems].sort((a, b) => {
         const ai = proofOrder.indexOf(a.id);
         const bi = proofOrder.indexOf(b.id);
         return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
       })
-    : proofHabits;
-  const proofDone      = proofHabits.filter(h => isSatisfiedForTodayRing(h)).length;
-  const proofTotal     = proofHabits.length;
+    : proofItems;
+  const proofHabitsSorted = proofItemsSorted.filter(h => h.habitType !== "goal");
+  const proofDone      = proofItems.filter(h => isSatisfiedForTodayRing(h)).length;
+  const proofTotal     = proofItems.length;
   const arcDayComplete = arcActive && proofTotal > 0 && proofDone === proofTotal;
 
   useEffect(() => {
@@ -934,6 +941,7 @@ export function TodayScreen({
         <AddProofActionSheet
           activeBlock={activeBlock}
           habits={habits}
+          goals={goals}
           onClose={() => setShowProofPicker(false)}
           onSelectHabit={async (id) => {
             setShowProofPicker(false);
@@ -942,9 +950,9 @@ export function TodayScreen({
           onCreateNew={() => { setShowProofPicker(false); onAdd?.(); }}
         />
       )}
-      {showReorder && proofHabits.length > 0 && (
+      {showReorder && proofItems.length > 0 && (
         <ReorderProofSheet
-          habits={proofHabitsSorted}
+          habits={proofItemsSorted}
           onClose={() => setShowReorder(false)}
           onSave={(ordered) => {
             const ids = ordered.map(h => h.id);
@@ -1109,7 +1117,7 @@ export function TodayScreen({
           >
             <div style={{ flex:1 }}>
               <div style={{ fontSize:14, fontWeight:500, color:T.text, marginBottom:2 }}>Add proof actions to make this Arc active</div>
-              <div style={{ fontSize:12, color:T.muted, lineHeight:1.5 }}>Pick three to five habits that prove who you&apos;re becoming.</div>
+              <div style={{ fontSize:12, color:T.muted, lineHeight:1.5 }}>Pick three to five habits or goals that prove who you&apos;re becoming.</div>
             </div>
             <div style={{ fontSize:16, color:T.accent, flexShrink:0 }}>→</div>
           </button>
@@ -1121,17 +1129,28 @@ export function TodayScreen({
             : <>
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 14px", marginBottom:6 }}>
                   <span style={{ fontSize:11, fontWeight:600, letterSpacing:"0.08em", color:T.sub, textTransform:"uppercase" }}>Proof actions</span>
-                  <button
-                    type="button"
-                    onClick={() => setShowReorder(true)}
-                    style={{ fontSize:11, fontWeight:600, color:T.muted, background:"rgba(255,255,255,0.06)", border:"0.5px solid rgba(255,255,255,0.1)", borderRadius:20, padding:"3px 10px", cursor:"pointer", letterSpacing:"0.04em", fontFamily:T.font }}
-                  >Edit order</button>
+                  <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                    {onOpenHub && (
+                      <button
+                        type="button"
+                        onClick={onOpenHub}
+                        aria-label="Open Hub — all habits, goals, and loose ends"
+                        style={{ fontSize:11, fontWeight:600, color:T.gold, background:"rgba(200,144,42,0.1)", border:"0.5px solid rgba(200,144,42,0.3)", borderRadius:20, padding:"3px 10px", cursor:"pointer", letterSpacing:"0.04em", fontFamily:T.font }}
+                      >Hub →</button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setShowReorder(true)}
+                      style={{ fontSize:11, fontWeight:600, color:T.muted, background:"rgba(255,255,255,0.06)", border:"0.5px solid rgba(255,255,255,0.1)", borderRadius:20, padding:"3px 10px", cursor:"pointer", letterSpacing:"0.04em", fontFamily:T.font }}
+                    >Edit order</button>
+                  </div>
                 </div>
-                {proofHabitsSorted.map(h => {
-                  if (h.habitType === "daily")   return <DailyCard key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} proofMode={true}/>;
-                  if (h.habitType === "limit")   return <LimitCard key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} onLowerBudget={onLowerBudget} onOpenCoachWithDraft={onOpenCoachWithDraft} proofMode={true}/>;
-                  if (h.habitType === "weekly")  return <WeeklyCard key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} proofMode={true}/>;
-                  if (h.habitType === "project") return <ProjectCard key={h.id} habit={h} onOpenLog={onOpenLog} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} proofMode={true}/>;
+                {proofItemsSorted.map(h => {
+                  if (h.habitType === "daily")   return <DailyCard key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} proofMode={true} onUnlinkProof={onUnlinkProofItem}/>;
+                  if (h.habitType === "limit")   return <LimitCard key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} onLowerBudget={onLowerBudget} onOpenCoachWithDraft={onOpenCoachWithDraft} proofMode={true} onUnlinkProof={onUnlinkProofItem}/>;
+                  if (h.habitType === "weekly")  return <WeeklyCard key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} proofMode={true} onUnlinkProof={onUnlinkProofItem}/>;
+                  if (h.habitType === "project") return <ProjectCard key={h.id} habit={h} onOpenLog={onOpenLog} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} proofMode={true} onUnlinkProof={onUnlinkProofItem}/>;
+                  if (h.habitType === "goal")    return <TodayGoalCard key={h.id} goal={h} onOpenLog={onOpenGoalLog} onEdit={onEditGoal} onComplete={onCompleteGoal} onDelete={onDeleteGoal} onShareGoal={onShareGoal} onOpen={onOpenGoalDetail} onUnlinkProof={onUnlinkProofItem}/>;
                   return null;
                 })}
                 {onLinkProofHabit && (
@@ -1188,26 +1207,45 @@ export function TodayScreen({
         />
       )}
       {/* Hub link — appears when an Arc is active so the user can still reach
-          their other habits, goals, and loose ends. Quiet by design. */}
-      {arcActive && onOpenHub && (
-        <button
-          type="button"
-          onClick={onOpenHub}
-          style={{
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-            width: "calc(100% - 28px)", margin: "8px 14px 0",
-            padding: "11px 14px", borderRadius: T.rsm,
-            background: "rgba(255,255,255,0.025)", border: `0.5px solid ${T.border}`,
-            cursor: "pointer", fontFamily: T.font, textAlign: "left", boxSizing: "border-box",
-          }}
-          aria-label="Open Hub — all habits, goals, and loose ends"
-        >
-          <span style={{ fontSize: 12, color: T.muted, fontWeight: 500 }}>
-            All habits & goals
-          </span>
-          <span style={{ fontSize: 12, color: T.sub, fontWeight: 600 }}>→</span>
-        </button>
-      )}
+          their other habits, goals, and loose ends. Surfaces a count so it's
+          obvious there's more than just the proof list. */}
+      {arcActive && onOpenHub && (() => {
+        const hiddenHabits = otherTrackHabits.length;
+        const hiddenGoals = Math.max(0, activeGoals.length - proofGoals.length);
+        const hiddenTasks = tasks.length;
+        const arcParts = [];
+        if (hiddenHabits > 0) arcParts.push(`${hiddenHabits} habit${hiddenHabits === 1 ? "" : "s"}`);
+        if (hiddenGoals > 0) arcParts.push(`${hiddenGoals} goal${hiddenGoals === 1 ? "" : "s"}`);
+        const tasksLabel = hiddenTasks > 0 ? `${hiddenTasks} quick task${hiddenTasks === 1 ? "" : "s"}` : "";
+        const hubLabel = arcParts.length > 0
+          ? `${arcParts.join(" & ")} not in this Arc${tasksLabel ? `, ${tasksLabel}` : ""}`
+          : (tasksLabel || "Everything outside this Arc");
+        return (
+          <button
+            type="button"
+            onClick={onOpenHub}
+            style={{
+              display: "flex", alignItems: "center", gap: 12, justifyContent: "space-between",
+              width: "calc(100% - 28px)", margin: "10px 14px 0",
+              padding: "13px 16px", borderRadius: T.r,
+              background: "rgba(200,144,42,0.07)", border: `0.5px solid rgba(200,144,42,0.3)`,
+              cursor: "pointer", fontFamily: T.font, textAlign: "left", boxSizing: "border-box",
+            }}
+            aria-label="Open Hub — all habits, goals, and loose ends"
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+              <span style={{ fontSize: 18, flexShrink: 0 }}>🗂️</span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>Hub</div>
+                <div style={{ fontSize: 11, color: T.muted, marginTop: 1 }}>
+                  {hubLabel}
+                </div>
+              </div>
+            </div>
+            <span style={{ fontSize: 14, color: T.gold, fontWeight: 700, flexShrink: 0 }}>→</span>
+          </button>
+        );
+      })()}
       <div style={{ height:16 }}/>
     </div>
   );

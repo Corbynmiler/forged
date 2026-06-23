@@ -131,8 +131,18 @@ export function HubScreen({
   onOpenGoalLog, onEditGoal, onCompleteGoal, onDeleteGoal, onShareGoal, onOpenGoalDetail,
   // Task callbacks
   onAddTask, onCompleteTask, onPinTask, onDeleteTask,
+  // Arc linking — lets non-proof habits/goals be added to the active Arc from here.
+  onLinkProofHabit = null,
 }) {
   useEffect(() => { window.scrollTo(0, 0); }, []);
+
+  const [introDismissed, setIntroDismissed] = useState(
+    () => { try { return !!localStorage.getItem("forged_hub_intro_dismissed"); } catch { return false; } }
+  );
+  function dismissIntro() {
+    setIntroDismissed(true);
+    try { localStorage.setItem("forged_hub_intro_dismissed", "1"); } catch { /* ignore */ }
+  }
 
   const today = todayStr();
   const arcActive = !!activeBlock?.id;
@@ -140,17 +150,19 @@ export function HubScreen({
   const trackHabits = habits.filter(h => h.habitType !== "log");
   const logHabits = habits.filter(h => h.habitType === "log");
 
-  // When Arc is active: "Other Habits" = non-proof habits for current Arc.
+  // When Arc is active: "Other Habits"/"Goals" = non-proof items for current Arc.
   // When no Arc: this is just everything (Hub still works as a backup home).
   const isProofForArc = (h) => arcActive && h.isProofAction === true && h.blockId === activeBlock.id;
   const otherHabits = arcActive ? trackHabits.filter(h => !isProofForArc(h)) : trackHabits;
+  const otherGoals = arcActive ? activeGoals.filter(g => !isProofForArc(g)) : activeGoals;
+  const linkProof = arcActive ? onLinkProofHabit : null;
 
   const daily   = otherHabits.filter(h => h.habitType === "daily");
   const limit   = otherHabits.filter(h => h.habitType === "limit");
   const weekly  = otherHabits.filter(h => h.habitType === "weekly");
   const project = otherHabits.filter(h => h.habitType === "project");
 
-  const totalCount = otherHabits.length + activeGoals.length + logHabits.length + tasks.length;
+  const totalCount = otherHabits.length + otherGoals.length + logHabits.length + tasks.length;
 
   return (
     <div style={{ overflowX: "hidden", maxWidth: "100%", minWidth: 0, boxSizing: "border-box" }}>
@@ -177,6 +189,25 @@ export function HubScreen({
         )}
       </div>
 
+      {arcActive && !introDismissed && (
+        <div style={{
+          margin: "0 14px 14px", padding: "13px 14px", borderRadius: T.r,
+          border: "0.5px solid rgba(200,144,42,0.3)", background: "rgba(200,144,42,0.07)",
+          display: "flex", gap: 10, alignItems: "flex-start",
+        }}>
+          <span style={{ fontSize: 16, flexShrink: 0 }}>👋</span>
+          <div style={{ flex: 1, fontSize: 12, color: T.sub, lineHeight: 1.55 }}>
+            <strong style={{ color: T.text }}>Nothing here was deleted.</strong> While your Arc is active, Today only
+            shows proof actions for it. Everything else — other habits, goals, and quick tasks — lives here. Tap
+            "Add to Arc" on anything below to bring it back to Today.
+          </div>
+          <button type="button" onClick={dismissIntro} aria-label="Dismiss"
+            style={{ background: "none", border: "none", cursor: "pointer", color: T.hint, fontSize: 13, flexShrink: 0, padding: 2 }}>
+            ✕
+          </button>
+        </div>
+      )}
+
       {totalCount === 0 && (
         <div style={{ padding: "32px 28px", textAlign: "center" }}>
           <div style={{ fontSize: 36, marginBottom: 12 }}>⚒️</div>
@@ -200,7 +231,7 @@ export function HubScreen({
             <DailyCard key={h.id} habit={h}
               onTap={onTap} onSkip={onSkip} onAddNote={onAddNote}
               onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit}
-              sharingThisHabit={sharingHabitId === h.id}/>
+              sharingThisHabit={sharingHabitId === h.id} onLinkProof={linkProof}/>
           ))}
         </>
       )}
@@ -212,7 +243,7 @@ export function HubScreen({
               onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onAddNote={onAddNote}
               onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit}
               sharingThisHabit={sharingHabitId === h.id}
-              onLowerBudget={onLowerBudget} onOpenCoachWithDraft={onOpenCoachWithDraft}/>
+              onLowerBudget={onLowerBudget} onOpenCoachWithDraft={onOpenCoachWithDraft} onLinkProof={linkProof}/>
           ))}
         </>
       )}
@@ -223,7 +254,7 @@ export function HubScreen({
             <WeeklyCard key={h.id} habit={h}
               onTap={onTap} onSkip={onSkip} onAddNote={onAddNote}
               onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit}
-              sharingThisHabit={sharingHabitId === h.id}/>
+              sharingThisHabit={sharingHabitId === h.id} onLinkProof={linkProof}/>
           ))}
         </>
       )}
@@ -234,19 +265,20 @@ export function HubScreen({
             <ProjectCard key={h.id} habit={h}
               onOpenLog={onOpenLog} onAddNote={onAddNote}
               onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit}
-              sharingThisHabit={sharingHabitId === h.id}/>
+              sharingThisHabit={sharingHabitId === h.id} onLinkProof={linkProof}/>
           ))}
         </>
       )}
 
       {/* Goals */}
-      {activeGoals.length > 0 && (
+      {otherGoals.length > 0 && (
         <>
           <SLabel>Goals</SLabel>
-          {activeGoals.map(g => (
+          {otherGoals.map(g => (
             <TodayGoalCard key={g.id} goal={g}
               onOpenLog={onOpenGoalLog} onEdit={onEditGoal} onComplete={onCompleteGoal}
-              onDelete={onDeleteGoal} onShareGoal={onShareGoal} onOpen={onOpenGoalDetail}/>
+              onDelete={onDeleteGoal} onShareGoal={onShareGoal} onOpen={onOpenGoalDetail}
+              onLinkProof={linkProof}/>
           ))}
         </>
       )}

@@ -33,6 +33,14 @@ export function getProofHabitsForBlock(habits, blockId) {
   );
 }
 
+/** Proof items across both habits and goals — goals can be proof actions too. */
+export function getProofItemsForBlock(habits, goals, blockId) {
+  return [
+    ...getProofHabitsForBlock(habits, blockId),
+    ...(goals || []).filter(g => g && isProofHabitForBlock(g, blockId)),
+  ];
+}
+
 export function getArcDurationDays(activeBlock) {
   return Math.max(1, activeBlock?.durationDays || 56);
 }
@@ -73,8 +81,8 @@ export function getArcRankFromPercent(percent) {
 /**
  * Aggregate proof % from ledger rows, replacing today with live habit state.
  */
-export function calculateArcProofPercent({ ledgerRows, habits, blockId, today = todayStr() }) {
-  const proofHabits = getProofHabitsForBlock(habits, blockId);
+export function calculateArcProofPercent({ ledgerRows, habits, goals, blockId, today = todayStr() }) {
+  const proofHabits = getProofItemsForBlock(habits, goals, blockId);
   const todayTotal = proofHabits.length;
   const todayDone = proofHabits.filter(h => isSatisfiedForTodayRing(h)).length;
 

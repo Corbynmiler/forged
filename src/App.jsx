@@ -7,6 +7,7 @@ import {
   computeTodayArcXpAward,
   getArcRankDisplay,
   isProofHabitForBlock,
+  getProofItemsForBlock,
   lifetimeXpForHabitLog,
   LIFETIME_XP_DURING_ARC_NON_PROOF,
   LIFETIME_XP_LIMIT_NONE,
@@ -1718,18 +1719,68 @@ export default function App() {
     const uid = userIdRef.current;
     if (!blockId || !uid || !habitId) return;
     const habit = habits.find(h => h.id === habitId);
-    if (!habit || habit.habitType === "log") return;
-    if (habit.blockId === blockId && habit.isProofAction) return;
-    const updated = { ...habit, blockId, isProofAction: true };
-    const ok = await syncHabit(updated);
-    if (!ok) {
-      addToast("⚠️ Couldn't link habit — check your connection");
+    if (habit) {
+      if (habit.habitType === "log") return;
+      if (habit.blockId === blockId && habit.isProofAction) return;
+      const updated = { ...habit, blockId, isProofAction: true };
+      const ok = await syncHabit(updated);
+      if (!ok) {
+        addToast("⚠️ Couldn't link habit — check your connection");
+        return;
+      }
+      const nextHabits = habits.map(h => (h.id === habitId ? updated : h));
+      setHabits(nextHabits);
+      if (activeBlock?.id) void reconcileArcProgress(activeBlock, nextHabits);
+      addToast("✓ Added as proof action");
       return;
     }
-    const nextHabits = habits.map(h => (h.id === habitId ? updated : h));
-    setHabits(nextHabits);
-    if (activeBlock?.id) void reconcileArcProgress(activeBlock, nextHabits);
+    const goal = goals.find(g => entityIdEq(g.id, habitId));
+    if (!goal) return;
+    if (goal.blockId === blockId && goal.isProofAction) return;
+    const updatedGoal = { ...goal, blockId, isProofAction: true };
+    const ok = await syncGoal(updatedGoal);
+    if (!ok) {
+      addToast("⚠️ Couldn't link goal — check your connection");
+      return;
+    }
+    const nextGoals = goals.map(g => (entityIdEq(g.id, habitId) ? updatedGoal : g));
+    setGoals(nextGoals);
+    if (activeBlock?.id) void reconcileArcProgress(activeBlock, habits, nextGoals);
     addToast("✓ Added as proof action");
+  }
+
+  /** Move a habit or goal off the active Arc's proof list, back to the Hub. */
+  async function unlinkProofItem(itemId) {
+    const uid = userIdRef.current;
+    if (!uid || !itemId) return;
+    const habit = habits.find(h => h.id === itemId);
+    if (habit) {
+      if (!habit.isProofAction && !habit.blockId) return;
+      const updated = { ...habit, blockId: null, isProofAction: false };
+      const ok = await syncHabit(updated);
+      if (!ok) {
+        addToast("⚠️ Couldn't move habit — check your connection");
+        return;
+      }
+      const nextHabits = habits.map(h => (h.id === itemId ? updated : h));
+      setHabits(nextHabits);
+      if (activeBlock?.id) void reconcileArcProgress(activeBlock, nextHabits);
+      addToast("Moved to Hub");
+      return;
+    }
+    const goal = goals.find(g => entityIdEq(g.id, itemId));
+    if (!goal) return;
+    if (!goal.isProofAction && !goal.blockId) return;
+    const updatedGoal = { ...goal, blockId: null, isProofAction: false };
+    const ok = await syncGoal(updatedGoal);
+    if (!ok) {
+      addToast("⚠️ Couldn't move goal — check your connection");
+      return;
+    }
+    const nextGoals = goals.map(g => (entityIdEq(g.id, itemId) ? updatedGoal : g));
+    setGoals(nextGoals);
+    if (activeBlock?.id) void reconcileArcProgress(activeBlock, habits, nextGoals);
+    addToast("Moved to Hub");
   }
 
   async function loadArcLedgerForBlock(blockId) {
@@ -1761,15 +1812,13 @@ export default function App() {
    * Recompute today's Arc XP from proof habits, upsert ledger, adjust forge_blocks.arc_xp.
    * Idempotent: safe on retick/untick and page refresh.
    */
-  async function reconcileArcProgress(block, habitsList) {
+  async function reconcileArcProgress(block, habitsList, goalsList = goals) {
     const uid = userIdRef.current;
     if (!block?.id || !uid) return { ok: true, delta: 0 };
 
     const blockId = block.id;
     const today = todayStr();
-    const proofHabits = (habitsList || []).filter(
-      h => h && h.habitType !== "log" && isProofHabitForBlock(h, blockId),
-    );
+    const proofHabits = getProofItemsForBlock(habitsList, goalsList, blockId);
     const proofTotal = proofHabits.length;
     const proofDone = proofHabits.filter(h => isSatisfiedForTodayRing(h)).length;
     const newAward = computeTodayArcXpAward({ proofTotal, proofDone });
@@ -1817,6 +1866,7 @@ export default function App() {
     const percent = calculateArcProofPercent({
       ledgerRows: ledgerForPercent,
       habits: habitsList,
+      goals: goalsList,
       blockId,
       today,
     });
@@ -3729,12 +3779,16 @@ export default function App() {
     };
     const saved = await syncGoal(updated);
     if (!saved) return;
-    setGoals(prev => {
-      const idx = prev.findIndex(g => entityIdEq(g.id, id));
-      if (idx === -1) return [...prev, updated];
-      return prev.map(g => (entityIdEq(g.id, id) ? updated : g));
-    });
+    const nextGoals = (() => {
+      const idx = goals.findIndex(g => entityIdEq(g.id, id));
+      if (idx === -1) return [...goals, updated];
+      return goals.map(g => (entityIdEq(g.id, id) ? updated : g));
+    })();
+    setGoals(nextGoals);
     setHabits(prev => prev.filter(h => !entityIdEq(h.id, id)));
+    if (activeBlock?.id && updated.blockId === activeBlock.id) {
+      void reconcileArcProgress(activeBlock, habits, nextGoals);
+    }
     const today = todayStr();
     const awardKey = `goal:${id}:${today}`;
     if (xpAwardedDates.has(awardKey)) return;
@@ -3773,12 +3827,16 @@ export default function App() {
       addToast("⚠️ Couldn't complete goal — check your connection");
       return;
     }
-    setGoals(prev => {
-      const idx = prev.findIndex(g => entityIdEq(g.id, id));
-      if (idx === -1) return [...prev, updated];
-      return prev.map(g => (entityIdEq(g.id, id) ? updated : g));
-    });
+    const nextGoals = (() => {
+      const idx = goals.findIndex(g => entityIdEq(g.id, id));
+      if (idx === -1) return [...goals, updated];
+      return goals.map(g => (entityIdEq(g.id, id) ? updated : g));
+    })();
+    setGoals(nextGoals);
     setHabits(prev => prev.filter(h => !entityIdEq(h.id, id)));
+    if (activeBlock?.id && updated.blockId === activeBlock.id) {
+      void reconcileArcProgress(activeBlock, habits, nextGoals);
+    }
     addToast("✓ Goal completed");
   }
 
@@ -3910,7 +3968,7 @@ export default function App() {
             >×</button>
           </div>
         )}
-        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} activeBlock={activeBlock} todayArcScore={todayArcScore} arcLedgerRows={arcLedgerRows} arcProofSyncing={arcProofSyncing} onStartArc={openArcCoachCreate} onViewArc={() => { setScreen("arc"); setArcTab("arc"); }} onLinkProofHabit={linkHabitAsProof} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} onOpenCoachMic={() => openCoachWithMode("mic")} onOpenCoachWithDraft={openCoachWithDraft} onCreateProofViaCoach={openCoachForProofAction} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} onOpenGoalDetail={id => setOpenGoalId(id)} todayJournalEntry={journalEntries.find(e => e.date === todayStr()) ?? null} onGenerateReceipt={handleGenerateReceipt} generatingReceipt={generatingReceipt} onOpenJournal={() => { setJournalOpenTab("journal"); setJournalAutoGenerate(false); navigateTo("arc"); }} onLowerBudget={handleLowerBudget} tasks={tasks} onAddTask={handleAddTask} onCompleteTask={handleCompleteTask} onPinTask={handlePinTask} onDeleteTask={handleDeleteTask} onOpenHub={() => setScreen("hub")}/>}
+        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} activeBlock={activeBlock} todayArcScore={todayArcScore} arcLedgerRows={arcLedgerRows} arcProofSyncing={arcProofSyncing} onStartArc={openArcCoachCreate} onViewArc={() => { setScreen("arc"); setArcTab("arc"); }} onLinkProofHabit={linkHabitAsProof} onUnlinkProofItem={unlinkProofItem} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} onOpenCoachMic={() => openCoachWithMode("mic")} onOpenCoachWithDraft={openCoachWithDraft} onCreateProofViaCoach={openCoachForProofAction} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} onOpenGoalDetail={id => setOpenGoalId(id)} todayJournalEntry={journalEntries.find(e => e.date === todayStr()) ?? null} onGenerateReceipt={handleGenerateReceipt} generatingReceipt={generatingReceipt} onOpenJournal={() => { setJournalOpenTab("journal"); setJournalAutoGenerate(false); navigateTo("arc"); }} onLowerBudget={handleLowerBudget} tasks={tasks} onAddTask={handleAddTask} onCompleteTask={handleCompleteTask} onPinTask={handlePinTask} onDeleteTask={handleDeleteTask} onOpenHub={() => setScreen("hub")}/>}
         {screen === "hub"      && <HubScreen
           habits={habits} goals={goals} tasks={tasks} activeBlock={activeBlock}
           onBack={() => setScreen("today")}
@@ -3926,6 +3984,7 @@ export default function App() {
           onShareGoal={handleShareGoal} onOpenGoalDetail={id => setOpenGoalId(id)}
           onAddTask={handleAddTask} onCompleteTask={handleCompleteTask}
           onPinTask={handlePinTask} onDeleteTask={handleDeleteTask}
+          onLinkProofHabit={linkHabitAsProof}
         />}
         {screen === "arc" && <ArcScreen
           tab={arcTab} onTabChange={setArcTab}
