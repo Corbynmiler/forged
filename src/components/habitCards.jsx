@@ -167,7 +167,7 @@ export function TodayOverflowDotsBtn({ expanded, onToggle }) {
   );
 }
 
-export function TodayHabitMenuDropdown({ habit, onEdit, onDelete, onShareHabit, shareSaving, menuOpen, onCloseMenu }) {
+export function TodayHabitMenuDropdown({ habit, onEdit, onDelete, onShareHabit, shareSaving, menuOpen, onCloseMenu, onUnlinkProof, onLinkProof }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   useEffect(() => { if (!menuOpen) setConfirmDelete(false); }, [menuOpen]);
   if (!menuOpen) return null;
@@ -191,6 +191,14 @@ export function TodayHabitMenuDropdown({ habit, onEdit, onDelete, onShareHabit, 
     <div onClick={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()} style={{ borderTop:`0.5px solid ${T.border}`, padding:"8px 15px 10px", display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
       <button type="button" onPointerDown={e => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onEdit(habit.id); onCloseMenu(); }}
         style={{ fontSize:12, color:habit.color, background:"none", border:`0.5px solid ${habit.color+"44"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>Edit</button>
+      {onUnlinkProof && (
+        <button type="button" onPointerDown={e => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onUnlinkProof(habit.id); onCloseMenu(); }}
+          style={{ fontSize:12, color:T.sub, background:"none", border:`0.5px solid ${T.border}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>Move to Hub</button>
+      )}
+      {onLinkProof && (
+        <button type="button" onPointerDown={e => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onLinkProof(habit.id); onCloseMenu(); }}
+          style={{ fontSize:12, color:T.accent, background:"rgba(192,57,43,0.08)", border:`0.5px solid rgba(192,57,43,0.35)`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>Add to Arc</button>
+      )}
       {onShareHabit && (
         <button type="button" disabled={!!shareSaving} onPointerDown={e => e.stopPropagation()} onClick={async (e) => { e.stopPropagation(); try { await onShareHabit(habit.id); } finally { onCloseMenu(); } }}
           style={{ fontSize:12, color:T.gold, background:"rgba(200,144,42,0.12)", border:`0.5px solid rgba(200,144,42,0.35)`, borderRadius:T.rsm, padding:"5px 12px", cursor:shareSaving?"wait":"pointer", fontWeight:500, opacity:shareSaving?0.55:1 }}>
@@ -230,7 +238,7 @@ function dailyLogConfirmMessage(h) {
 }
 
 // ─── DAILY CARD ───────────────────────────────────────────────────────────────
-export function DailyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit, proofMode = false }) {
+export function DailyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit, proofMode = false, onUnlinkProof = null, onLinkProof = null }) {
   const tLog  = latestTodayLog(habit);
   const logged = isLoggedToday(habit);
   const isSkip = tLog?.value === "skip";
@@ -303,7 +311,7 @@ export function DailyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDele
           {confirmMsg}
         </p>
       )}
-      {onEditHabit && onDeleteHabit && <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} onShareHabit={onShareHabit} shareSaving={!!sharingThisHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} />}
+      {onEditHabit && onDeleteHabit && <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} onShareHabit={onShareHabit} shareSaving={!!sharingThisHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} onUnlinkProof={proofMode ? onUnlinkProof : null} onLinkProof={!proofMode ? onLinkProof : null} />}
       {isSkip && (
         <div style={{ margin:"0 15px 12px", background:"rgba(106,104,96,0.15)", borderRadius:T.rsm, padding:"8px 12px", display:"flex", flexDirection:"column", gap:6 }}>
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
@@ -342,7 +350,7 @@ export function DailyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDele
 }
 
 // ─── WEEKLY CARD ──────────────────────────────────────────────────────────────
-export function WeeklyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit, proofMode = false }) {
+export function WeeklyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit, proofMode = false, onUnlinkProof = null, onLinkProof = null }) {
   const t = todayStr();
   const isSkip = hasRestDay(habit, t);
   const sessionToday = habit.logs.some(l => l.date === t && l.value === true);
@@ -370,7 +378,7 @@ export function WeeklyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDel
               style={{ width:44, height:44, borderRadius:"50%", flexShrink:0, border:`2px solid ${T.muted}`, background:T.surface, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, transition:"all 0.18s" }}>🛡️</button>
           : <CheckBtn logged={checkLogged} habit={habit} onClick={e => onTap(habit.id, e)}/>}
       </div>
-      {onEditHabit && onDeleteHabit && <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} onShareHabit={onShareHabit} shareSaving={!!sharingThisHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} />}
+      {onEditHabit && onDeleteHabit && <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} onShareHabit={onShareHabit} shareSaving={!!sharingThisHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} onUnlinkProof={proofMode ? onUnlinkProof : null} onLinkProof={!proofMode ? onLinkProof : null} />}
       <div style={{ padding:"0 15px 14px" }}>
         <div style={{ height:5, background:T.surface, borderRadius:3, overflow:"hidden", marginBottom:8 }}>
           <div style={{ height:"100%", borderRadius:3, background:pct>=100?T.goldBright:habit.color, width:`${pct}%`, transition:"width 0.5s ease" }}/>
@@ -423,7 +431,7 @@ export function WeeklyCard({ habit, onTap, onSkip, onAddNote, onEditHabit, onDel
 }
 
 // ─── PROJECT CARD ─────────────────────────────────────────────────────────────
-export function ProjectCard({ habit, onOpenLog, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit, proofMode = false }) {
+export function ProjectCard({ habit, onOpenLog, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit, proofMode = false, onUnlinkProof = null, onLinkProof = null }) {
   const stats = getProjectStats(habit);
   const tLogs = todayLogs(habit);
   const logged = tLogs.length > 0;
@@ -460,7 +468,7 @@ export function ProjectCard({ habit, onOpenLog, onAddNote, onEditHabit, onDelete
         {onEditHabit && onDeleteHabit && <TodayOverflowDotsBtn expanded={habitMenuOpen} onToggle={() => setHabitMenuOpen(p => !p)} />}
         <PlusBtn habit={habit} logged={logged} onClick={() => onOpenLog(habit.id)}/>
       </div>
-      {onEditHabit && onDeleteHabit && <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} onShareHabit={onShareHabit} shareSaving={!!sharingThisHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} />}
+      {onEditHabit && onDeleteHabit && <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} onShareHabit={onShareHabit} shareSaving={!!sharingThisHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} onUnlinkProof={proofMode ? onUnlinkProof : null} onLinkProof={!proofMode ? onLinkProof : null} />}
       <div style={{ padding:"0 15px 14px", display:"flex", gap:8 }}>
         <Stat label="hrs this wk" value={stats.weekHours} color={habit.color}/>
         <Stat label="total hrs" value={stats.totalHours}/>
@@ -480,7 +488,7 @@ export function ProjectCard({ habit, onOpenLog, onAddNote, onEditHabit, onDelete
 }
 
 // ─── LIMIT CARD ───────────────────────────────────────────────────────────────
-export function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit, onLowerBudget, onOpenCoachWithDraft, proofMode = false }) {
+export function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHabit, onDeleteHabit, onShareHabit, sharingThisHabit, onLowerBudget, onOpenCoachWithDraft, proofMode = false, onUnlinkProof = null, onLinkProof = null }) {
   const todayLogsArr = habit.logs.filter(l => l.date === todayStr() && l.value !== "quicknote");
   const used   = todayLogsArr.reduce((s, l) => s + (typeof l.value === "number" ? l.value : 0), 0);
   const budget = habit.dailyBudget || 60;
@@ -558,7 +566,7 @@ export function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHa
           <button className="tap" onClick={handleLimitPlusTap} style={{ width:44, height:44, borderRadius:"50%", border:`2px solid ${habit.color+"66"}`, background:"transparent", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, color:habit.color, fontWeight:300, transition:"all 0.18s" }}>+</button>
         </div>
       </div>
-      {onEditHabit && onDeleteHabit && <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} onShareHabit={onShareHabit} shareSaving={!!sharingThisHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} />}
+      {onEditHabit && onDeleteHabit && <TodayHabitMenuDropdown habit={habit} onEdit={onEditHabit} onDelete={onDeleteHabit} onShareHabit={onShareHabit} shareSaving={!!sharingThisHabit} menuOpen={habitMenuOpen} onCloseMenu={() => setHabitMenuOpen(false)} onUnlinkProof={proofMode ? onUnlinkProof : null} onLinkProof={!proofMode ? onLinkProof : null} />}
       {logged ? (
         <div style={{ padding:"0 15px 14px" }}>
           <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:T.muted, marginBottom:5 }}>
@@ -900,7 +908,7 @@ export function GoalDetailSheet({ goal, habits, onClose, onLog, onEdit, onComple
 }
 
 // ─── TODAY GOAL CARD ──────────────────────────────────────────────────────────
-export function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete, onDelete, onShareGoal, onOpen }) {
+export function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete, onDelete, onShareGoal, onOpen, onUnlinkProof = null, onLinkProof = null }) {
   const stats = getGoalProgress(goal);
   const { isComplete } = stats;
   const barFillPct = goalBarFillWidthPct(stats);
@@ -966,6 +974,14 @@ export function TodayGoalCard({ goal, onOpenLog, onEdit, onComplete, onDelete, o
           {!isComplete && (
             <button type="button" onClick={(e) => { e.stopPropagation(); onComplete(goal.id); setShowMenu(false); }}
               style={{ fontSize:12, color:T.green, background:"none", border:`0.5px solid ${T.green+"44"}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer" }}>Complete goal</button>
+          )}
+          {onUnlinkProof && (
+            <button type="button" onClick={(e) => { e.stopPropagation(); onUnlinkProof(goal.id); setShowMenu(false); }}
+              style={{ fontSize:12, color:T.sub, background:"none", border:`0.5px solid ${T.border}`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>Move to Hub</button>
+          )}
+          {onLinkProof && (
+            <button type="button" onClick={(e) => { e.stopPropagation(); onLinkProof(goal.id); setShowMenu(false); }}
+              style={{ fontSize:12, color:T.accent, background:"rgba(192,57,43,0.08)", border:`0.5px solid rgba(192,57,43,0.35)`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>Add to Arc</button>
           )}
           <button type="button" aria-label="Delete goal" onClick={(e) => { e.stopPropagation(); setGoalDeleteConfirm(true); }}
             style={{ fontSize:12, color:"#e74c3c", background:"none", border:`0.5px solid rgba(231,76,60,0.3)`, borderRadius:T.rsm, padding:"5px 12px", cursor:"pointer", fontWeight:500 }}>Delete</button>

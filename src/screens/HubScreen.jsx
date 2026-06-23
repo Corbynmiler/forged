@@ -131,6 +131,8 @@ export function HubScreen({
   onOpenGoalLog, onEditGoal, onCompleteGoal, onDeleteGoal, onShareGoal, onOpenGoalDetail,
   // Task callbacks
   onAddTask, onCompleteTask, onPinTask, onDeleteTask,
+  // Arc linking — lets non-proof habits/goals be added to the active Arc from here.
+  onLinkProofHabit = null,
 }) {
   useEffect(() => { window.scrollTo(0, 0); }, []);
 
@@ -140,17 +142,19 @@ export function HubScreen({
   const trackHabits = habits.filter(h => h.habitType !== "log");
   const logHabits = habits.filter(h => h.habitType === "log");
 
-  // When Arc is active: "Other Habits" = non-proof habits for current Arc.
+  // When Arc is active: "Other Habits"/"Goals" = non-proof items for current Arc.
   // When no Arc: this is just everything (Hub still works as a backup home).
   const isProofForArc = (h) => arcActive && h.isProofAction === true && h.blockId === activeBlock.id;
   const otherHabits = arcActive ? trackHabits.filter(h => !isProofForArc(h)) : trackHabits;
+  const otherGoals = arcActive ? activeGoals.filter(g => !isProofForArc(g)) : activeGoals;
+  const linkProof = arcActive ? onLinkProofHabit : null;
 
   const daily   = otherHabits.filter(h => h.habitType === "daily");
   const limit   = otherHabits.filter(h => h.habitType === "limit");
   const weekly  = otherHabits.filter(h => h.habitType === "weekly");
   const project = otherHabits.filter(h => h.habitType === "project");
 
-  const totalCount = otherHabits.length + activeGoals.length + logHabits.length + tasks.length;
+  const totalCount = otherHabits.length + otherGoals.length + logHabits.length + tasks.length;
 
   return (
     <div style={{ overflowX: "hidden", maxWidth: "100%", minWidth: 0, boxSizing: "border-box" }}>
@@ -200,7 +204,7 @@ export function HubScreen({
             <DailyCard key={h.id} habit={h}
               onTap={onTap} onSkip={onSkip} onAddNote={onAddNote}
               onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit}
-              sharingThisHabit={sharingHabitId === h.id}/>
+              sharingThisHabit={sharingHabitId === h.id} onLinkProof={linkProof}/>
           ))}
         </>
       )}
@@ -212,7 +216,7 @@ export function HubScreen({
               onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onAddNote={onAddNote}
               onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit}
               sharingThisHabit={sharingHabitId === h.id}
-              onLowerBudget={onLowerBudget} onOpenCoachWithDraft={onOpenCoachWithDraft}/>
+              onLowerBudget={onLowerBudget} onOpenCoachWithDraft={onOpenCoachWithDraft} onLinkProof={linkProof}/>
           ))}
         </>
       )}
@@ -223,7 +227,7 @@ export function HubScreen({
             <WeeklyCard key={h.id} habit={h}
               onTap={onTap} onSkip={onSkip} onAddNote={onAddNote}
               onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit}
-              sharingThisHabit={sharingHabitId === h.id}/>
+              sharingThisHabit={sharingHabitId === h.id} onLinkProof={linkProof}/>
           ))}
         </>
       )}
@@ -234,19 +238,20 @@ export function HubScreen({
             <ProjectCard key={h.id} habit={h}
               onOpenLog={onOpenLog} onAddNote={onAddNote}
               onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit}
-              sharingThisHabit={sharingHabitId === h.id}/>
+              sharingThisHabit={sharingHabitId === h.id} onLinkProof={linkProof}/>
           ))}
         </>
       )}
 
       {/* Goals */}
-      {activeGoals.length > 0 && (
+      {otherGoals.length > 0 && (
         <>
           <SLabel>Goals</SLabel>
-          {activeGoals.map(g => (
+          {otherGoals.map(g => (
             <TodayGoalCard key={g.id} goal={g}
               onOpenLog={onOpenGoalLog} onEdit={onEditGoal} onComplete={onCompleteGoal}
-              onDelete={onDeleteGoal} onShareGoal={onShareGoal} onOpen={onOpenGoalDetail}/>
+              onDelete={onDeleteGoal} onShareGoal={onShareGoal} onOpen={onOpenGoalDetail}
+              onLinkProof={linkProof}/>
           ))}
         </>
       )}

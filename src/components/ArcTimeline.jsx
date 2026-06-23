@@ -3,7 +3,7 @@ import { T } from "../theme.js";
 import { supabase } from "../supabase.js";
 import { parseLocal, fmtEntryDate, isSatisfiedForTodayRing } from "../utils.js";
 import { resolveArcTitle, arcDurationWeeksLabel } from "../arcProofMatch.js";
-import { getArcDayNumber, getArcDurationDays, isProofHabitForBlock } from "../arcProgress.js";
+import { getArcDayNumber, getArcDurationDays, getProofItemsForBlock } from "../arcProgress.js";
 import { ArcTimelineSplit } from "./ArcTimelineSplit.jsx";
 import { useReducedMotion } from "../hooks/useReducedMotion.js";
 import {
@@ -1167,9 +1167,9 @@ export function ArcTimeline({
   const weeksTotal = timeline.weekCount;
   const progress = Math.min(1, Math.max(0, (dayNum - 1) / Math.max(1, duration)));
 
-  const proofHabits = (habits || []).filter(h => h.habitType !== "log" && isProofHabitForBlock(h, block?.id));
-  const proofDone = proofHabits.filter(h => isSatisfiedForTodayRing(h)).length;
-  const proofTotal = proofHabits.length;
+  const proofItems = getProofItemsForBlock(habits, goals, block?.id);
+  const proofDone = proofItems.filter(h => isSatisfiedForTodayRing(h)).length;
+  const proofTotal = proofItems.length;
 
   const defaultSegment = initialWeek != null ? SEG.week(initialWeek) : SEG.week(currentWeek);
 

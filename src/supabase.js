@@ -87,6 +87,9 @@ export function rowToGoal(row) {
     lastLogDate,
     color:       row.color ?? "#E67E22",
     sharedGoalId: row.shared_goal_id ?? undefined,
+    // Arc / forge_block linkage. Surfaced to clients so Today can filter to proof actions.
+    blockId:          row.block_id        ?? null,
+    isProofAction:    !!row.is_proof_action,
   };
 }
 
@@ -116,6 +119,9 @@ export function goalToRow(goal, userId) {
     tap_increment:     1,
     daily_target_minutes: null,
     shared_goal_id:    goal.sharedGoalId ?? null,
+    // Arc / forge_block linkage. Null block_id means "not part of an Arc."
+    block_id:          goal.blockId       ?? null,
+    is_proof_action:   !!goal.isProofAction,
     updated_at:        new Date().toISOString(),
   };
 }
