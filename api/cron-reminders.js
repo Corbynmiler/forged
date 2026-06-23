@@ -398,14 +398,23 @@ function pickNormalMessage(habits, goals, todayYmd, localHour, coachName, arcBlo
     return { title: "Forged", body: resolve(lines[Math.abs(seed) % lines.length]) };
   }
 
-  // Evening + no proof yet + minimum on file — surface the bare minimum, identity-led when possible.
+  // Evening + no proof yet + minimum on file — the genuine peak-risk moment.
+  // Worth a sharper, identity-confronting line here specifically — this is
+  // the one slot per day where someone is actually about to lose the day.
   if (arcActive && slot === "evening" && proofDone === 0 && minimum) {
     const trimmed = minimum.length > 60 ? minimum.slice(0, 57) + "…" : minimum;
     const idtShort = identityShortPhrase(arcBlock.identity);
-    const body = idtShort
-      ? `Day ${arcDayX}. This is the day you said you'd become ${idtShort}. It's slipping — ${trimmed} saves it. — {coach}`
-      : `Day ${arcDayX}. Bad day version: ${trimmed} — {coach}`;
-    return { title: "Forged", body: resolve(body) };
+    const lines = idtShort
+      ? [
+          `Day ${arcDayX}. This is the day you said you'd become ${idtShort}. It's slipping — ${trimmed} saves it. — {coach}`,
+          `Day ${arcDayX}. How bad do you want to become ${idtShort}? Prove it now — ${trimmed}. — {coach}`,
+          `Day ${arcDayX}. Nothing yet. ${idtShort} isn't built on the easy days — ${trimmed}, right now. — {coach}`,
+        ]
+      : [
+          `Day ${arcDayX}. Bad day version: ${trimmed} — {coach}`,
+          `Day ${arcDayX}. How bad do you want this? Bare minimum: ${trimmed}. — {coach}`,
+        ];
+    return { title: "Forged", body: resolve(lines[Math.abs(seed) % lines.length]) };
   }
 
   // Morning during an Arc — anchor the day with a small ask. If yesterday had
@@ -419,10 +428,14 @@ function pickNormalMessage(habits, goals, todayYmd, localHour, coachName, arcBlo
 
     if (yesterdayMissed) {
       const idtShort = identityShortPhrase(arcBlock.identity);
-      return {
-        title: "Forged",
-        body: resolve(`Yesterday didn't happen. Today still counts — one piece of proof for ${idtShort || "the Arc"}. — {coach}`),
-      };
+      const lines = [
+        `Yesterday didn't happen. Today still counts — one piece of proof for ${idtShort || "the Arc"}. — {coach}`,
+        `One missed day. How bad do you want ${idtShort || "this"}? Show it today. — {coach}`,
+        idtShort
+          ? `Yesterday's gone. Becoming ${idtShort} doesn't pause for bad days. — {coach}`
+          : `Yesterday's gone. The Arc doesn't pause for bad days. — {coach}`,
+      ];
+      return { title: "Forged", body: resolve(lines[Math.abs(seed) % lines.length]) };
     }
 
     const lines = [
@@ -532,7 +545,23 @@ async function aiPickMessage(name, coachName, habits, goals, todayYmd, localHour
     h => TRACKABLE_AI.includes(h.habit_type) && h.habit_type !== "log" && hasAnyLogOnDate(h, todayYmd)
   );
 
-  const toneHint = hour >= 19 && !anyLoggedToday
+  // Peak-risk detection — mirrors the template-pool logic in pickNormalMessage.
+  // Only this specific moment (evening, zero proof shown, Arc active) earns
+  // permission for a sharper, identity-confronting register below.
+  const arcActiveForTone = !!arcBlock?.identity;
+  let proofAtRisk = false;
+  if (arcActiveForTone) {
+    const proofRows = (habits || []).filter(
+      h => TRACKABLE_AI.includes(h.habit_type) && h.habit_type !== "log"
+        && h.is_proof_action === true && h.block_id === arcBlock.id
+    );
+    proofAtRisk = proofRows.length > 0 && proofRows.every(h => !strictLoggedProgressToday(h, todayYmd));
+  }
+  const arcAtRisk = arcActiveForTone && hour >= 19 && proofAtRisk;
+
+  const toneHint = arcAtRisk
+    ? "It's evening, Arc active, and zero proof shown today with the bare minimum still on the table — this is the one moment that earns a sharper, identity-confronting line (e.g. challenging whether they actually want what they said they wanted). Direct, not mean. No guilt-tripping, no name-calling."
+    : hour >= 19 && !anyLoggedToday
     ? "It's evening and they haven't logged yet — warmly encourage them to capture the day before it slips away. Human and gentle, not pushy or guilt-trippy."
     : hour >= 19
     ? "It's evening and they've already logged — be warm and reflective. Acknowledge the day. No push to do more, just encouragement."
@@ -562,7 +591,8 @@ ARC FRAMING (use it):
 Good examples (use the shape, not the words):
   Day 3. Breakfast is the first proof. Don't let nicotine win the morning. — ${coachName || "Coach"}
   Day 14. One proof action today. Small counts. — ${coachName || "Coach"}
-  Day 22. Bad day version: ${minimum}. — ${coachName || "Coach"}
+  Day 22. Bad day version: ${minimum}. — ${coachName || "Coach"}${arcAtRisk ? `
+  Day 22. How bad do you want to become ${arcBlock.identity}? Prove it: ${minimum}. — ${coachName || "Coach"}` : ""}
 NEVER use: warrior, elite, alpha, journey, future you, stay strong king/queen.`;
   }
 
