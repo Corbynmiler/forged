@@ -6,7 +6,7 @@ import {
   isSatisfiedForTodayRing, currentWeekStart, fmtDate,
   openForgedFeedbackMailto,
 } from "../utils.js";
-import { Modal, GBtn, lbl, inp, Stat, ToggleSwitch, NotifCategoryRow, JoinCoachSection } from "../components/ui.jsx";
+import { Modal, GBtn, lbl, inp, Stat, ToggleSwitch, NotifCategoryRow } from "../components/ui.jsx";
 import { useScrollLock } from "../hooks/useScrollLock.js";
 import { CoachSettingsSheet } from "./SocialScreen.jsx";
 
@@ -270,7 +270,7 @@ export function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
     </div>
   );
 }
-export function ProfileScreen({ user, xp, habits, isPro, isCoach, stripeCustomerId, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onReplayPageGuides, onPreviewCoach, previewNormalCoachGreeting = false, onTogglePreviewNormalCoachGreeting, onSignOut, onShowTour, onUpgrade, coachName, coachIcon, onSaveCoach, voiceRepliesEnabled = false, coachVoiceId = null, onSaveVoicePrefs, notifEnabled, notifTime, notifLoading, notifPermission, dailyRemindersEnabled, nudgesEnabled, invitesEnabled, onNotifToggle, onNotifTimeChange, onNotifCategoryChange, onOpenSocial = null, onOpenHub = null }) {
+export function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onReplayPageGuides, previewNormalCoachGreeting = false, onTogglePreviewNormalCoachGreeting, onSignOut, onShowTour, onUpgrade, coachName, coachIcon, onSaveCoach, voiceRepliesEnabled = false, coachVoiceId = null, onSaveVoicePrefs, notifEnabled, notifTime, notifLoading, notifPermission, dailyRemindersEnabled, nudgesEnabled, invitesEnabled, onNotifToggle, onNotifTimeChange, onNotifCategoryChange, onOpenSocial = null, onOpenHub = null }) {
   const [editingName,    setEditingName]    = useState(false);
   const [nameVal,        setNameVal]        = useState(user.name);
   const [showCoachSheet, setShowCoachSheet] = useState(false);
@@ -444,39 +444,6 @@ export function ProfileScreen({ user, xp, habits, isPro, isCoach, stripeCustomer
           )}
         </div>
       )}
-
-      {/* Coaching — only shown when this account is linked to a coach */}
-      {user.coachId && (
-        <div style={{
-          margin:"0 14px 12px",
-          background:"linear-gradient(145deg, rgba(39,174,96,0.07) 0%, rgba(39,174,96,0.02) 100%)",
-          border:`1px solid rgba(39,174,96,0.28)`,
-          borderRadius:14,
-          padding:"14px 16px",
-        }}>
-          <div style={{ fontSize:10, fontWeight:700, color:"#27AE60", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:8 }}>
-            Coaching
-          </div>
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, marginBottom:6 }}>
-            <span style={{ fontSize:17, color:T.text, fontWeight:600 }}>
-              {user.linkedCoachName || "Your coach"}
-            </span>
-            <span style={{ display:"flex", alignItems:"center", gap:5, fontSize:11, color:"#27AE60", fontWeight:600, background:"rgba(39,174,96,0.1)", padding:"3px 9px", borderRadius:99 }}>
-              <span style={{ width:6, height:6, borderRadius:"50%", background:"#27AE60", flexShrink:0 }}/>
-              Connected
-            </span>
-          </div>
-          <div style={{ fontSize:12, color:T.muted, lineHeight:1.6 }}>
-            {user.linkedCoachName ? `${user.linkedCoachName} can` : "Your coach can"} see your habit logs and notes to help prepare for your sessions.
-          </div>
-        </div>
-      )}
-
-      {/* Join a coach — shown when not yet linked */}
-      {!user.coachId && (
-        <JoinCoachSection onLinked={(coachId, coachName) => onUpdateUser({ coachId, linkedCoachName: coachName })} />
-      )}
-
 
       {/* Spoken replies — Pro only */}
       {isPro && onSaveVoicePrefs && (
@@ -859,10 +826,6 @@ export function ProfileScreen({ user, xp, habits, isPro, isCoach, stripeCustomer
           <button onClick={onReplayPageGuides}
             style={{ width:"100%", padding:"11px 0", borderRadius:T.rsm, border:`0.5px solid ${T.border}`, background:"none", color:T.muted, fontSize:13, cursor:"pointer", fontFamily:T.font, marginBottom:8 }}>
             Replay AI page tour (safe — no data changes)
-          </button>
-          <button onClick={onPreviewCoach}
-            style={{ width:"100%", padding:"11px 0", borderRadius:T.rsm, border:`0.5px solid rgba(200,144,42,0.4)`, background:"none", color:T.gold, fontSize:13, cursor:"pointer", fontFamily:T.font, marginBottom:8 }}>
-            Preview coach workspace →
           </button>
           {onTogglePreviewNormalCoachGreeting ? (
             <button

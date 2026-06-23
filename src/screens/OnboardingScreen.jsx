@@ -225,7 +225,7 @@ const STEP_FINAL    = "final";
 const STEP_NUMBERS = { [STEP_WELCOME]:1, [STEP_NAME]:2, [STEP_CHAT]:3, [STEP_EVIDENCE]:4, [STEP_NOTIF]:5, [STEP_FINAL]:6 };
 const DISPLAY_TOTAL = 5; // final screen isn't a "step"
 
-export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, notifEnabled, notifLoading, notifPermission, onNotifToggle, isCoachClient = false, topInset = 0 }) {
+export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, notifEnabled, notifLoading, notifPermission, onNotifToggle, topInset = 0 }) {
   const [step, setStep] = useState(STEP_WELCOME);
   const [name, setName] = useState("");
 
@@ -431,31 +431,6 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
                   : "Track what matters, talk to your coach, and start an Arc whenever you're ready."}
               </div>
             </div>
-
-            {isCoachClient && (
-              <div style={{
-                position:"relative",
-                background:"linear-gradient(145deg, rgba(39,174,96,0.13) 0%, rgba(39,174,96,0.04) 100%)",
-                border:"1px solid rgba(39,174,96,0.45)",
-                borderRadius:18,
-                padding:"18px 18px 16px",
-                marginBottom:16,
-                textAlign:"left",
-                animation:"finalItemIn 0.55s 0.15s cubic-bezier(0.22,1,0.36,1) both",
-              }}>
-                <div style={{ position:"absolute", top:-10, left:14, background:"#27AE60", color:"#fff", fontSize:10, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase", padding:"3px 9px", borderRadius:6 }}>
-                  Included with your coach
-                </div>
-                <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10, marginTop:4 }}>
-                  <div style={{ fontSize:22 }}>⚡</div>
-                  <div style={{ fontFamily:T.serif, fontSize:18, color:T.text, lineHeight:1.2 }}>Forged Pro — Free</div>
-                  <div style={{ marginLeft:"auto", fontSize:12, color:"#27AE60", fontWeight:600 }}>$0/mo</div>
-                </div>
-                <div style={{ fontSize:12, color:T.sub, lineHeight:1.65 }}>
-                  Your coach has unlocked full access for you — unlimited coaching, spoken replies, and complete history.
-                </div>
-              </div>
-            )}
 
             <button
               onClick={finishOnboarding}

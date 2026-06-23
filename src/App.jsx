@@ -58,8 +58,7 @@ import { resolveArcTitle, normalizeArcDuration } from "./arcProofMatch.js";
 import {
   Particle, XPFlash, Toast, Ring, SLabel, Stat, Modal, FG,
   PBtn, GBtn, Toggle, DoneBanner, TourOverlay, ToggleSwitch,
-  NotifCategoryRow, JoinCoachSection, ActivityDots,
-  CompletionBar, lbl, inp,
+  NotifCategoryRow, lbl, inp,
 } from "./components/ui.jsx";
 
 // Hooks
@@ -108,7 +107,6 @@ import { OnboardingScreen, buildDemoHabits } from "./screens/OnboardingScreen.js
 
 // Coach
 import { CoachBar, AICoach } from "./coach/AICoach.jsx";
-import { CoachApp, CoachWelcomeScreen } from "./coach/CoachApp.jsx";
 
 /**
  * Returns true if Supabase has stored any session tokens in localStorage.
@@ -248,30 +246,11 @@ export default function App() {
   const [showShare,   setShowShare]   = useState(false);
   const [isPro,          setIsPro]          = useState(false);
   const [isAdmin,        setIsAdmin]        = useState(false);
-  const [isCoach,        setIsCoach]        = useState(false);
-  // Active coach subscription tier ("coach" | "coach_pro" | null). Drives the
-  // paywall in CoachApp — coaches without a tier see the subscribe screen.
-  const [coachTier,      setCoachTier]      = useState(null);
-  const [previewCoach,   setPreviewCoach]   = useState(false);
   const [previewNormalCoachGreeting, setPreviewNormalCoachGreeting] = useState(false);
-  /** Signed-out coach shell demo — only opened via `?coach_dev_preview=1` (dev / QA), not consumer auth UI */
-  const [publicCoachPreview, setPublicCoachPreview] = useState(false);
   /** From profiles.stripe_customer_id — used for Stripe Customer Portal */
   const [stripeCustomerId, setStripeCustomerId] = useState(null);
   const [coachName,      setCoachName]      = useState("Coach");
   const [coachIcon,      setCoachIcon]      = useState("");
-  // One-time post-onboarding welcome screen shown to users who arrived via a
-  // coach invite link. Flipped on by either (a) a successful accept-coach-invite
-  // POST, or (b) detecting `forged_pending_coach` at app load. Persisted-once
-  // dismissal lives in localStorage("forged_coach_welcome_seen").
-  const [pendingCoachWelcome, setPendingCoachWelcome] = useState(() => {
-    try {
-      if (typeof window === "undefined") return false;
-      const seen = window.localStorage.getItem("forged_coach_welcome_seen") === "1";
-      const hasPending = !!window.localStorage.getItem("forged_pending_coach");
-      return hasPending && !seen;
-    } catch { return false; }
-  });
 
   // ── Notification state (App-level so it survives tab switches) ───────────────
   const [notifEnabled,    setNotifEnabled]    = useState(false);
@@ -330,9 +309,6 @@ export default function App() {
   const [authEmail,   setAuthEmail]   = useState(null);
   /** Supabase auth user id when signed in; null when logged out */
   const [sessionUserId, setSessionUserId] = useState(null);
-  /** Incremented when a ?coach= param lands while the user is already signed in,
-   *  so the accept-invite effect re-fires even though sessionUserId didn't change. */
-  const [coachInviteTick, setCoachInviteTick] = useState(0);
   const [xpAwardedDates, setXpAwardedDates] = useState(() => new Set());
   /** True only after profile/habits load succeeded for this session (never true while data is missing) */
   const [accountDataReady, setAccountDataReady] = useState(false);
@@ -365,22 +341,6 @@ export default function App() {
   useEffect(() => {
     setXpAwardedDates(new Set());
   }, [sessionUserId]);
-
-  // Dev / QA: unsigned coach shell — open with `?coach_dev_preview=1` (param is stripped). Not linked from consumer auth.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const q = new URLSearchParams(window.location.search);
-      if (q.get("coach_dev_preview") !== "1") return;
-      setPublicCoachPreview(true);
-      q.delete("coach_dev_preview");
-      const nextSearch = q.toString();
-      const path = window.location.pathname + (nextSearch ? `?${nextSearch}` : "") + window.location.hash;
-      window.history.replaceState({}, "", path);
-    } catch {
-      /* ignore */
-    }
-  }, []);
 
   useEffect(() => {
     const today = todayStr();
@@ -553,87 +513,6 @@ export default function App() {
       window.history.replaceState({}, "", "/");
     }
   }, []);
-
-  // ── Handle ?coach=<base64(coachUserId)> invite URLs ─────────────────────────
-  // Stash the raw token on first paint (before auth resolves). After the user
-  // signs in or creates an account the dependent effect below POSTs it to
-  // /api/accept-coach-invite. URL is cleaned synchronously so a refresh or a
-  // share doesn't re-process the same invite.
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const coachToken = params.get("coach");
-    if (coachToken) {
-      localStorage.setItem("forged_pending_coach", coachToken);
-      params.delete("coach");
-      const qs = params.toString();
-      const newUrl = window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash;
-      window.history.replaceState({}, "", newUrl);
-      // If the user is already signed in when they land on the invite link,
-      // sessionUserId won't change so the accept-invite effect below won't
-      // fire. Bump the tick to force it to re-run.
-      setCoachInviteTick(t => t + 1);
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Once the user has a session, hand the stashed token to the backend. We
-  // clear localStorage *after* a successful response so a transient network
-  // failure leaves the token in place to retry on next session restore.
-  useEffect(() => {
-    if (!sessionUserId) return;
-    const coachToken = localStorage.getItem("forged_pending_coach");
-    if (!coachToken) return;
-    (async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const accessToken = session?.access_token;
-        if (!accessToken) return; // try again on the next session change
-        const res = await fetch("/api/accept-coach-invite", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-          body: JSON.stringify({ coach: coachToken }),
-        });
-        if (res.ok) {
-          localStorage.removeItem("forged_pending_coach");
-          try {
-            const json = await res.json();
-            // Mirror coach_id into local user state so the Coaching card on
-            // ProfileScreen renders without a profile re-fetch.
-            if (json.coachId) {
-              setUser(u => ({ ...u, coachId: json.coachId }));
-              // Fetch and surface the coach's display name immediately.
-              supabase.from("profiles").select("name").eq("id", json.coachId).maybeSingle()
-                .then(({ data }) => {
-                  if (data?.name) setUser(u => ({ ...u, linkedCoachName: data.name.trim() || null }));
-                }).catch(() => {});
-            }
-            if (json.isProGranted) {
-              setIsPro(true);
-              addToast("✓ Connected with your coach — Forged Pro unlocked!");
-            } else {
-              addToast("You're connected with your coach.");
-            }
-          } catch {
-            addToast("You're connected with your coach.");
-          }
-          // Always queue the welcome screen on a fresh acceptance, unless the
-          // user already dismissed it on this device.
-          try {
-            if (localStorage.getItem("forged_coach_welcome_seen") !== "1") {
-              setPendingCoachWelcome(true);
-            }
-          } catch { /* localStorage blocked — skip welcome silently */ }
-        } else {
-          // Permanent failure modes: bad token, self-invite, missing coach.
-          // Drop the token so we don't keep retrying every session.
-          if (res.status === 400 || res.status === 404) {
-            localStorage.removeItem("forged_pending_coach");
-          }
-        }
-      } catch {
-        // Transient — leave the token, will retry on next session restore.
-      }
-    })();
-  }, [sessionUserId, coachInviteTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!sessionUserId) return;
@@ -1693,32 +1572,17 @@ export default function App() {
       let isOnboarded = null;
 
       if (profile) {
-        // If this account is linked to a coach, fetch the coach's display name
-        // so we can show it in the "Coached by" card instead of generic text.
-        let linkedCoachName = null;
-        if (profile.coach_id) {
-          try {
-            const { data: coachProf } = await supabase
-              .from("profiles").select("name").eq("id", profile.coach_id).maybeSingle();
-            linkedCoachName = coachProf?.name?.trim() || null;
-          } catch { /* non-critical — silently skip */ }
-        }
-
         setUser({
           id: profile.id,
           name: profile.name || "",
           avatarUrl: profile.avatar_url || null,
           username: profile.username || "",
           visibleToFriendsOfFriends: !!profile.visible_to_friends_of_friends,
-          coachId: profile.coach_id || null,
-          linkedCoachName,
         });
         setXp(profile.xp ?? 0);
         const proStatus = !!(profile.is_pro || profile.is_admin);
         setIsPro(proStatus);
         setIsAdmin(!!profile.is_admin);
-        setIsCoach(!!profile.is_coach);
-        setCoachTier(profile.coach_tier || null);
         // Detect a completed payment on any sign-in path (session survived or user re-authenticated)
         if (proStatus && localStorage.getItem('forged_checkout_pending') === '1') {
           localStorage.removeItem('forged_checkout_pending');
@@ -2470,9 +2334,6 @@ export default function App() {
           setOnboarded(null);
           setIsPro(false);
           setIsAdmin(false);
-          setIsCoach(false);
-          setPreviewCoach(false);
-          setPublicCoachPreview(false);
           setStripeCustomerId(null);
           setRefCode(null);
           setAuthEmail(null);
@@ -2870,31 +2731,6 @@ export default function App() {
     }
   }
 
-  // Public coach demo — no sign-in; exits back to auth or main shell
-  if (!loading && publicCoachPreview) {
-    return (
-      <>
-        <style>{CSS}</style>
-        <CoachApp
-          onExit={async () => {
-            try {
-              await supabase.auth.signOut();
-            } catch {
-              /* ignore */
-            }
-            setPublicCoachPreview(false);
-            setAuthScreen(true);
-          }}
-          isPreview
-          publicPreview
-          coachTier={null}
-          isAdmin={false}
-          coachOwnName=""
-        />
-      </>
-    );
-  }
-
   // Show password recovery screen
   if (!loading && passwordRecovery) {
     return (
@@ -2916,13 +2752,6 @@ export default function App() {
       <AuthScreen
         onSent={email => setPendingEmail(email)}
         checkoutPending={localStorage.getItem('forged_checkout_pending') === '1'}
-        onCoachSignupIntent={() => {
-          window.location.href =
-            "mailto:hello@forged.app?subject=Forged%20Coach%20%E2%80%94%20coach%20access%20request&body=" +
-            encodeURIComponent(
-              "Hi — I'm interested in Forged Coach (client roster / session prep).\n\nName:\nWebsite or social:\nApprox. number of 1:1 clients:\n",
-            );
-        }}
       /></>
     );
   }
@@ -3176,25 +3005,6 @@ export default function App() {
         notifLoading={notifLoading}
         notifPermission={notifPermission}
         onNotifToggle={handleNotifToggle}
-        isCoachClient={!!localStorage.getItem("forged_pending_coach")}
-      /></>
-    );
-  }
-
-  // Coach-client welcome — fires once after onboarding completes for users who
-  // arrived via a coach invite link. Renders BEFORE the main app the very
-  // first time only; dismissal stamps localStorage so this never reappears.
-  if (
-    !loading && !authScreen && accountDataReady && onboarded === true &&
-    pendingCoachWelcome && !checkingPayment && !previewOnboarding
-  ) {
-    return (
-      <><style>{CSS}</style>
-      <CoachWelcomeScreen
-        onDone={() => {
-          try { localStorage.setItem("forged_coach_welcome_seen", "1"); } catch { /* noop */ }
-          setPendingCoachWelcome(false);
-        }}
       /></>
     );
   }
@@ -4036,30 +3846,8 @@ export default function App() {
   }
 
   async function handleSignOut() {
-    setPublicCoachPreview(false);
-    setPreviewCoach(false);
     // onAuthStateChange will fire SIGNED_OUT and handle all state resets
     await supabase.auth.signOut();
-  }
-
-  // ── Coach workspace early return ────────────────────────────────────────────
-  // Real coaches (is_coach=true, is_admin=false) always see the coach shell.
-  // Admins can preview it from dev tools; they keep their consumer app otherwise.
-  if ((isCoach && !isAdmin) || previewCoach) {
-    return (
-      <>
-        <style>{CSS}</style>
-        {toasts.map(t => <Toast key={t.id} msg={t.msg} onDone={() => setToasts(ts => ts.filter(x => x.id !== t.id))}/>)}
-        <CoachApp
-          onExit={previewCoach ? () => setPreviewCoach(false) : null}
-          isPreview={!!previewCoach}
-          publicPreview={false}
-          coachTier={coachTier}
-          isAdmin={isAdmin}
-          coachOwnName={user.name || ""}
-        />
-      </>
-    );
   }
 
   // Primary navigation is Today · Arc · You. Journal ("Evidence") and Insights
@@ -4179,7 +3967,7 @@ export default function App() {
           isPro={isPro}
           onUpgrade={() => setShowUpgrade(true)}
         />}
-        {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} isCoach={isCoach} stripeCustomerId={stripeCustomerId} refCode={refCode}
+        {screen === "profile"  && <ProfileScreen  user={user} xp={xp} habits={habits} isPro={isPro} stripeCustomerId={stripeCustomerId} refCode={refCode}
           authEmail={authEmail}
           onUpgrade={() => setShowUpgrade(true)}
           onUpdateUser={updates => {
@@ -4218,7 +4006,6 @@ export default function App() {
           }}
           onResetOnboarding={() => setOnboarded(false)}
           onPreviewOnboarding={() => setPreviewOnboarding(true)}
-          onPreviewCoach={() => setPreviewCoach(true)}
           previewNormalCoachGreeting={previewNormalCoachGreeting}
           onTogglePreviewNormalCoachGreeting={() => {
             const next = !previewNormalCoachGreeting;
@@ -4548,7 +4335,7 @@ export default function App() {
       {editGoalId    && (() => { const g = resolveGoalForModal(editGoalId, goals, habits); return g ? <EditGoalModal goal={g} onClose={() => setEditGoalId(null)} onSave={handleEditGoalSave}/> : null; })()}
       {openGoalId    && (() => { const g = resolveGoalForModal(openGoalId, goals, habits); return g ? <GoalDetailSheet goal={g} habits={habits} onClose={() => setOpenGoalId(null)} onLog={id => { setOpenGoalId(null); setLogGoalId(id); }} onEdit={id => { setOpenGoalId(null); openEditGoal(id); }} onComplete={handleCompleteGoal} onDelete={id => { handleDeleteGoal(id); setOpenGoalId(null); }} onCheckin={handleGoalCheckin} onLinkHabits={handleGoalLinkHabits}/> : null; })()}
       {showHistory   && <HistoryModal  habits={habits} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} onClose={() => setShowHistory(false)}/>}
-      {reflectId     && <ReflectModal  habit={reflectHabit}                  onClose={() => setReflectId(null)} onSave={handleSaveReflection} hasCoach={!!user.coachId}/>}
+      {reflectId     && <ReflectModal  habit={reflectHabit}                  onClose={() => setReflectId(null)} onSave={handleSaveReflection}/>}
       {editId && !editGoalId && editHabit && !isGoalLikeHabitType(editHabit) && <EditModal habit={editHabit} onClose={() => setEditId(null)} onSave={handleEditSave}/>}
       {logId && logHabit?.habitType === "project"  && <LogProjectModal   habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
       {showCoach   && <AICoach key={sessionUserId || "anon"} openInputMode={coachOpenMode}
