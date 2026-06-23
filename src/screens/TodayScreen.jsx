@@ -167,7 +167,7 @@ function TodayReceiptCard({ entry, loggedCount, generating, onGenerate, onOpenJo
   const identity = arcActive ? String(activeBlock.identity || "").trim() : "";
   const minimum = arcActive ? String(activeBlock.minimumProof || "").trim() : "";
   const minHit = arcActive && loggedCount > 0 && !!minimum; // simple heuristic; refined in Phase 2
-  const eyebrowLabel = arcActive ? (isNight ? "Tonight's audit" : "Today's verdict") : "Today's receipt";
+  const eyebrowLabel = arcActive ? (isNight ? "Tonight's verdict" : "Today's verdict") : "Today's receipt";
   const eyebrowColor = arcActive ? T.gold : T.hint;
   const borderColor = arcActive ? "rgba(200,144,42,0.4)" : T.border;
 

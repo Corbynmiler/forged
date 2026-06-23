@@ -136,6 +136,14 @@ export function HubScreen({
 }) {
   useEffect(() => { window.scrollTo(0, 0); }, []);
 
+  const [introDismissed, setIntroDismissed] = useState(
+    () => { try { return !!localStorage.getItem("forged_hub_intro_dismissed"); } catch { return false; } }
+  );
+  function dismissIntro() {
+    setIntroDismissed(true);
+    try { localStorage.setItem("forged_hub_intro_dismissed", "1"); } catch { /* ignore */ }
+  }
+
   const today = todayStr();
   const arcActive = !!activeBlock?.id;
   const activeGoals = goals.filter(g => g.status !== "completed");
@@ -180,6 +188,25 @@ export function HubScreen({
           </button>
         )}
       </div>
+
+      {arcActive && !introDismissed && (
+        <div style={{
+          margin: "0 14px 14px", padding: "13px 14px", borderRadius: T.r,
+          border: "0.5px solid rgba(200,144,42,0.3)", background: "rgba(200,144,42,0.07)",
+          display: "flex", gap: 10, alignItems: "flex-start",
+        }}>
+          <span style={{ fontSize: 16, flexShrink: 0 }}>👋</span>
+          <div style={{ flex: 1, fontSize: 12, color: T.sub, lineHeight: 1.55 }}>
+            <strong style={{ color: T.text }}>Nothing here was deleted.</strong> While your Arc is active, Today only
+            shows proof actions for it. Everything else — other habits, goals, and quick tasks — lives here. Tap
+            "Add to Arc" on anything below to bring it back to Today.
+          </div>
+          <button type="button" onClick={dismissIntro} aria-label="Dismiss"
+            style={{ background: "none", border: "none", cursor: "pointer", color: T.hint, fontSize: 13, flexShrink: 0, padding: 2 }}>
+            ✕
+          </button>
+        </div>
+      )}
 
       {totalCount === 0 && (
         <div style={{ padding: "32px 28px", textAlign: "center" }}>
