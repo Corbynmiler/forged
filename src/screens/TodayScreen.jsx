@@ -1210,7 +1210,16 @@ export function TodayScreen({
           their other habits, goals, and loose ends. Surfaces a count so it's
           obvious there's more than just the proof list. */}
       {arcActive && onOpenHub && (() => {
-        const hiddenCount = otherTrackHabits.length + Math.max(0, activeGoals.length - proofGoals.length) + tasks.length;
+        const hiddenHabits = otherTrackHabits.length;
+        const hiddenGoals = Math.max(0, activeGoals.length - proofGoals.length);
+        const hiddenTasks = tasks.length;
+        const arcParts = [];
+        if (hiddenHabits > 0) arcParts.push(`${hiddenHabits} habit${hiddenHabits === 1 ? "" : "s"}`);
+        if (hiddenGoals > 0) arcParts.push(`${hiddenGoals} goal${hiddenGoals === 1 ? "" : "s"}`);
+        const tasksLabel = hiddenTasks > 0 ? `${hiddenTasks} quick task${hiddenTasks === 1 ? "" : "s"}` : "";
+        const hubLabel = arcParts.length > 0
+          ? `${arcParts.join(" & ")} not in this Arc${tasksLabel ? `, ${tasksLabel}` : ""}`
+          : (tasksLabel || "Everything outside this Arc");
         return (
           <button
             type="button"
@@ -1229,9 +1238,7 @@ export function TodayScreen({
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>Hub</div>
                 <div style={{ fontSize: 11, color: T.muted, marginTop: 1 }}>
-                  {hiddenCount > 0
-                    ? `${hiddenCount} item${hiddenCount === 1 ? "" : "s"} waiting here`
-                    : "Everything outside this Arc"}
+                  {hubLabel}
                 </div>
               </div>
             </div>
