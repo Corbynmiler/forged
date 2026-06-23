@@ -1056,7 +1056,7 @@ export function LogProjectModal({ habit, onClose, onLog }) {
 }
 
 // ─── REFLECT MODAL ────────────────────────────────────────────────────────────
-export function ReflectModal({ habit, onClose, onSave, hasCoach = false }) {
+export function ReflectModal({ habit, onClose, onSave }) {
   const [text, setText] = useState("");
   const [saved, setSaved] = useState(false);
   const speech = useSpeechInput(transcript => setText(p => mergeDictationIntoText(p, transcript)));
@@ -1095,7 +1095,6 @@ export function ReflectModal({ habit, onClose, onSave, hasCoach = false }) {
         </div>
       )}
       {speech.interim && !saved && <div style={{ fontSize:13, color:T.hint, fontStyle:"italic", lineHeight:1.5, marginBottom:10, paddingLeft:4 }}>{speech.interim}…</div>}
-      {hasCoach && !saved && <div style={{ fontSize:11, color:T.hint, fontStyle:"italic", lineHeight:1.5, marginTop:6, marginBottom:6, paddingLeft:4 }}>Your coach reads these.</div>}
       {speech.speechError && !saved ? <div style={{ fontSize:12, color:T.accent, marginBottom:10, paddingLeft:4, lineHeight:1.5, whiteSpace:"pre-line" }}>{speech.speechError}</div> : null}
       {past.length > 0 && (
         <div style={{ marginTop:22 }}>

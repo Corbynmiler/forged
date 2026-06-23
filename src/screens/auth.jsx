@@ -77,7 +77,7 @@ export function SetPasswordScreen({ onDone }) {
   );
 }
 
-export function AuthScreen({ onSent, checkoutPending, onCoachSignupIntent }) {
+export function AuthScreen({ onSent, checkoutPending }) {
   const [mode,       setMode]       = useState(() => {
     try { return new URLSearchParams(window.location.search).has("signup") ? "signup" : "signin"; }
     catch { return "signin"; }
@@ -279,25 +279,6 @@ export function AuthScreen({ onSent, checkoutPending, onCoachSignupIntent }) {
           </button>
         )}
       </div>
-      {typeof onCoachSignupIntent === "function" && (
-        <div style={{ marginTop:32, borderTop:`0.5px solid ${T.border}`, paddingTop:24 }}>
-          <div style={{ fontSize:11, color:T.hint, textAlign:"center", marginBottom:12, lineHeight:1.5 }}>
-            Running 1:1 clients? See their habits before every session.
-          </div>
-          <button
-            type="button"
-            onClick={onCoachSignupIntent}
-            style={{
-              width:"100%", padding:"13px 16px", borderRadius:T.rsm,
-              border:`1px solid rgba(200,144,42,0.45)`, background:"rgba(200,144,42,0.07)",
-              color:T.gold, fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:T.font,
-              letterSpacing:"0.01em",
-            }}
-          >
-            Apply for Forged Coach — $49/mo →
-          </button>
-        </div>
-      )}
     </div>
   );
 }
