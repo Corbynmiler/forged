@@ -322,6 +322,23 @@ export default function App() {
   const mountTimeRef = useRef(Date.now());
   const initialAuthHandledRef = useRef(false);
   const lastSignedInUidRef = useRef(null);
+  /**
+   * PREVIEW BRANCH — Companion-first landing (Phase 1).
+   * Once per session, land the user straight in the coach conversation
+   * instead of the Today dashboard — conversation is the front door, not a
+   * button you have to find. Reuses the existing, unmodified AICoach panel
+   * (openCoachWithMode) with no forced mic/text mode, so it just opens ready
+   * to talk. Today/Arc/You/Hub/Social are untouched and still one tap away
+   * via the panel's close button or the bottom nav underneath it.
+   */
+  const companionAutoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (companionAutoOpenedRef.current) return;
+    if (loading || authScreen || !accountDataReady || onboarded !== true) return;
+    companionAutoOpenedRef.current = true;
+    openCoachWithMode(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, authScreen, accountDataReady, onboarded]);
   const noteDebounceRef = useRef({});
   const retryLoadPromiseRef = useRef(null);
   const retryLoadUidRef = useRef(null);
