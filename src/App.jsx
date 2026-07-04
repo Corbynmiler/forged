@@ -1449,9 +1449,10 @@ export default function App() {
     try {
       const [{ data: mem }, { data: sums }] = await Promise.all([
         supabase.from("coach_memory").select("content, updated_at").eq("user_id", uid).maybeSingle(),
-        // `title` (Phase 3+) feeds the Companion screen's "Yesterday: …" line —
-        // additive select, ignored by anything still only reading date/summary.
-        supabase.from("daily_summaries").select("date, summary, title").eq("user_id", uid)
+        // `title`/`structured` feed the Companion screen's living morning
+        // greeting ("Yesterday you: • …") — additive select, ignored by
+        // anything still only reading date/summary.
+        supabase.from("daily_summaries").select("date, summary, title, structured").eq("user_id", uid)
           .order("date", { ascending: false }).limit(7),
       ]);
       setCoachMemory({
@@ -3939,14 +3940,16 @@ export default function App() {
       {toasts.map(t    => <Toast    key={t.id} msg={t.msg} onDone={() => setToasts(ts => ts.filter(x => x.id !== t.id))}/>)}
 
       <div style={{ fontFamily:T.font, maxWidth:430, margin:"0 auto", minHeight:"100vh", background:T.bg, paddingBottom:172 }}>
-        {/* Top bar */}
+        {/* Top bar — suppressed entirely on the Companion screen. That screen
+            owns the whole viewport on purpose: no "Forged" wordmark, no
+            dashboard-style header sitting above it. Every other screen is
+            unaffected. */}
+        {screen !== "companion" && (
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", paddingTop: cssPadTopSafe(22), paddingBottom: 8, ...cssPadXSafe(18) }}>
           <div>
             <div style={{ fontFamily:T.serif, fontSize:30, color:T.text, letterSpacing:"-0.01em" }}>Forged</div>
             <div style={{ fontSize:12, color:T.muted, marginTop:1, lineHeight:1.35 }}>
-              {screen === "companion"
-                ? ""
-                : screen === "today"
+              {screen === "today"
                 ? fmtDateLong()
                 : screen === "profile" ? user.name
                 : screen === "arc" ? "Your Arc"
@@ -3955,6 +3958,7 @@ export default function App() {
             </div>
           </div>
         </div>
+        )}
 
         {/* Notification nudge banner — shown on Today screen when not enabled */}
         {screen === "today" && !notifEnabled && !notifNudgeDismissed && notifPermission !== "denied" && (

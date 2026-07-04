@@ -154,5 +154,12 @@ export function useCoachTts({ enabled = false, isPro = false, voiceId = null } =
     }
   }, [enabled, isPro, stopSpeaking, fetchChunkAudioUrl, playChunkUrl]);
 
-  return { speak, stopSpeaking, primeAudio, speaking, ttsError, clearTtsError: () => setTtsError(null) };
+  // Exposes the underlying <audio> element (created/reused internally above)
+  // so a consumer can attach a Web Audio analyser for a genuinely
+  // audio-reactive "speaking" animation, without this hook needing to know
+  // anything about how its output is visualized. Read-only in spirit —
+  // callers should not mutate playback state directly, only observe it.
+  const audioElRef = audioRef;
+
+  return { speak, stopSpeaking, primeAudio, speaking, ttsError, clearTtsError: () => setTtsError(null), audioElRef };
 }
