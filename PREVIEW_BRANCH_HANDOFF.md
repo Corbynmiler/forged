@@ -2,7 +2,7 @@
 
 **Branch:** `claude/forged-ai-companion-redesign-agyjl7` (preview only — `main`/production untouched)
 **Purpose:** turn Forged from a habit-tracker-with-a-chatbot into a memory-first AI companion where conversation is the front door. Full product design doc: see the artifact linked in chat history, or ask for it to be regenerated.
-**Last updated:** 2026-07-04, end of Phase 4.
+**Last updated:** 2026-07-05 — both staged migrations applied by the user; verified live against the database; starting Phase 5.
 
 This file is the single source of truth for anyone (human or Cursor) picking this branch up cold. Update it at the end of every phase — do not let it drift from what's actually in the diff.
 
@@ -17,14 +17,14 @@ This is the answer to "how many phases and what does each do." Read this table f
 | 1 | Companion-first landing | App opens straight into the AI coach conversation instead of the Today dashboard | ✅ **Done** |
 | 1b | Custom Companion screen | Purpose-built "What's on your mind?" home screen with a situation selector (Just chat / I'm planning / I'm building / I'm stuck / I need perspective), day-status, XP chip | ⛔ **Blocked** — needs a human to export ~8 functions from the protected `AICoach.jsx` (see §4) |
 | 2 | Faster voice replies | Coach replies get chunked into sentences and streamed/played back-to-back instead of waiting for the whole reply to synthesize as one clip | ✅ **Done** |
-| 3 | Memory layer (schema + extraction) | Real daily titles ("Planting in the Rain Again"), atomic durable facts, commitments, emotional context — extracted nightly and stored | ✅ **Done, but inert** — code is written, migration is staged but **not applied** anywhere (see §4) |
+| 3 | Memory layer (schema + extraction) | Real daily titles ("Planting in the Rain Again"), atomic durable facts, commitments, emotional context — extracted nightly and stored | ✅ **Done and live** — migration applied 2026-07-05, verified against the real database (see §3) |
 | — | Embedding generation + hybrid retrieval | Turn stored facts into real semantic search (replacing the coach's current keyword search) | ⛔ **Not started** — needs an embeddings vendor decision (no API key configured) *and* touches the protected `api/chat.js` |
-| 4 | AI-judged XP (observation only) | Nightly Haiku call judges a 0-50 XP amount + a one-sentence reason per day, stores it for review | ✅ **Done, but inert** — same as Phase 3: code written, migration staged, not applied. **Deliberately not wired into the real, user-facing XP total yet** — see §3 for why |
-| 5 | Conversational onboarding + ChatGPT import | Replace the onboarding form with a real conversation; add a "paste your ChatGPT memory" option | ⛔ **Not started** |
+| 4 | AI-judged XP (observation only) | Nightly Haiku call judges a 0-50 XP amount + a one-sentence reason per day, stores it for review | ✅ **Done and live** — migration applied 2026-07-05. **Deliberately not wired into the real, user-facing XP total yet** — see §3 for why |
+| 5 | Conversational onboarding + ChatGPT import | Replace the onboarding form with a real conversation; add a "paste your ChatGPT memory" option | 🚧 **In progress** |
 | 6 | Notification philosophy rewrite | Morning/midday/evening messages that reference something specific and real, or say nothing at all | ⛔ **Not started** |
 | 7 | "What I remember" + Arc inference | A screen to view/delete stored facts; AI notices patterns and suggests an Arc instead of requiring manual setup | ⛔ **Not started** |
 
-**Net position:** 3 of 8 numbered phases are code-complete (1, 2, 4-worth-of-logic — though 3 and 4 need a migration applied to actually take effect). One phase (1b) and one unnumbered step (embeddings/retrieval) are blocked on human decisions, not on more agent work. Phases 5-7 haven't been started.
+**Net position:** 4 of 8 numbered phases are done, 3 of those fully live (1, 2, and now 3 and 4 with the migration applied). One phase (1b) and one unnumbered step (embeddings/retrieval) are blocked on human decisions. Phase 5 is starting now; 6-7 haven't been started.
 
 ---
 
@@ -108,6 +108,8 @@ Cut: "Executor" (redundant with Builder), "Prompt Engineer" (contradicts the pro
 
 **Phase 4 XP clamping verified against edge cases.** A standalone unit test confirmed the clamp handles: negative deltas (→0), over-cap deltas (→50), fractional deltas (→rounded), and — importantly — a stringly-typed `"38"` from the model instead of a number `38` (→ rejected to `null` rather than silently coerced, since `Number.isFinite("38")` is `false`). Malformed model output results in no XP recorded for that day rather than a guessed value.
 
+**Both staged migrations applied and verified live (2026-07-05).** The user ran both files directly against the Supabase SQL editor. Verified afterward with a read-only schema check: `daily_summaries` now has `title`/`commitments`/`emotional_context`/`xp_awarded`/`xp_reason`; `memory_facts` exists with the correct columns, check constraints, RLS, and foreign key; `xp_events` exists with the correct check constraint (`amount >= 0`), RLS, and foreign key. Both new tables currently sit at 0 rows, which is correct — nothing populates them until the nightly rollover actually runs against real conversation data. `daily_summaries`' 70 pre-existing rows were unaffected (new columns are nullable/defaulted, no data rewritten). This resolves Blocker B from §4 below.
+
 ---
 
 ## 4. What requires human action (blockers)
@@ -115,25 +117,18 @@ Cut: "Executor" (redundant with Builder), "Prompt Engineer" (contradicts the pro
 **Blocker A — export from `AICoach.jsx` (unblocks Phase 1b).** Someone with repo permissions needs to either (a) grant a Bash permission rule allowing `FORGED_OVERRIDE_PROTECTED=1` for this narrow, additive change, or (b) manually add the word `export` in front of these already-existing, unchanged functions in `src/coach/AICoach.jsx`:
 `buildCoachSystemPrompts`, `loadCoachDayMessages`, `saveCoachDayMessages`, `COACH_API_MESSAGE_CAP`, `syncCoachMsgCountFromStorage`, `bumpCoachMsgCountInStorage`, `applyCoachRemainingFromServer`, `buildCoachGreeting` (and ideally `CoachFormattedBubble`, `CapturedLine`, `CaptureSavingLine`, `formatCoachMsgTime`). Zero logic changes either way.
 
-**Blocker B — apply the two staged migrations (unblocks Phases 3 and 4 taking effect).** Both files are currently inert. Exact steps, in order:
+**~~Blocker B~~ — RESOLVED 2026-07-05.** Both staged migrations were applied via the Supabase SQL editor and verified live (see §3). `api/memory-rollover.js` needed no further changes — it was already writing to every new column/table, wrapped fail-soft; those writes now succeed instead of logging a warning.
 
-1. **Review both files first** — they're real schema changes (a new Postgres extension, two new tables with RLS, six new nullable columns on an existing table):
-   - `supabase/pending_migrations/20260704120000_pgvector_memory_facts.sql`
-   - `supabase/pending_migrations/20260704130000_xp_events.sql`
-2. **Apply in that order** (the second doesn't depend on the first, but keeping the original sequence is simplest to reason about). Two ways to do it — pick whichever matches how this repo normally runs migrations:
-   - **Option 1 (matches this repo's existing convention):** copy each file into `supabase/migrations/` with a fresh timestamp prefix (e.g. `supabase/migrations/20260705090000_pgvector_memory_facts.sql`), so it sits alongside the other 31 migrations, then run this project's normal migration command against the target Supabase project.
-   - **Option 2 (fastest, no file move):** open the Supabase dashboard's SQL editor for the project, paste the contents of each `.sql` file, and run it directly. Functionally identical to Option 1 for a `create table if not exists`/`add column if not exists` migration like these — both are idempotent and safe to re-run.
-3. **After applying, nothing else needs to change in the code.** `api/memory-rollover.js` already writes to every new column/table — the fail-soft wrapping just means those writes start *succeeding* instead of logging a warning. No redeploy-and-tweak cycle needed.
-4. **Verify** by triggering a rollover for a test account (has the app call `/api/memory-rollover` the normal way, or invoke it manually with a valid user token) and then checking, directly in the Supabase table editor: `daily_summaries` should show non-null `title`/`commitments`/`emotional_context`/`xp_awarded`/`xp_reason` for a processed day; `memory_facts` should have new rows; `xp_events` should have one row per processed day.
+**Still outstanding — verify the rollover job against a real model call.** Applying the schema confirms the *tables* are correct; it does not yet confirm the *extended prompt* (the larger JSON schema asking for title/commitments/facts/xp_delta) actually round-trips cleanly through a real Claude call. That's still unverified in this sandbox (no Anthropic credentials here) — see §5. **First real test:** trigger `/api/memory-rollover` for a test account with a day or two of real conversation history, then check `daily_summaries`/`memory_facts`/`xp_events` directly — do the titles read like real chapter names, are the facts genuinely worth keeping, is the XP reason specific rather than generic.
 
 **Blocker C — choose an embeddings approach (unblocks real semantic retrieval).** Pick one:
    - **Voyage AI** (recommended in the design doc — cheap, simple, no new infra beyond an API key). Needs `VOYAGE_API_KEY` (or similar) added to the environment.
    - **Supabase Edge Function** calling the built-in `gte-small` model. No new vendor, but needs an Edge Function deployed (new runtime surface for this project).
    Neither is configured in this environment. This also gates the `recall` tool's keyword→vector swap in `api/chat.js`, which needs its own sign-off since that file is protected too.
 
-**Everything else, in order, once the above is resolved:**
-5. Embedding generation + hybrid retrieval (needs Blocker C + Blocker B applied + a protected-file sign-off for the `api/chat.js` swap).
-6. Conversational onboarding rebuild + ChatGPT import.
+**Everything else, in order:**
+5. Embedding generation + hybrid retrieval (needs Blocker C + a protected-file sign-off for the `api/chat.js` swap; schema is ready now that Blocker B is resolved).
+6. Conversational onboarding rebuild + ChatGPT import — **in progress now.**
 7. Notification philosophy rewrite.
 8. "What I remember" trust screen + Arc-inference exploration.
 9. (Whenever it comes up) Decide how AI-judged XP reconciles with the existing deterministic system, then wire `daily_summaries.xp_awarded` into something user-visible.
@@ -145,31 +140,24 @@ Cut: "Executor" (redundant with Builder), "Prompt Engineer" (contradicts the pro
 - **Phase 1 auto-open not visually confirmed post-login** — no real Supabase credentials in this sandbox. Verified by build + Playwright smoke test to the sign-in screen + code review only.
 - **First-session mic permission / repeat-open behavior** — opening the panel doesn't force a mic prompt (deliberate); the auto-open only fires once per component mount, not once per calendar day, so a rare full remount could reopen it.
 - **Phase 2 TTS unverified with real audio** — no ElevenLabs/Supabase credentials here. Verified by build, `node --check`, and a standalone unit test of the sentence-splitter. **Test by hand:** Pro user, voice replies on, multi-sentence message — listen for faster/gapless audio and clean interruption.
-- **Phase 3 & 4 rollover changes unverified against a live model call** — no Anthropic/Supabase credentials here. The larger JSON schema has never actually been sent to or parsed from a real Claude response, only mock data. **Test by hand once migrations are applied:** trigger a real rollover, inspect `daily_summaries`/`memory_facts`/`xp_events` directly. Also worth confirming `max_tokens: 1200` (unchanged despite a much larger JSON schema) doesn't cause truncated/unparseable output with 2 pending days' worth of the new fields — bump it if rollover logs start showing "unparseable model output" more than very rarely.
-- **Both migrations are unreviewed by anyone but this session** — real schema, review before applying.
+- **Phase 3 & 4 rollover changes still unverified against a live model call** — migrations are applied and schema is confirmed correct (§3), but no Anthropic credentials exist in this sandbox, so the larger JSON schema has never actually been sent to or parsed from a real Claude response, only mock data. **Next real test:** trigger a real rollover, inspect `daily_summaries`/`memory_facts`/`xp_events` directly. Also worth confirming `max_tokens: 1200` (unchanged despite a much larger JSON schema) doesn't cause truncated/unparseable output with 2 pending days' worth of the new fields — bump it if rollover logs start showing "unparseable model output" more than very rarely.
 - **`xp_events` has no dedup/idempotency guard**, unlike `daily_summaries`/`memory_facts` — but it doesn't need one under normal operation, since a day is only ever in the rollover's `pending` list once (the base `daily_summaries` write, which always happens first and is never skipped, is what marks a day "already summarized" for future runs).
 - **Two chat surfaces will eventually share prompt-building logic with separate fetch/stream code** once Phase 1b exists — flagged for a future consolidation into a shared hook, not urgent now.
 
 ---
 
-## 6. How to test safely (does not require applying anything)
-
-Everything below is safe to test right now, on the preview branch, without applying either staged migration:
+## 6. How to test safely
 
 - **Phase 1:** sign in to a real account → confirm the AI coach panel opens automatically instead of the Today dashboard → close it (×) → confirm you land on Today exactly as before → confirm Arc/You/Hub/Social are unaffected.
 - **Phase 2:** as a Pro user with voice replies enabled, send a message long enough to produce a multi-sentence reply → listen for noticeably faster, gapless audio compared to before this branch.
-- **Phase 3 & 4 (code-only, before migration):** trigger `/api/memory-rollover` for a test account and check the server logs — you should see the existing `"[memory-rollover] updated"` success log exactly as before (proving the core job still works), plus two new `console.warn` lines (`"extended daily_summaries fields not written"` and `"memory_facts not written"`/`"xp_events not written"`) confirming the new code path is reached and fails *safely* rather than breaking the job. Seeing those warnings right now is the expected, correct behavior pre-migration — not a bug.
-- **Phase 3 & 4 (full, after applying both migrations — see §4 Blocker B):** re-trigger a rollover for the same test account and confirm the warnings are gone and `daily_summaries`/`memory_facts`/`xp_events` are populated as described in §4's verification step.
-
-**Do not** apply the migrations, move anything into `supabase/migrations/`, or attempt the `AICoach.jsx` export yourself through this session unless you want to explicitly unblock the next phase — this document assumes those three things remain deliberately untouched until you say otherwise.
+- **Phase 3 & 4 (now that migrations are applied):** trigger `/api/memory-rollover` for a test account with a day or two of real conversation history, then check the server logs for the `"[memory-rollover] updated"` success line (the two `console.warn` "not written yet" lines should be gone now), and check `daily_summaries`/`memory_facts`/`xp_events` directly in the Supabase table editor — titles should read like real chapter names, facts should be genuinely worth keeping, XP reasons should be specific, not generic.
 
 ---
 
 ## 7. Next recommended step
 
-Given none of the three blockers (§4) are resolved, the highest-leverage next move is **your call on which blocker to unblock first** — they gate different work:
-- Unblocking **Blocker A** (export) → enables Phase 1b (the custom Companion screen you originally asked for).
-- Unblocking **Blocker B** (apply migrations) → makes Phases 3 and 4's already-written code actually take effect, and is a prerequisite for everything else touching memory or XP.
-- Unblocking **Blocker C** (embeddings vendor) → enables real semantic retrieval, the biggest remaining gap in the memory story.
+Blocker B is resolved. Two blockers remain, gating different work:
+- **Blocker A** (export from `AICoach.jsx`) → enables Phase 1b, the custom Companion screen.
+- **Blocker C** (embeddings vendor decision) → enables real semantic retrieval.
 
-If you'd rather I keep building without any blockers resolved, the next available work is **Phase 5 (conversational onboarding + ChatGPT import)** — it doesn't touch protected files or need new schema beyond what Phase 3 already staged (onboarding-extracted facts can use the same `memory_facts` write path, fail-soft, same as the rollover job).
+Neither blocks **Phase 5 (conversational onboarding + ChatGPT import)**, which is starting now — it doesn't touch protected files and reuses the same `memory_facts` write path (fail-soft, same pattern as the rollover job) that's now live.
