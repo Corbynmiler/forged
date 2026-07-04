@@ -2946,6 +2946,7 @@ export default function App() {
       </div>
         <OnboardingScreen
           topInset={36}
+          isPreview
           onComplete={() => setPreviewOnboarding(false)}
           onSaveProgress={() => Promise.resolve()}
           onCheckout={() => {

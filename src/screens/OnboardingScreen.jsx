@@ -230,7 +230,7 @@ const DISPLAY_TOTAL = 6; // final screen isn't a "step"
 // applied 2026-07-05) and api/memory-rollover.js's nightly extraction.
 const IMPORT_MAX_CHARS = 8000;
 
-export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, notifEnabled, notifLoading, notifPermission, onNotifToggle, topInset = 0 }) {
+export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, notifEnabled, notifLoading, notifPermission, onNotifToggle, topInset = 0, isPreview = false }) {
   const [step, setStep] = useState(STEP_WELCOME);
   const [name, setName] = useState("");
 
@@ -397,7 +397,10 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
   async function saveMemoryImportFactsAndContinue() {
     if (memoryImportSaving) return;
     const facts = memoryImportFacts || [];
-    if (!facts.length) { setStep(STEP_CHAT); return; }
+    // Admin "Preview onboarding" promises "no changes will be saved" for the
+    // whole flow (see App.jsx) — this write must honor that too, not just
+    // the onSaveProgress/onCheckout stubs the rest of onboarding uses.
+    if (isPreview || !facts.length) { setStep(STEP_CHAT); return; }
     setMemoryImportSaving(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
