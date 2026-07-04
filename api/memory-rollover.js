@@ -23,6 +23,7 @@ function shiftDate(ymd, deltaDays) {
 
 const MEMORY_MAX_CHARS = 1500;
 const MAX_DAYS_PER_CALL = 2; // cost bound: at most two day-summaries per call
+const XP_DAILY_CAP = 50; // bound on AI-judged XP per day — matches the design doc's 0-50/day range
 
 /** Compact one day of habit logs + notes into a short plain-text digest for the model. */
 function buildDayDigest(date, habits, journalRow) {
@@ -134,10 +135,12 @@ async function handler(req, res) {
           "- structured: { \"wins\": [..], \"hard_parts\": [..], \"slips\": [..], \"mood\": string|null, \"tomorrow_focus\": string|null } — short phrases only, empty arrays when nothing fits.\n" +
           "- commitments: short array of things the user said they'd do (e.g. \"send the contract\", \"call the dentist\") — empty array if none were made.\n" +
           "- emotional_context: one short plain sentence on how the day felt emotionally, or null if there's nothing meaningful to say — never invent feelings that weren't there.\n" +
-          "- facts: 0–6 atomic, durable facts worth remembering long after this single day — the kind of thing a close friend would still remember weeks later (a recurring theme, a project, a person, a preference, a pattern). Each is { \"kind\": one of \"fact\"|\"commitment\"|\"preference\"|\"project\"|\"person\"|\"event\"|\"emotional_pattern\", \"content\": a short third-person sentence, \"importance\": 1–5 }. Skip anything trivial, already obvious, or already covered by the rolling memory below — only include what's genuinely new and worth carrying forward.\n\n" +
+          "- facts: 0–6 atomic, durable facts worth remembering long after this single day — the kind of thing a close friend would still remember weeks later (a recurring theme, a project, a person, a preference, a pattern). Each is { \"kind\": one of \"fact\"|\"commitment\"|\"preference\"|\"project\"|\"person\"|\"event\"|\"emotional_pattern\", \"content\": a short third-person sentence, \"importance\": 1–5 }. Skip anything trivial, already obvious, or already covered by the rolling memory below — only include what's genuinely new and worth carrying forward.\n" +
+          "- xp_delta: a whole number from 0 to " + XP_DAILY_CAP + " judging how much this day deserves, based on genuine effort and follow-through — not just whether things went well. A hard day where they still showed up can deserve more than an easy day that took no effort. Never judge purely on outcome.\n" +
+          "- xp_reason: one short, specific, plain sentence explaining the xp_delta — this gets shown to the user directly, so it must reference something real from the day, never generic praise.\n\n" +
           "Then UPDATE the rolling memory (max " + MEMORY_MAX_CHARS + " characters): durable, useful context about this person — work situation, recurring pressures, important relationships, preferences, current projects, emotional patterns, what derails them, what works. Merge new information into the existing memory; drop stale or low-value detail to stay under the limit. Terse prose or short bullets. Never include day-by-day logs — that's what summaries are for.\n\n" +
           "Return ONLY valid JSON, no markdown fences:\n" +
-          "{ \"days\": [{ \"date\": \"YYYY-MM-DD\", \"title\": \"...\", \"summary\": \"...\", \"structured\": {...}, \"commitments\": [...], \"emotional_context\": \"...\"|null, \"facts\": [{ \"kind\": \"...\", \"content\": \"...\", \"importance\": 1 }] }], \"memory\": \"...\" }",
+          "{ \"days\": [{ \"date\": \"YYYY-MM-DD\", \"title\": \"...\", \"summary\": \"...\", \"structured\": {...}, \"commitments\": [...], \"emotional_context\": \"...\"|null, \"facts\": [{ \"kind\": \"...\", \"content\": \"...\", \"importance\": 1 }], \"xp_delta\": 0, \"xp_reason\": \"...\" }], \"memory\": \"...\" }",
         cache_control: { type: "ephemeral" },
       }],
       messages: [{
@@ -195,6 +198,17 @@ async function handler(req, res) {
         emotional_context: typeof d.emotional_context === "string" && d.emotional_context.trim()
           ? d.emotional_context.trim().slice(0, 300)
           : null,
+        // AI-judged XP (Phase 4) — clamped server-side regardless of what the
+        // model returns; never trust it to honor the prompt's 0-XP_DAILY_CAP
+        // range on its own. Deliberately NOT written to profiles.xp (the
+        // live, user-facing lifetime total) — see PREVIEW_BRANCH_HANDOFF.md
+        // for why: profiles.xp already has a separate, deterministic
+        // per-habit-tap XP path (lifetimeXpForHabitLog in src/arcProgress.js),
+        // and wiring this in too would double-count every day. This column
+        // is observational-only until a human decides how the two systems
+        // should reconcile.
+        xp_awarded: Number.isFinite(d.xp_delta) ? Math.min(XP_DAILY_CAP, Math.max(0, Math.round(d.xp_delta))) : null,
+        xp_reason: typeof d.xp_reason === "string" && d.xp_reason.trim() ? d.xp_reason.trim().slice(0, 300) : null,
       }));
     if (extendedUpserts.length) {
       const { error: extErr } = await db
@@ -268,6 +282,31 @@ async function handler(req, res) {
       }
     }
     // ── end Phase 3 addition ────────────────────────────────────────────────
+
+    // ── PREVIEW BRANCH — AI-judged XP audit log (Phase 4) ──────────────────
+    // xp_events is a NEW table, staged (not applied) alongside the rest of
+    // this branch's schema work — see supabase/pending_migrations/. Same
+    // fail-soft pattern as memory_facts above: an append-only audit row per
+    // day/user so the (currently just observational) xp_awarded/xp_reason
+    // values above are traceable later, without touching profiles.xp.
+    const xpEvents = parsed.days
+      .filter(d => d && wanted.has(d.date) && Number.isFinite(d.xp_delta))
+      .map(d => ({
+        user_id: userId,
+        event_date: d.date,
+        amount: Math.min(XP_DAILY_CAP, Math.max(0, Math.round(d.xp_delta))),
+        reason: typeof d.xp_reason === "string" && d.xp_reason.trim() ? d.xp_reason.trim().slice(0, 300) : null,
+        source: "ai_daily_rollover",
+      }));
+    if (xpEvents.length) {
+      try {
+        const { error: xpErr } = await db.from("xp_events").insert(xpEvents);
+        if (xpErr) throw xpErr;
+      } catch (xpErr) {
+        console.warn("[memory-rollover] xp_events not written (table likely not created yet)", xpErr?.message || xpErr);
+      }
+    }
+    // ── end Phase 4 addition ────────────────────────────────────────────────
 
     let memoryOut = currentMemory;
     if (typeof parsed.memory === "string" && parsed.memory.trim()) {
