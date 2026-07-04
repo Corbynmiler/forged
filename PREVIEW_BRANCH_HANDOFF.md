@@ -2,7 +2,7 @@
 
 **Branch:** `claude/forged-ai-companion-redesign-agyjl7` (preview only — `main`/production untouched)
 **Purpose:** turn Forged from a habit-tracker-with-a-chatbot into a memory-first AI companion where conversation is the front door. Full product design doc: see the artifact linked in chat history, or ask for it to be regenerated.
-**Last updated:** 2026-07-05 — both staged migrations applied by the user; verified live against the database; starting Phase 5.
+**Last updated:** 2026-07-05, end of Phase 5 (first slice — ChatGPT memory import).
 
 This file is the single source of truth for anyone (human or Cursor) picking this branch up cold. Update it at the end of every phase — do not let it drift from what's actually in the diff.
 
@@ -20,11 +20,13 @@ This is the answer to "how many phases and what does each do." Read this table f
 | 3 | Memory layer (schema + extraction) | Real daily titles ("Planting in the Rain Again"), atomic durable facts, commitments, emotional context — extracted nightly and stored | ✅ **Done and live** — migration applied 2026-07-05, verified against the real database (see §3) |
 | — | Embedding generation + hybrid retrieval | Turn stored facts into real semantic search (replacing the coach's current keyword search) | ⛔ **Not started** — needs an embeddings vendor decision (no API key configured) *and* touches the protected `api/chat.js` |
 | 4 | AI-judged XP (observation only) | Nightly Haiku call judges a 0-50 XP amount + a one-sentence reason per day, stores it for review | ✅ **Done and live** — migration applied 2026-07-05. **Deliberately not wired into the real, user-facing XP total yet** — see §3 for why |
-| 5 | Conversational onboarding + ChatGPT import | Replace the onboarding form with a real conversation; add a "paste your ChatGPT memory" option | 🚧 **In progress** |
+| 5 | Conversational onboarding + ChatGPT import | Replace the onboarding form with a real conversation; add a "paste your ChatGPT memory" option | 🚧 **Partly done** — ChatGPT import step shipped and live (schema already supports it); the deeper "rebuild the whole form as one conversation" half not started (see §1) |
 | 6 | Notification philosophy rewrite | Morning/midday/evening messages that reference something specific and real, or say nothing at all | ⛔ **Not started** |
 | 7 | "What I remember" + Arc inference | A screen to view/delete stored facts; AI notices patterns and suggests an Arc instead of requiring manual setup | ⛔ **Not started** |
 
-**Net position:** 4 of 8 numbered phases are done, 3 of those fully live (1, 2, and now 3 and 4 with the migration applied). One phase (1b) and one unnumbered step (embeddings/retrieval) are blocked on human decisions. Phase 5 is starting now; 6-7 haven't been started.
+**Net position:** 4 of 8 numbered phases are done or partly done, all live (1, 2, 3, 4 with the migration applied, and now half of 5). One phase (1b) and one unnumbered step (embeddings/retrieval) are blocked on human decisions. 6-7 haven't been started.
+
+**Correction on Phase 5's existing state:** onboarding was already substantially conversational before this session touched it — `OnboardingScreen.jsx` + `api/onboard-chat.js` already run a real Arc-setup chat (mic/text, AI proposes 2-3 Arc options). What was genuinely missing was the ChatGPT import — that's what this phase built.
 
 ---
 
@@ -58,6 +60,14 @@ Original Phase 4 scope was "AI-judged XP + `xp_events` audit table." Before writ
 - **`supabase/pending_migrations/20260704130000_xp_events.sql`** (new, staged, NOT applied): an append-only, read-only-to-clients audit table (`user_id`, `event_date`, `amount`, `reason`, `source`, `created_at`) so every AI-judged award is traceable later. `memory-rollover.js` already writes to it, wrapped fail-soft like everything else.
 - **Deliberately NOT done:** no write to `profiles.xp`, no UI surfacing (no XP flash, no reason shown anywhere) — there's no live number changing yet, so there's nothing honest to show. Reconciling the two XP systems (or deciding the AI-judged number *replaces* the deterministic one, per the original design doc's intent) is a product decision for a human, not something to quietly pick mid-phase.
 
+### Phase 5 (first slice) — ChatGPT memory import in onboarding (shipped, live — no migration needed)
+
+Discovered mid-phase that onboarding was already conversational for Arc setup (`src/screens/OnboardingScreen.jsx` + `api/onboard-chat.js`, both unprotected, neither touched by earlier phases) — so this slice targets the one piece that was genuinely missing: importing existing ChatGPT memory.
+
+- **`api/onboarding-memory-import.js`** (new): auth-gated (same JWT pattern as `onboard-chat.js`), accepts pasted free text capped at 8,000 characters, makes one Haiku call treating the paste as fully unstructured (never assumes a ChatGPT export schema), returns up to 12 extracted facts (`kind`/`content`/`importance`) as JSON. Does not write to the database itself.
+- **`src/screens/OnboardingScreen.jsx`**: added a new step (`STEP_MEMORY_IMPORT`) between the name-entry step and the existing Arc conversation. Explains where to find Memory in ChatGPT settings, offers a paste box, and an equal-weight "Skip this step" option. On import, shows every extracted fact with a per-item remove button before anything saves — matches the design doc's "show what got extracted before committing" requirement. Confirmed facts are written directly to `memory_facts` from the client (not through a server route) using the user's own session — the table's existing RLS policy already permits `auth.uid() = user_id` inserts, so no service-role endpoint was needed for the write, only for the extraction call (which needs the Anthropic key).
+- **Not included:** the extracted facts are not yet wired into `onboard-chat.js`'s system prompt, so the Arc-setup conversation itself doesn't yet "already know" what was imported — it only seeds `memory_facts` for future coach conversations to eventually draw on (once retrieval exists). Wiring it into the Arc-conversation's prompt too is a reasonable follow-up, not required for this slice to be valuable on its own. The broader "rebuild the rest of onboarding as one continuous conversation" (versus the current welcome→name→import→Arc-chat→evidence→notif step sequence) is also not attempted this round — the existing Arc-chat is a carefully tuned, working conversation already; restructuring it further wasn't judged worth the risk for what this slice needed to deliver.
+
 ---
 
 ## 2. Files touched (cumulative)
@@ -71,6 +81,8 @@ Original Phase 4 scope was "AI-judged XP + `xp_events` audit table." Before writ
 | `api/memory-rollover.js` | 3 | Extended prompt/schema with title/commitments/emotional_context/facts; two new fail-soft write blocks. | Low-medium (real nightly job, not protected) |
 | `api/memory-rollover.js` | 4 | Further extended prompt/schema with xp_delta/xp_reason; one new fail-soft write to `daily_summaries`, one new fail-soft insert into `xp_events`. | Low-medium (same file as above; deliberately not touching `profiles.xp`) |
 | `supabase/pending_migrations/20260704130000_xp_events.sql` | 4 | New file, staged, not applied. | None until applied |
+| `api/onboarding-memory-import.js` | 5 | New file. Auth-gated Haiku call, extracts facts from pasted text, returns them — no DB write. | Low — new, isolated, not protected. |
+| `src/screens/OnboardingScreen.jsx` | 5 | New step (`STEP_MEMORY_IMPORT`) inserted between name entry and the existing Arc conversation; renumbered progress steps 1-7. New state, two new functions (extract, save-and-continue). Existing Arc-chat step and its logic untouched. | Low-medium — not protected, but touches the real signup flow; renumbering steps is cosmetic (progress bar text only). |
 
 **No changes, ever, to:** `api/chat.js`, `src/coach/AICoach.jsx`, `src/coach/CoachApp.jsx`, `api/coach-summary.js`, `api/coach-intro.js`, anything under the real `supabase/migrations/` directory, `api/stripe-webhook.js`, `api/create-checkout.js`, `api/create-portal-session.js`, `package.json`. All protected paths remain fully untouched across all four phases.
 
@@ -110,6 +122,12 @@ Cut: "Executor" (redundant with Builder), "Prompt Engineer" (contradicts the pro
 
 **Both staged migrations applied and verified live (2026-07-05).** The user ran both files directly against the Supabase SQL editor. Verified afterward with a read-only schema check: `daily_summaries` now has `title`/`commitments`/`emotional_context`/`xp_awarded`/`xp_reason`; `memory_facts` exists with the correct columns, check constraints, RLS, and foreign key; `xp_events` exists with the correct check constraint (`amount >= 0`), RLS, and foreign key. Both new tables currently sit at 0 rows, which is correct — nothing populates them until the nightly rollover actually runs against real conversation data. `daily_summaries`' 70 pre-existing rows were unaffected (new columns are nullable/defaulted, no data rewritten). This resolves Blocker B from §4 below.
 
+**Onboarding was already conversational — checked before assuming a rebuild was needed.** Read `OnboardingScreen.jsx` and found `api/onboard-chat.js` (unprotected, distinct from the main coach's `api/chat.js`) already running a real, carefully-tuned conversation for Arc setup — mic/text input, 2-4 question turns, then 2-3 proposed Arc options as cards. Rebuilding that from scratch would have been redundant work and risked degrading something that already works well. Scoped this phase down to the one clearly-missing piece instead: ChatGPT import.
+
+**Why the import writes directly from the client instead of through a server route.** `memory_facts`' RLS policy (from the Phase 3 migration) already allows `for all using (auth.uid() = user_id) with check (auth.uid() = user_id)` — an authenticated user can insert their own rows without a service-role intermediary. Only the LLM extraction step needs a server endpoint (it needs the Anthropic API key); the actual save is a normal client-side Supabase write, same trust model as habit logging elsewhere in the app.
+
+**Why extracted facts aren't fed into the Arc-conversation's own prompt yet.** That would mean editing `api/onboard-chat.js`'s system-prompt construction — permitted (it's not protected), but it's tuned, working prompt logic, and threading in a new "known context" block is exactly the kind of change worth doing deliberately with its own test pass, not as a rider on an unrelated feature. Flagged as a natural next step, not done this round.
+
 ---
 
 ## 4. What requires human action (blockers)
@@ -128,7 +146,7 @@ Cut: "Executor" (redundant with Builder), "Prompt Engineer" (contradicts the pro
 
 **Everything else, in order:**
 5. Embedding generation + hybrid retrieval (needs Blocker C + a protected-file sign-off for the `api/chat.js` swap; schema is ready now that Blocker B is resolved).
-6. Conversational onboarding rebuild + ChatGPT import — **in progress now.**
+6. ~~Conversational onboarding + ChatGPT import~~ — **ChatGPT import done and live.** Remaining: wire imported facts into `onboard-chat.js`'s prompt (optional follow-up, not blocked on anything); decide whether the rest of onboarding needs restructuring (it's already conversational for Arc setup — may not need more work at all).
 7. Notification philosophy rewrite.
 8. "What I remember" trust screen + Arc-inference exploration.
 9. (Whenever it comes up) Decide how AI-judged XP reconciles with the existing deterministic system, then wire `daily_summaries.xp_awarded` into something user-visible.
@@ -143,6 +161,8 @@ Cut: "Executor" (redundant with Builder), "Prompt Engineer" (contradicts the pro
 - **Phase 3 & 4 rollover changes still unverified against a live model call** — migrations are applied and schema is confirmed correct (§3), but no Anthropic credentials exist in this sandbox, so the larger JSON schema has never actually been sent to or parsed from a real Claude response, only mock data. **Next real test:** trigger a real rollover, inspect `daily_summaries`/`memory_facts`/`xp_events` directly. Also worth confirming `max_tokens: 1200` (unchanged despite a much larger JSON schema) doesn't cause truncated/unparseable output with 2 pending days' worth of the new fields — bump it if rollover logs start showing "unparseable model output" more than very rarely.
 - **`xp_events` has no dedup/idempotency guard**, unlike `daily_summaries`/`memory_facts` — but it doesn't need one under normal operation, since a day is only ever in the rollover's `pending` list once (the base `daily_summaries` write, which always happens first and is never skipped, is what marks a day "already summarized" for future runs).
 - **Two chat surfaces will eventually share prompt-building logic with separate fetch/stream code** once Phase 1b exists — flagged for a future consolidation into a shared hook, not urgent now.
+- **Phase 5 import unverified against a live model call or real signup flow** — no Anthropic/Supabase credentials in this sandbox, and the admin-only `previewOnboarding` path (the one way to see onboarding without a real account) isn't reachable without already being signed in as an existing user. Verified instead by: production build succeeding, and a standalone unit test of the extraction/clamping logic (bogus `kind` dropped, empty content dropped, importance clamped including a 999→5 edge case, over-12-facts array correctly capped) against mock model output. **Not yet visually confirmed:** the new step actually renders correctly in the real onboarding flow, the paste→extract→review→save round-trip works against a real Claude response, and the step-renumbering (1-7 instead of 1-6) doesn't look wrong anywhere. First things to check by hand.
+- **New step adds one more tap before Arc setup** for every new signup, including anyone who skips — worth watching whether the extra "Skip this step" tap causes any drop-off, though it mirrors the equal-weight skip pattern used elsewhere in this same onboarding flow (e.g. the evidence step).
 
 ---
 
@@ -151,6 +171,7 @@ Cut: "Executor" (redundant with Builder), "Prompt Engineer" (contradicts the pro
 - **Phase 1:** sign in to a real account → confirm the AI coach panel opens automatically instead of the Today dashboard → close it (×) → confirm you land on Today exactly as before → confirm Arc/You/Hub/Social are unaffected.
 - **Phase 2:** as a Pro user with voice replies enabled, send a message long enough to produce a multi-sentence reply → listen for noticeably faster, gapless audio compared to before this branch.
 - **Phase 3 & 4 (now that migrations are applied):** trigger `/api/memory-rollover` for a test account with a day or two of real conversation history, then check the server logs for the `"[memory-rollover] updated"` success line (the two `console.warn` "not written yet" lines should be gone now), and check `daily_summaries`/`memory_facts`/`xp_events` directly in the Supabase table editor — titles should read like real chapter names, facts should be genuinely worth keeping, XP reasons should be specific, not generic.
+- **Phase 5:** sign up as a brand-new user (or use the admin "preview onboarding" path from Profile if you have an admin account) → confirm the new "Bring what you already have" step appears right after entering your name → paste some sample ChatGPT-style memory text → confirm extracted facts show up for review with working remove buttons → confirm "Save and continue" lands you in the existing Arc-setup conversation exactly as before → afterward, check the new user's `memory_facts` rows directly in Supabase. Also test "Skip this step" goes straight to Arc setup with nothing saved.
 
 ---
 
@@ -160,4 +181,6 @@ Blocker B is resolved. Two blockers remain, gating different work:
 - **Blocker A** (export from `AICoach.jsx`) → enables Phase 1b, the custom Companion screen.
 - **Blocker C** (embeddings vendor decision) → enables real semantic retrieval.
 
-Neither blocks **Phase 5 (conversational onboarding + ChatGPT import)**, which is starting now — it doesn't touch protected files and reuses the same `memory_facts` write path (fail-soft, same pattern as the rollover job) that's now live.
+Neither blocks further work. Two reasonable directions from here, your call:
+- **Verify Phase 5 by hand first** (§6) before building more on top of an unverified new signup step — a broken onboarding step is higher-stakes than most other risks on this branch, since it sits in front of every new user.
+- **Or keep going to Phase 6** (notification philosophy rewrite) — also doesn't need either remaining blocker.

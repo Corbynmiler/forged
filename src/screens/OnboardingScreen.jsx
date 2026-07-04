@@ -217,13 +217,18 @@ export function buildDemoHabits() {
 // component with a no-op onSaveProgress.
 const STEP_WELCOME  = "welcome";
 const STEP_NAME     = "name";
+const STEP_MEMORY_IMPORT = "memory_import";
 const STEP_CHAT     = "chat";
 const STEP_EVIDENCE = "evidence";
 const STEP_NOTIF    = "notif";
 const STEP_FINAL    = "final";
 
-const STEP_NUMBERS = { [STEP_WELCOME]:1, [STEP_NAME]:2, [STEP_CHAT]:3, [STEP_EVIDENCE]:4, [STEP_NOTIF]:5, [STEP_FINAL]:6 };
-const DISPLAY_TOTAL = 5; // final screen isn't a "step"
+const STEP_NUMBERS = { [STEP_WELCOME]:1, [STEP_NAME]:2, [STEP_MEMORY_IMPORT]:3, [STEP_CHAT]:4, [STEP_EVIDENCE]:5, [STEP_NOTIF]:6, [STEP_FINAL]:7 };
+const DISPLAY_TOTAL = 6; // final screen isn't a "step"
+
+// Atomic-fact kinds — mirrors the memory_facts table (supabase/pending_migrations,
+// applied 2026-07-05) and api/memory-rollover.js's nightly extraction.
+const IMPORT_MAX_CHARS = 8000;
 
 export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckout, notifEnabled, notifLoading, notifPermission, onNotifToggle, topInset = 0 }) {
   const [step, setStep] = useState(STEP_WELCOME);
@@ -238,6 +243,13 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
   const [editedArc,   setEditedArc]   = useState(null);   // editable copy of the pick
   const [editingArc,  setEditingArc]  = useState(false);  // confirm card edit mode
   const [skipConfirmVisible, setSkipConfirmVisible] = useState(false);
+
+  // ── ChatGPT memory import state ──
+  const [memoryImportText,    setMemoryImportText]    = useState("");
+  const [memoryImportFacts,   setMemoryImportFacts]   = useState(null);  // [{kind, content, importance}] | null
+  const [memoryImportLoading, setMemoryImportLoading] = useState(false);
+  const [memoryImportError,   setMemoryImportError]   = useState(null);
+  const [memoryImportSaving,  setMemoryImportSaving]  = useState(false);
 
   // ── Evidence + final state ──
   const [evidenceText,      setEvidenceText]      = useState("");
@@ -344,6 +356,69 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
     if (!editedArc?.identity?.trim()) return;
     if (!editedArc?.minimumProof?.trim()) return;
     setStep(STEP_EVIDENCE);
+  }
+
+  // ── ChatGPT memory import ───────────────────────────────────────────────────
+  // Pasted text is treated as fully unstructured — never assume ChatGPT's
+  // export format stays stable. One Haiku call extracts atomic facts; the
+  // user reviews/removes before anything is saved to memory_facts.
+  async function extractMemoryImport() {
+    const trimmed = memoryImportText.trim();
+    if (!trimmed || memoryImportLoading) return;
+    setMemoryImportLoading(true);
+    setMemoryImportError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("No session");
+      const res = await fetch("/api/onboarding-memory-import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ text: trimmed.slice(0, IMPORT_MAX_CHARS) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "Import failed");
+      setMemoryImportFacts(Array.isArray(data.facts) ? data.facts : []);
+    } catch (err) {
+      setMemoryImportError(err?.message || "Couldn't read that — try again, or skip this step");
+    } finally {
+      setMemoryImportLoading(false);
+    }
+  }
+
+  function removeMemoryImportFact(idx) {
+    setMemoryImportFacts(prev => (prev || []).filter((_, i) => i !== idx));
+  }
+
+  // Direct client-side insert — memory_facts RLS already allows an
+  // authenticated user to insert rows where user_id = auth.uid(), so no
+  // dedicated server route is needed for the write itself (only the
+  // extraction call above needs the Anthropic key).
+  async function saveMemoryImportFactsAndContinue() {
+    if (memoryImportSaving) return;
+    const facts = memoryImportFacts || [];
+    if (!facts.length) { setStep(STEP_CHAT); return; }
+    setMemoryImportSaving(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const uid = session?.user?.id;
+      if (uid) {
+        await supabase.from("memory_facts").insert(
+          facts.map(f => ({
+            user_id: uid,
+            kind: f.kind,
+            content: f.content,
+            importance: f.importance,
+            source_day: todayStr(),
+          })),
+        );
+      }
+    } catch {
+      // Best-effort — never block onboarding on this write.
+    } finally {
+      setMemoryImportSaving(false);
+      setStep(STEP_CHAT);
+    }
   }
 
   // ── Save everything and enter the app ──────────────────────────────────────
@@ -602,6 +677,100 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
             style={{ width:"100%", padding:12, background:"none", border:"none", color:T.hint, fontSize:13, cursor:"pointer" }}>
             Nothing yet — skip
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── CHATGPT MEMORY IMPORT ───────────────────────────────────────────────────
+  if (step === STEP_MEMORY_IMPORT) {
+    const hasFacts = Array.isArray(memoryImportFacts);
+    return (
+      <div style={wrap}>
+        <ProgressHeader currentNum={STEP_NUMBERS[STEP_MEMORY_IMPORT]} />
+        <div style={{ flex:1, padding:"32px 24px 16px", overflowY:"auto", display:"flex", flexDirection:"column" }}>
+          <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, lineHeight:1.25, marginBottom:10 }}>
+            Bring what you already have
+          </div>
+
+          {!hasFacts ? (
+            <>
+              <div style={{ fontSize:13.5, color:T.sub, lineHeight:1.65, marginBottom:16 }}>
+                If you&apos;ve been using ChatGPT, it may already remember things about you. Copy that over and Forged
+                starts with context instead of zero.
+              </div>
+              <div style={{ background:T.raised, borderRadius:T.r, padding:"14px 16px", marginBottom:20, borderLeft:`3px solid ${T.accent}` }}>
+                <div style={{ fontSize:12.5, color:T.sub, lineHeight:1.75 }}>
+                  In ChatGPT: <strong style={{ color:T.text }}>Settings → Personalization → Memory</strong> (or{" "}
+                  <strong style={{ color:T.text }}>Manage memories</strong>). Select what&apos;s there, copy it, and
+                  paste it below — any format is fine, mess included.
+                </div>
+              </div>
+              <textarea
+                value={memoryImportText}
+                onChange={e => setMemoryImportText(e.target.value)}
+                onInput={e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 180) + "px"; }}
+                placeholder="Paste your ChatGPT memory here…"
+                style={{ ...styleInp, resize:"none", minHeight:110, maxHeight:180, lineHeight:1.55, fontSize:15 }}
+              />
+              {memoryImportError ? (
+                <div style={{ fontSize:12, color:T.accent, marginTop:10, lineHeight:1.5 }}>{memoryImportError}</div>
+              ) : null}
+            </>
+          ) : memoryImportFacts.length ? (
+            <>
+              <div style={{ fontSize:13.5, color:T.sub, lineHeight:1.6, marginBottom:14 }}>
+                Here&apos;s what I pulled out. Remove anything that&apos;s wrong before I save the rest.
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {memoryImportFacts.map((f, i) => (
+                  <div key={i} style={{ display:"flex", alignItems:"flex-start", gap:10, background:T.surface, border:`0.5px solid ${T.border}`, borderRadius:T.rsm, padding:"10px 12px" }}>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:9.5, fontWeight:700, letterSpacing:"0.06em", textTransform:"uppercase", color:T.hint, marginBottom:3 }}>
+                        {f.kind.replace("_", " ")}
+                      </div>
+                      <div style={{ fontSize:13.5, color:T.text, lineHeight:1.5 }}>{f.content}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeMemoryImportFact(i)}
+                      aria-label="Remove"
+                      style={{ flexShrink:0, width:26, height:26, borderRadius:"50%", border:`0.5px solid ${T.borderStrong}`, background:T.raised, color:T.muted, fontSize:15, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}
+                    >×</button>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize:13.5, color:T.sub, lineHeight:1.65 }}>
+              Nothing worth keeping in that paste — no problem, we&apos;ll build your memory as we go instead.
+            </div>
+          )}
+        </div>
+
+        <div style={{ padding:"16px 24px 48px", flexShrink:0 }}>
+          {!hasFacts ? (
+            <>
+              <button
+                onClick={extractMemoryImport}
+                disabled={!memoryImportText.trim() || memoryImportLoading}
+                style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:memoryImportText.trim() && !memoryImportLoading ? T.accent : T.surface, color:memoryImportText.trim() && !memoryImportLoading ? "#fff" : T.muted, fontSize:16, fontWeight:600, cursor:memoryImportText.trim() && !memoryImportLoading ? "pointer" : "default", marginBottom:10, transition:"background 0.15s" }}>
+                {memoryImportLoading ? "Reading…" : "Import"}
+              </button>
+              <button
+                onClick={() => setStep(STEP_CHAT)}
+                style={{ width:"100%", padding:12, background:"none", border:"none", color:T.hint, fontSize:13, cursor:"pointer" }}>
+                Skip this step
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={saveMemoryImportFactsAndContinue}
+              disabled={memoryImportSaving}
+              style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:600, cursor:memoryImportSaving?"default":"pointer", opacity:memoryImportSaving?0.7:1, transition:"background 0.15s" }}>
+              {memoryImportSaving ? "Saving…" : memoryImportFacts.length ? "Save and continue →" : "Continue →"}
+            </button>
+          )}
         </div>
       </div>
     );
@@ -950,7 +1119,7 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
               placeholder="e.g. Alex"
               value={name}
               onChange={e => setName(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter" && name.trim()) setStep(STEP_CHAT); }}
+              onKeyDown={e => { if (e.key === "Enter" && name.trim()) setStep(STEP_MEMORY_IMPORT); }}
               autoFocus
             />
           </>
@@ -962,7 +1131,7 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
           onClick={() => {
             if (isWelcome) { setStep(STEP_NAME); return; }
             if (!name.trim()) return;
-            setStep(STEP_CHAT);
+            setStep(STEP_MEMORY_IMPORT);
           }}
           style={{ width:"100%", padding:16, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:16, fontWeight:500, cursor:"pointer", transition:"all 0.2s" }}>
           {isWelcome ? "Let's begin" : "That's me"}
