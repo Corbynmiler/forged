@@ -112,8 +112,6 @@ async function handler(req, res) {
       return res.status(502).json({ error: "Could not generate speech right now." });
     }
 
-    const audioBuffer = Buffer.from(await elevenRes.arrayBuffer());
-
     await db.from("tts_usage").upsert(
       {
         user_id: userId,
@@ -124,11 +122,35 @@ async function handler(req, res) {
       { onConflict: "user_id,month" },
     );
 
+    // Relay ElevenLabs' audio stream to the client as chunks arrive instead of
+    // buffering the whole clip first — cuts time-to-first-audio, especially
+    // for longer replies. (Matches the streaming pattern already used by
+    // api/chat.js — X-Accel-Buffering: no keeps intermediate proxies from
+    // re-buffering the response.)
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Accel-Buffering", "no");
     res.setHeader("X-TTS-Chars", String(charCount));
     res.setHeader("X-TTS-Remaining", String(Math.max(0, TTS_MONTHLY_CHAR_LIMIT - used - charCount)));
-    return res.status(200).send(audioBuffer);
+    res.status(200);
+
+    const reader = elevenRes.body.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) res.write(Buffer.from(value));
+      }
+    } catch (streamErr) {
+      // Headers (200) are already flushed by this point — can't fall back to
+      // a JSON error response. Log it and end the (truncated) stream; the
+      // client's <audio> onerror/onended handles a cut-off clip gracefully.
+      console.error("[tts] stream relay failed", streamErr?.message || streamErr);
+      captureException(streamErr, { route: "tts", userId });
+    } finally {
+      res.end();
+    }
+    return undefined;
   } catch (err) {
     console.error("[tts] stream failed", err?.message || err);
     captureException(err, { route: "tts", userId });
