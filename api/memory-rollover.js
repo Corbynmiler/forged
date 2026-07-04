@@ -129,11 +129,15 @@ async function handler(req, res) {
         text:
           "You maintain compact memory for a personal-change companion app. You receive one or two finished days of a user's activity (habit logs, personal notes, evidence entries) plus their current rolling memory.\n\n" +
           "For EACH day produce:\n" +
+          "- title: a short, specific, human title for the day (4–6 words) — like a chapter name, e.g. \"Planting in the Rain Again\" or \"Hope Contract Finally Lands\". Never generic (\"A Good Day\", \"Productive Day\", \"Making Progress\").\n" +
           "- summary: 1–2 plain sentences, max 220 characters. Specific and concrete (name the real events), no fluff, no moralizing. Written in third person about the user.\n" +
-          "- structured: { \"wins\": [..], \"hard_parts\": [..], \"slips\": [..], \"mood\": string|null, \"tomorrow_focus\": string|null } — short phrases only, empty arrays when nothing fits.\n\n" +
+          "- structured: { \"wins\": [..], \"hard_parts\": [..], \"slips\": [..], \"mood\": string|null, \"tomorrow_focus\": string|null } — short phrases only, empty arrays when nothing fits.\n" +
+          "- commitments: short array of things the user said they'd do (e.g. \"send the contract\", \"call the dentist\") — empty array if none were made.\n" +
+          "- emotional_context: one short plain sentence on how the day felt emotionally, or null if there's nothing meaningful to say — never invent feelings that weren't there.\n" +
+          "- facts: 0–6 atomic, durable facts worth remembering long after this single day — the kind of thing a close friend would still remember weeks later (a recurring theme, a project, a person, a preference, a pattern). Each is { \"kind\": one of \"fact\"|\"commitment\"|\"preference\"|\"project\"|\"person\"|\"event\"|\"emotional_pattern\", \"content\": a short third-person sentence, \"importance\": 1–5 }. Skip anything trivial, already obvious, or already covered by the rolling memory below — only include what's genuinely new and worth carrying forward.\n\n" +
           "Then UPDATE the rolling memory (max " + MEMORY_MAX_CHARS + " characters): durable, useful context about this person — work situation, recurring pressures, important relationships, preferences, current projects, emotional patterns, what derails them, what works. Merge new information into the existing memory; drop stale or low-value detail to stay under the limit. Terse prose or short bullets. Never include day-by-day logs — that's what summaries are for.\n\n" +
           "Return ONLY valid JSON, no markdown fences:\n" +
-          "{ \"days\": [{ \"date\": \"YYYY-MM-DD\", \"summary\": \"...\", \"structured\": {...} }], \"memory\": \"...\" }",
+          "{ \"days\": [{ \"date\": \"YYYY-MM-DD\", \"title\": \"...\", \"summary\": \"...\", \"structured\": {...}, \"commitments\": [...], \"emotional_context\": \"...\"|null, \"facts\": [{ \"kind\": \"...\", \"content\": \"...\", \"importance\": 1 }] }], \"memory\": \"...\" }",
         cache_control: { type: "ephemeral" },
       }],
       messages: [{
@@ -168,6 +172,102 @@ async function handler(req, res) {
         .upsert(upserts, { onConflict: "user_id,date" });
       if (sumErr) throw new Error(`daily_summaries upsert failed: ${sumErr.message}`);
     }
+
+    // ── PREVIEW BRANCH — memory layer (Phase 3) ────────────────────────────
+    // title / commitments / emotional_context live on daily_summaries as new
+    // nullable columns, and facts land in a new memory_facts table — both
+    // added by a migration staged at supabase/pending_migrations/ (not yet
+    // applied to every environment this code might run against). Both
+    // blocks below are deliberately isolated from the upsert above and from
+    // each other: if the migration hasn't landed yet in a given environment,
+    // these fail quietly (logged, not thrown) so the existing summary/
+    // structured/coach_memory writes above — the part of this job real
+    // users already depend on — keep working exactly as before.
+    const extendedUpserts = parsed.days
+      .filter(d => d && wanted.has(d.date))
+      .map(d => ({
+        user_id: userId,
+        date: d.date,
+        title: typeof d.title === "string" && d.title.trim() ? d.title.trim().slice(0, 80) : null,
+        commitments: Array.isArray(d.commitments)
+          ? d.commitments.filter(c => typeof c === "string" && c.trim()).map(c => c.trim().slice(0, 200)).slice(0, 10)
+          : [],
+        emotional_context: typeof d.emotional_context === "string" && d.emotional_context.trim()
+          ? d.emotional_context.trim().slice(0, 300)
+          : null,
+      }));
+    if (extendedUpserts.length) {
+      const { error: extErr } = await db
+        .from("daily_summaries")
+        .upsert(extendedUpserts, { onConflict: "user_id,date" });
+      if (extErr) {
+        console.warn("[memory-rollover] extended daily_summaries fields not written (migration likely not applied yet)", extErr.message);
+      }
+    }
+
+    const FACT_KINDS = new Set(["fact", "commitment", "preference", "project", "person", "event", "emotional_pattern"]);
+    const normalizeForDedup = s => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+    const candidateFacts = [];
+    for (const d of parsed.days) {
+      if (!d || !wanted.has(d.date) || !Array.isArray(d.facts)) continue;
+      for (const f of d.facts) {
+        if (!f || typeof f.content !== "string" || !f.content.trim()) continue;
+        if (!FACT_KINDS.has(f.kind)) continue;
+        const importance = Number.isFinite(f.importance) ? Math.min(5, Math.max(1, Math.round(f.importance))) : 3;
+        candidateFacts.push({ kind: f.kind, content: f.content.trim().slice(0, 500), importance, source_day: d.date });
+      }
+    }
+    if (candidateFacts.length) {
+      try {
+        const { data: existingFacts, error: factSelErr } = await db
+          .from("memory_facts")
+          .select("id, kind, content")
+          .eq("user_id", userId)
+          .eq("status", "active");
+        if (factSelErr) throw factSelErr;
+
+        // No embeddings yet (see PREVIEW_BRANCH_HANDOFF.md) — dedup via a
+        // crude normalized-text match instead of similarity search. Good
+        // enough to stop the same fact being re-inserted every rollover run;
+        // real semantic dedup lands once an embedding pipeline exists.
+        const existingNorm = (existingFacts || []).map(r => ({ id: r.id, kind: r.kind, norm: normalizeForDedup(r.content) }));
+        const toInsert = [];
+        const toTouch = [];
+        const insertedNorm = []; // dedup against facts already queued THIS run too — a two-day batch can easily surface the same theme twice
+        for (const f of candidateFacts) {
+          const norm = normalizeForDedup(f.content);
+          const dbMatch = existingNorm.find(e => e.kind === f.kind && (e.norm === norm || e.norm.includes(norm) || norm.includes(e.norm)));
+          if (dbMatch) {
+            if (!toTouch.includes(dbMatch.id)) toTouch.push(dbMatch.id);
+            continue;
+          }
+          const batchMatch = insertedNorm.find(e => e.kind === f.kind && (e.norm === norm || e.norm.includes(norm) || norm.includes(e.norm)));
+          if (batchMatch) continue; // already queued for insert this run — skip the duplicate rather than inserting it twice
+          toInsert.push({
+            user_id: userId,
+            kind: f.kind,
+            content: f.content,
+            importance: f.importance,
+            source_day: f.source_day,
+          });
+          insertedNorm.push({ kind: f.kind, norm });
+        }
+        if (toInsert.length) {
+          const { error: factInsErr } = await db.from("memory_facts").insert(toInsert);
+          if (factInsErr) throw factInsErr;
+        }
+        if (toTouch.length) {
+          const { error: factTouchErr } = await db
+            .from("memory_facts")
+            .update({ last_referenced_at: new Date().toISOString() })
+            .in("id", toTouch);
+          if (factTouchErr) throw factTouchErr;
+        }
+      } catch (factErr) {
+        console.warn("[memory-rollover] memory_facts not written (migration likely not applied yet)", factErr?.message || factErr);
+      }
+    }
+    // ── end Phase 3 addition ────────────────────────────────────────────────
 
     let memoryOut = currentMemory;
     if (typeof parsed.memory === "string" && parsed.memory.trim()) {
