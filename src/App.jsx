@@ -80,6 +80,7 @@ import {
 
 // Screens
 import { TodayScreen, CoachGreeting } from "./screens/TodayScreen.jsx";
+import { CompanionScreen } from "./screens/CompanionScreen.jsx";
 import { ArcScreen } from "./screens/ArcScreen.jsx";
 import { HubScreen } from "./screens/HubScreen.jsx";
 import ArcSetupSheet from "./screens/ArcSetupSheet.jsx";
@@ -183,7 +184,7 @@ export default function App() {
   const [arcProofSyncing, setArcProofSyncing] = useState(false);
   const [arcLedgerRows, setArcLedgerRows] = useState([]);
   const [todayArcScore, setTodayArcScore] = useState(null);
-  const [screen,      setScreen]     = useState("today");
+  const [screen,      setScreen]     = useState("companion");
   /** Active section inside the Arc screen: "arc" | "evidence" | "reviews". */
   const [arcTab,      setArcTab]     = useState("arc");
   const [xp,          setXp]         = useState(0);
@@ -322,23 +323,6 @@ export default function App() {
   const mountTimeRef = useRef(Date.now());
   const initialAuthHandledRef = useRef(false);
   const lastSignedInUidRef = useRef(null);
-  /**
-   * PREVIEW BRANCH — Companion-first landing (Phase 1).
-   * Once per session, land the user straight in the coach conversation
-   * instead of the Today dashboard — conversation is the front door, not a
-   * button you have to find. Reuses the existing, unmodified AICoach panel
-   * (openCoachWithMode) with no forced mic/text mode, so it just opens ready
-   * to talk. Today/Arc/You/Hub/Social are untouched and still one tap away
-   * via the panel's close button or the bottom nav underneath it.
-   */
-  const companionAutoOpenedRef = useRef(false);
-  useEffect(() => {
-    if (companionAutoOpenedRef.current) return;
-    if (loading || authScreen || !accountDataReady || onboarded !== true) return;
-    companionAutoOpenedRef.current = true;
-    openCoachWithMode(null);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, authScreen, accountDataReady, onboarded]);
   const noteDebounceRef = useRef({});
   const retryLoadPromiseRef = useRef(null);
   const retryLoadUidRef = useRef(null);
@@ -1465,7 +1449,9 @@ export default function App() {
     try {
       const [{ data: mem }, { data: sums }] = await Promise.all([
         supabase.from("coach_memory").select("content, updated_at").eq("user_id", uid).maybeSingle(),
-        supabase.from("daily_summaries").select("date, summary").eq("user_id", uid)
+        // `title` (Phase 3+) feeds the Companion screen's "Yesterday: …" line —
+        // additive select, ignored by anything still only reading date/summary.
+        supabase.from("daily_summaries").select("date, summary, title").eq("user_id", uid)
           .order("date", { ascending: false }).limit(7),
       ]);
       setCoachMemory({
@@ -3939,6 +3925,7 @@ export default function App() {
   }
 
   const NAV = [
+    { id:"companion", label:"Talk",    icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 12.5a2.5 2.5 0 0 0 2.5-2.5V6a2.5 2.5 0 1 0-5 0v4a2.5 2.5 0 0 0 2.5 2.5Z" stroke="currentColor" strokeWidth="1.5"/><path d="M6.5 9.5v.5a3.5 3.5 0 0 0 7 0v-.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
     { id:"today",    label:"Today",    icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.5"/><path d="M10 6v4l2.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
     { id:"arc",      label:"Arc",      icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 15a7 7 0 0 1 14 0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><path d="M10 3.5v2M4.6 5.6l1.4 1.4M15.4 5.6L14 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
     { id:"profile",  label:"You",      icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="7" r="3" stroke="currentColor" strokeWidth="1.5"/><path d="M4 17c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
@@ -3957,7 +3944,9 @@ export default function App() {
           <div>
             <div style={{ fontFamily:T.serif, fontSize:30, color:T.text, letterSpacing:"-0.01em" }}>Forged</div>
             <div style={{ fontSize:12, color:T.muted, marginTop:1, lineHeight:1.35 }}>
-              {screen === "today"
+              {screen === "companion"
+                ? ""
+                : screen === "today"
                 ? fmtDateLong()
                 : screen === "profile" ? user.name
                 : screen === "arc" ? "Your Arc"
@@ -3986,6 +3975,41 @@ export default function App() {
             >×</button>
           </div>
         )}
+        {screen === "companion" && <CompanionScreen
+          habits={habits} goals={goals} user={user} isPro={isPro} activeBlock={activeBlock}
+          onOpenEditArc={openArcCoachEdit}
+          onUpgrade={() => setShowUpgrade(true)}
+          coachName={coachName}
+          coachIcon={coachIcon}
+          onNavigateTo={navigateTo}
+          onHabitCreated={h => {
+            setHabits(p => p.some(x => String(x.id) === String(h.id)) ? p.map(x => String(x.id) === String(h.id) ? h : x) : [...p, h]);
+            if (proofActionLinkNextRef.current && activeBlock?.id && h?.id) {
+              proofActionLinkNextRef.current = false;
+              void linkHabitAsProof(h.id);
+            }
+          }}
+          onGoalCreated={g => setGoals(p => p.some(x => String(x.id) === String(g.id)) ? p.map(x => String(x.id) === String(g.id) ? g : x) : [...p, g])}
+          previewNormalCoachGreeting={previewNormalCoachGreeting}
+          onCoachLogsApplied={applyCoachLogsBatch}
+          onHabitRenamed={(id, name) => setHabits(p => p.map(h => String(h.id) === String(id) ? { ...h, name } : h))}
+          journalEntries={journalEntries}
+          voiceRepliesEnabled={voiceRepliesEnabled}
+          coachVoiceId={coachVoiceId}
+          coachMemory={coachMemory ? {
+            content: coachMemory.content,
+            recentSummaries: (coachMemory.recentSummaries || []).slice(isPro ? -7 : -3),
+          } : null}
+          onJournalLogged={entries => {
+            const uid = userIdRef.current;
+            if (uid) {
+              supabase.from("journal_entries").select("id, date, content, daily_context, is_ai_generated, manually_edited, created_at, updated_at")
+                .eq("user_id", uid).order("date", { ascending: false })
+                .then(({ data: jRows }) => { if (jRows) setJournalEntries(jRows); });
+            }
+          }}
+          onOpenProgress={() => setScreen("today")}
+        />}
         {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} activeBlock={activeBlock} todayArcScore={todayArcScore} arcLedgerRows={arcLedgerRows} arcProofSyncing={arcProofSyncing} onStartArc={openArcCoachCreate} onViewArc={() => { setScreen("arc"); setArcTab("arc"); }} onLinkProofHabit={linkHabitAsProof} onUnlinkProofItem={unlinkProofItem} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} onOpenCoachMic={() => openCoachWithMode("mic")} onOpenCoachWithDraft={openCoachWithDraft} onCreateProofViaCoach={openCoachForProofAction} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} onOpenGoalDetail={id => setOpenGoalId(id)} todayJournalEntry={journalEntries.find(e => e.date === todayStr()) ?? null} onGenerateReceipt={handleGenerateReceipt} generatingReceipt={generatingReceipt} onOpenJournal={() => { setJournalOpenTab("journal"); setJournalAutoGenerate(false); navigateTo("arc"); }} onLowerBudget={handleLowerBudget} tasks={tasks} onAddTask={handleAddTask} onCompleteTask={handleCompleteTask} onPinTask={handlePinTask} onDeleteTask={handleDeleteTask} onOpenHub={() => setScreen("hub")}/>}
         {screen === "hub"      && <HubScreen
           habits={habits} goals={goals} tasks={tasks} activeBlock={activeBlock}

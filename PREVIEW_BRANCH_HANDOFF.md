@@ -1,186 +1,143 @@
 # Forged — Preview Branch Handoff
 
 **Branch:** `claude/forged-ai-companion-redesign-agyjl7` (preview only — `main`/production untouched)
-**Purpose:** turn Forged from a habit-tracker-with-a-chatbot into a memory-first AI companion where conversation is the front door. Full product design doc: see the artifact linked in chat history, or ask for it to be regenerated.
-**Last updated:** 2026-07-05, end of Phase 5 (first slice — ChatGPT memory import).
+**Purpose:** turn Forged from a habit-tracker-with-a-chatbot into a memory-first AI companion where conversation is the front door.
+**Last updated:** 2026-07-05 — the real Companion home screen shipped, replacing the Phase 1 auto-open hack. Roadmap revised mid-session after the user flagged that prior phases, while real, hadn't touched what the app actually looks like.
 
 This file is the single source of truth for anyone (human or Cursor) picking this branch up cold. Update it at the end of every phase — do not let it drift from what's actually in the diff.
 
 ---
 
-## 0. Roadmap at a glance — 8 phases total (+1 unnumbered step)
+## 0. Roadmap at a glance
 
-This is the answer to "how many phases and what does each do." Read this table first; everything below is supporting detail.
+Revised 2026-07-05. The original Phase 1-8 numbering undersold how much depended on one blocker; this table reflects what's actually true now.
 
-| # | Phase | What it does | Status |
-|---|---|---|---|
-| 1 | Companion-first landing | App opens straight into the AI coach conversation instead of the Today dashboard | ✅ **Done** |
-| 1b | Custom Companion screen | Purpose-built "What's on your mind?" home screen with a situation selector (Just chat / I'm planning / I'm building / I'm stuck / I need perspective), day-status, XP chip | ⛔ **Blocked** — needs a human to export ~8 functions from the protected `AICoach.jsx` (see §4) |
-| 2 | Faster voice replies | Coach replies get chunked into sentences and streamed/played back-to-back instead of waiting for the whole reply to synthesize as one clip | ✅ **Done** |
-| 3 | Memory layer (schema + extraction) | Real daily titles ("Planting in the Rain Again"), atomic durable facts, commitments, emotional context — extracted nightly and stored | ✅ **Done and live** — migration applied 2026-07-05, verified against the real database (see §3) |
-| — | Embedding generation + hybrid retrieval | Turn stored facts into real semantic search (replacing the coach's current keyword search) | ⛔ **Not started** — needs an embeddings vendor decision (no API key configured) *and* touches the protected `api/chat.js` |
-| 4 | AI-judged XP (observation only) | Nightly Haiku call judges a 0-50 XP amount + a one-sentence reason per day, stores it for review | ✅ **Done and live** — migration applied 2026-07-05. **Deliberately not wired into the real, user-facing XP total yet** — see §3 for why |
-| 5 | Conversational onboarding + ChatGPT import | Replace the onboarding form with a real conversation; add a "paste your ChatGPT memory" option | 🚧 **Partly done** — ChatGPT import step shipped and live (schema already supports it); the deeper "rebuild the whole form as one conversation" half not started (see §1) |
-| 6 | Notification philosophy rewrite | Morning/midday/evening messages that reference something specific and real, or say nothing at all | ⛔ **Not started** |
-| 7 | "What I remember" + Arc inference | A screen to view/delete stored facts; AI notices patterns and suggests an Arc instead of requiring manual setup | ⛔ **Not started** |
+| Phase | What it does | Status |
+|---|---|---|
+| **Companion home screen** | Mic-first, one conversation surface, situation selector, day-status line — the actual default landing screen | ✅ **Done, this session** — replaces the old "auto-open a modal on top of the Today dashboard" approach |
+| Faster voice replies | Coach replies chunked into sentences, streamed/played back-to-back instead of waiting for the whole reply to synthesize as one clip | ✅ Done |
+| Memory layer (schema + extraction) | Real daily titles, atomic durable facts, commitments, emotional context — extracted nightly, stored | ✅ Done and live (migration applied) |
+| AI-judged XP (observation only) | Nightly judgment of a 0-50 XP amount + a one-sentence reason, stored for review | ✅ Done and live — **deliberately not wired to the real XP total yet** (see §3) |
+| ChatGPT memory import | Onboarding step: paste existing ChatGPT memory, review extracted facts, save | ✅ Done and live |
+| Retire the old CoachBar / modal drawer | The floating mic bar + popup chat panel is now redundant now that the Companion screen exists | ⛔ **Not done yet — next up** |
+| Embedding generation + hybrid retrieval | Turn stored facts into real semantic search | ⛔ Not started — needs a vendor decision + protected-file sign-off |
+| Notifications rewrite | Morning/midday/evening messages that reference something specific and real, or say nothing | ⛔ Not started — correctly demoted behind the home screen |
+| "What I remember" + Arc inference | View/delete stored facts; AI notices patterns and suggests an Arc | ⛔ Not started |
 
-**Net position:** 4 of 8 numbered phases are done or partly done, all live (1, 2, 3, 4 with the migration applied, and now half of 5). One phase (1b) and one unnumbered step (embeddings/retrieval) are blocked on human decisions. 6-7 haven't been started.
-
-**Correction on Phase 5's existing state:** onboarding was already substantially conversational before this session touched it — `OnboardingScreen.jsx` + `api/onboard-chat.js` already run a real Arc-setup chat (mic/text, AI proposes 2-3 Arc options). What was genuinely missing was the ChatGPT import — that's what this phase built.
+**What changed in the revision:** the user correctly pointed out that four phases of real, shipped work (memory schema, XP judgment, TTS speed, ChatGPT import) hadn't touched what the app actually *looks and feels like* — it still opened to the Today dashboard with a coach panel auto-triggered on top. The root cause: the actual custom Companion screen (originally "Phase 1b") had been blocked on exporting functions from the protected `AICoach.jsx`, and every phase since routed around that blocker instead of resolving it. This session resolved it — see §3 — and the real screen is now built and live as the default.
 
 ---
 
-## 1. What has been changed (cumulative, all phases so far)
+## 1. What has been changed (cumulative)
 
-### Phase 1 — Companion-first landing (shipped)
+### The Companion home screen (shipped this session, supersedes the old Phase 1)
 
-The app now opens straight into the AI coach conversation instead of the Today dashboard, for onboarded, signed-in users, once per session.
+The app now opens directly to `src/screens/CompanionScreen.jsx` — no dashboard, no auto-opened modal on top of one. This is the actual screen from the original design brief:
 
-- `src/App.jsx`: added a `useRef` + `useEffect` (near the `accountDataReady` state declaration, before any early-return JSX branches — required so React's hook-call-order rule isn't violated) that fires exactly once per app load, calling the **existing, untouched** `openCoachWithMode(null)`. Passing `null` opens the panel without forcing mic permission or text focus — the user lands on the greeting + starter chips, mic ready to tap.
-- Nothing else changed. `screen` still defaults to `"today"` underneath — closing the panel lands the user exactly where it always did. Today/Arc/You/Hub/Social are 100% untouched.
+- **Mic-first, user-controlled, no auto-cutoff.** Tap the mic, talk as long as you want, tap again to stop — stopping *is* the send action, no separate confirm step. Uses the same `useSpeechInput({ autoRestart: true, meter: true })` continuous-dictation mode the old coach drawer already used, so this isn't new/unproven behavior, just a new home for it.
+- **Day-status line** at the top ("Yesterday: [title]") once a real title exists from the memory-rollover job; blank otherwise. Wired via a small additive change to `App.jsx`'s existing `daily_summaries` query (added `title` to the select).
+- **Situation selector** — a collapsed pill (default "Just chat"), tap to reveal the five situations from the design (I'm planning / I'm building / I'm stuck / I need perspective). Selecting one appends 1-3 sentences of steering text to the cached `system_stable` block for that conversation — memory, retrieval, and tool access are identical across situations, only tone changes.
+- **Reuses the tuned coach personality**, not a fork of it. `buildCoachSystemPrompts`, `loadCoachDayMessages`, `saveCoachDayMessages`, `COACH_API_MESSAGE_CAP`, the free-tier quota helpers, and the message-rendering components (`CoachFormattedBubble`, `CapturedLine`, `CaptureSavingLine`, `formatCoachMsgTime`) are all imported from `AICoach.jsx`, which now exports them (see §3 for how that got unblocked). The screen owns its own UI shell and its own streaming/send loop — the personality itself was never forked.
+- **Same day-thread key as the old coach drawer** (`forged_coach_day:v1:<userId>:<day>`) — both surfaces read/write the same localStorage-persisted conversation, so nothing is lost or duplicated during the transition period where both still technically exist.
+- **Text fallback always reachable** — a quiet "type instead" link, not a competing input bar, matching "mic-first, not mic-only."
+- **A small "Progress →" link** at the bottom routes to the existing Today screen — Arc/Hub/Social/You are unchanged and reachable from there exactly as before.
+- Added to the bottom nav as the first item ("Talk"), alongside the existing Today/Arc/You — none of those were touched, removed, or restructured.
 
-### Phase 2 — Faster, chunked voice replies (shipped)
+**Removed:** the Phase 1 `companionAutoOpenedRef` `useEffect` that auto-triggered the old modal drawer — superseded, since the Companion screen is now the default `screen` state directly, nothing needs auto-opening on top of anything.
 
-- **`api/tts.js`** — now relays ElevenLabs' audio stream to the client as bytes arrive instead of buffering the whole clip first (same pattern `api/chat.js` already uses for its own streaming). Auth/Pro-gating/quota logic byte-for-byte unchanged.
-- **`src/hooks/useCoachTts.jsx`** — `speak(text)` now splits a reply into sentence chunks (new exported `splitIntoSpeechChunks`) and plays them back-to-back, prefetching the next chunk while the current one plays. Public API (`speak`, `stopSpeaking`, `primeAudio`, `speaking`, `ttsError`, `clearTtsError`) unchanged — zero edits needed in `AICoach.jsx`.
-- **Not included:** true mid-generation streaming (speaking while Claude is still writing) — needs the protected SSE loop in `AICoach.jsx`.
+**Not included in this pass** (see §4/§5):
+- The old CoachBar (floating mic bar above the bottom nav on Today/Arc/Social/Hub) and the modal `AICoach` drawer it opens still exist, unremoved — they're now a redundant second way to reach the same conversation. Retiring them is the very next step, not done yet.
+- Goal-plan-preview cards (the `<goal_plan>` confirmation UI) aren't rendered on this screen — deliberately scoped out; if the coach proposes a goal via Companion, the block is stripped from display but no confirmation card shows yet. Users can still set goals via Arc/Hub.
+- True mid-generation TTS streaming still needs the protected SSE loop — unaffected by this change either way.
 
-### Phase 3 — Memory layer: schema + fact/title extraction (shipped, migration staged not applied)
+### Faster, chunked voice replies (shipped)
 
-- **`supabase/pending_migrations/20260704120000_pgvector_memory_facts.sql`** (staged, NOT applied): enables `pgvector`, creates `memory_facts` (atomic facts — `kind`/`content`/`embedding vector(384)` left NULL/`importance`/`status`, RLS matching existing tables), extends `daily_summaries` with `title`/`commitments`/`emotional_context`/`xp_awarded`/`xp_reason` (last two schema-only, populated in Phase 4).
-- **`api/memory-rollover.js`**: the existing nightly Haiku call now also produces a per-day `title`, `commitments`, `emotional_context`, and 0-6 atomic `facts` — same single LLM call, larger JSON schema, no new cost. Facts are deduped against existing DB rows *and* against each other within the same batch (a real bug found and fixed via a mock-data unit test — see §3).
-- **Fail-soft by design:** the new writes are wrapped in their own try/catch, isolated from the pre-existing `summary`/`structured`/`coach_memory` writes, so a database that hasn't run the migration keeps working exactly as it did before this branch — the new fields just silently don't get written yet (logged, not thrown).
-- **Not included:** no vector similarity search (needs the embeddings decision + `api/chat.js` sign-off), no embedding generation, no "What I remember" UI.
+- **`api/tts.js`** — relays ElevenLabs' audio stream to the client as bytes arrive instead of buffering the whole clip first. Auth/Pro-gating/quota logic unchanged.
+- **`src/hooks/useCoachTts.jsx`** — `speak(text)` splits a reply into sentence chunks and plays them back-to-back, prefetching the next chunk while the current one plays. Public API unchanged.
+- Bug caught and fixed before commit: a mid-stream ElevenLabs failure would have tried to send a second response after headers were already committed ("headers already sent") — fixed by catching the relay error locally instead of letting it re-throw.
 
-### Phase 4 — AI-judged XP, observation only (shipped, migration staged not applied, NOT wired to live XP)
+### Memory layer: schema + fact/title extraction (shipped, live)
 
-Original Phase 4 scope was "AI-judged XP + `xp_events` audit table." Before writing anything, I flagged a real risk: `profiles.xp` (the live, user-facing lifetime XP total shown throughout the app) is already incremented by an existing, separate, deterministic system (`lifetimeXpForHabitLog()` in `src/arcProgress.js`, fired from habit taps). If the new AI-judged amount were *also* written to `profiles.xp`, every user would get double XP each day — a real correctness bug, not a style choice. So this phase is scoped to computation and storage only, not to touching the live total. See §3 for the full reasoning.
+- `supabase/pending_migrations/20260704120000_pgvector_memory_facts.sql` — **applied 2026-07-05**, verified live: `pgvector` enabled, `memory_facts` table exists (embedding column present, `NULL` until an embeddings vendor is chosen), `daily_summaries` extended with `title`/`commitments`/`emotional_context`/`xp_awarded`/`xp_reason`.
+- `api/memory-rollover.js` — the nightly Haiku call now also produces a per-day title, commitments, emotional context, and 0-6 atomic facts, same single LLM call, no new cost. Facts are deduped against existing DB rows *and* against each other within the same batch — a real bug (missing in-batch dedup) was caught with a mock-data unit test and fixed before commit.
+- All new writes are fail-soft — wrapped separately from the pre-existing `summary`/`structured`/`coach_memory` writes, so this never risked breaking the working nightly job even before the migration was applied.
 
-- **`api/memory-rollover.js`** (further extended): the same nightly Haiku call now also returns, per day, an `xp_delta` (instructed to stay 0-50, but **clamped server-side regardless** — the model is never trusted to self-enforce the range) and a one-sentence `xp_reason` ("You followed through on a difficult conversation and still made progress despite low energy"). Written to `daily_summaries.xp_awarded`/`xp_reason` (staged in Phase 3's migration) — same fail-soft pattern as everything else in Phase 3.
-- **`supabase/pending_migrations/20260704130000_xp_events.sql`** (new, staged, NOT applied): an append-only, read-only-to-clients audit table (`user_id`, `event_date`, `amount`, `reason`, `source`, `created_at`) so every AI-judged award is traceable later. `memory-rollover.js` already writes to it, wrapped fail-soft like everything else.
-- **Deliberately NOT done:** no write to `profiles.xp`, no UI surfacing (no XP flash, no reason shown anywhere) — there's no live number changing yet, so there's nothing honest to show. Reconciling the two XP systems (or deciding the AI-judged number *replaces* the deterministic one, per the original design doc's intent) is a product decision for a human, not something to quietly pick mid-phase.
+### AI-judged XP, observation only (shipped, live, NOT wired to the real total)
 
-### Phase 5 (first slice) — ChatGPT memory import in onboarding (shipped, live — no migration needed)
+- Same nightly call now also returns an `xp_delta` (0-50, clamped server-side regardless of what the model returns) and a one-sentence `xp_reason`, written to `daily_summaries` and a new, applied `xp_events` audit table.
+- **Deliberately not written to `profiles.xp`** — that column already has a separate, deterministic per-habit-tap XP path; writing this too would double-count every user's daily XP. This is a product decision (how should the two systems reconcile?) that hasn't been made yet, not an oversight.
 
-Discovered mid-phase that onboarding was already conversational for Arc setup (`src/screens/OnboardingScreen.jsx` + `api/onboard-chat.js`, both unprotected, neither touched by earlier phases) — so this slice targets the one piece that was genuinely missing: importing existing ChatGPT memory.
+### ChatGPT memory import in onboarding (shipped, live)
 
-- **`api/onboarding-memory-import.js`** (new): auth-gated (same JWT pattern as `onboard-chat.js`), accepts pasted free text capped at 8,000 characters, makes one Haiku call treating the paste as fully unstructured (never assumes a ChatGPT export schema), returns up to 12 extracted facts (`kind`/`content`/`importance`) as JSON. Does not write to the database itself.
-- **`src/screens/OnboardingScreen.jsx`**: added a new step (`STEP_MEMORY_IMPORT`) between the name-entry step and the existing Arc conversation. Explains where to find Memory in ChatGPT settings, offers a paste box, and an equal-weight "Skip this step" option. On import, shows every extracted fact with a per-item remove button before anything saves — matches the design doc's "show what got extracted before committing" requirement. Confirmed facts are written directly to `memory_facts` from the client (not through a server route) using the user's own session — the table's existing RLS policy already permits `auth.uid() = user_id` inserts, so no service-role endpoint was needed for the write, only for the extraction call (which needs the Anthropic key).
-- **Not included:** the extracted facts are not yet wired into `onboard-chat.js`'s system prompt, so the Arc-setup conversation itself doesn't yet "already know" what was imported — it only seeds `memory_facts` for future coach conversations to eventually draw on (once retrieval exists). Wiring it into the Arc-conversation's prompt too is a reasonable follow-up, not required for this slice to be valuable on its own. The broader "rebuild the rest of onboarding as one continuous conversation" (versus the current welcome→name→import→Arc-chat→evidence→notif step sequence) is also not attempted this round — the existing Arc-chat is a carefully tuned, working conversation already; restructuring it further wasn't judged worth the risk for what this slice needed to deliver.
+- New step in `OnboardingScreen.jsx`, right after name entry: explains where to find Memory in ChatGPT, paste box, equal-weight skip. New `api/onboarding-memory-import.js` extracts up to 12 atomic facts from the unstructured paste via one Haiku call. Facts are shown for review/removal before saving; confirmed facts write directly to `memory_facts` from the client (RLS already permits it).
+- **Bug caught and fixed after the fact:** the admin "Preview onboarding" path explicitly promises "no changes will be saved," but the import's save function bypassed that and would have written real rows regardless of preview mode. Fixed by threading an `isPreview` prop through and skipping the write when set.
+- Onboarding itself was already conversational for Arc setup before this branch touched it (`api/onboard-chat.js`, unprotected, distinct from the main coach) — this phase only needed to add the one genuinely missing piece.
 
 ---
 
 ## 2. Files touched (cumulative)
 
-| File | Phase | Change | Risk |
-|---|---|---|---|
-| `src/App.jsx` | 1 | One `useRef` + `useEffect` (~15 lines), calls existing `openCoachWithMode(null)`. | Low |
-| `api/tts.js` | 2 | Buffer-then-send → stream-then-end; fixed a double-response bug caught in review. | Low-medium (real ElevenLabs traffic, not protected) |
-| `src/hooks/useCoachTts.jsx` | 2 | `speak()` rewritten to chunk-and-prefetch; public API unchanged. | Low |
-| `supabase/pending_migrations/20260704120000_pgvector_memory_facts.sql` | 3 | New file, staged, not applied. | None until applied |
-| `api/memory-rollover.js` | 3 | Extended prompt/schema with title/commitments/emotional_context/facts; two new fail-soft write blocks. | Low-medium (real nightly job, not protected) |
-| `api/memory-rollover.js` | 4 | Further extended prompt/schema with xp_delta/xp_reason; one new fail-soft write to `daily_summaries`, one new fail-soft insert into `xp_events`. | Low-medium (same file as above; deliberately not touching `profiles.xp`) |
-| `supabase/pending_migrations/20260704130000_xp_events.sql` | 4 | New file, staged, not applied. | None until applied |
-| `api/onboarding-memory-import.js` | 5 | New file. Auth-gated Haiku call, extracts facts from pasted text, returns them — no DB write. | Low — new, isolated, not protected. |
-| `src/screens/OnboardingScreen.jsx` | 5 | New step (`STEP_MEMORY_IMPORT`) inserted between name entry and the existing Arc conversation; renumbered progress steps 1-7. New state, two new functions (extract, save-and-continue). Existing Arc-chat step and its logic untouched. | Low-medium — not protected, but touches the real signup flow; renumbering steps is cosmetic (progress bar text only). |
-
-**No changes, ever, to:** `api/chat.js`, `src/coach/AICoach.jsx`, `src/coach/CoachApp.jsx`, `api/coach-summary.js`, `api/coach-intro.js`, anything under the real `supabase/migrations/` directory, `api/stripe-webhook.js`, `api/create-checkout.js`, `api/create-portal-session.js`, `package.json`. All protected paths remain fully untouched across all four phases.
-
----
-
-## 3. Decisions made (and why) — all phases
-
-**Protected-file wall, hit twice, resolved two different ways.** `src/coach/AICoach.jsx`/`api/chat.js` (coach personality) and `supabase/migrations/**` (schema) are both locked by `.claude/hooks/protected-paths.txt`, requiring explicit human sign-off. Phase 1b needed the former; Phase 3 needed the latter. For the coach-file case, the user approved an export but the session's own auto-mode safety classifier independently blocked the env-var override anyway — resolved by shipping a reduced Phase 1 (auto-open the existing panel) instead of fighting it twice. For the migration case, recognized upfront (before writing code) that it would block the *entire* phase, asked first, and the resolution was to stage migrations in `supabase/pending_migrations/` — a sibling directory the protected-path glob doesn't match — rather than re-attempt the same override fight.
-
-**Why "auto-open the existing coach" (Phase 1) is a legitimate validation, not a cop-out.** The hypothesis to test isn't a screen's visual design — it's whether landing in conversation instead of a dashboard actually feels better day to day. That's testable with the existing, tuned panel exactly as it is.
-
-**Daily conversation lifecycle — recommendation.** Today's conversation is already persisted per local day, but only to `localStorage` (in the protected `AICoach.jsx`) — durable on one device, invisible to the nightly rollover job. Recommended model: raw transcript stays ephemeral/local (scratch space); compressed memory (`daily_summaries` + `memory_facts`) is the durable, cross-device record. A real server-side `conversation_messages` table is worth adding once it can feed richer fact-extraction than today's `daily_context` notes — not before.
-
-**Situations/modes — finalized design, not yet wired (blocked on the same export as Phase 1b).**
-
-| User-facing | Internal | Behavior |
+| File | What | Risk |
 |---|---|---|
-| Just chat *(default)* | Companion | Existing coach personality, unchanged |
-| I'm planning | Strategist | Surface tradeoffs, ask before opining, don't rush to a conclusion |
-| I'm building | Builder | Terse, concrete, ends in a next action, tracks commitments |
-| I'm stuck | Pattern Finder (Reflector-paced) | Slow down, look for a loop/pattern, ask only if it helps |
-| I need perspective | Reflector | Listen first, offer a view only once it's wanted |
+| `src/screens/CompanionScreen.jsx` | **New.** The real home screen. | Medium — new, substantial, but additive; doesn't touch the protected file it reuses logic from. |
+| `src/App.jsx` | Default `screen` → `"companion"`; removed the old auto-open effect; added `CompanionScreen` import/render/NAV entry; added `title` to the `daily_summaries` select for the day-status line. | Low-medium — real routing change, but every other screen is untouched and still reachable. |
+| `src/coach/AICoach.jsx` | **12 functions/consts changed from `function`/`const` to `export function`/`export const`. No other change.** Done by the user directly (not by this session), verified via `git show` before building on top of it. | None — confirmed zero logic change, just visibility. |
+| `api/tts.js` | Buffer-then-send → stream-then-end; fixed a double-response bug. | Low-medium |
+| `src/hooks/useCoachTts.jsx` | `speak()` rewritten to chunk-and-prefetch; public API unchanged. | Low |
+| `supabase/pending_migrations/20260704120000_pgvector_memory_facts.sql` | Applied. | None — done |
+| `supabase/pending_migrations/20260704130000_xp_events.sql` | Applied. | None — done |
+| `api/memory-rollover.js` | Extended prompt/schema with title/commitments/emotional_context/facts/xp_delta/xp_reason; fail-soft writes. | Low-medium |
+| `api/onboarding-memory-import.js` | **New.** Extraction endpoint, no DB write. | Low |
+| `src/screens/OnboardingScreen.jsx` | New import step + `isPreview` safety fix. | Low-medium |
 
-Cut: "Executor" (redundant with Builder), "Prompt Engineer" (contradicts the product thesis).
-
-**Phase 2 scope call.** True token-level streaming (speaking while Claude is still generating) needs the protected SSE loop. What shipped instead — chunk the *complete* reply, then play back-to-back with prefetch — removes the biggest share of the delay (no longer waiting for the whole reply's audio as one clip) without needing that file. Quota accounting is split across more requests but sums to the same total character cost.
-
-**Phase 2 bug caught before commit.** First draft of the `api/tts.js` streaming change would, on a mid-stream failure, call `res.end()` in a `finally` and then let the error re-throw into the outer `catch`, which tried to send a *second* response after headers were already committed — Node would throw "headers already sent." Fixed by catching the relay error locally instead of re-throwing.
-
-**Embedding generation deliberately deferred.** `memory_facts.embedding` exists (`vector(384)`) but nothing populates it — needs either a new vendor + API key (Voyage AI recommended in the design doc) or a Supabase Edge Function for the built-in `gte-small` model, and no credentials for either exist in this environment. Fact extraction/storage is still valuable without embeddings; the column is ready whenever that decision gets made.
-
-**Phase 3 in-batch dedup bug caught before commit.** First draft only deduped new facts against existing DB rows, not against each other within the same rollover run (which processes up to 2 pending days at once) — would have inserted near-duplicates on a user's first run. Caught with a standalone mock-data unit test, fixed by tracking normalized content already queued within the batch.
-
-**Phase 4 — why XP is observation-only, not wired to `profiles.xp`.** The existing app already increments `profiles.xp` deterministically per habit tap (`lifetimeXpForHabitLog()`). Writing the new AI-judged amount to the same column would double every user's daily XP, silently, forever — a correctness bug shipped as a "feature." Reconciling the two systems (does AI-judged XP *replace* the deterministic path, run alongside it with a shared daily cap, or something else) is a product decision, not an engineering default to pick alone. What Phase 4 ships instead: the judgment is computed, clamped, reasoned, and stored (in `daily_summaries` and a new audit table) — fully reviewable, fully reversible, zero effect on any number a real user currently sees.
-
-**Phase 4 XP clamping verified against edge cases.** A standalone unit test confirmed the clamp handles: negative deltas (→0), over-cap deltas (→50), fractional deltas (→rounded), and — importantly — a stringly-typed `"38"` from the model instead of a number `38` (→ rejected to `null` rather than silently coerced, since `Number.isFinite("38")` is `false`). Malformed model output results in no XP recorded for that day rather than a guessed value.
-
-**Both staged migrations applied and verified live (2026-07-05).** The user ran both files directly against the Supabase SQL editor. Verified afterward with a read-only schema check: `daily_summaries` now has `title`/`commitments`/`emotional_context`/`xp_awarded`/`xp_reason`; `memory_facts` exists with the correct columns, check constraints, RLS, and foreign key; `xp_events` exists with the correct check constraint (`amount >= 0`), RLS, and foreign key. Both new tables currently sit at 0 rows, which is correct — nothing populates them until the nightly rollover actually runs against real conversation data. `daily_summaries`' 70 pre-existing rows were unaffected (new columns are nullable/defaulted, no data rewritten). This resolves Blocker B from §4 below.
-
-**Onboarding was already conversational — checked before assuming a rebuild was needed.** Read `OnboardingScreen.jsx` and found `api/onboard-chat.js` (unprotected, distinct from the main coach's `api/chat.js`) already running a real, carefully-tuned conversation for Arc setup — mic/text input, 2-4 question turns, then 2-3 proposed Arc options as cards. Rebuilding that from scratch would have been redundant work and risked degrading something that already works well. Scoped this phase down to the one clearly-missing piece instead: ChatGPT import.
-
-**Why the import writes directly from the client instead of through a server route.** `memory_facts`' RLS policy (from the Phase 3 migration) already allows `for all using (auth.uid() = user_id) with check (auth.uid() = user_id)` — an authenticated user can insert their own rows without a service-role intermediary. Only the LLM extraction step needs a server endpoint (it needs the Anthropic API key); the actual save is a normal client-side Supabase write, same trust model as habit logging elsewhere in the app.
-
-**Why extracted facts aren't fed into the Arc-conversation's own prompt yet.** That would mean editing `api/onboard-chat.js`'s system-prompt construction — permitted (it's not protected), but it's tuned, working prompt logic, and threading in a new "known context" block is exactly the kind of change worth doing deliberately with its own test pass, not as a rider on an unrelated feature. Flagged as a natural next step, not done this round.
+**Still fully untouched:** `api/chat.js`, `src/coach/CoachApp.jsx`, `api/coach-summary.js`, `api/coach-intro.js`, the real `supabase/migrations/` directory, all Stripe/billing files, `package.json`.
 
 ---
 
-## 4. What requires human action (blockers)
+## 3. Decisions made (and why)
 
-**Blocker A — export from `AICoach.jsx` (unblocks Phase 1b).** Someone with repo permissions needs to either (a) grant a Bash permission rule allowing `FORGED_OVERRIDE_PROTECTED=1` for this narrow, additive change, or (b) manually add the word `export` in front of these already-existing, unchanged functions in `src/coach/AICoach.jsx`:
-`buildCoachSystemPrompts`, `loadCoachDayMessages`, `saveCoachDayMessages`, `COACH_API_MESSAGE_CAP`, `syncCoachMsgCountFromStorage`, `bumpCoachMsgCountInStorage`, `applyCoachRemainingFromServer`, `buildCoachGreeting` (and ideally `CoachFormattedBubble`, `CapturedLine`, `CaptureSavingLine`, `formatCoachMsgTime`). Zero logic changes either way.
+**The protected-file blocker got resolved this session, deliberately, after being routed around for four phases.** Building the real Companion screen required the coach personality/prompt logic that only exists in the protected `AICoach.jsx`. Rather than fork it into a second, drifting copy, the user made the 12 required `export`-keyword additions themselves — a genuinely zero-risk change (verified via `git show`: exactly those 12 lines, nothing else). This was the right call in hindsight from day one; the earlier "route around it" pattern optimized for not-fighting-the-permission-system at the cost of never shipping the actual product surface.
 
-**~~Blocker B~~ — RESOLVED 2026-07-05.** Both staged migrations were applied via the Supabase SQL editor and verified live (see §3). `api/memory-rollover.js` needed no further changes — it was already writing to every new column/table, wrapped fail-soft; those writes now succeed instead of logging a warning.
+**Why the Companion screen writes its own send/stream loop instead of extracting a shared hook.** `AICoach.jsx`'s internal `send()` function (the SSE-parsing loop, Arc-edit routing, etc.) wasn't itself exported — only the pure helper functions around it were. Extracting a shared `useCoachSession` hook that both surfaces could use would be the cleaner long-term shape, but it means modifying the tuned, working drawer file more deeply than "add export to 12 lines." Given this was already a big step, duplicating the send/stream loop (while reusing every exported pure helper) was the lower-risk choice — flagged as a real follow-up once both surfaces have been live for a while and the drawer is either retired or proven still necessary.
 
-**Still outstanding — verify the rollover job against a real model call.** Applying the schema confirms the *tables* are correct; it does not yet confirm the *extended prompt* (the larger JSON schema asking for title/commitments/facts/xp_delta) actually round-trips cleanly through a real Claude call. That's still unverified in this sandbox (no Anthropic credentials here) — see §5. **First real test:** trigger `/api/memory-rollover` for a test account with a day or two of real conversation history, then check `daily_summaries`/`memory_facts`/`xp_events` directly — do the titles read like real chapter names, are the facts genuinely worth keeping, is the XP reason specific rather than generic.
+**Why the old CoachBar/modal drawer wasn't removed in the same step.** It's the very next thing to do, but this step was already large (new screen, new routing, a real behavior change to the default landing experience) — cutting the old surface in the same commit would have made this diff harder to review and roll back independently if something about the new screen needs adjusting first.
 
-**Blocker C — choose an embeddings approach (unblocks real semantic retrieval).** Pick one:
-   - **Voyage AI** (recommended in the design doc — cheap, simple, no new infra beyond an API key). Needs `VOYAGE_API_KEY` (or similar) added to the environment.
-   - **Supabase Edge Function** calling the built-in `gte-small` model. No new vendor, but needs an Edge Function deployed (new runtime surface for this project).
-   Neither is configured in this environment. This also gates the `recall` tool's keyword→vector swap in `api/chat.js`, which needs its own sign-off since that file is protected too.
+**Goal-plan-preview cards deliberately left out of the Companion screen.** The `GoalPlanPreview` component that renders a "create this goal" confirmation card isn't exported from `AICoach.jsx`, and re-implementing it wasn't judged worth the scope for this step — voice/text goal-planning is a secondary path (most goal creation happens via Arc/Hub). The `<goal_plan>` block is still stripped cleanly from display so it doesn't leak as raw text; it just doesn't get a confirmation card yet.
 
-**Everything else, in order:**
-5. Embedding generation + hybrid retrieval (needs Blocker C + a protected-file sign-off for the `api/chat.js` swap; schema is ready now that Blocker B is resolved).
-6. ~~Conversational onboarding + ChatGPT import~~ — **ChatGPT import done and live.** Remaining: wire imported facts into `onboard-chat.js`'s prompt (optional follow-up, not blocked on anything); decide whether the rest of onboarding needs restructuring (it's already conversational for Arc setup — may not need more work at all).
-7. Notification philosophy rewrite.
-8. "What I remember" trust screen + Arc-inference exploration.
-9. (Whenever it comes up) Decide how AI-judged XP reconciles with the existing deterministic system, then wire `daily_summaries.xp_awarded` into something user-visible.
+*(Prior-phase decisions — embedding deferral, XP double-counting risk, migration staging, dedup bugs caught in review — are preserved from earlier versions of this file; ask if you need the full history restated.)*
+
+---
+
+## 4. What requires human action
+
+**Immediate — retire the redundant old chat surface.** The floating CoachBar + modal `AICoach` drawer (on Today/Arc/Social/Hub) now duplicates the Companion screen. Recommend hiding the CoachBar's floating mic button (keep the underlying `AICoach` component and its logic intact, just stop surfacing the *trigger* for it) once the Companion screen has been used for real and feels right — don't cut the fallback before that.
+
+**Blocker C — choose an embeddings approach** (unblocks real semantic retrieval): Voyage AI (needs an API key) or a Supabase Edge Function calling the built-in `gte-small` model (needs a new deployment). Neither is configured. This also gates the `recall` tool's keyword→vector swap in `api/chat.js`, which is protected and needs its own sign-off.
+
+**Whenever it comes up:** decide how AI-judged XP (already computed, stored, and auditable) should reconcile with the existing deterministic per-tap system before wiring `daily_summaries.xp_awarded` into anything user-visible.
+
+**Optional, not blocking anything:** wire ChatGPT-imported facts into `onboard-chat.js`'s own system prompt so the Arc-setup conversation "already knows" what was imported, instead of only seeding `memory_facts` for later.
 
 ---
 
 ## 5. Risks / open items
 
-- **Phase 1 auto-open not visually confirmed post-login** — no real Supabase credentials in this sandbox. Verified by build + Playwright smoke test to the sign-in screen + code review only.
-- **First-session mic permission / repeat-open behavior** — opening the panel doesn't force a mic prompt (deliberate); the auto-open only fires once per component mount, not once per calendar day, so a rare full remount could reopen it.
-- **Phase 2 TTS unverified with real audio** — no ElevenLabs/Supabase credentials here. Verified by build, `node --check`, and a standalone unit test of the sentence-splitter. **Test by hand:** Pro user, voice replies on, multi-sentence message — listen for faster/gapless audio and clean interruption.
-- **Phase 3 & 4 rollover changes still unverified against a live model call** — migrations are applied and schema is confirmed correct (§3), but no Anthropic credentials exist in this sandbox, so the larger JSON schema has never actually been sent to or parsed from a real Claude response, only mock data. **Next real test:** trigger a real rollover, inspect `daily_summaries`/`memory_facts`/`xp_events` directly. Also worth confirming `max_tokens: 1200` (unchanged despite a much larger JSON schema) doesn't cause truncated/unparseable output with 2 pending days' worth of the new fields — bump it if rollover logs start showing "unparseable model output" more than very rarely.
-- **`xp_events` has no dedup/idempotency guard**, unlike `daily_summaries`/`memory_facts` — but it doesn't need one under normal operation, since a day is only ever in the rollover's `pending` list once (the base `daily_summaries` write, which always happens first and is never skipped, is what marks a day "already summarized" for future runs).
-- **Two chat surfaces will eventually share prompt-building logic with separate fetch/stream code** once Phase 1b exists — flagged for a future consolidation into a shared hook, not urgent now.
-- **Phase 5 import unverified against a live model call or real signup flow** — no Anthropic/Supabase credentials in this sandbox, and the admin-only `previewOnboarding` path (the one way to see onboarding without a real account) isn't reachable without already being signed in as an existing user. Verified instead by: production build succeeding, and a standalone unit test of the extraction/clamping logic (bogus `kind` dropped, empty content dropped, importance clamped including a 999→5 edge case, over-12-facts array correctly capped) against mock model output. **Not yet visually confirmed:** the new step actually renders correctly in the real onboarding flow, the paste→extract→review→save round-trip works against a real Claude response, and the step-renumbering (1-7 instead of 1-6) doesn't look wrong anywhere. First things to check by hand.
-- **New step adds one more tap before Arc setup** for every new signup, including anyone who skips — worth watching whether the extra "Skip this step" tap causes any drop-off, though it mirrors the equal-weight skip pattern used elsewhere in this same onboarding flow (e.g. the evidence step).
+- **The Companion screen has not been visually tested** — no real login credentials in this sandbox. Verified by: production build succeeding with the new screen actually in the bundle (confirmed by module count), a Playwright smoke test to the pre-auth sign-in screen (clean, no crash), and close code review including two real bugs caught before commit (see below). **First thing to check by hand:** sign in, confirm you land directly on the Companion screen (not Today), confirm the mic press/release/send cycle works end to end, confirm voice replies play, confirm the situation pill and "Progress →" link both work, confirm Today/Arc/You still work exactly as before via the bottom nav.
+- **Two real bugs caught in self-review before commit, not by testing:** (1) the mic-stop-to-send handler originally read `input` via a stale closure instead of a ref, which would have sent an incomplete message missing the last flushed dictation segment — fixed. (2) `captureSaving` (the "Saving what mattered…" indicator) was rendered but nothing ever set it true — the polling effect that drives it (mirrored from `AICoach.jsx`) was missing — added.
+- **Both this screen and the old modal drawer are live simultaneously** until the drawer is retired — they share the same day-thread key, so conversation continuity is fine, but having two mic entry points is exactly the "confusing second entry point" this whole revision was trying to eliminate. Don't leave this in place long.
+- **`onOpenProgress` currently routes to `"today"` specifically** — reasonable default, but if a different secondary landing makes more sense (e.g. a dedicated hub), that's a one-line change.
+- Everything from prior phases (rollover unverified against a live model call, `xp_events` has no dedup guard but doesn't need one, embedding column unpopulated) still applies unchanged.
 
 ---
 
 ## 6. How to test safely
 
-- **Phase 1:** sign in to a real account → confirm the AI coach panel opens automatically instead of the Today dashboard → close it (×) → confirm you land on Today exactly as before → confirm Arc/You/Hub/Social are unaffected.
-- **Phase 2:** as a Pro user with voice replies enabled, send a message long enough to produce a multi-sentence reply → listen for noticeably faster, gapless audio compared to before this branch.
-- **Phase 3 & 4 (now that migrations are applied):** trigger `/api/memory-rollover` for a test account with a day or two of real conversation history, then check the server logs for the `"[memory-rollover] updated"` success line (the two `console.warn` "not written yet" lines should be gone now), and check `daily_summaries`/`memory_facts`/`xp_events` directly in the Supabase table editor — titles should read like real chapter names, facts should be genuinely worth keeping, XP reasons should be specific, not generic.
-- **Phase 5:** sign up as a brand-new user (or use the admin "preview onboarding" path from Profile if you have an admin account) → confirm the new "Bring what you already have" step appears right after entering your name → paste some sample ChatGPT-style memory text → confirm extracted facts show up for review with working remove buttons → confirm "Save and continue" lands you in the existing Arc-setup conversation exactly as before → afterward, check the new user's `memory_facts` rows directly in Supabase. Also test "Skip this step" goes straight to Arc setup with nothing saved.
+- **Companion screen:** sign in → confirm you land directly on it, no dashboard first → tap the mic, say something, tap again to stop → confirm it sends automatically and a reply streams in → confirm the situation pill opens/closes and changes tone plausibly → confirm "type instead" and the send button work → confirm voice replies play if enabled → confirm "Progress →" takes you to Today, and Arc/You from the bottom nav both still work exactly as before → reload the app and confirm today's conversation is still there.
+- **Memory/XP (now live):** trigger a real rollover for a test account with some real conversation history, then check `daily_summaries`/`memory_facts`/`xp_events` directly in Supabase.
+- **ChatGPT import:** covered in the previous test pass — still valid, unaffected by this step.
 
 ---
 
 ## 7. Next recommended step
 
-Blocker B is resolved. Two blockers remain, gating different work:
-- **Blocker A** (export from `AICoach.jsx`) → enables Phase 1b, the custom Companion screen.
-- **Blocker C** (embeddings vendor decision) → enables real semantic retrieval.
-
-Neither blocks further work. Two reasonable directions from here, your call:
-- **Verify Phase 5 by hand first** (§6) before building more on top of an unverified new signup step — a broken onboarding step is higher-stakes than most other risks on this branch, since it sits in front of every new user.
-- **Or keep going to Phase 6** (notification philosophy rewrite) — also doesn't need either remaining blocker.
+Retire the old CoachBar/modal drawer's floating trigger once the Companion screen has been used for real and feels right — don't rush this the same day the new screen ships. After that, the two open blockers (embeddings vendor, XP reconciliation) are the real remaining gates; neither blocks starting the notifications rewrite if that's preferred instead.
