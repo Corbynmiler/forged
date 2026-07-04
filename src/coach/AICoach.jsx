@@ -380,7 +380,7 @@ function buildTodaySnapshot(habits, goals, today) {
  * and a VOLATILE part (today's snapshot, logged flags — changes every turn,
  * never cached). Returns { stable, volatile }.
  */
-function buildCoachSystemPrompts(user, habits, coachName, screen, goals = [], journalEntries = [], activeBlock = null, memory = null) {
+export function buildCoachSystemPrompts(user, habits, coachName, screen, goals = [], journalEntries = [], activeBlock = null, memory = null) {
   const name = user?.name || "there";
   const coach = coachName || "Coach";
   const today = todayStr();
@@ -619,7 +619,7 @@ ${journalEntries.slice(0, 5).map(e => `[${e.date}] "${e.content.slice(0, 200)}${
 const COACH_LS_RESET = "coach_reset_date";
 const COACH_LS_MSGS = "coach_msgs_today";
 
-function syncCoachMsgCountFromStorage() {
+export function syncCoachMsgCountFromStorage() {
   try {
     const today = todayStr();
     let reset = localStorage.getItem(COACH_LS_RESET) || "";
@@ -636,7 +636,7 @@ function syncCoachMsgCountFromStorage() {
   }
 }
 
-function bumpCoachMsgCountInStorage() {
+export function bumpCoachMsgCountInStorage() {
   try {
     const n = syncCoachMsgCountFromStorage() + 1;
     localStorage.setItem(COACH_LS_MSGS, String(n));
@@ -647,7 +647,7 @@ function bumpCoachMsgCountInStorage() {
 }
 
 /** Sync client quota from server `remaining` (authoritative after each chat response). */
-function applyCoachRemainingFromServer(remaining) {
+export function applyCoachRemainingFromServer(remaining) {
   if (typeof remaining !== "number" || !Number.isFinite(remaining)) return null;
   const used = Math.max(0, FREE_DAILY_LIMIT - remaining);
   try {
@@ -660,13 +660,13 @@ function applyCoachRemainingFromServer(remaining) {
 const COACH_STREAM_ID = "__streaming__";
 /** One rolling thread per user per local calendar day; trimmed for storage + display. Server still uses last 12 msgs only. */
 const COACH_DAY_MAX_MESSAGES = 24;
-const COACH_API_MESSAGE_CAP  = 12;
+export const COACH_API_MESSAGE_CAP  = 12;
 
 function coachDayLocalKey(userId, dayYmd) {
   return `forged_coach_day:v1:${userId}:${dayYmd}`;
 }
 
-function loadCoachDayMessages(userId) {
+export function loadCoachDayMessages(userId) {
   if (!userId) return null;
   const day = todayStr();
   try {
@@ -685,7 +685,7 @@ function loadCoachDayMessages(userId) {
   }
 }
 
-function saveCoachDayMessages(userId, dayYmd, messages) {
+export function saveCoachDayMessages(userId, dayYmd, messages) {
   if (!userId || !dayYmd) return;
   try {
     const cleaned = messages
@@ -796,7 +796,7 @@ function CapturedChip({ item, onNavigateTo, onClose }) {
  * Expanded: one navigable row per item.
  * Server truth only (structured items from api/chat.js) — never model wording.
  */
-function CapturedLine({ items, onNavigateTo, onClose }) {
+export function CapturedLine({ items, onNavigateTo, onClose }) {
   const [open, setOpen] = useState(false);
   const list = Array.isArray(items) ? items : [];
   if (!list.length) return null;
@@ -864,7 +864,7 @@ function CapturedLine({ items, onNavigateTo, onClose }) {
 }
 
 /** Shown while the server executes capture tools after reply text has streamed. */
-function CaptureSavingLine() {
+export function CaptureSavingLine() {
   return (
     <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6, maxWidth: "100%" }}>
       <div style={{
@@ -918,7 +918,7 @@ function CoachReceiptChips({ receiptText, onNavigateTo, onClose }) {
   );
 }
 
-function CoachFormattedBubble({ text, isUser, muted }) {
+export function CoachFormattedBubble({ text, isUser, muted }) {
   const baseColor = muted ? T.sub : (isUser ? "#fff" : T.text);
   const strongColor = muted ? T.muted : (isUser ? "#fff" : T.text);
   const paras = String(text || "").split(/\n\n+/);
@@ -962,7 +962,7 @@ function CoachFormattedBubble({ text, isUser, muted }) {
 }
 
 /** Coach chat bubble footer — e.g. "3:05 pm" */
-function formatCoachMsgTime(ts) {
+export function formatCoachMsgTime(ts) {
   if (ts == null || !Number.isFinite(ts)) return "";
   const d = new Date(ts);
   let h = d.getHours();
@@ -990,7 +990,7 @@ function buildNormalCoachOpener({ name, activeBlock = null }) {
   return `${hi}. Tell me about your day — talk or type, mess is fine. I'll keep what matters.`;
 }
 
-function buildCoachGreeting({ name, habits = [], goals = [], activeBlock = null }) {
+export function buildCoachGreeting({ name, habits = [], goals = [], activeBlock = null }) {
   return buildNormalCoachOpener({ name, activeBlock });
 }
 
