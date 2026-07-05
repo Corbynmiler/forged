@@ -29,12 +29,24 @@ export function shouldUseSpeechOnlyMicPath() {
  * Chromium: Web Speech often returns "service-not-allowed" if the tab never obtained mic access
  * via getUserMedia. We briefly open the mic, stop tracks, then start SR (no parallel capture).
  * Skip for pure Safari / WebKit-only UAs to avoid an extra permission prompt on iOS/macOS Safari.
+ *
+ * Skip entirely on iOS, regardless of browser chrome (Chrome/Edge/Firefox on iOS are all
+ * required by Apple to run on WebKit under the hood — "CriOS" is just Chrome's UI wrapper around
+ * the same engine Safari uses). The `await navigator.mediaDevices.getUserMedia(...)` priming step
+ * below is async, and by the time it resolves — after the user has tapped "Allow" on the
+ * permission dialog — the original synchronous user-gesture context from the tap is gone.
+ * WebKit's SpeechRecognition.start() requires that synchronous gesture on iOS; calling it after
+ * an awaited permission prompt makes it silently do nothing (permission granted, recognition
+ * never actually starts — no error, no transcript). Real Safari never hit this because it already
+ * skipped priming (`pureWebKitSafari` below); iOS Chrome/Edge/Firefox wrongly matched the
+ * Chromium-priming branch since their UA also contains "Chrome" et al.
  */
 export function shouldPrimeMicBeforeWebSpeech() {
   if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return false;
   const ua = navigator.userAgent || "";
   // Android: skip GUM prime — it often still ends in service-not-allowed; SR-only is enough once site policy allows it.
   if (/Android/i.test(ua)) return false;
+  if (isAppleMobileDevice()) return false;
   const hasChromiumToken = /Chrome|Chromium|Edg|OPR|CriOS|Brave/i.test(ua);
   const pureWebKitSafari = /Safari/i.test(ua) && !/Chrome|Chromium|CriOS|Edg|OPR|Brave/i.test(ua);
   return hasChromiumToken && !pureWebKitSafari;
@@ -118,6 +130,22 @@ export function speechMicStartFailedMessage() {
     return "Microphone didn't start in the installed app. Copy the link and open Forged in Safari, or type instead.";
   }
   return "Voice input didn't start. Allow the microphone for this site and try again, or type instead.";
+}
+
+/** iOS browser wrapper (Chrome/Edge/Firefox on iPhone) — same WebKit engine as Safari underneath,
+ *  but real-world voice-start reliability there lags actual Safari. Named explicitly rather than
+ *  folded into the generic "didn't start" message so the user knows Safari is the reliable option. */
+function isIosNonSafariBrowser() {
+  if (typeof navigator === "undefined") return false;
+  return isAppleMobileDevice() && /CriOS|FxiOS|EdgiOS|OPiOS/i.test(navigator.userAgent || "");
+}
+
+/** Shown when recognition silently never starts (permission resolves, but no onstart/onerror fires). */
+export function speechStartWatchdogMessage() {
+  if (isIosNonSafariBrowser()) {
+    return "Voice input isn't starting reliably in this browser on iPhone. Open Forged in Safari for voice input, or type instead.";
+  }
+  return "Voice input didn't start. Try tapping the mic again, or type instead.";
 }
 
 /**
@@ -538,7 +566,22 @@ export function useSpeechInput(onFinal, opts = {}) {
       /* some engines cap or ignore */
     }
 
+    // Watchdog for a silent start failure: some iOS browser wrappers resolve the
+    // getUserMedia/permission prompt but then never fire onstart or onerror at all —
+    // recognition just never actually begins, with nothing to catch/report. Never
+    // silently leave the user tapping a mic that does nothing (see speechStartWatchdogMessage).
+    let startedOk = false;
+    const startWatchdog = setTimeout(() => {
+      if (startedOk || R.current.recog !== recog) return;
+      console.warn("[speech] recognition never fired onstart within 4s — treating as a start failure");
+      errorOccurredRef.current = true;
+      setSpeechError(speechStartWatchdogMessage());
+      stopAll();
+    }, 4000);
+
     recog.onstart = () => {
+      startedOk = true;
+      clearTimeout(startWatchdog);
       markSpeechSucceededInSession();
       pendingInterimRef.current = "";
       setMicBlocked(false);
@@ -589,6 +632,8 @@ export function useSpeechInput(onFinal, opts = {}) {
     };
 
     recog.onerror = (ev) => {
+      startedOk = true; // a real error is not a silent failure — don't let the watchdog also fire
+      clearTimeout(startWatchdog);
       const code = ev?.error || "";
       if (code === "aborted") return;
       // In auto-restart mode "no-speech" is the *expected* nudge to
@@ -642,6 +687,8 @@ export function useSpeechInput(onFinal, opts = {}) {
       recog.start();
       if (stream) startVolumeMeter(stream);
     } catch (e) {
+      startedOk = true;
+      clearTimeout(startWatchdog);
       console.warn("[speech] recog.start:", e);
       setSpeechError(speechMicStartFailedMessage());
       stopAll();

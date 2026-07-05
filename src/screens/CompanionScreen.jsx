@@ -37,7 +37,7 @@ import {
 // which means the reply needs the same range: observations, analysis,
 // explanations, stories, connections to what it remembers — not a reflex
 // question every turn. ──
-const RESPONSE_STYLE_STEER = "RESPONSE STYLE: Match the range of a sharp, well-read conversational partner, not a coaching app's follow-up loop. Most replies should NOT end in a question — lead with a real observation, an honest take, an explanation, a relevant story or analogy, or a connection to something you remember about them. Ask a question only when you genuinely need the answer to help, not as a reflex closer on every turn. Vary the shape and length of your replies to match the weight of what they said — a throwaway comment gets a throwaway reply, a real problem gets real thought.";
+const RESPONSE_STYLE_STEER = "RESPONSE STYLE: Match the range of a sharp, well-read conversational partner, not a coaching app's follow-up loop. THIS IS A HARD CONSTRAINT, NOT A SOFT PREFERENCE: do not end your reply with a question by default. Before you add a question, ask yourself whether you actually need the answer to help — if you're not sure, don't ask it. Lead with a real observation, an honest take, an explanation, a relevant story or analogy, or a connection to something you remember about them. Vary the shape and length of your replies to match the weight of what they said — a throwaway comment gets a throwaway reply, a real problem gets real thought.";
 
 // ── Situations — designed around how the user actually reaches for AI, not
 // generic coaching postures. Each one asks for a genuinely different
@@ -46,22 +46,39 @@ const RESPONSE_STYLE_STEER = "RESPONSE STYLE: Match the range of a sharp, well-r
 // text is appended to the cached system_stable block; retrieval, memory, and
 // XP stay identical across situations. ──
 const SITUATIONS = [
-  { id: "chat",     label: "Just chat", steer: "This is open, undirected conversation. Respond like a sharp, well-read friend would: react to what's actually interesting in what they said, bring your own honest take or a connection to something you know about their life, and let a question arise naturally only when you're truly curious or it would genuinely help — don't default to one every turn." },
-  { id: "build",    label: "Build",     steer: "Founder/execution mode — products, code, marketing, shipping. Be terse and concrete: assume real competence and skip the preamble. Respond like a sharp co-founder in the middle of building something, not a coach — reflect exactly what's been done, name the specific next action or decision, and give a direct, practical, opinionated technical or marketing take rather than open-ended exploration. Ask a question only if it's genuinely blocking the next step; default to moving things forward, not clarifying." },
-  { id: "think",    label: "Think",     steer: "Long-form thinking mode — go deep instead of asking another question. Take real space: develop an idea across several sentences or a full paragraph, tell a relevant story or analogy, and actively connect what they're saying now to things you remember about them. Depth is the point of this mode specifically — a short, safe, one-line reply is a failure here even where it would be perfectly fine in another mode." },
-  { id: "decide",   label: "Decide",    steer: "Decision-support mode. Don't just lay out neutral tradeoffs — have an actual opinion and say what you'd do and why. Challenge the framing if it's wrong, push back on weak reasoning, and name the strongest case against whatever they seem to be leaning toward. The goal is a sharper decision, not a balanced list — hedge only where the honest answer really is \"it depends,\" never as a default posture." },
-  { id: "reflect",  label: "Reflect",   steer: "Reflective/journal mode — weekly-review energy, not a single-message answer. Look for patterns across what you remember (recent days, recurring themes, things they keep circling back to) and name them plainly, as an observation, not a question. Noticing a trend they haven't said out loud themselves is worth more here than asking how they're feeling." },
+  {
+    id: "chat", label: "Just chat", desc: "Normal conversation, mate-to-mate.",
+    steer: "This is normal, mate-to-mate conversation — no agenda. React like a sharp, well-read friend: give an honest take, notice what's actually interesting, connect it to something you know about their life. A question is fine sometimes, but it is never the default move — most turns should end on a thought, not a question mark.",
+  },
+  {
+    id: "build", label: "Build", desc: "Practical and direct — product & execution.",
+    steer: "Founder/execution mode: products, code, marketing, shipping. Talk like a co-founder mid-build, not a coach — terse, direct, practical. Assume competence, skip preamble, skip encouragement. Say exactly what you'd actually do next and why. Do not ask a clarifying question unless the next action is genuinely impossible to name without one — default to giving direction, not gathering more information.",
+  },
+  {
+    id: "think", label: "Think", desc: "Long-form, connects the dots, big picture.",
+    steer: "Long-form thinking mode. This is the one mode where a short reply is simply wrong. Take real space — develop the idea, draw connections across things you remember about them, use a story or analogy if one genuinely fits, zoom out to the bigger picture. Never end on a question here — end on a thought, a synthesis, or a next thing worth considering.",
+  },
+  {
+    id: "decide", label: "Decide", desc: "Real opinions, tradeoffs, no fence-sitting.",
+    steer: "Decision mode: help them choose. State a real opinion — what you'd actually do — before you list tradeoffs, not instead of them. Name the strongest argument against the option they seem to want. Do not sit on the fence and do not hand the decision back to them with a question — that's the one failure mode of this specific mode.",
+  },
+  {
+    id: "reflect", label: "Reflect", desc: "Journal mode — what mattered, what changed.",
+    steer: "Journal/memory mode — weekly-review energy. Look back across what you remember: recent days, recurring themes, things they keep circling back to. Pull out what actually mattered and what's changed, and say so plainly, as an observation — not a question. This is about noticing patterns they haven't said out loud, not prompting them to share more.",
+  },
 ];
 
 const STREAM_ID = "__companion_stream__";
 
+// Casual, not formal — "Morning." reads like a text from a friend;
+// "Good morning." reads like a formal card. Matches the tone the rest of
+// this greeting is now written in.
 function timeOfDayGreeting() {
   const h = new Date().getHours();
   if (h < 5) return "Still up";
-  if (h < 12) return "Good morning";
-  if (h < 17) return "Good afternoon";
-  if (h < 21) return "Good evening";
-  return "Good evening";
+  if (h < 12) return "Morning";
+  if (h < 17) return "Afternoon";
+  return "Evening";
 }
 
 // Older daily_summaries rows (written before the rollover prompt produced a
@@ -119,9 +136,13 @@ function latestDayTitle(recentSummaries) {
 // glow that reacts to what's actually happening. Tapping it toggles the mic
 // (press to talk, press to stop — stopping sends). Deliberately restrained
 // rather than "busy": a clean circular core (no distortion — a warped shape
-// reads as an accident, not fire), a soft ambient bloom that breathes, and a
-// couple of quiet sonar-style rings that only appear while listening or
-// speaking. States are visually distinct:
+// reads as an accident, not intentional), a soft ambient bloom that breathes,
+// and a couple of quiet sonar-style rings that only appear while listening
+// or speaking. Palette is "Moonstone" — pale lavender-white cooling to a
+// muted slate edge — chosen over the original warm orange/gold specifically
+// to read as calm and premium rather than a literal fireball; the name
+// "Ember" is now just this component's internal identifier, not a design
+// commitment to fire as a metaphor. States are visually distinct:
 //  - idle: slow, quiet breathing — waiting. A couple of faint sparks drift up.
 //  - listening: brighter, tighter breathing + expanding rings; real mic
 //    amplitude layers on top where the browser provides it (desktop).
@@ -159,7 +180,7 @@ function Ember({ state, onTap, ringRef, coreRef, label }) {
       {showSparks ? EMBER_SPARKS.map((s, i) => (
         <div key={i} aria-hidden style={{
           position: "absolute", left: s.left, bottom: "60%", width: 3, height: 3, borderRadius: "50%",
-          background: "radial-gradient(circle, #FFF6DE 0%, #F3C35E 60%, transparent 100%)",
+          background: "radial-gradient(circle, #F5F3FC 0%, #C4C0E6 60%, transparent 100%)",
           animation: `emberSpark ${s.dur} ease-in infinite`, animationDelay: s.delay, opacity: 0,
         }} />
       )) : null}
@@ -169,7 +190,7 @@ function Ember({ state, onTap, ringRef, coreRef, label }) {
         {showRings ? [0, 1].map(i => (
           <div key={i} aria-hidden style={{
             position: "absolute", inset: 0, borderRadius: "50%",
-            border: `1px solid rgba(243,195,94,${state === "speaking" ? 0.3 : 0.38})`,
+            border: `1px solid rgba(196,192,230,${state === "speaking" ? 0.3 : 0.36})`,
             animation: "emberRingPulse 2.2s ease-out infinite",
             animationDelay: `${i * 1.1}s`,
           }} />
@@ -182,20 +203,20 @@ function Ember({ state, onTap, ringRef, coreRef, label }) {
           data-ember-state={state}
           style={{
             position: "absolute", inset: -4, borderRadius: "50%",
-            background: "radial-gradient(circle, rgba(243,195,94,0.42) 0%, rgba(217,140,59,0.16) 45%, transparent 72%)",
+            background: "radial-gradient(circle, rgba(196,192,230,0.40) 0%, rgba(150,146,190,0.16) 45%, transparent 72%)",
             filter: "blur(14px)",
             animation: auraAnim,
           }}
         />
 
-        {/* core — a clean, deliberate circle: hot highlight cooling to a warm copper edge */}
+        {/* core — a clean, deliberate circle: soft pale-lavender highlight cooling to a muted slate edge (Moonstone palette) */}
         <div
           ref={coreRef}
           aria-hidden
           style={{
             position: "absolute", width: "56%", height: "56%", borderRadius: "50%",
-            background: "radial-gradient(circle at 35% 30%, #FFFDF6 0%, #FDE9B8 12%, #F3C35E 32%, #D98C3B 58%, #A85A26 82%, #6B3414 100%)",
-            boxShadow: "0 0 26px rgba(243,195,94,0.45), 0 0 56px rgba(217,140,59,0.22)",
+            background: "radial-gradient(circle at 35% 30%, #FFFFFF 0%, #F3F1FA 14%, #D9D6EC 36%, #B8B4D6 60%, #8D89AE 84%, #5C5A78 100%)",
+            boxShadow: "0 0 26px rgba(196,192,230,0.42), 0 0 56px rgba(150,146,190,0.20)",
           }}
         />
 
@@ -231,6 +252,19 @@ export function CompanionScreen({
 
   const [situation, setSituation] = useState(SITUATIONS[0].id);
   const [showSituations, setShowSituations] = useState(false);
+  // Briefly surfaces the picked mode's one-line description right after
+  // selection, so switching modes is felt immediately — not just something
+  // that quietly changes what the next reply happens to look like.
+  const [modeHintVisible, setModeHintVisible] = useState(false);
+  const modeHintTimerRef = useRef(null);
+  function pickSituation(id) {
+    setSituation(id);
+    setShowSituations(false);
+    setModeHintVisible(true);
+    window.clearTimeout(modeHintTimerRef.current);
+    modeHintTimerRef.current = window.setTimeout(() => setModeHintVisible(false), 3200);
+  }
+  useEffect(() => () => window.clearTimeout(modeHintTimerRef.current), []);
   const [showTextInput, setShowTextInput] = useState(false);
 
   const [messages, setMessages] = useState(() => (user?.id ? loadCoachDayMessages(user.id) || [] : []));
@@ -602,20 +636,25 @@ export function CompanionScreen({
       `}</style>
 
       {/* Situation pill — top right, quiet, collapsed by default */}
-      <div style={{ position: "absolute", top: "calc(env(safe-area-inset-top, 0px) + 4px)", right: 4, zIndex: 20 }}>
+      <div style={{ position: "absolute", top: "calc(env(safe-area-inset-top, 0px) + 4px)", right: 4, zIndex: 20, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
         <button type="button" onClick={() => setShowSituations(o => !o)}
           style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 20, border: `0.5px solid ${T.borderStrong}`, background: T.raised, color: T.sub, fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: T.font }}>
           {SITUATIONS.find(s => s.id === situation)?.label}
           <span style={{ fontSize: 9, opacity: 0.6 }}>▾</span>
         </button>
         {showSituations ? (
-          <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, background: T.raised, border: `0.5px solid ${T.borderStrong}`, borderRadius: T.rsm, padding: 6, minWidth: 168, boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
+          <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, background: T.raised, border: `0.5px solid ${T.borderStrong}`, borderRadius: T.rsm, padding: 6, minWidth: 210, boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
             {SITUATIONS.map(s => (
-              <button key={s.id} type="button" onClick={() => { setSituation(s.id); setShowSituations(false); }}
-                style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 10px", borderRadius: 8, border: "none", background: s.id === situation ? "rgba(200,144,42,0.12)" : "none", color: s.id === situation ? T.gold : T.text, fontSize: 13, cursor: "pointer", fontFamily: T.font }}>
-                {s.label}
+              <button key={s.id} type="button" onClick={() => pickSituation(s.id)}
+                style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 10px", borderRadius: 8, border: "none", background: s.id === situation ? "rgba(200,144,42,0.12)" : "none", cursor: "pointer", fontFamily: T.font }}>
+                <div style={{ color: s.id === situation ? T.gold : T.text, fontSize: 13, fontWeight: 600 }}>{s.label}</div>
+                <div style={{ color: T.muted, fontSize: 11, marginTop: 1, lineHeight: 1.35 }}>{s.desc}</div>
               </button>
             ))}
+          </div>
+        ) : !showSituations && modeHintVisible ? (
+          <div style={{ animation: "companionFadeIn 0.25s ease", maxWidth: 190, textAlign: "right", background: T.raised, border: `0.5px solid ${T.borderStrong}`, borderRadius: T.rsm, padding: "6px 10px" }}>
+            <div style={{ color: T.muted, fontSize: 11, lineHeight: 1.35 }}>{SITUATIONS.find(s => s.id === situation)?.desc}</div>
           </div>
         ) : null}
       </div>
@@ -628,9 +667,10 @@ export function CompanionScreen({
                 {dayTitle}
               </div>
             ) : null}
-            <div style={{ fontFamily: T.serif, fontSize: 21, color: T.text, lineHeight: 1.5 }}>
-              <div>{greeting.text}</div>
-              <div style={{ marginTop: 10 }}>{greeting.closer}</div>
+            {/* Deliberately T.font at body size, not T.serif at display size — a
+                greeting is something a friend says to you, not a poster headline. */}
+            <div style={{ fontFamily: T.font, fontSize: 16.5, fontWeight: 400, color: T.text, lineHeight: 1.6, maxWidth: 300, margin: "0 auto" }}>
+              {greeting.text} <span style={{ color: T.sub }}>{greeting.closer}</span>
             </div>
           </div>
         ) : (
@@ -678,6 +718,10 @@ export function CompanionScreen({
             </div>
             {captureSaving ? <div style={{ textAlign: "center", marginTop: 8 }}><CaptureSavingLine /></div> : null}
             {error ? <div style={{ textAlign: "center", fontSize: 12, color: T.accent, marginTop: 10 }}>{error}</div> : null}
+            {/* Previously swallowed entirely — a misconfigured/unreachable TTS
+                backend (e.g. ELEVENLABS_API_KEY unset) failed with no visible
+                sign at all beyond "the reply just never gets spoken." */}
+            {coachTts.ttsError ? <div style={{ textAlign: "center", fontSize: 12, color: T.accent, marginTop: 10 }}>{coachTts.ttsError}</div> : null}
           </div>
         )}
 
