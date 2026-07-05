@@ -77,24 +77,24 @@ const RESPONSE_STYLE_STEER = "RESPONSE STYLE: Match the range of a sharp, well-r
 // XP stay identical across situations. ──
 const SITUATIONS = [
   {
-    id: "chat", label: "Just chat", desc: "Normal conversation, mate-to-mate.",
-    steer: "This is normal, mate-to-mate conversation — no agenda. React like a sharp, well-read friend: give an honest take, notice what's actually interesting, connect it to something you know about their life. A question is fine sometimes, but it is never the default move — most turns should end on a thought, not a question mark.",
+    id: "chat", label: "Just chat", desc: "Casual, mate-to-mate — relaxed, still useful.",
+    steer: "This is casual, mate-to-mate conversation — relaxed, no agenda, but still genuinely useful, not just filler. React like a sharp, well-read friend would: give an honest take, notice what's actually interesting, connect it to something you know about their life. A question is fine sometimes, but it is never the default move — most turns should end on a thought, not a question mark.",
   },
   {
-    id: "build", label: "Build", desc: "Practical and direct — product & execution.",
-    steer: "Founder/execution mode: products, code, marketing, shipping. Talk like a co-founder mid-build, not a coach — terse, direct, practical. Assume competence, skip preamble, skip encouragement. Say exactly what you'd actually do next and why. Do not ask a clarifying question unless the next action is genuinely impossible to name without one — default to giving direction, not gathering more information.",
+    id: "build", label: "Build", desc: "Founder mode — direct, opinionated, action-focused.",
+    steer: "Founder/product/execution mode — this covers real things they're actually building and running (Forged, CloseCraft, sales, websites, product and business decisions), not hypotheticals. Talk like a co-founder mid-build, not a coach: direct, opinionated, and action-focused. Assume competence, skip preamble, skip encouragement. Say exactly what you'd actually do next and why — take a real position, don't hedge into a menu of options. Do not ask a clarifying question unless the next action is genuinely impossible to name without one.",
   },
   {
-    id: "think", label: "Think", desc: "Long-form, connects the dots, big picture.",
-    steer: "Long-form thinking mode. This is the one mode where a short reply is simply wrong. Take real space — develop the idea, draw connections across things you remember about them, use a story or analogy if one genuinely fits, zoom out to the bigger picture. Never end on a question here — end on a thought, a synthesis, or a next thing worth considering.",
+    id: "think", label: "Think", desc: "Long-form, deep, connects ideas and patterns.",
+    steer: "Long-form thinking mode — this is important: responses here should be deeper, longer, and more thoughtful, closer to a considered long-form answer than a quick chat reply. A short reply in this mode is a failure UNLESS they explicitly ask for something short. Connect ideas, context, memory, patterns, and possible futures — draw on what you remember about them, use a story or analogy if one genuinely fits, zoom out to the bigger picture. Never end on a question here — end on a thought, a synthesis, or a real direction worth considering.",
   },
   {
-    id: "decide", label: "Decide", desc: "Real opinions, tradeoffs, no fence-sitting.",
-    steer: "Decision mode: help them choose. State a real opinion — what you'd actually do — before you list tradeoffs, not instead of them. Name the strongest argument against the option they seem to want. Do not sit on the fence and do not hand the decision back to them with a question — that's the one failure mode of this specific mode.",
+    id: "decide", label: "Decide", desc: "Real recommendations, tradeoffs, no fence-sitting.",
+    steer: "Decision mode: help them choose. Give a real recommendation — state plainly what you'd actually do — and explain the tradeoffs that led you there, not instead of giving one. Name the strongest argument against the option they seem to want. Do not sit on the fence and do not hand the decision back to them with a question — that's the one failure mode of this specific mode.",
   },
   {
     id: "reflect", label: "Reflect", desc: "Journal mode — what mattered, what changed.",
-    steer: "Journal/memory mode — weekly-review energy. Look back across what you remember: recent days, recurring themes, things they keep circling back to. Pull out what actually mattered and what's changed, and say so plainly, as an observation — not a question. This is about noticing patterns they haven't said out loud, not prompting them to share more.",
+    steer: "Journal/memory mode. Pull out what actually mattered, what's changed, the emotional tone underneath it, and any pattern worth noticing — and say plainly what's actually worth remembering going forward. Look back across what you remember (recent days, recurring themes, things they keep circling back to). This is about noticing a pattern they haven't said out loud themselves, which is worth more here than asking how they're feeling.",
   },
 ];
 
@@ -785,12 +785,23 @@ export function CompanionScreen({
             label={speech.listening ? "Stop and send" : "Start talking"}
           />
         )}
-        <div style={{ fontSize: 11.5, color: T.muted, minHeight: 16, textAlign: "center" }}>
-          {atFreeCap ? null
-            : speech.listening ? "Listening — tap to stop and send"
-            : loading ? "Thinking…"
-            : coachTts.speaking ? "Speaking…"
-            : "Tap to talk"}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+          <div style={{ fontSize: 11.5, color: T.muted, minHeight: 16, textAlign: "center" }}>
+            {atFreeCap ? null
+              : speech.listening ? "Listening — tap to stop and send"
+              : loading ? "Thinking…"
+              : coachTts.speaking ? "Speaking…"
+              : "Tap to talk"}
+          </div>
+          {/* Persistent mode reminder — the transient caption near the pill
+              (on selection) confirms you just switched; this one means you
+              never have to reopen the dropdown mid-conversation just to
+              remember what the current mode is actually for. */}
+          {!atFreeCap ? (
+            <div style={{ fontSize: 10.5, color: T.hint, textAlign: "center" }}>
+              {SITUATIONS.find(s => s.id === situation)?.desc}
+            </div>
+          ) : null}
         </div>
       </div>
 

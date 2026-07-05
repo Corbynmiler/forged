@@ -2,7 +2,7 @@
 
 **Branch:** `claude/forged-ai-companion-redesign-agyjl7` (preview only — `main`/production untouched)
 **Purpose:** this is not "Forged with AI added." It's a new AI life companion that reuses Forged's backend, auth, memory, and APIs — but earns its UI from scratch. Wins on continuity, not capability: memory is the product, conversation is the interface. Being built for one user first — the bar is "would you use this instead of ChatGPT for life updates, reflection, planning, and thinking."
-**Last updated:** 2026-07-05 (Phase 2a, step 2) — `conversation_messages` (staged last round) is now applied and confirmed writing correctly. This round wires `api/memory-rollover.js` to actually read from it, folding real conversation content into the nightly extraction digest alongside the existing habit/journal signals. No new migration this round — schema unchanged.
+**Last updated:** 2026-07-05 (conversation modes, strengthened) — confirmed modes are genuinely injected into the model's system prompt (traced the exact path, see §3), then rewrote all five modes' steering text to mirror your exact requirements more precisely (Build now names your actual projects, Think explicitly allows a short-reply exception, Reflect explicitly targets emotional tone), and added a persistent mode-hint line under the Ember's status text so you never have to reopen the dropdown to remember what the current mode is for.
 
 This file is the single source of truth for anyone (human or Cursor) picking this branch up cold. Update it at the end of every phase — do not let it drift from what's actually in the diff.
 
@@ -49,17 +49,25 @@ This round builds the arrow between box 1 and box 2 — real conversation conten
 
 ---
 
-## 3. This round's change — Phase 2a, step 2: rollover reads real conversation
+## 3. This round's change — conversation modes, confirmed and strengthened
 
-**What changed, in `api/memory-rollover.js` only:**
+**First, the direct answer you asked for: are modes actually injected into the model's prompt?** Yes — traced the exact path rather than assuming:
+1. `CompanionScreen.jsx`'s `send()` builds `stableWithSituation` by appending the selected mode's `steer` text (plus the shared `RESPONSE_STYLE_STEER`) onto `system_stable`.
+2. That's sent as `system_stable` in the `/api/chat` request body.
+3. In `api/chat.js` (protected, read-only for this check), `buildSystemBlocks(systemStable, ...)` takes that exact string and makes it the primary cached system-prompt text block sent to Claude.
 
-1. **New query** against `conversation_messages` for the same candidate date window the job already computes, isolated in its own `try`/`catch` (not folded into the existing `Promise.all`) — so an environment where the migration somehow hasn't landed still gets the existing habit/journal digest working exactly as before, unaffected.
-2. **New `buildConversationDigest(rows)` function** — turns a day's raw turns into a compact `User: .../Companion: ...` transcript, capped at `CONVERSATION_DIGEST_MAX_CHARS_PER_DAY` (**default 4000 characters/day**, overridable via that env var — a one-line change if you want it higher, no new config system).
-3. **Merged into the existing per-day digest** — a day's final digest is now the habit/journal digest plus (if any exists) a "Conversation that day:" section, joined together. Both empty is skipped (unchanged); either one alone is enough to include the day (see next point).
-4. **Real correctness fix, not just an addition:** previously, a day with real conversation but zero habit logs/journal entries produced an *empty* digest and was silently skipped — never summarized at all. That gap is now closed; conversation alone is enough to trigger a summary.
-5. **No prompt rewrite needed.** The extraction system prompt already said it receives "habit logs, personal notes, evidence entries, conversation content" and already instructs "read what they actually said — notes, evidence entries, conversation content" when judging XP. That's been true in *wording* since two rounds ago; this change is what finally makes it true in *fact*. Nothing about the prompt text changed this round.
+So this was never decorative — every mode's steering text has been reaching the model since it was introduced. What needed work was precision: the existing steer text (written two rounds ago, in paraphrase) didn't fully match what you'd now specified in your own words.
 
-**Verified without live credentials, honestly:** wrote a standalone logic test (mock rows, no network — same pattern as this branch's earlier `test-rollover-logic.mjs`/`test-xp-clamp.mjs` checks) covering: empty/null rows, basic formatting, blank-content filtering, truncation past the 4000-char cap, and — the important one — that a conversation-only day (no habit logs) now produces a non-empty digest while a habit-only day (no conversation) is completely unaffected. All passed. This confirms the logic is sound; it does not confirm what a real Haiku call does with real conversation content in front of it — that needs a real rollover run (§6).
+**What changed, in `src/screens/CompanionScreen.jsx` only:**
+- **All five modes' steer text rewritten** to mirror your requirements directly instead of an earlier paraphrase:
+  - **Just chat** — now explicitly "relaxed... but still genuinely useful, not just filler."
+  - **Build** — now explicitly names your actual projects ("Forged, CloseCraft, sales, websites, product and business decisions") as real, not-hypothetical territory, and adds "take a real position, don't hedge into a menu of options."
+  - **Think** — now explicitly says a short reply is a failure *unless you explicitly ask for something short* (previously had no exception at all), and explicitly lists "ideas, context, memory, patterns, and possible futures" as what to connect, matching your wording almost verbatim.
+  - **Decide** — tightened to "give a real recommendation... and explain the tradeoffs that led you there, not instead of giving one" (previously implied this, now states it directly).
+  - **Reflect** — now explicitly names "the emotional tone underneath it" and "what's actually worth remembering going forward" as its own targets, not folded into "patterns" generically.
+- **New persistent mode-hint line**, under the Ember's "Tap to talk"/"Listening…"/"Thinking…"/"Speaking…" status text — always shows the current mode's one-line description (e.g. "Long-form, deep, connects ideas and patterns.") so you never have to reopen the dropdown mid-conversation to remember what mode you're in. This is separate from and in addition to the transient caption that flashes near the mode pill right when you switch (that one confirms "you just changed it"; this one is the permanent "here's what you're currently in").
+
+**Verified:** `npm run build` passes; visually confirmed the new persistent hint line's layout/spacing via a disposable rendered preview (tight, unobtrusive, doesn't crowd the Ember) before shipping.
 
 ---
 
@@ -67,57 +75,46 @@ This round builds the arrow between box 1 and box 2 — real conversation conten
 
 | File | What | Risk |
 |---|---|---|
-| `api/memory-rollover.js` | Added `CONVERSATION_DIGEST_MAX_CHARS_PER_DAY` constant, `buildConversationDigest()`, a new fail-soft query against `conversation_messages`, and merged its output into the per-day digest fed to the extraction model. Fixed the "conversation-only day gets silently skipped" gap as a side effect of the merge logic. | Medium — this is a real behavioral change to a live, production-relied-upon nightly job (what the model actually sees, which affects `xp_delta`/`facts`/`narrative` output). Mitigated: fail-soft on the new query (falls back to old behavior on any read error), a character cap bounding cost, and standalone logic tests before shipping. Since preview and `main` are separate deployments, this only runs inside the preview deployment regardless. |
+| `src/screens/CompanionScreen.jsx` | Rewrote all five `SITUATIONS` entries' `steer` and `desc` text; added a persistent mode-hint line under the Ember's status text. No changes to `send()`'s plumbing, the carousel, or the Ember itself. | Low — text and one small additive UI element; the injection mechanism itself (already correct) is untouched. |
 
-**No other files changed this round. No migration — schema was already applied last round.**
+**No other files changed this round. No migration.**
 
 ---
 
 ## 5. Decisions made this round (and why)
 
-**Isolated the new query in its own try/catch rather than adding it to the existing `Promise.all`.** `Promise.all` fails all-or-nothing; if the new query ever errored in some environment, bundling it in would risk breaking the four existing, working queries (habit rows, journal rows, rolling memory, active Arc) that this job has depended on for months. Isolating it means the worst case is "no conversation content this run," never "the whole job breaks."
+**Answered "is this actually wired up" by tracing the real code path, not by re-describing the design.** You asked to confirm, and specifically to be shown where, if it's real — pointing at the exact three-hop path (steer text → `system_stable` → `buildSystemBlocks` in the protected `api/chat.js`) is a stronger answer than "yes, it's wired up," and it's also how the gaps between your wording and the existing steer text actually got found.
 
-**Fixed the conversation-only-day gap deliberately, not as an accidental side effect left unremarked.** Calling it out explicitly here because it's a real behavior change beyond "wire up the new data source" — previously, a day where you only talked to the companion and logged nothing would never get a title, a narrative, or an XP judgment at all. Worth knowing this was silently true before this round.
+**Rewrote steer text to mirror your own phrasing rather than re-paraphrasing again.** Two rounds of my own paraphrasing had already drifted slightly from what you actually wanted (e.g., Build never named your real projects, Think had no explicit short-reply exception). Copying your intent more literally into the prompt reduces that drift and makes it easier for you to spot-check that the prompt says what you meant, next time you read this file.
 
-**Capped conversation length per day with a plain constant + env override, not a smarter summarization/pre-truncation scheme.** You said "make it easy to increase later... but don't overcomplicate it yet." A `parseInt(process.env.X || "4000", 10)` constant is a one-line change to raise, matches the exact pattern already used by `TTS_MONTHLY_CHAR_LIMIT` in `api/tts.js`, and needed zero new infrastructure. Truncates from the end with a visible `[…truncated]` marker rather than trying to be clever about *which* part of a day's conversation matters most — that's a real design problem (recency vs. importance) worth solving properly later if it ever actually triggers, not guessed at now.
+**Added a persistent hint instead of only relying on the existing transient one.** The transient caption (added two rounds ago) answers "did my tap register" for a few seconds; it doesn't answer "what am I currently in" five minutes into a conversation. Both together cover both moments without removing something that already worked.
 
-**Verified via a standalone logic test instead of just reading the code twice.** Same discipline as this branch's very first XP-clamping check — a plain assertion script costs a few minutes and catches real edge cases (the conversation-only-day gap was actually confirmed, not just asserted, this way) that re-reading code carefully can still miss.
-
-**Did not touch the system prompt.** It already asked for exactly this ("conversation content") in language written two rounds ago — changing prompt wording in the same pass as changing what data actually flows in would make it harder to tell, later, whether an output-quality change came from the new data or new wording. Isolate the variable.
+**Did not touch `RESPONSE_STYLE_STEER` (the shared anti-question-loop baseline) this round.** Your five mode descriptions were about *shape and stance* differences between modes, not about the shared baseline itself, which was already hardened last round ("hard constraint, not a soft preference"). No reason to re-open something not in scope this time.
 
 ---
 
 ## 6. Risks / open items
 
-- **Unverified against a real Haiku call with real conversation content.** No Anthropic credentials in this sandbox. The logic that assembles the digest is tested (§3); what the model actually *does* with a real transcript in front of it — does `xp_delta` genuinely start reflecting conversation-only effort, does `narrative` start naming things you only ever said out loud, not logged — needs a real rollover run against real data.
-- **Cost is now somewhat conversation-length-dependent** where it wasn't before, bounded by the 4000 char/day cap (roughly ~1000 extra tokens/day in the worst case, on top of the existing habit/journal digest) — worth keeping an eye on `input_tokens` in the job's own logging (already present) after a few real runs.
-- **The embeddings/retrieval piece (box 3 of the architecture) still doesn't exist.** This round makes the *input* to nightly extraction richer; it does not yet give the companion a way to reach back further than the rolling summary window at reply-time. "You changed your opinion since April" still isn't possible yet — that's still blocked on the embeddings vendor decision.
-- Everything from prior rounds' risk lists (Blue Ember unverified in the real app, transcription word-loss diagnosed-not-fixed, XP collision needs your call, two chat surfaces still both live, ElevenLabs connectivity unknown from this sandbox) still stands unchanged — preserved in the appendix.
+- **Unverified against real replies.** Same standing limitation as every prompt-steering change on this branch — this needs a handful of real exchanges per mode to judge whether the rewritten text actually produces the sharper differences described in §3, not just a stronger-sounding prompt.
+- **Prompt engineering is still not a hard guarantee.** Flagged before and still true: even explicit, forceful instructions can be departed from by the model on a given reply. If a specific mode still doesn't feel distinct enough after real testing, the next lever is a mechanism (e.g., a server-side check), not a fourth round of stronger wording.
+- Everything from prior rounds' risk lists (embeddings/retrieval not started, XP collision needs your call, two chat surfaces still both live, Blue Ember/transcription items, ElevenLabs connectivity) still stands unchanged — preserved in the appendix.
 
 ---
 
 ## 7. How to test (plain English)
 
-Rollover only processes **unsummarized** days — it never re-runs a day that already has a `daily_summaries` row. So the real test needs either a fresh day to roll over naturally, or a day you know is still unsummarized:
-
-1. **Talk to the Companion screen today** (or on any day that hasn't rolled over yet) — a real conversation, not just a one-line test, so there's actual substance for the model to work with.
-2. **Let that day roll over naturally** — this happens the next time the app calls the rollover endpoint for an account with an unsummarized prior day (normally triggered automatically; if you want to force it sooner, the endpoint is `POST /api/memory-rollover` with your auth token and a `client_date`, but the normal flow of just using the app the next day is the simplest test and needs nothing extra from you).
-3. **Read the result** — the greeting on the day *after* the rollover, and/or query `daily_summaries` directly for that date:
-   ```sql
-   select date, title, structured->>'narrative' as narrative, xp_awarded, xp_reason
-   from public.daily_summaries
-   where user_id = auth.uid()
-   order by date desc limit 3;
-   ```
-4. **Judge it against what actually happened that day, specifically in conversation** — did the narrative/xp_reason reference something you only ever *said*, not logged as a habit? That's the signal this round's change is supposed to produce. If a day had real conversation but no habit logs and it still got a title/narrative/xp at all (rather than being skipped entirely), that alone confirms the correctness fix in §3.4 worked.
+1. **Open the mode dropdown** — confirm all five show a short description under the label.
+2. **Pick a mode** — confirm the small caption flashes near the pill, and confirm a second, permanent line now sits under "Tap to talk" showing that same mode's description, staying there (not fading) until you switch modes again.
+3. **Try the same real message in at least two different modes** — good test pairs: something work-related in **Build** vs. **Think** (Build should be short/direct/name-a-next-action; Think should be noticeably longer and more developed, connecting to things it remembers), or a real open decision in **Decide** (should state an actual recommendation, not a list) vs. **Just chat** (should feel like a relaxed reaction, not an analysis).
+4. **Check Think specifically** — ask something that would normally get a one-line answer; the reply should still be substantive unless you explicitly say "briefly" or "short answer."
 
 ---
 
 ## 8. Next steps
 
-1. **A real rollover run against real data** — the only way to actually judge whether this round's change improved anything, per §7. Needs a day or two of normal use.
-2. **Embeddings vendor decision** (Voyage API vs. a Supabase Edge Function running `gte-small`) — this is the actual remaining blocker for real cross-time retrieval, box 3 of the architecture, and has been sitting unresolved for a while now.
-3. **2b — retire the old CoachBar/modal drawer.** Doesn't depend on any of the above, and it's been flagged for six-plus rounds now.
+1. **Real-world read on whether the modes now feel distinct** — the actual point of this round, needs your hands.
+2. **Embeddings vendor decision** — still the real blocker for genuine cross-time retrieval (box 3 of the memory architecture), unresolved for several rounds now.
+3. **2b — retire the old CoachBar/modal drawer** — doesn't depend on anything above, flagged for seven-plus rounds now.
 
 ---
 
@@ -204,6 +201,10 @@ create policy "Own conversation_messages"
 Rollback if ever needed: `drop table if exists public.conversation_messages;` — no longer fully side-effect-free now that the rollover job reads from it (see §3), but still safe (rollover's read is fail-soft and falls back to the pre-existing habit/journal-only digest if the table disappears).
 
 `src/screens/CompanionScreen.jsx` writes to this table via `persistConversationMessage()` — fire-and-forget, not awaited, three call sites (user message, streaming assistant finalization, non-streaming fallback).
+
+### Phase 2a, step 2 (read side) — rollover reads real conversation, preserved for reference
+
+`api/memory-rollover.js` now queries `conversation_messages` for the same candidate date window it already computes (isolated in its own `try`/`catch`, not folded into the main `Promise.all`, so a read failure falls back to the pre-existing habit/journal-only digest rather than breaking the job). `buildConversationDigest(rows)` turns a day's raw turns into a compact `User: .../Companion: ...` transcript, capped at `CONVERSATION_DIGEST_MAX_CHARS_PER_DAY` (default 4000 chars/day, env-overridable). Merged into the per-day digest sent to the extraction model alongside the existing habit/journal digest. Real correctness fix bundled in: a day with conversation but zero habit logs previously produced an empty digest and was silently skipped forever — conversation content alone is now enough to trigger a summary. Verified via a standalone mock-data logic test (formatting, truncation, blank-content filtering, and the conversation-only-day fix specifically) — not yet verified against a real Haiku call with real data (no Anthropic credentials in this sandbox; still needs a real rollover run to judge quality, per this round's §8).
 
 ### Other prior-round changes (still live, unrelated to memory architecture)
 
