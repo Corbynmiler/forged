@@ -2,7 +2,29 @@
 
 **Branch:** `claude/forged-ai-companion-redesign-agyjl7`
 **Status:** preview/experimental only. `main` (production) has not been touched, merged into, or modified at any point on this branch.
-**Last updated:** 2026-07-05 (tenth round today) — two small follow-ups to round nine, from a direct question: a real caching bug (the cache didn't know about voice) and a design complaint (the usage readout was visually "loud"). See "Tenth round" below, then "Ninth round" for the tap-to-play system this refines.
+**Last updated:** 2026-07-06 (eleventh round today) — raised the TTS char cap for heavy personal testing, then did a real coherence pass on **You** (`ProfileScreen.jsx`) — the one primary screen that hadn't been touched all session. See "Eleventh round" below.
+
+### Eleventh round — TTS cap raised for real testing + You screen coherence pass
+
+**1. `TTS_MONTHLY_CHAR_LIMIT` raised to 1,000,000 chars/mo (~$50 at Flash pricing), explicitly requested** for heavy personal testing — not a literal "no limit" (that removes a real safety backstop against a genuine bug spending unboundedly), but a generous ceiling sized to an actual dollar amount the user said they're comfortable with. Changed in `theme.js`, `api/tts.js`, `api/tts-usage.js`'s fallback.
+
+**Important, not fixable from this side — needs action on elevenlabs.io:** this is the *app's own* self-imposed cap. It does not and cannot raise ElevenLabs' real account quota. The ElevenLabs account itself was confirmed still on the free tier (10,000 chars/mo, account-wide) — raising the app's cap past that just means the app will keep trying and ElevenLabs will keep rejecting once its own real 10k/mo is hit. **To actually get more usable characters, the ElevenLabs account needs a paid plan.** Recalled from training knowledge, not verified live: ElevenLabs' tiers are roughly Starter (~$5/mo, ~30k chars), Creator (~$22/mo, ~100k chars, also raises the concurrent-request limit from 2 to 3+, which would let `useCoachTts.jsx`'s `CONCURRENT_TTS_FETCH_WINDOW` safely go up too), Pro (~$99/mo, ~500k chars) — confirm current numbers/names on elevenlabs.io → Subscription before picking one, pricing pages change. Creator fits the stated $20-50/mo range well. Once upgraded, no code change is needed for the higher ElevenLabs ceiling itself — only for raising `CONCURRENT_TTS_FETCH_WINDOW` if the new plan supports more concurrent requests (see the comment at that constant in `useCoachTts.jsx`).
+
+**2. You screen coherence pass.** Talk and Noticed had both had full redesign rounds; `ProfileScreen.jsx` (the screen behind the "You" tab) hadn't been touched all session and still read as a generic settings page with the old "coach" vocabulary in a few places and one section (push notifications) visually louder than everything around it.
+
+- **Merged two sections that were about the same thing.** The companion's name/icon lived in "Account"; spoken-replies + voice picker lived in a separate "Companion voice" section above it — two blocks about the same relationship, split apart. Now one section, "Your companion": name → spoken replies toggle → voice picker, in that order.
+- **Push notifications detoned.** Was the loudest thing on the page — a 40px icon in a gold-gradient box, a gold-gradient section background, a gold-tinted sub-panel for the category toggles. Rewritten to match the plain `T.raised`/`T.border` treatment every other section on this screen already uses. Same toggles, same categories, same behavior — visual weight only.
+- **Remaining "coach" copy fixed**: the header tagline ("Your account — coach, notifications…" → "…companion, notifications…"), the notification subtitle ("from your coach" → "from your companion"), two feature-list rows in `UpgradeModal` ("Arc coach" → "Arc companion", "Unlimited Arc coach" → "Unlimited Arc companion"), and the toggle's screen-reader label ("Spoken coach replies" → "Spoken companion replies").
+- **Fixed a real display bug the char-limit raise exposed**: the "~Xk characters/month included" line did a naive `/1000` — at the new 1,000,000 limit that would have read "~1000k characters/month," which is wrong-looking. New `fmtCharAllowance()` helper shows "10k" or "1M" correctly depending on magnitude.
+- **Fixed a stale onboarding tour step** (`profile-account` in `habitCards.jsx`) that said "rename your AI companion here," pointing at a spot that no longer contains that control after the section merge above.
+
+**What did NOT change:** the Pro/paywall section, referral, feedback, data export, dev tools, sign-out — all untouched, all still there, exactly where they were. This was a coherence/terminology/visual-weight pass, not a restructure of what's on the page.
+
+**Verified:** `npm run build` passes after every step. **Not verified:** real visual review in a browser — no live session in this sandbox.
+
+**Files touched:** `src/theme.js`, `api/tts.js`, `api/tts-usage.js` (char cap), `src/screens/ProfileScreen.jsx` (You screen pass, `fmtCharAllowance` helper), `src/components/habitCards.jsx` (tour copy fix).
+
+**What to test:** open You — confirm "Your companion" is one section (name, then spoken replies, then voice picker) instead of two; confirm push notifications no longer has a gold-gradient background/icon; confirm the char allowance line reads "~1M characters/month," not "~1000k"; confirm no visible "coach" wording remains on this screen or in the upgrade sheet.
 
 ### Tenth round — voice-aware cache key + quieter usage readout
 

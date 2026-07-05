@@ -6,15 +6,17 @@ const SUPABASE_ANON_KEY =
   "sb_publishable_GdMepnUv2W4VRiOuV23xiA_O4J11RMl";
 
 /**
- * Hard cap per user per local calendar month. Matches the real ElevenLabs
- * free-tier account limit (10,000 chars/mo) — this app runs on one shared
- * free-tier ElevenLabs account, so this needs to fit inside that real
- * ceiling, not an assumed paid-tier number. Was wrongly 50,000 (~$2.50
- * COGS math that only applies on a paid plan); corrected once the account
- * was confirmed still free-tier. Keep in sync with theme.js's copy of this
- * same constant (display-only there) and api/tts-usage.js's fallback.
+ * Hard cap per user per local calendar month. Raised for heavy personal
+ * testing (explicitly requested, willing to spend ~$20-50/mo on
+ * ElevenLabs) — 1,000,000 chars/mo ≈ $50 at Flash pricing. A real, generous
+ * ceiling rather than a literal "no limit," so a genuine bug still can't
+ * spend unboundedly. This is this APP's own self-imposed cap only — it does
+ * NOT raise ElevenLabs' actual account quota; the ElevenLabs account itself
+ * needs a paid plan for this number to mean anything (see
+ * PREVIEW_BRANCH_HANDOFF.md). Keep in sync with theme.js's copy of this same
+ * constant (display-only there) and api/tts-usage.js's fallback.
  */
-const TTS_MONTHLY_CHAR_LIMIT = parseInt(process.env.TTS_MONTHLY_CHAR_LIMIT || "10000", 10);
+const TTS_MONTHLY_CHAR_LIMIT = parseInt(process.env.TTS_MONTHLY_CHAR_LIMIT || "1000000", 10);
 const ELEVENLABS_MODEL = "eleven_flash_v2_5";
 // Matches the first entry in COACH_VOICE_OPTIONS (src/theme.js) — keep in sync if that changes.
 const DEFAULT_VOICE_ID = process.env.ELEVENLABS_DEFAULT_VOICE_ID || "JBFqnCBsd6RMkjVDRZzb";

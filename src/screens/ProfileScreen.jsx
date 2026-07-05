@@ -10,6 +10,15 @@ import { Modal, GBtn, lbl, inp, Stat, ToggleSwitch, NotifCategoryRow } from "../
 import { useScrollLock } from "../hooks/useScrollLock.js";
 import { CoachSettingsSheet } from "./SocialScreen.jsx";
 
+/** "10k", "1M" — not "1000k", which is what a naive /1000 display gives once the monthly allowance is raised into 7 figures. */
+function fmtCharAllowance(n) {
+  if (n >= 1000000) {
+    const m = n / 1000000;
+    return `${Number.isInteger(m) ? m : m.toFixed(1)}M`;
+  }
+  return `${Math.round(n / 1000)}k`;
+}
+
 export function ShareCardModal({ user, habits, xp, onClose }) {
   useScrollLock(true);
   const level = getLevel(xp);
@@ -139,7 +148,7 @@ export function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
   const spotsPct  = spots !== null ? Math.min(100, (spots / 100) * 100) : 0;
 
   const features = [
-    { icon:"🔥", label:"Arc coach",           free:`${FREE_DAILY_LIMIT}/day`, pro:"Unlimited",              live:true },
+    { icon:"🔥", label:"Arc companion",       free:`${FREE_DAILY_LIMIT}/day`, pro:"Unlimited",              live:true },
     { icon:"🎙️", label:"Voice dumps",         free:"—",            pro:"Hands-free logging",     live:true },
     { icon:"📊", label:"Weekly Arc Review",   free:"One trial",    pro:"Fresh each week",        live:true },
     { icon:"📜", label:"Arc + habit history", free:"Last 7 days",  pro:"Every entry, forever",   live:true },
@@ -408,7 +417,7 @@ export function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCo
           </div>
         )}
         <div style={{ fontSize:13, color:T.muted, marginBottom:20, lineHeight:1.5 }}>
-          Your account — coach, notifications, and Arc history live here.
+          Your account — companion, notifications, and Arc history live here.
         </div>
       </div>
 
@@ -445,48 +454,17 @@ export function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCo
         </div>
       )}
 
-      {/* Spoken replies — Pro only */}
-      {isPro && onSaveVoicePrefs && (
-        <div style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, overflow:"hidden" }}>
-          <div style={{ padding:"10px 16px 6px", fontSize:10, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em" }}>Companion voice</div>
-          <div style={{ padding:"12px 16px 14px", borderBottom:`0.5px solid ${T.border}` }}>
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 }}>
-              <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontSize:14, color:T.text }}>Spoken replies</div>
-                <div style={{ fontSize:12, color:T.muted, marginTop:2, lineHeight:1.45 }}>Adds a "Listen" button to each reply on Talk — tap to hear it, nothing plays automatically</div>
-              </div>
-              <ToggleSwitch on={voiceRepliesEnabled} onClick={() => onSaveVoicePrefs({ voiceRepliesEnabled: !voiceRepliesEnabled, coachVoiceId })} ariaLabel="Spoken coach replies" />
-            </div>
-            <div style={{ fontSize:11, color:T.hint, marginTop:8, lineHeight:1.45 }}>
-              ~{Math.round(TTS_MONTHLY_CHAR_LIMIT / 1000)}k characters/month included. Audio is generated server-side — only reply text is sent.
-            </div>
-          </div>
-          {voiceRepliesEnabled && (
-            <div style={{ padding:"8px 10px 12px" }}>
-              {COACH_VOICE_OPTIONS.map(v => {
-                const active = (coachVoiceId || COACH_VOICE_OPTIONS[0].id) === v.id;
-                return (
-                  <button key={v.id} type="button" onClick={() => onSaveVoicePrefs({ voiceRepliesEnabled: true, coachVoiceId: v.id })}
-                    style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 12px", marginBottom:6, borderRadius:T.rsm, border:`0.5px solid ${active ? "rgba(200,144,42,0.55)" : T.border}`, background:active ? "rgba(200,144,42,0.1)" : T.surface, cursor:"pointer", fontFamily:T.font }}>
-                    <div style={{ fontSize:14, fontWeight:600, color:T.text }}>{v.label}</div>
-                    <div style={{ fontSize:12, color:T.muted }}>{v.desc}</div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Account */}
-      <div data-tour="profile-account" style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, overflow:"hidden" }}>
-        <div style={{ padding:"10px 16px 6px", fontSize:10, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em" }}>Account</div>
-        <SRow label="Display name" value={user.name} onPress={() => setEditingName(true)}/>
+      {/* Your companion — name/icon + spoken replies + voice, all in one place.
+          Used to be split: the name lived in "Account" while voice lived in
+          its own "Companion voice" block above it — two sections about the
+          same relationship. One section now. */}
+      <div style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, overflow:"hidden" }}>
+        <div style={{ padding:"10px 16px 6px", fontSize:10, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em" }}>Your companion</div>
         <div style={{ borderBottom:`0.5px solid ${T.border}`, padding:"12px 16px" }}>
           <button type="button" onClick={() => setShowCoachSheet(true)} style={{ display:"flex", alignItems:"center", width:"100%", background:"none", border:"none", cursor:"pointer", gap:10 }}>
             <div style={{ fontSize:18, flexShrink:0 }}>🤖</div>
             <div style={{ flex:1, textAlign:"left", minWidth:0 }}>
-              <div style={{ fontSize:14, color:T.text }}>AI companion name</div>
+              <div style={{ fontSize:14, color:T.text }}>Name</div>
               <div style={{
                 fontSize:12, color:T.muted, marginTop:1,
                 lineHeight:1.35, wordBreak:"break-word", overflowWrap:"anywhere",
@@ -498,11 +476,45 @@ export function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCo
             <span style={{ fontSize:18, color:T.hint }}>›</span>
           </button>
         </div>
+        {isPro && onSaveVoicePrefs ? (
+          <>
+            <div style={{ padding:"12px 16px 14px", borderBottom:`0.5px solid ${T.border}` }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 }}>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:14, color:T.text }}>Spoken replies</div>
+                  <div style={{ fontSize:12, color:T.muted, marginTop:2, lineHeight:1.45 }}>Adds a "Listen" button to each reply on Talk — tap to hear it, nothing plays automatically</div>
+                </div>
+                <ToggleSwitch on={voiceRepliesEnabled} onClick={() => onSaveVoicePrefs({ voiceRepliesEnabled: !voiceRepliesEnabled, coachVoiceId })} ariaLabel="Spoken companion replies" />
+              </div>
+              <div style={{ fontSize:11, color:T.hint, marginTop:8, lineHeight:1.45 }}>
+                ~{fmtCharAllowance(TTS_MONTHLY_CHAR_LIMIT)} characters/month included. Audio is generated server-side — only reply text is sent.
+              </div>
+            </div>
+            {voiceRepliesEnabled && (
+              <div style={{ padding:"8px 10px 12px" }}>
+                {COACH_VOICE_OPTIONS.map(v => {
+                  const active = (coachVoiceId || COACH_VOICE_OPTIONS[0].id) === v.id;
+                  return (
+                    <button key={v.id} type="button" onClick={() => onSaveVoicePrefs({ voiceRepliesEnabled: true, coachVoiceId: v.id })}
+                      style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 12px", marginBottom:6, borderRadius:T.rsm, border:`0.5px solid ${active ? "rgba(200,144,42,0.55)" : T.border}`, background:active ? "rgba(200,144,42,0.1)" : T.surface, cursor:"pointer", fontFamily:T.font }}>
+                      <div style={{ fontSize:14, fontWeight:600, color:T.text }}>{v.label}</div>
+                      <div style={{ fontSize:12, color:T.muted }}>{v.desc}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        ) : null}
+      </div>
+
+      {/* Account */}
+      <div data-tour="profile-account" style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, overflow:"hidden" }}>
+        <div style={{ padding:"10px 16px 6px", fontSize:10, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em" }}>Account</div>
+        <SRow label="Display name" value={user.name} onPress={() => setEditingName(true)}/>
         <div
           style={{
             padding:"14px 16px 16px",
-            background:"linear-gradient(135deg, rgba(200,144,42,0.12) 0%, rgba(200,144,42,0.04) 100%)",
-            borderTop:`0.5px solid rgba(200,144,42,0.22)`,
           }}
         >
           {/* Header row: icon + label + master toggle. The master toggle
@@ -511,20 +523,11 @@ export function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCo
               persist independently per push_subscriptions row so a user can,
               say, accept friend nudges in real time while turning off the
               daily reminder. */}
-          <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-            <div
-              style={{
-                width:40, height:40, borderRadius:12, flexShrink:0,
-                background:"rgba(200,144,42,0.18)", border:`0.5px solid rgba(200,144,42,0.35)`,
-                display:"flex", alignItems:"center", justifyContent:"center", fontSize:20,
-              }}
-              aria-hidden
-            >
-              🔔
-            </div>
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <div style={{ fontSize:18, flexShrink:0 }} aria-hidden>🔔</div>
             <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontSize:15, fontWeight:600, color:T.text, letterSpacing:"-0.01em" }}>Push notifications</div>
-              <div style={{ fontSize:12, color:T.sub, marginTop:2 }}>
+              <div style={{ fontSize:14, color:T.text }}>Push notifications</div>
+              <div style={{ fontSize:12, color:T.muted, marginTop:1 }}>
                 {notifPermission === "denied"
                   ? "Blocked — enable in your device Settings → Notifications"
                   : notifEnabled
@@ -546,8 +549,8 @@ export function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCo
             <div
               style={{
                 marginTop:14,
-                background:"rgba(0,0,0,0.18)",
-                border:`0.5px solid rgba(200,144,42,0.18)`,
+                background:T.surface,
+                border:`0.5px solid ${T.border}`,
                 borderRadius:10,
                 overflow:"hidden",
               }}
@@ -558,7 +561,7 @@ export function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCo
                 title="Daily reminders"
                 subtitle={
                   dailyRemindersEnabled
-                    ? "Morning, midday, and evening — from your coach"
+                    ? "Morning, midday, and evening — from your companion"
                     : "Off — your daily push is paused"
                 }
                 checked={dailyRemindersEnabled}
@@ -729,7 +732,7 @@ export function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCo
             <>
               <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14 }}>
                 {[
-                  { label:"Unlimited Arc coach",           status:"pro" },
+                  { label:"Unlimited Arc companion",       status:"pro" },
                   { label:"Voice dumps",                     status:"pro" },
                   { label:"Weekly Arc Reviews",              status:"pro" },
                   { label:"Nudge friends to stay on track", status:"pro" },

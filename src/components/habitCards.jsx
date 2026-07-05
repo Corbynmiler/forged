@@ -1635,7 +1635,7 @@ export const PAGE_TOURS = {
     { target:"[data-tour='insights-streaks']", title:"Activity summary", body:"Quick read on streaks, your steadiest habit, and which day you usually log. Tap \"Show full activity breakdown\" for streak rows, 28-day rates, and the 12-week heatmap.", pad:8 },
   ],
   profile: [
-    { target:"[data-tour='profile-account']", title:"Your account", body:"Change your display name or rename your AI companion here. These are the names shown across the whole app.", pad:6 },
+    { target:"[data-tour='profile-account']", title:"Your account", body:"Change your display name here. Your AI companion's name, icon, and voice live in Your Companion, just above — both names show up across the whole app.", pad:6 },
     { target:"[data-tour='profile-upgrade']", title:"Early supporter access", body:"Unlocks unlimited habits and companion messages, voice logging, friend nudges, and full history — at a price locked in forever. First 100 users get it at $4.99/mo.", pad:6 },
     { target:"[data-tour='profile-feedback']", title:"Send feedback", body:"You're one of the first people using Forged. A quick note goes directly to the founder — it genuinely shapes what gets built next.", pad:6 },
     { target:"[data-tour='profile-signout']", title:"Sign out", body:"Your data is saved to your account, so you can sign in on any device and pick up exactly where you left off.", pad:6 },

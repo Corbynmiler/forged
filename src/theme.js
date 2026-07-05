@@ -114,15 +114,19 @@ export const COACH_VOICE_OPTIONS = [
 ];
 
 /**
- * Matches the real ElevenLabs free-tier account limit (10,000 chars/mo) —
- * this app currently runs on a single shared free-tier ElevenLabs account,
- * so the app's own per-user cap has to fit inside that real ceiling, not an
- * assumed paid-tier number. Was wrongly set to 50,000 (~$2.50 COGS math
- * that only applies on a paid plan) — corrected after confirming the
- * account is actually still on the free 10k/mo tier. Enforced server-side
- * in api/tts.js; also the fallback default in api/tts-usage.js.
+ * Raised for heavy personal testing — explicitly requested, willing to
+ * spend ~$20-50/mo on ElevenLabs to actually exercise this. 1,000,000
+ * chars/mo ≈ $50 at Flash pricing ($0.05/1000 chars) — a real, generous
+ * ceiling rather than a literal "no limit," so a genuine bug (a runaway
+ * loop, say) still can't spend unboundedly. This is the APP's own
+ * self-imposed cap only — raising it does NOT raise ElevenLabs' actual
+ * account quota. The ElevenLabs account itself needs a paid plan for this
+ * number to mean anything in practice (was confirmed still on the free
+ * 10,000 chars/mo tier as of the last check) — see PREVIEW_BRANCH_HANDOFF.md
+ * for exactly what to upgrade and roughly what it costs. Enforced
+ * server-side in api/tts.js; also the fallback default in api/tts-usage.js.
  */
-export const TTS_MONTHLY_CHAR_LIMIT = 10000;
+export const TTS_MONTHLY_CHAR_LIMIT = 1000000;
 
 /**
  * Live Stripe prices stay on env price IDs ($4.99/mo today).
