@@ -2,7 +2,7 @@
 
 **Branch:** `claude/forged-ai-companion-redesign-agyjl7`
 **Status:** preview/experimental only. `main` (production) has not been touched, merged into, or modified at any point on this branch.
-**Last updated:** 2026-07-05 — full rewrite for a cold handoff (e.g. to Cursor). Consolidates everything shipped across many rounds into one current-state document instead of a round-by-round log. If you're picking this branch up without prior context, read this file top to bottom before touching code.
+**Last updated:** 2026-07-05 — the Talk-screen voice pill (proposed in §9 of the prior revision) is now actually built, committed, and pushed. **Important note on process:** a prior attempt at this same feature (via Cursor) reported a commit hash that was verified, directly against the remote repository, to not exist on any branch — nothing had actually reached GitHub, which is why it never appeared live. That work was redone from scratch here rather than debugged, since there was nothing on the remote to inspect or build on top of. If a tool reports a commit/milestone as complete, verify it landed on `origin` (`git log origin/<branch>`) before trusting the report or building further on top of it.
 
 ---
 
@@ -105,9 +105,9 @@ This entire branch has been built in a sandboxed environment with **no real logi
 
 In priority order, with reasoning:
 
-1. **Build the Talk-screen voice controls** (design proposed in §9 of this doc) — the most immediately actionable, well-scoped next build item, and it directly serves this branch's core thesis (voice is the product, not a buried settings toggle). Do this once `ELEVENLABS_API_KEY` is confirmed set (§ "ElevenLabs setup checklist" below) so it can actually be tested as it's built.
-2. **Retire the old CoachBar/modal drawer (Phase 2b)** — doesn't depend on anything else, been overdue longest, and having two chat surfaces is a real, growing inconsistency the longer it's left.
-3. **Embeddings vendor decision + wire up retrieval (Phase 2a, remaining piece)** — the actual unlock for genuine cross-time memory ("you changed your opinion since April"). Bigger and more architecturally significant than 1-2; do it once those are settled.
+1. ~~Build the Talk-screen voice controls~~ **Done** — see §9. Needs a real test once `ELEVENLABS_API_KEY` is confirmed set (§5).
+2. **Retire the old CoachBar/modal drawer (Phase 2b)** — doesn't depend on anything else, been overdue longest, and having two chat surfaces is a real, growing inconsistency the longer it's left. **This is now the top of the list.**
+3. **Embeddings vendor decision + wire up retrieval (Phase 2a, remaining piece)** — the actual unlock for genuine cross-time memory ("you changed your opinion since April"). Bigger and more architecturally significant than 2; do it once that's settled.
 4. **Phase 2c/2d/2e** (reframe Today, resolve the XP collision, rename Coach→Companion) — each depends on the above being further along; see the phased plan in §7.
 
 ---
@@ -135,20 +135,24 @@ Full original reasoning for why each step blocks the next, and the full memory-a
 
 ---
 
-## 9. Proposed: Talk-screen voice controls (design only — not built)
+## 9. Talk-screen voice controls — built
 
-**The ask:** move voice on/off and voice selection onto the Talk screen itself (mirroring the existing top-right conversation-mode pill with a top-left voice pill), so using voice never requires a trip to the Profile screen.
+**Status: implemented, committed, and pushed to `origin/claude/forged-ai-companion-redesign-agyjl7`.** (A prior attempt at this via Cursor reported a commit that never actually reached the remote — see the note at the top of this document. This is the real implementation.)
 
-**Proposed interaction** (refines the requested layout, explained below):
+**What it is:** a top-left voice pill on the Talk screen, mirroring the existing top-right conversation-mode pill, split into two zones:
+- **Pill body** — tapping it instantly mutes/unmutes spoken replies. If a reply is actively being spoken, muting stops playback immediately (`coachTts.stopSpeaking()`), not just future replies. Shows "🔊 {voice name}" when on, "🔇 Muted" when off.
+- **Chevron (▾)** — opens a 4-voice picker (Adam/Sarah/Daniel/Rachel). Selecting any voice both sets it and turns spoken replies on, in one action (per the original requirement — not two separate steps).
+- **Non-Pro accounts** see a quiet locked "🔒 Voice" pill in the same spot that opens the upgrade flow when tapped, instead of the pill disappearing — keeps the layout stable and still advertises the feature (matches the existing `locked`/`onLockedClick` pattern used by `MicBtn` elsewhere in this codebase).
+- **Opening one top-corner dropdown closes the other** (voice picker and mode picker can't both be open at once).
+- **The old Profile-screen toggle is untouched** and still works — both surfaces call the same shared handler (`handleSaveVoicePrefs` in `App.jsx`), writing the same `profiles.voice_replies_enabled`/`coach_voice_id` fields, so neither can leave the other showing stale state.
 
-- **Top-left pill**, visually matching the existing top-right situation pill exactly (same border/background/font treatment, mirrored position). Shows a small speaker icon + the current voice's name (e.g. "🔊 Sarah"), or a muted-speaker icon + "Muted" when off.
-- **Tapping the main body of the pill instantly toggles mute/unmute** — no dropdown, no navigation. This is the fast, one-tap control you asked for, for the common case of "shut it up right now."
-- **A small chevron at the end of the pill** (matching the existing situation pill's "▾") opens a short dropdown listing the 4 voices. **Tapping any voice both selects it and enables spoken replies**, per your requirement — this is a deliberate, single action, not two.
-- **Why split into two zones (tap vs. chevron) instead of one:** mute/unmute is something you'll want instantly and often, mid-conversation, without hunting through a menu; changing *which* voice is much rarer. Splitting a fast, frequent action from a rare, deliberate one is a standard pattern (a "split button") and avoids overloading a single tap with two different meanings depending on context. If you'd rather have one single tap always open the dropdown (matching the situation pill's own behavior exactly, with "Mute" as just another item in that list), that's a simpler, more consistent alternative — slightly slower to mute (two taps instead of one) in exchange for one less interaction pattern to learn. Worth a quick preference call before building.
-- **Non-Pro accounts:** show the same pill in a quiet locked state (small lock glyph) that opens the upgrade flow when tapped, rather than hiding it — keeps the top-of-screen layout stable and still advertises the feature, matching the existing `locked`/`onLockedClick` pattern already used elsewhere in this codebase (`MicBtn`).
-- **The old Profile-screen toggle:** left in place as a secondary/advanced-settings location (both write to the same `profiles.voice_replies_enabled`/`coach_voice_id` fields, so nothing conflicts) rather than removed — removing it is a separate, small decision, not required to satisfy "no requirement to visit Profile just to use voice."
+**Files touched:** `src/screens/CompanionScreen.jsx` (the pill UI, `toggleVoiceMute`, `pickVoice`), `src/App.jsx` (extracted the inline voice-prefs handler that only `ProfileScreen` had into a shared `handleSaveVoicePrefs`, passed to both `ProfileScreen` and `CompanionScreen` — the old `AICoach` modal drawer deliberately was NOT given this prop, since it's slated for retirement in 2b, not further investment).
 
-**Not built this round** — this is a spec for the next work session (this branch, or via Cursor) to implement against.
+**Verified:** `npm run build` passes; the pill's visual layout (both open/dropdown and closed/muted states) confirmed via a disposable rendered preview before shipping — reads clean and symmetric with the existing mode pill.
+
+**Not verified (same standing limitation as everything voice-related on this branch):** no ElevenLabs key or real login session in this sandbox, so actual audio playback, the mute-mid-reply behavior, and the picker's real-world feel have not been tested live. First real test: see §5 and §11.
+
+**Interaction question resolved by building, not asking again:** went with the split-button pattern (tap = mute, chevron = picker) as the primary recommendation from the original proposal, since it best serves "one tap to mute/unmute" literally. If it feels wrong in practice, the single-tap-always-opens-dropdown alternative (with "Mute" as just another list item) is a small, contained change to the same component.
 
 ---
 
@@ -179,5 +183,5 @@ Full original reasoning for why each step blocks the next, and the full memory-a
 
 - **Modes:** open the mode dropdown on Talk, confirm descriptions show; pick different modes and send the same real message in each — Build should be terse/direct, Think noticeably longer/deeper, Decide should state an actual recommendation, Reflect should surface a pattern rather than ask a question.
 - **Memory:** have a real conversation, let the day roll over naturally, then `select date, title, structured->>'narrative' as narrative, xp_awarded, xp_reason from public.daily_summaries where user_id = auth.uid() order by date desc limit 3;` — check whether it references something you only said, not logged.
-- **Voice (once ElevenLabs is enabled — see checklist below):** turn on spoken replies via Profile (until the Talk-screen redesign in §9 ships), send a message, confirm audio plays and the Ember visibly reacts to it while speaking.
+- **Voice (once ElevenLabs is enabled — see §5):** on the Talk screen as a Pro account, tap the chevron on the top-left pill, pick a voice (pill should update to "🔊 {name}"), send a message, confirm audio plays and the Ember visibly reacts while speaking. Tap the pill body mid-reply — audio should stop immediately and the pill should switch to "🔇 Muted". Tap it again — should resume with the same voice still selected. As a non-Pro account, the same spot should show a locked "🔒 Voice" pill that opens the upgrade flow.
 - **iOS Chrome mic / stale PWA:** needs a real iPhone — see §3, both currently unverified.

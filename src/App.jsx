@@ -3913,6 +3913,15 @@ export default function App() {
     await supabase.auth.signOut();
   }
 
+  // Shared by ProfileScreen's existing voice settings AND the Companion
+  // screen's own top-left voice pill — both write the same profile fields,
+  // so neither surface can leave the other showing stale state.
+  function handleSaveVoicePrefs({ voiceRepliesEnabled: vre, coachVoiceId: cvid }) {
+    setVoiceRepliesEnabled(!!vre);
+    setCoachVoiceId(cvid || null);
+    syncProfile({ voice_replies_enabled: !!vre, coach_voice_id: cvid || null });
+  }
+
   // Primary navigation is Today · Arc · You. Journal ("Evidence") and Insights
   // ("Reviews") live inside the Arc screen; Social and Hub are reachable from
   // the You screen. navigateTo maps legacy screen ids onto the new structure so
@@ -4000,6 +4009,7 @@ export default function App() {
           journalEntries={journalEntries}
           voiceRepliesEnabled={voiceRepliesEnabled}
           coachVoiceId={coachVoiceId}
+          onSaveVoicePrefs={handleSaveVoicePrefs}
           coachMemory={coachMemory ? {
             content: coachMemory.content,
             recentSummaries: (coachMemory.recentSummaries || []).slice(isPro ? -7 : -3),
@@ -4136,11 +4146,7 @@ export default function App() {
           coachIcon={coachIcon}
           voiceRepliesEnabled={voiceRepliesEnabled}
           coachVoiceId={coachVoiceId}
-          onSaveVoicePrefs={({ voiceRepliesEnabled: vre, coachVoiceId: cvid }) => {
-            setVoiceRepliesEnabled(!!vre);
-            setCoachVoiceId(cvid || null);
-            syncProfile({ voice_replies_enabled: !!vre, coach_voice_id: cvid || null });
-          }}
+          onSaveVoicePrefs={handleSaveVoicePrefs}
           onSaveCoach={({ name, icon }) => {
             setCoachName(name);
             setCoachIcon(icon);

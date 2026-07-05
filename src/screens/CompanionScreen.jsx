@@ -6,7 +6,7 @@
 // ../coach/AICoach.jsx) rather than forking it — this screen owns its own
 // presentation and streaming loop, not the personality itself.
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
-import { T, FREE_DAILY_LIMIT } from "../theme.js";
+import { T, FREE_DAILY_LIMIT, COACH_VOICE_OPTIONS } from "../theme.js";
 import {
   detectsArcEditIntent,
   formatCoachChatDisplay,
@@ -285,7 +285,7 @@ export function CompanionScreen({
   journalEntries = [], coachMemory = null, voiceRepliesEnabled = false, coachVoiceId = null,
   onNavigateTo, onHabitCreated, onGoalCreated, onCoachLogsApplied, onHabitRenamed,
   onJournalLogged, onOpenEditArc, onUpgrade, previewNormalCoachGreeting = false,
-  onOpenProgress,
+  onOpenProgress, onSaveVoicePrefs,
 }) {
   const cName = coachName || "Coach";
   const greeting = composeGreeting(coachMemory?.recentSummaries);
@@ -301,12 +301,19 @@ export function CompanionScreen({
   function pickSituation(id) {
     setSituation(id);
     setShowSituations(false);
+    setShowVoices(false); // only one top-corner dropdown open at a time
     setModeHintVisible(true);
     window.clearTimeout(modeHintTimerRef.current);
     modeHintTimerRef.current = window.setTimeout(() => setModeHintVisible(false), 3200);
   }
   useEffect(() => () => window.clearTimeout(modeHintTimerRef.current), []);
   const [showTextInput, setShowTextInput] = useState(false);
+
+  // ── Voice pill (top-left, mirrors the situation pill on the right) ─────
+  // Split-button: tapping the pill body is an instant mute/unmute (the
+  // common, fast action); the chevron opens a picker where selecting any
+  // voice both sets it AND turns spoken replies on, in one action.
+  const [showVoices, setShowVoices] = useState(false);
 
   const [messages, setMessages] = useState(() => (user?.id ? loadCoachDayMessages(user.id) || [] : []));
   const messagesRef = useRef(messages);
@@ -326,6 +333,17 @@ export function CompanionScreen({
 
   const coachTts = useCoachTts({ enabled: voiceRepliesEnabled === true, isPro, voiceId: coachVoiceId });
   const speech = useSpeechInput(t => setInput(p => mergeDictationIntoText(p, t)), { autoRestart: true, meter: true });
+
+  function toggleVoiceMute() {
+    if (!onSaveVoicePrefs) return;
+    if (voiceRepliesEnabled) coachTts.stopSpeaking?.(); // muting mid-reply cuts audio immediately, not just future replies
+    onSaveVoicePrefs({ voiceRepliesEnabled: !voiceRepliesEnabled, coachVoiceId });
+  }
+  function pickVoice(id) {
+    if (!onSaveVoicePrefs) return;
+    onSaveVoicePrefs({ voiceRepliesEnabled: true, coachVoiceId: id });
+    setShowVoices(false);
+  }
 
   // ── Ember state machine ────────────────────────────────────────────────
   const emberRingRef = useRef(null);
@@ -681,7 +699,7 @@ export function CompanionScreen({
 
       {/* Situation pill — top right, quiet, collapsed by default */}
       <div style={{ position: "absolute", top: "calc(env(safe-area-inset-top, 0px) + 4px)", right: 4, zIndex: 20, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
-        <button type="button" onClick={() => setShowSituations(o => !o)}
+        <button type="button" onClick={() => { setShowSituations(o => !o); setShowVoices(false); }}
           style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 20, border: `0.5px solid ${T.borderStrong}`, background: T.raised, color: T.sub, fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: T.font }}>
           {SITUATIONS.find(s => s.id === situation)?.label}
           <span style={{ fontSize: 9, opacity: 0.6 }}>▾</span>
@@ -702,6 +720,47 @@ export function CompanionScreen({
           </div>
         ) : null}
       </div>
+
+      {/* Voice pill — top left, mirrors the situation pill. Split button:
+          tapping the body instantly mutes/unmutes; the chevron opens a
+          picker where choosing a voice both selects it and turns replies on. */}
+      {onSaveVoicePrefs ? (
+        <div style={{ position: "absolute", top: "calc(env(safe-area-inset-top, 0px) + 4px)", left: 4, zIndex: 20, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
+          {!isPro ? (
+            <button type="button" onClick={onUpgrade}
+              style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 20, border: "0.5px solid rgba(200,144,42,0.45)", background: "rgba(200,144,42,0.10)", color: T.gold, fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: T.font }}>
+              🔒 Voice
+            </button>
+          ) : (
+            <div style={{ display: "flex", alignItems: "stretch" }}>
+              <button type="button" onClick={toggleVoiceMute} aria-label={voiceRepliesEnabled ? "Mute spoken replies" : "Unmute spoken replies"}
+                style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 10px", borderRadius: "20px 0 0 20px", border: `0.5px solid ${T.borderStrong}`, borderRight: "none", background: T.raised, color: voiceRepliesEnabled ? T.sub : T.hint, fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: T.font }}>
+                {voiceRepliesEnabled
+                  ? `🔊 ${COACH_VOICE_OPTIONS.find(v => v.id === (coachVoiceId || COACH_VOICE_OPTIONS[0].id))?.label || "Voice"}`
+                  : "🔇 Muted"}
+              </button>
+              <button type="button" onClick={() => { setShowVoices(o => !o); setShowSituations(false); }} aria-label="Choose voice"
+                style={{ display: "flex", alignItems: "center", padding: "6px 10px", borderRadius: "0 20px 20px 0", border: `0.5px solid ${T.borderStrong}`, background: T.raised, color: T.sub, fontSize: 9, cursor: "pointer", fontFamily: T.font }}>
+                ▾
+              </button>
+            </div>
+          )}
+          {showVoices ? (
+            <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, background: T.raised, border: `0.5px solid ${T.borderStrong}`, borderRadius: T.rsm, padding: 6, minWidth: 180, boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
+              {COACH_VOICE_OPTIONS.map(v => {
+                const active = voiceRepliesEnabled && (coachVoiceId || COACH_VOICE_OPTIONS[0].id) === v.id;
+                return (
+                  <button key={v.id} type="button" onClick={() => pickVoice(v.id)}
+                    style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 10px", borderRadius: 8, border: "none", background: active ? "rgba(200,144,42,0.12)" : "none", cursor: "pointer", fontFamily: T.font }}>
+                    <div style={{ color: active ? T.gold : T.text, fontSize: 13, fontWeight: 600 }}>{v.label}</div>
+                    <div style={{ color: T.muted, fontSize: 11, marginTop: 1, lineHeight: 1.35 }}>{v.desc}</div>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: 24, padding: "0 28px", minHeight: 0 }}>
         {!showConversation ? (
