@@ -1,11 +1,10 @@
 // ─── COMPANION SCREEN — the new home ─────────────────────────────────────────
-// This is not a chat screen with a mic bolted on. The transcript is not the
-// product — it's demoted to a secondary "History" view. The default surface
-// is a living greeting, a breathing presence (the "ember" — this app is
-// called Forged; shaped by fire), and whatever's being said right now,
-// ephemeral. Reuses the coach's tuned personality/prompt logic (exported
-// from ../coach/AICoach.jsx) rather than forking it — this screen owns its
-// own presentation and streaming loop, not the personality itself.
+// This is not a chat screen with a mic bolted on. The default surface is a
+// living greeting, a breathing presence (the "ember"), and a floating
+// carousel of the current exchange — never a scrolling wall of chat bubbles.
+// Reuses the coach's tuned personality/prompt logic (exported from
+// ../coach/AICoach.jsx) rather than forking it — this screen owns its own
+// presentation and streaming loop, not the personality itself.
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { T, FREE_DAILY_LIMIT } from "../theme.js";
 import {
@@ -30,18 +29,26 @@ import {
   CoachFormattedBubble,
   CapturedLine,
   CaptureSavingLine,
-  formatCoachMsgTime,
 } from "../coach/AICoach.jsx";
 
-// ── Situations — purpose-driven lenses over one shared memory. Steering text
-// is appended to the cached system_stable block; retrieval, memory, and XP
-// stay identical across situations — only tone/behavior changes. ──
+// ── Applies to every situation, always — the base personality (tuned in
+// AICoach.jsx) tends to close turns with a follow-up question. This screen's
+// bar is "would Corbyn use this instead of ChatGPT for thinking out loud,"
+// which means the reply needs the same range: observations, analysis,
+// explanations, stories, connections to what it remembers — not a reflex
+// question every turn. ──
+const RESPONSE_STYLE_STEER = "RESPONSE STYLE: Match the range of a sharp, well-read conversational partner, not a coaching app's follow-up loop. Most replies should NOT end in a question — lead with a real observation, an honest take, an explanation, a relevant story or analogy, or a connection to something you remember about them. Ask a question only when you genuinely need the answer to help, not as a reflex closer on every turn. Vary the shape and length of your replies to match the weight of what they said — a throwaway comment gets a throwaway reply, a real problem gets real thought.";
+
+// ── Situations — purpose-driven lenses over one shared memory. Each one asks
+// for a genuinely different response shape, not just a different tone.
+// Steering text is appended to the cached system_stable block; retrieval,
+// memory, and XP stay identical across situations. ──
 const SITUATIONS = [
-  { id: "chat",        label: "Just chat",         steer: null },
-  { id: "planning",    label: "I'm planning",      steer: "The user has flagged this as a planning conversation. Help them think through the decision: surface the real tradeoffs and criteria, ask a clarifying question before you offer a take, and don't rush to a conclusion." },
-  { id: "building",    label: "I'm building",      steer: "The user has flagged this as a building/execution conversation. Be terse and concrete. Help them turn what they say into a specific next action. Track anything they commit to." },
-  { id: "stuck",       label: "I'm stuck",         steer: "The user has flagged that they're stuck. Slow down. Don't jump to advice or solutions. Look for a pattern or loop in what they're describing — reference relevant history if you know it — and ask a clarifying question only if it would genuinely help them see the loop." },
-  { id: "perspective", label: "I need perspective", steer: "The user has flagged that they want perspective, not fixing. Listen first. Don't rush to advice — offer an outside view only once it feels like they want one, and hold space for them to just talk it through." },
+  { id: "chat",        label: "Just chat",         steer: "This is open, undirected conversation. Respond like a sharp, well-read friend would: react to what's actually interesting in what they said, bring your own honest take or a connection to something you know about their life, and let a question arise naturally only when you're truly curious or it would genuinely help — don't default to one every turn." },
+  { id: "planning",    label: "I'm planning",      steer: "The user has flagged this as a planning conversation. Lay out the real tradeoffs and what actually matters here given what you know about them, then give your own honest read on which way you'd lean and why. Ask a clarifying question only if you're genuinely missing something you need — don't just interview them." },
+  { id: "building",    label: "I'm building",      steer: "The user has flagged this as a building/execution conversation. Be terse and concrete: reflect what's actually been done, name the specific next action, and connect it to the broader thing they're building if relevant. Skip preamble and skip questions unless one is actually blocking the next step." },
+  { id: "stuck",       label: "I'm stuck",         steer: "The user has flagged that they're stuck. Slow down — don't jump to advice or solutions. State the pattern or loop you actually notice in what they're describing (referencing relevant history if you know it) as a plain observation, not a question. Only ask something if it would genuinely help them see the loop more clearly." },
+  { id: "perspective", label: "I need perspective", steer: "The user has flagged that they want perspective, not fixing. Listen first, but don't just reflect their feelings back at them — bring something of your own: a genuine outside view, a relevant story or analogy, or a connection they might not have made themselves. Offer it once it feels like they're ready for it, not immediately." },
 ];
 
 const STREAM_ID = "__companion_stream__";
@@ -90,77 +97,104 @@ function latestDayTitle(recentSummaries) {
   return (last?.title || "").trim() || null;
 }
 
-// ── The Ember — the companion's presence. Not a mic icon: a living, breathing
+// ── The Ember — the companion's presence. Not a mic icon: a calm, living
 // glow that reacts to what's actually happening. Tapping it toggles the mic
-// (press to talk, press to stop — stopping sends). States are visually
-// distinct, not just a single pulse animation reused everywhere:
-//  - idle: slow, quiet breathing — waiting.
-//  - listening: brighter, tighter rhythm; real mic amplitude layers on top
-//    where the browser provides it (desktop), CSS-only rhythm elsewhere.
-//  - thinking: a shimmer/color-shift, no breathing — processing, not waiting.
-//  - speaking: pulses toward the audio output's real amplitude where Web
+// (press to talk, press to stop — stopping sends). Deliberately restrained
+// rather than "busy": a clean circular core (no distortion — a warped shape
+// reads as an accident, not fire), a soft ambient bloom that breathes, and a
+// couple of quiet sonar-style rings that only appear while listening or
+// speaking. States are visually distinct:
+//  - idle: slow, quiet breathing — waiting. A couple of faint sparks drift up.
+//  - listening: brighter, tighter breathing + expanding rings; real mic
+//    amplitude layers on top where the browser provides it (desktop).
+//  - thinking: steady glow with a soft light sweep crossing the core —
+//    processing, not waiting or reacting.
+//  - speaking: rings + a core that scales with the AI's own voice where Web
 //    Audio access succeeds, otherwise a steady rhythmic pulse.
-// A handful of tiny sparks drifting up off the ember, staggered so they never
-// look mechanically synced — this is what tips the read from "glowing orb"
-// to "small fire," more than the gradient alone.
 const EMBER_SPARKS = [
-  { left: "20%", delay: "0s",   dur: "3.2s" },
-  { left: "74%", delay: "0.9s", dur: "3.8s" },
-  { left: "46%", delay: "1.6s", dur: "3.0s" },
-  { left: "82%", delay: "2.3s", dur: "3.5s" },
-  { left: "30%", delay: "1.1s", dur: "4.1s" },
+  { left: "28%", delay: "0s",   dur: "3.6s" },
+  { left: "58%", delay: "1.3s", dur: "4.1s" },
+  { left: "42%", delay: "2.4s", dur: "3.8s" },
 ];
 
 function Ember({ state, onTap, ringRef, coreRef, label }) {
+  const showSparks = state === "idle" || state === "listening";
+  const showRings = state === "listening" || state === "speaking";
+  const auraAnim =
+    state === "idle" ? "emberBreatheIdle 4.4s ease-in-out infinite"
+    : state === "listening" ? "emberBreatheActive 1.4s ease-in-out infinite"
+    : state === "thinking" ? "emberBreatheIdle 2.4s ease-in-out infinite"
+    : "emberBreatheActive 0.6s ease-in-out infinite";
+
   return (
     <button
       type="button"
       onClick={onTap}
       aria-label={label}
       style={{
-        position: "relative", width: 180, height: 200,
+        position: "relative", width: 176, height: 196,
         border: "none", background: "none", cursor: "pointer", padding: 0,
         display: "flex", alignItems: "flex-end", justifyContent: "center",
         WebkitTapHighlightColor: "transparent", flexShrink: 0,
       }}
     >
-      {EMBER_SPARKS.map((s, i) => (
+      {showSparks ? EMBER_SPARKS.map((s, i) => (
         <div key={i} aria-hidden style={{
-          position: "absolute", left: s.left, bottom: "62%", width: 3, height: 3, borderRadius: "50%",
-          background: "radial-gradient(circle, #FFF4D6 0%, #F5C842 60%, transparent 100%)",
+          position: "absolute", left: s.left, bottom: "60%", width: 3, height: 3, borderRadius: "50%",
+          background: "radial-gradient(circle, #FFF6DE 0%, #F3C35E 60%, transparent 100%)",
           animation: `emberSpark ${s.dur} ease-in infinite`, animationDelay: s.delay, opacity: 0,
         }} />
-      ))}
-      <div style={{ position: "relative", width: 168, height: 168, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        {/* outer soft glow — organic wobble via SVG turbulence filter, breathes/reacts via direct style writes (ringRef) */}
+      )) : null}
+
+      <div style={{ position: "relative", width: 164, height: 164, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {/* quiet sonar rings — listening/speaking only, kept out of idle/thinking so those stay calm */}
+        {showRings ? [0, 1].map(i => (
+          <div key={i} aria-hidden style={{
+            position: "absolute", inset: 0, borderRadius: "50%",
+            border: `1px solid rgba(243,195,94,${state === "speaking" ? 0.3 : 0.38})`,
+            animation: "emberRingPulse 2.2s ease-out infinite",
+            animationDelay: `${i * 1.1}s`,
+          }} />
+        )) : null}
+
+        {/* ambient bloom — breathes/reacts via direct style writes (ringRef), no shape distortion */}
         <div
           ref={ringRef}
           aria-hidden
           data-ember-state={state}
           style={{
-            position: "absolute", inset: -6, borderRadius: "50%",
-            background: "radial-gradient(circle, rgba(245,200,66,0.6) 0%, rgba(200,144,42,0.32) 40%, rgba(139,40,20,0.14) 70%, transparent 100%)",
-            filter: "blur(7px) url(#emberWobble)",
-            animation: state === "idle" ? "emberBreathe 4.2s ease-in-out infinite"
-              : state === "listening" ? "emberListen 1.3s ease-in-out infinite"
-              : state === "thinking" ? "emberThink 1.7s ease-in-out infinite"
-              : "emberSpeak 0.45s ease-in-out infinite",
+            position: "absolute", inset: -4, borderRadius: "50%",
+            background: "radial-gradient(circle, rgba(243,195,94,0.42) 0%, rgba(217,140,59,0.16) 45%, transparent 72%)",
+            filter: "blur(14px)",
+            animation: auraAnim,
           }}
         />
-        {/* inner core — hot white center cooling to a charred edge, not a uniform gradient sphere */}
+
+        {/* core — a clean, deliberate circle: hot highlight cooling to a warm copper edge */}
         <div
           ref={coreRef}
           aria-hidden
           style={{
-            position: "absolute", width: "58%", height: "58%", borderRadius: "50%",
-            background: "radial-gradient(circle at 40% 34%, #FFFFFF 0%, #FFEBB0 9%, #F5C842 24%, #E67E22 48%, #B33A22 72%, #3A1408 100%)",
-            filter: "url(#emberWobble2)",
-            boxShadow: "0 0 34px rgba(245,200,66,0.55), 0 0 60px rgba(230,126,34,0.25)",
+            position: "absolute", width: "56%", height: "56%", borderRadius: "50%",
+            background: "radial-gradient(circle at 35% 30%, #FFFDF6 0%, #FDE9B8 12%, #F3C35E 32%, #D98C3B 58%, #A85A26 82%, #6B3414 100%)",
+            boxShadow: "0 0 26px rgba(243,195,94,0.45), 0 0 56px rgba(217,140,59,0.22)",
           }}
         />
+
+        {/* thinking — a soft light sweep crossing the core, not a color/hue flicker */}
+        {state === "thinking" ? (
+          <div aria-hidden style={{ position: "absolute", width: "56%", height: "56%", borderRadius: "50%", overflow: "hidden" }}>
+            <div style={{
+              position: "absolute", inset: "-40%", mixBlendMode: "screen",
+              background: "conic-gradient(from 0deg, transparent 0%, rgba(255,255,255,0.4) 10%, transparent 22%)",
+              animation: "emberSweep 1.5s linear infinite",
+            }} />
+          </div>
+        ) : null}
       </div>
+
       {state === "listening" ? (
-        <span aria-hidden style={{ position: "absolute", bottom: "30%", right: "24%", width: 8, height: 8, borderRadius: "50%", background: "#E74C3C", boxShadow: "0 0 8px #E74C3C" }} />
+        <span aria-hidden style={{ position: "absolute", bottom: "32%", right: "26%", width: 7, height: 7, borderRadius: "50%", background: "#E74C3C", boxShadow: "0 0 7px #E74C3C" }} />
       ) : null}
     </button>
   );
@@ -179,7 +213,6 @@ export function CompanionScreen({
 
   const [situation, setSituation] = useState(SITUATIONS[0].id);
   const [showSituations, setShowSituations] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
   const [showTextInput, setShowTextInput] = useState(false);
 
   const [messages, setMessages] = useState(() => (user?.id ? loadCoachDayMessages(user.id) || [] : []));
@@ -193,7 +226,7 @@ export function CompanionScreen({
   const streamActiveRef = useRef(false);
   const lastStreamTextAtRef = useRef(0);
   const [freeMsgsToday, setFreeMsgsToday] = useState(0);
-  const bottomRef = useRef(null);
+  const carouselScrollRef = useRef(null);
   const textareaRef = useRef(null);
   const inputRef = useRef(input);
   inputRef.current = input;
@@ -239,7 +272,7 @@ export function CompanionScreen({
         analyser.connect(ctx.destination); // required — otherwise routing through an analyser silences output
         audioAnalyserRef.current = analyser;
       } catch {
-        audioAnalyserRef.current = null; // fine — falls back to the CSS-only emberSpeak rhythm
+        audioAnalyserRef.current = null; // fine — falls back to the CSS-only ring pulse
       }
     }
     const analyser = audioAnalyserRef.current;
@@ -355,8 +388,9 @@ export function CompanionScreen({
       const token = session?.access_token;
       const prompts = buildCoachSystemPrompts(user, habits, cName, "companion", goals, journalEntries, activeBlock, coachMemory);
       const situationDef = SITUATIONS.find(s => s.id === situation);
-      const stableWithSituation = situationDef?.steer
-        ? `${prompts.stable}\n\n─── CURRENT SITUATION (user-selected lens) ───\n${situationDef.steer}`
+      const steerText = [RESPONSE_STYLE_STEER, situationDef?.steer].filter(Boolean).join("\n\n");
+      const stableWithSituation = steerText
+        ? `${prompts.stable}\n\n─── CURRENT SITUATION (user-selected lens) ───\n${steerText}`
         : prompts.stable;
 
       const res = await fetch("/api/chat", {
@@ -489,51 +523,55 @@ export function CompanionScreen({
     speech.toggle();
   }
 
-  const lastUserMsg = [...messages].reverse().find(m => m.role === "user");
-  const lastAssistantMsg = [...messages].reverse().find(m => m.role === "assistant" && String(m.content || "").trim());
+  // ── Conversation carousel — floating text, not bubbles. Only ever a
+  // couple of exchanges tall (fixed max height + top mask-fade); anything
+  // older is reached by scrolling inside that fixed region, never by the
+  // page growing. The user's own line stays visible the whole time they're
+  // talking (accumulated dictation + interim), so a mid-sentence pause never
+  // makes it disappear — and it stays visible once the AI starts thinking,
+  // instead of being replaced by a "thinking" state.
   const streamingMsg = messages.find(m => m.id === STREAM_ID);
-  const showLiveExchange = messages.length > 0 && !showHistory;
+  const liveDictationText = speech.listening
+    ? polishInterimDisplay(`${input} ${speech.interim || ""}`.trim())
+    : "";
+  const showConversation = messages.length > 0 || speech.listening || (loading && !streamingMsg);
+  let carouselItems = messages;
+  if (speech.listening) {
+    carouselItems = [...messages, { id: "__live_dictation__", role: "user", content: liveDictationText, pending: true }];
+  } else if (loading && !streamingMsg) {
+    carouselItems = [...messages, { id: "__thinking__", role: "assistant", content: "", pending: true }];
+  }
+
+  // Keep the carousel scrolled to the newest line as the conversation grows —
+  // scrolls only the fixed-height region itself, never the page.
+  useEffect(() => {
+    const el = carouselScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, liveDictationText, showConversation]);
 
   return (
     <div style={{ position: "relative", minHeight: "100dvh", display: "flex", flexDirection: "column", paddingTop: "calc(env(safe-area-inset-top, 0px) + 28px)", paddingBottom: 8 }}>
-      {/* Organic wobble for the ember's edges — a plain circle reads as "AI
-          orb" (every assistant has one now); a slightly irregular, flickering
-          edge is what actually reads as fire. Zero-size, purely a filter def. */}
-      <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden>
-        <filter id="emberWobble">
-          <feTurbulence type="fractalNoise" baseFrequency="0.015 0.03" numOctaves="2" seed="7" result="noise">
-            <animate attributeName="baseFrequency" dur="9s" values="0.015 0.03;0.022 0.04;0.015 0.03" repeatCount="indefinite" />
-          </feTurbulence>
-          <feDisplacementMap in="SourceGraphic" in2="noise" scale="16" />
-        </filter>
-        <filter id="emberWobble2">
-          <feTurbulence type="fractalNoise" baseFrequency="0.03 0.05" numOctaves="2" seed="3" result="noise2">
-            <animate attributeName="baseFrequency" dur="6s" values="0.03 0.05;0.04 0.06;0.03 0.05" repeatCount="indefinite" />
-          </feTurbulence>
-          <feDisplacementMap in="SourceGraphic" in2="noise2" scale="6" />
-        </filter>
-      </svg>
       <style>{`
-        @keyframes emberBreathe {
-          0%, 100% { transform: scale(1); opacity: 0.78; }
-          50%      { transform: scale(1.08); opacity: 0.98; }
+        @keyframes emberBreatheIdle {
+          0%, 100% { transform: scale(1); opacity: 0.72; }
+          50%      { transform: scale(1.07); opacity: 0.94; }
         }
-        @keyframes emberListen {
-          0%, 100% { transform: scale(1.04); opacity: 0.94; }
-          50%      { transform: scale(1.2); opacity: 1; }
+        @keyframes emberBreatheActive {
+          0%, 100% { transform: scale(1.02); opacity: 0.86; }
+          50%      { transform: scale(1.16); opacity: 1; }
         }
-        @keyframes emberThink {
-          0%, 100% { filter: blur(7px) url(#emberWobble) hue-rotate(0deg) brightness(1); opacity: 0.85; }
-          50%      { filter: blur(7px) url(#emberWobble) hue-rotate(-14deg) brightness(1.25); opacity: 1; }
+        @keyframes emberRingPulse {
+          0%   { transform: scale(0.92); opacity: 0.5; }
+          100% { transform: scale(1.6); opacity: 0; }
         }
-        @keyframes emberSpeak {
-          0%, 100% { transform: scale(1.05); }
-          50%      { transform: scale(1.16); }
+        @keyframes emberSweep {
+          from { transform: rotate(0deg); }
+          to   { transform: rotate(360deg); }
         }
         @keyframes emberSpark {
           0%   { transform: translate(0, 0) scale(1); opacity: 0; }
-          15%  { opacity: 1; }
-          100% { transform: translate(6px, -90px) scale(0.3); opacity: 0; }
+          18%  { opacity: 0.75; }
+          100% { transform: translate(4px, -70px) scale(0.35); opacity: 0; }
         }
         @keyframes companionDot {
           0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
@@ -545,193 +583,159 @@ export function CompanionScreen({
         }
       `}</style>
 
-      {!showHistory ? (
-        <>
-          {/* Situation pill — top right, quiet, collapsed by default */}
-          <div style={{ position: "absolute", top: "calc(env(safe-area-inset-top, 0px) + 4px)", right: 4, zIndex: 20 }}>
-            <button type="button" onClick={() => setShowSituations(o => !o)}
-              style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 20, border: `0.5px solid ${T.borderStrong}`, background: T.raised, color: T.sub, fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: T.font }}>
-              {SITUATIONS.find(s => s.id === situation)?.label}
-              <span style={{ fontSize: 9, opacity: 0.6 }}>▾</span>
-            </button>
-            {showSituations ? (
-              <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, background: T.raised, border: `0.5px solid ${T.borderStrong}`, borderRadius: T.rsm, padding: 6, minWidth: 168, boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
-                {SITUATIONS.map(s => (
-                  <button key={s.id} type="button" onClick={() => { setSituation(s.id); setShowSituations(false); }}
-                    style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 10px", borderRadius: 8, border: "none", background: s.id === situation ? "rgba(200,144,42,0.12)" : "none", color: s.id === situation ? T.gold : T.text, fontSize: 13, cursor: "pointer", fontFamily: T.font }}>
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
-
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: 28, padding: "0 28px" }}>
-            {!showLiveExchange ? (
-              <div style={{ textAlign: "center", maxWidth: 340 }}>
-                {dayTitle ? (
-                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.hint, marginBottom: 10 }}>
-                    {dayTitle}
-                  </div>
-                ) : null}
-                <div style={{ fontFamily: T.serif, fontSize: 21, color: T.text, lineHeight: 1.5 }}>
-                  <div>{greeting.opener}</div>
-                  {greeting.bullets.length ? (
-                    <div style={{ display: "inline-block", textAlign: "left", marginTop: 10 }}>
-                      {greeting.bullets.map((b, i) => (
-                        <div key={i}>•  {b}</div>
-                      ))}
-                    </div>
-                  ) : null}
-                  <div style={{ marginTop: greeting.bullets.length ? 16 : 10 }}>{greeting.closer}</div>
-                </div>
-              </div>
-            ) : (
-              <div style={{ textAlign: "center", maxWidth: 340, minHeight: 90 }}>
-                {speech.listening && speech.interim?.trim() ? (
-                  <div style={{ fontSize: 15, color: T.sub, lineHeight: 1.6, fontStyle: "italic" }}>
-                    &ldquo;{polishInterimDisplay(speech.interim)}&rdquo;
-                  </div>
-                ) : loading || (streamingMsg && !String(streamingMsg.content || "").trim()) ? (
-                  <div style={{ display: "flex", justifyContent: "center", gap: 5 }}>
-                    {[0, 1, 2].map(i => (
-                      <div key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: T.muted, animation: "companionDot 1.2s ease-in-out infinite", animationDelay: `${i * 0.2}s` }} />
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ animation: "companionFadeIn 0.3s ease" }}>
-                    {lastUserMsg ? (
-                      <div style={{ fontSize: 12.5, color: T.hint, marginBottom: 10, lineHeight: 1.5 }}>
-                        You: {lastUserMsg.content}
-                      </div>
-                    ) : null}
-                    {streamingMsg?.content || lastAssistantMsg ? (
-                      <div style={{ fontSize: 15.5, color: T.text, lineHeight: 1.6 }}>
-                        <CoachFormattedBubble text={formatCoachChatDisplay(splitCoachReceipt(stripPartialGoalPlan(streamingMsg?.content || lastAssistantMsg?.content || "")).main)} isUser={false} />
-                      </div>
-                    ) : null}
-                    {captureSaving ? <div style={{ marginTop: 8 }}><CaptureSavingLine /></div> : null}
-                    {lastAssistantMsg?.captured?.length && !streamingMsg ? (
-                      <div style={{ marginTop: 8, display: "inline-block", textAlign: "left" }}>
-                        <CapturedLine items={lastAssistantMsg.captured} onNavigateTo={onNavigateTo} />
-                      </div>
-                    ) : null}
-                  </div>
-                )}
-                {error ? <div style={{ fontSize: 12, color: T.accent, marginTop: 10 }}>{error}</div> : null}
-              </div>
-            )}
-
-            {atFreeCap ? (
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 13, color: T.sub, marginBottom: 8 }}>Daily coach limit reached — resets tomorrow</div>
-                <button type="button" onClick={onUpgrade} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 12, color: T.gold, fontWeight: 600 }}>
-                  Go Pro for unlimited coach →
-                </button>
-              </div>
-            ) : (
-              <Ember
-                state={emberState}
-                onTap={handleEmberTap}
-                ringRef={emberRingRef}
-                coreRef={emberCoreRef}
-                label={speech.listening ? "Stop and send" : "Start talking"}
-              />
-            )}
-            <div style={{ fontSize: 11.5, color: T.muted, minHeight: 16, textAlign: "center" }}>
-              {atFreeCap ? null
-                : speech.listening ? "Listening — tap to stop and send"
-                : loading ? "Thinking…"
-                : coachTts.speaking ? "Speaking…"
-                : "Tap to talk"}
-            </div>
-          </div>
-
-          {/* Text fallback + footer links */}
-          <div style={{ padding: "0 24px", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-            {!showTextInput ? (
-              <button type="button" onClick={() => { setShowTextInput(true); requestAnimationFrame(() => textareaRef.current?.focus()); }}
-                style={{ background: "none", border: "none", color: T.hint, fontSize: 12.5, cursor: "pointer", fontFamily: T.font, padding: "4px 8px" }}>
-                type instead
+      {/* Situation pill — top right, quiet, collapsed by default */}
+      <div style={{ position: "absolute", top: "calc(env(safe-area-inset-top, 0px) + 4px)", right: 4, zIndex: 20 }}>
+        <button type="button" onClick={() => setShowSituations(o => !o)}
+          style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 20, border: `0.5px solid ${T.borderStrong}`, background: T.raised, color: T.sub, fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: T.font }}>
+          {SITUATIONS.find(s => s.id === situation)?.label}
+          <span style={{ fontSize: 9, opacity: 0.6 }}>▾</span>
+        </button>
+        {showSituations ? (
+          <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, background: T.raised, border: `0.5px solid ${T.borderStrong}`, borderRadius: T.rsm, padding: 6, minWidth: 168, boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
+            {SITUATIONS.map(s => (
+              <button key={s.id} type="button" onClick={() => { setSituation(s.id); setShowSituations(false); }}
+                style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 10px", borderRadius: 8, border: "none", background: s.id === situation ? "rgba(200,144,42,0.12)" : "none", color: s.id === situation ? T.gold : T.text, fontSize: 13, cursor: "pointer", fontFamily: T.font }}>
+                {s.label}
               </button>
-            ) : (
-              <div style={{ width: "100%", display: "flex", gap: 8, alignItems: "flex-end" }}>
-                <textarea
-                  ref={textareaRef}
-                  value={input}
-                  onChange={e => setInput(e.target.value)}
-                  onInput={e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 88) + "px"; }}
-                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !atFreeCap) { e.preventDefault(); send(input); } }}
-                  placeholder="Type instead…"
-                  style={{ flex: 1, background: T.surface, border: `0.5px solid ${T.borderStrong}`, borderRadius: T.rsm, padding: "10px 14px", fontSize: 16, color: T.text, resize: "none", fontFamily: T.font, lineHeight: 1.5, outline: "none", minHeight: 42, maxHeight: 88 }}
-                />
-                <button type="button" onClick={() => send(input)} disabled={!input.trim() || loading || atFreeCap}
-                  aria-label="Send message"
-                  style={{ width: 40, height: 40, borderRadius: "50%", border: `0.5px solid ${T.border}`, flexShrink: 0, background: input.trim() && !loading ? T.gold : T.surface, cursor: input.trim() && !loading ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <svg width="15" height="15" viewBox="0 0 18 18" fill="none">
-                    <path d="M2 9h14M9 2l7 7-7 7" stroke={input.trim() && !loading ? "#1a1a16" : T.hint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </button>
-              </div>
-            )}
+            ))}
+          </div>
+        ) : null}
+      </div>
 
-            {!isPro && !atFreeCap ? (
-              <div style={{ fontSize: 11, color: FREE_DAILY_LIMIT - freeMsgsToday === 1 ? T.gold : T.muted }}>
-                {FREE_DAILY_LIMIT - freeMsgsToday} coach message{FREE_DAILY_LIMIT - freeMsgsToday === 1 ? "" : "s"} remaining today
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: 24, padding: "0 28px", minHeight: 0 }}>
+        {!showConversation ? (
+          <div style={{ textAlign: "center", maxWidth: 340 }}>
+            {dayTitle ? (
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.hint, marginBottom: 10 }}>
+                {dayTitle}
               </div>
             ) : null}
-
-            <div style={{ display: "flex", gap: 18 }}>
-              {messages.length > 0 ? (
-                <button type="button" onClick={() => setShowHistory(true)}
-                  style={{ background: "none", border: "none", color: T.hint, fontSize: 11.5, cursor: "pointer", fontFamily: T.font, padding: "4px 8px" }}>
-                  Today's conversation →
-                </button>
+            <div style={{ fontFamily: T.serif, fontSize: 21, color: T.text, lineHeight: 1.5 }}>
+              <div>{greeting.opener}</div>
+              {greeting.bullets.length ? (
+                <div style={{ display: "inline-block", textAlign: "left", marginTop: 10 }}>
+                  {greeting.bullets.map((b, i) => (
+                    <div key={i}>•  {b}</div>
+                  ))}
+                </div>
               ) : null}
-              {onOpenProgress ? (
-                <button type="button" onClick={onOpenProgress}
-                  style={{ background: "none", border: "none", color: T.hint, fontSize: 11.5, cursor: "pointer", fontFamily: T.font, padding: "4px 8px" }}>
-                  Progress →
-                </button>
-              ) : null}
+              <div style={{ marginTop: greeting.bullets.length ? 16 : 10 }}>{greeting.closer}</div>
             </div>
           </div>
-        </>
-      ) : (
-        // ── History — the full transcript, demoted to a secondary view ──
-        <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, padding: "0 4px" }}>
-          <button type="button" onClick={() => setShowHistory(false)}
-            style={{ alignSelf: "flex-start", background: "none", border: "none", color: T.sub, fontSize: 13, cursor: "pointer", fontFamily: T.font, padding: "4px 8px", marginBottom: 10 }}>
-            ← Back
-          </button>
-          <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12, paddingBottom: 16 }}>
-            {messages.map((m, i) => {
-              const rawVisible = m.role === "assistant" ? stripPartialGoalPlan(m.content) : m.content;
-              const { main: coachMainRaw } = m.role === "assistant" ? splitCoachReceipt(rawVisible) : { main: rawVisible };
-              const coachMain = m.role === "assistant" ? formatCoachChatDisplay(coachMainRaw) : coachMainRaw;
-              return (
-                <div key={m.id || `${m.role}-${i}-${m.ts ?? ""}`} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
-                  <div style={{ maxWidth: "88%", display: "flex", flexDirection: "column", alignItems: m.role === "user" ? "flex-end" : "flex-start" }}>
-                    {coachMain ? (
-                      <div style={{
-                        padding: "10px 14px", borderRadius: m.role === "user" ? "14px 14px 3px 14px" : "14px 14px 14px 3px",
-                        background: m.role === "user" ? T.accent : T.surface, fontSize: 14, color: m.role === "user" ? "#fff" : T.text, lineHeight: 1.6,
-                      }}>
-                        <CoachFormattedBubble text={coachMain} isUser={m.role === "user"} />
+        ) : (
+          <div style={{ width: "100%", maxWidth: 360 }}>
+            <div
+              ref={carouselScrollRef}
+              style={{
+                maxHeight: 230, overflowY: "auto", WebkitOverflowScrolling: "touch",
+                display: "flex", flexDirection: "column", gap: 16, padding: "6px 2px",
+                maskImage: "linear-gradient(to bottom, transparent 0, black 22px, black 100%)",
+                WebkitMaskImage: "linear-gradient(to bottom, transparent 0, black 22px, black 100%)",
+              }}
+            >
+              {carouselItems.map((m, i) => {
+                const isUser = m.role === "user";
+                const rawVisible = !isUser ? stripPartialGoalPlan(m.content || "") : (m.content || "");
+                const { main: coachMainRaw } = !isUser ? splitCoachReceipt(rawVisible) : { main: rawVisible };
+                const coachMain = !isUser ? formatCoachChatDisplay(coachMainRaw) : coachMainRaw;
+                const isThinking = !isUser && !coachMain.trim();
+                return (
+                  <div key={m.id || `${m.role}-${i}`} style={{ animation: "companionFadeIn 0.35s ease", textAlign: isUser ? "right" : "left" }}>
+                    {isThinking ? (
+                      <div style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", gap: 5 }}>
+                        {[0, 1, 2].map(d => (
+                          <div key={d} style={{ width: 6, height: 6, borderRadius: "50%", background: T.muted, animation: "companionDot 1.2s ease-in-out infinite", animationDelay: `${d * 0.2}s` }} />
+                        ))}
+                      </div>
+                    ) : isUser ? (
+                      <div style={{ fontSize: 14, lineHeight: 1.55, color: m.pending ? T.muted : T.sub, fontStyle: m.pending ? "italic" : "normal" }}>
+                        {coachMain || (m.pending ? "Listening…" : "")}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 15.5, lineHeight: 1.6, color: T.text }}>
+                        <CoachFormattedBubble text={coachMain} isUser={false} />
+                      </div>
+                    )}
+                    {!isUser && m.captured?.length ? (
+                      <div style={{ marginTop: 6, display: "inline-block", textAlign: "left" }}>
+                        <CapturedLine items={m.captured} onNavigateTo={onNavigateTo} />
                       </div>
                     ) : null}
-                    {m.role === "assistant" && m.captured?.length ? (
-                      <CapturedLine items={m.captured} onNavigateTo={onNavigateTo} />
-                    ) : null}
-                    <div style={{ fontSize: 10, color: T.hint, marginTop: 3 }}>{formatCoachMsgTime(m.ts)}</div>
                   </div>
-                </div>
-              );
-            })}
-            <div ref={bottomRef} />
+                );
+              })}
+            </div>
+            {captureSaving ? <div style={{ textAlign: "center", marginTop: 8 }}><CaptureSavingLine /></div> : null}
+            {error ? <div style={{ textAlign: "center", fontSize: 12, color: T.accent, marginTop: 10 }}>{error}</div> : null}
           </div>
+        )}
+
+        {atFreeCap ? (
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 13, color: T.sub, marginBottom: 8 }}>Daily coach limit reached — resets tomorrow</div>
+            <button type="button" onClick={onUpgrade} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 12, color: T.gold, fontWeight: 600 }}>
+              Go Pro for unlimited coach →
+            </button>
+          </div>
+        ) : (
+          <Ember
+            state={emberState}
+            onTap={handleEmberTap}
+            ringRef={emberRingRef}
+            coreRef={emberCoreRef}
+            label={speech.listening ? "Stop and send" : "Start talking"}
+          />
+        )}
+        <div style={{ fontSize: 11.5, color: T.muted, minHeight: 16, textAlign: "center" }}>
+          {atFreeCap ? null
+            : speech.listening ? "Listening — tap to stop and send"
+            : loading ? "Thinking…"
+            : coachTts.speaking ? "Speaking…"
+            : "Tap to talk"}
         </div>
-      )}
+      </div>
+
+      {/* Text fallback + footer links */}
+      <div style={{ padding: "0 24px", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+        {!showTextInput ? (
+          <button type="button" onClick={() => { setShowTextInput(true); requestAnimationFrame(() => textareaRef.current?.focus()); }}
+            style={{ background: "none", border: "none", color: T.hint, fontSize: 12.5, cursor: "pointer", fontFamily: T.font, padding: "4px 8px" }}>
+            type instead
+          </button>
+        ) : (
+          <div style={{ width: "100%", display: "flex", gap: 8, alignItems: "flex-end" }}>
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onInput={e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 88) + "px"; }}
+              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !atFreeCap) { e.preventDefault(); send(input); } }}
+              placeholder="Type instead…"
+              style={{ flex: 1, background: T.surface, border: `0.5px solid ${T.borderStrong}`, borderRadius: T.rsm, padding: "10px 14px", fontSize: 16, color: T.text, resize: "none", fontFamily: T.font, lineHeight: 1.5, outline: "none", minHeight: 42, maxHeight: 88 }}
+            />
+            <button type="button" onClick={() => send(input)} disabled={!input.trim() || loading || atFreeCap}
+              aria-label="Send message"
+              style={{ width: 40, height: 40, borderRadius: "50%", border: `0.5px solid ${T.border}`, flexShrink: 0, background: input.trim() && !loading ? T.gold : T.surface, cursor: input.trim() && !loading ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <svg width="15" height="15" viewBox="0 0 18 18" fill="none">
+                <path d="M2 9h14M9 2l7 7-7 7" stroke={input.trim() && !loading ? "#1a1a16" : T.hint} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          </div>
+        )}
+
+        {!isPro && !atFreeCap ? (
+          <div style={{ fontSize: 11, color: FREE_DAILY_LIMIT - freeMsgsToday === 1 ? T.gold : T.muted }}>
+            {FREE_DAILY_LIMIT - freeMsgsToday} coach message{FREE_DAILY_LIMIT - freeMsgsToday === 1 ? "" : "s"} remaining today
+          </div>
+        ) : null}
+
+        {onOpenProgress ? (
+          <button type="button" onClick={onOpenProgress}
+            style={{ background: "none", border: "none", color: T.hint, fontSize: 11.5, cursor: "pointer", fontFamily: T.font, padding: "4px 8px" }}>
+            Progress →
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

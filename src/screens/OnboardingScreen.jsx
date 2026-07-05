@@ -505,8 +505,8 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
               </div>
               <div style={{ fontSize:14, color:T.muted, lineHeight:1.7, maxWidth:300, margin:"0 auto 28px" }}>
                 {editedArc
-                  ? <>“{editedArc.title || "Your Arc"}” — {arcDurationWeeksLabel(editedArc.durationDays)}, starting today. Show proof, talk to your coach, and let the weekly Review tell you the truth.</>
-                  : <>Track what matters and talk to your coach now. Whenever you're ready, start an <strong style={{ color:T.sub }}>Arc</strong> — a focused stretch of time built around one identity, where daily <strong style={{ color:T.sub }}>proof actions</strong> show you're living it.</>}
+                  ? <>“{editedArc.title || "Your Arc"}” — {arcDurationWeeksLabel(editedArc.durationDays)}, starting today. Keep talking to me, and I'll remember how it's actually going.</>
+                  : <>Just talk to me — about your day, what you're building, whatever's on your mind. I'll remember it. Whenever you want to commit to something specific, we can start an <strong style={{ color:T.sub }}>Arc</strong> — a focused stretch of time built around one identity, tracked with daily proof.</>}
               </div>
             </div>
 
@@ -568,16 +568,16 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
           <div style={{ textAlign:"center", marginBottom:28 }}>
             <div style={{ fontSize:52, marginBottom:14, lineHeight:1 }}>🔔</div>
             <div style={{ fontFamily:T.serif, fontSize:26, color:T.text, lineHeight:1.2, marginBottom:10 }}>
-              Protect the Arc
+              I'll check in with you
             </div>
             <div style={{ fontSize:14, color:T.muted, lineHeight:1.6, maxWidth:300, margin:"0 auto" }}>
-              One reminder a day, sent when you still have time to show proof. That&apos;s it — no spam.
+              One reminder a day, sent while there&apos;s still time to talk. That&apos;s it — no spam.
             </div>
           </div>
 
           <div style={{ display:"flex", flexDirection:"column", gap:12, marginBottom:28 }}>
             {[
-              { icon:"🔥", title:"Evidence protection", desc:"A nudge before the day closes empty." },
+              { icon:"🔥", title:"Daily nudge", desc:"A check-in before the day closes out." },
               { icon:"🗓️", title:"Weekly Review", desc:"Know when your Review is ready." },
               { icon:"✅", title:"Daily check-in", desc:"A quick tap to log and close the day." },
             ].map(({ icon, title, desc }) => (
