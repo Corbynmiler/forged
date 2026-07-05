@@ -7,7 +7,7 @@ import {
   DailyCard, WeeklyCard, ProjectCard, LimitCard, LogCard,
   TodayGoalCard,
 } from "../components/habitCards.jsx";
-import { resolveArcTitle, arcHeaderSubtitle, arcDurationWeeksLabel } from "../arcProofMatch.js";
+import { resolveArcTitle } from "../arcProofMatch.js";
 import { parseReceiptStructured } from "../lib/arcTimeline.js";
 import { ReceiptExpandedBody } from "../components/ArcTimeline.jsx";
 import { getArcDayStatus, ARC_STATUS_META } from "../arcProgress.js";
@@ -112,41 +112,122 @@ function buildCoachGreetingLine({ habits, goals }) {
 }
 
 /**
- * A single day's entry in the archive — date, the ready-made narrative the
- * nightly rollover wrote specifically to be read back (falling back to
- * title/summary for older rows from before that field existed), and the
- * AI-judged XP read for that day when present. Deliberately not collapsed —
- * these are short (1-2 sentences), and a scrapbook you can actually scan
- * beats a list you have to tap through one at a time.
+ * A single day's entry in the archive — tappable, collapsed to a scannable
+ * teaser (date, title, one line of narrative). Opening one is handled by the
+ * parent (DailyChapters), which owns which chapter is currently open so only
+ * one detail sheet exists at a time.
  */
-function DailyChapterCard({ entry }) {
+function DailyChapterCard({ entry, onOpen }) {
   const narrative = (entry?.structured?.narrative || entry?.summary || "").trim();
   const title = (entry?.title || "").trim();
-  const xpReason = typeof entry?.xp_reason === "string" ? entry.xp_reason.trim() : "";
-  const xp = Number.isFinite(entry?.xp_awarded) ? entry.xp_awarded : null;
   if (!narrative && !title) return null;
   return (
-    <div style={{ padding: "14px 16px", background: T.raised, borderRadius: T.r, border: `0.5px solid ${T.border}` }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: T.gold, letterSpacing: "0.04em", marginBottom: 6 }}>
-        {fmtEntryDate(entry.date)}
+    <button
+      type="button"
+      onClick={() => onOpen(entry)}
+      style={{
+        display: "block", width: "100%", textAlign: "left", fontFamily: T.font,
+        padding: "14px 16px", background: T.raised, borderRadius: T.r, border: `0.5px solid ${T.border}`,
+        cursor: "pointer",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: T.gold, letterSpacing: "0.04em" }}>{fmtEntryDate(entry.date)}</span>
+        <span style={{ fontSize: 11, color: T.hint, flexShrink: 0 }}>Read →</span>
       </div>
-      {title && <div style={{ fontFamily: T.serif, fontSize: 15, color: T.text, marginBottom: 4, lineHeight: 1.3 }}>{title}</div>}
-      {narrative && <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.55 }}>{narrative}</div>}
-      {(xpReason || xp != null) && (
-        <div style={{ fontSize: 11.5, color: T.hint, lineHeight: 1.5, marginTop: 8, paddingTop: 8, borderTop: `0.5px solid ${T.border}` }}>
-          <span style={{ fontWeight: 700 }}>Companion's read{xp != null ? ` (${xp} xp)` : ""}{xpReason ? ":" : ""}</span>{xpReason ? ` ${xpReason}` : ""}
+      {title && <div style={{ fontFamily: T.serif, fontSize: 15, color: T.text, marginTop: 4, marginBottom: 4, lineHeight: 1.3 }}>{title}</div>}
+      {narrative && (
+        <div style={{
+          fontSize: 13, color: T.sub, lineHeight: 1.55,
+          overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+        }}>
+          {narrative}
         </div>
       )}
-    </div>
+    </button>
+  );
+}
+
+/**
+ * The full chapter — opened as a bottom sheet, meant to read like a real
+ * journal entry rather than a data row. Sourced primarily from
+ * daily_summaries (title, narrative, emotional_context, commitments,
+ * xp_awarded/xp_reason — all written automatically by the nightly rollover,
+ * no extra fetch). When that day also has a real evidence/receipt entry in
+ * journal_entries, its full structured content (proof shown, wins, hard
+ * parts, pattern, etc.) is folded in as a bonus "Evidence entry" section via
+ * ReceiptExpandedBody — the same rich component the old Arc timeline used
+ * for this exact purpose, reused rather than rebuilt.
+ *
+ * Deliberately does not fetch raw conversation_messages for this day — real,
+ * clearly-scoped next step, not done here (would need a new per-day query;
+ * see PREVIEW_BRANCH_HANDOFF.md).
+ */
+function ChapterDetailSheet({ entry, journalEntry, onClose }) {
+  const narrative = (entry?.structured?.narrative || entry?.summary || "").trim();
+  const title = (entry?.title || "").trim();
+  const emotionalContext = typeof entry?.emotional_context === "string" ? entry.emotional_context.trim() : "";
+  const commitments = Array.isArray(entry?.commitments) ? entry.commitments.filter(c => typeof c === "string" && c.trim()) : [];
+  const xpReason = typeof entry?.xp_reason === "string" ? entry.xp_reason.trim() : "";
+  const xp = Number.isFinite(entry?.xp_awarded) ? entry.xp_awarded : null;
+  const parsedReceipt = journalEntry ? parseReceiptStructured(journalEntry.content) : null;
+  const hasReceiptBody = parsedReceipt && (parsedReceipt.title || parsedReceipt.narrative || parsedReceipt.proof || parsedReceipt.wins || parsedReceipt.hardParts);
+
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: T.gold, letterSpacing: "0.06em", marginBottom: 8 }}>
+        {fmtEntryDate(entry.date)}
+      </div>
+      {title && <div style={{ fontFamily: T.serif, fontSize: 22, color: T.text, marginBottom: 12, lineHeight: 1.25 }}>{title}</div>}
+      {narrative && <div style={{ fontSize: 14, color: T.text, lineHeight: 1.65, marginBottom: 18 }}>{narrative}</div>}
+
+      {emotionalContext && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.hint, marginBottom: 5 }}>How it felt</div>
+          <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.55 }}>{emotionalContext}</div>
+        </div>
+      )}
+
+      {commitments.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.hint, marginBottom: 6 }}>What you said you&apos;d do</div>
+          {commitments.map((c, i) => (
+            <div key={i} style={{ display: "flex", gap: 7, fontSize: 13, color: T.sub, lineHeight: 1.5, marginBottom: 3 }}>
+              <span style={{ color: T.hint, flexShrink: 0 }}>•</span><span>{c}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {(xpReason || xp != null) && (
+        <div style={{ marginBottom: hasReceiptBody ? 16 : 6, paddingTop: 14, borderTop: `0.5px solid ${T.border}` }}>
+          <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.hint, marginBottom: 5 }}>
+            Companion&apos;s read{xp != null ? ` — ${xp} xp` : ""}
+          </div>
+          {xpReason && <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.55 }}>{xpReason}</div>}
+        </div>
+      )}
+
+      {hasReceiptBody && (
+        <div style={{ paddingTop: 14, borderTop: `0.5px solid ${T.border}` }}>
+          <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.hint, marginBottom: 8 }}>
+            Evidence entry
+          </div>
+          <ReceiptExpandedBody parsed={parsedReceipt} content={journalEntry.content} />
+        </div>
+      )}
+
+      <GBtn onClick={onClose}>Close</GBtn>
+    </Modal>
   );
 }
 
 /**
  * The real daily-memory archive — replaces a single "yesterday" teaser line
  * with the actual companion-narrated history: every day the nightly
- * rollover has summarized, most recent first, rendered as a small chapter
- * rather than a report row. This is Today/Noticed's real reason to exist
- * beyond habit logging — a place worth scrolling back into.
+ * rollover has summarized, most recent first, rendered as a small tappable
+ * chapter rather than a report row. This is Today/Noticed's real reason to
+ * exist beyond habit logging — a place worth scrolling back into.
  *
  * Free accounts see the same recent window as the rest of the app's history
  * gating (last 7 days — matches HistoryModal's `daysAgo(6)` cutoff exactly,
@@ -154,13 +235,16 @@ function DailyChapterCard({ entry }) {
  * Older chapters are blurred with the same lock-and-unlock pattern already
  * used for habit history, not a separate one-off paywall design.
  */
-function DailyChapters({ recentSummaries, isPro, onUpgrade }) {
+function DailyChapters({ recentSummaries, isPro, onUpgrade, journalEntries = [] }) {
+  const [openDate, setOpenDate] = useState(null);
   const today = todayStr();
   const cutoff = daysAgo(6);
   const chapters = (Array.isArray(recentSummaries) ? recentSummaries : [])
     .filter(s => s?.date && s.date !== today)
     .slice()
     .reverse(); // most recent first (source is oldest-first)
+  const openEntry = openDate ? chapters.find(s => s.date === openDate) : null;
+  const openJournalEntry = openDate ? journalEntries.find(e => e.date === openDate) ?? null : null;
 
   // Today isn't a chapter yet — it's still being written, and won't become
   // one until tonight's rollover. Naming that explicitly (rather than just
@@ -195,12 +279,12 @@ function DailyChapters({ recentSummaries, isPro, onUpgrade }) {
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {todayGhost}
-        {visible.map(s => <DailyChapterCard key={s.date} entry={s} />)}
+        {visible.map(s => <DailyChapterCard key={s.date} entry={s} onOpen={e => setOpenDate(e.date)} />)}
       </div>
       {locked.length > 0 && (
         <div style={{ position: "relative", marginTop: 8, borderRadius: T.r, overflow: "hidden" }}>
           <div style={{ filter: "blur(3px)", pointerEvents: "none", userSelect: "none", display: "flex", flexDirection: "column", gap: 8 }}>
-            {locked.slice(0, 2).map(s => <DailyChapterCard key={s.date} entry={s} />)}
+            {locked.slice(0, 2).map(s => <DailyChapterCard key={s.date} entry={s} onOpen={() => {}} />)}
           </div>
           <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, background: "rgba(14,14,14,0.72)", padding: "16px" }}>
             <div style={{ fontSize: 12, color: T.text, fontWeight: 600, textAlign: "center" }}>
@@ -214,6 +298,7 @@ function DailyChapters({ recentSummaries, isPro, onUpgrade }) {
           </div>
         </div>
       )}
+      {openEntry && <ChapterDetailSheet entry={openEntry} journalEntry={openJournalEntry} onClose={() => setOpenDate(null)} />}
     </div>
   );
 }
@@ -619,11 +704,18 @@ function ArcStatusPill({ status }) {
   );
 }
 
+/**
+ * Deliberately quiet. This used to be Noticed's hero card: a big gradient
+ * background, a 22px serif Arc title, its own status badge — the exact
+ * "old Forged" dominance (direction as the mandatory centre, not an
+ * optional strip) this whole redesign has been working against. Same data,
+ * same tap-through-to-Arc behavior, but sized and colored like a secondary
+ * status line now that the companion's memory (DailyChapters, above this in
+ * the render order) is what actually leads the screen.
+ */
 function ArcStrip({ activeBlock, onViewArc, proofTotal = 0, proofDone = 0, hour = new Date().getHours() }) {
-  const { dayX, week, progress, duration, totalWeeks } = arcDayInfo(activeBlock);
+  const { dayX, duration } = arcDayInfo(activeBlock);
   const arcTitle = resolveArcTitle(activeBlock.title, activeBlock.identity);
-  const subtitle = arcHeaderSubtitle(activeBlock);
-  const weeksLabel = arcDurationWeeksLabel(duration);
   const status = getArcDayStatus({ proofTotal, proofDone, hour });
 
   return (
@@ -631,44 +723,28 @@ function ArcStrip({ activeBlock, onViewArc, proofTotal = 0, proofDone = 0, hour 
       type="button"
       onClick={() => { if (onViewArc) onViewArc(); }}
       style={{
-        display: "block",
+        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
         width: "calc(100% - 28px)",
         margin: "8px 14px 0",
-        padding: "12px 14px",
+        padding: "10px 14px",
         borderRadius: T.r,
-        border: "0.5px solid rgba(200,144,42,0.4)",
-        background: "linear-gradient(135deg, rgba(192,57,43,0.12) 0%, rgba(200,144,42,0.08) 45%, rgba(26,26,22,0.98) 100%)",
+        border: `0.5px solid ${T.border}`,
+        background: T.raised,
         cursor: onViewArc ? "pointer" : "default",
         textAlign: "left",
         fontFamily: T.font,
         boxSizing: "border-box",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
-        <div style={{ fontSize: 10, fontWeight: 800, color: T.gold, letterSpacing: "0.12em", textTransform: "uppercase", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {weeksLabel} · Day {dayX} of {duration} · Week {week}/{totalWeeks}
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 9.5, fontWeight: 700, color: T.hint, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 3 }}>
+          Direction · Day {dayX} of {duration}
         </div>
-        {proofTotal > 0 && <ArcStatusPill status={status} />}
-      </div>
-      <div style={{ fontFamily: T.serif, fontSize: 22, color: T.text, lineHeight: 1.2, marginBottom: subtitle ? 6 : 10, minWidth: 0, overflowWrap: "break-word", wordBreak: "break-word" }}>
-        {arcTitle}
-      </div>
-      {subtitle ? (
-        <div style={{
-          fontSize: 13,
-          color: T.sub,
-          lineHeight: 1.45,
-          marginBottom: 10,
-          minWidth: 0,
-          overflowWrap: "break-word",
-          wordBreak: "break-word",
-        }}>
-          {subtitle}
+        <div style={{ fontSize: 14, fontWeight: 600, color: T.text, lineHeight: 1.3, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {arcTitle}
         </div>
-      ) : null}
-      <div style={{ height: 3, borderRadius: 2, background: T.surface, overflow: "hidden" }}>
-        <div style={{ height: "100%", width: `${Math.round(progress * 100)}%`, background: `linear-gradient(90deg, ${T.accent}, ${T.gold})`, borderRadius: 2, transition: "width 0.4s ease" }} />
       </div>
+      {proofTotal > 0 && <ArcStatusPill status={status} />}
     </button>
   );
 }
@@ -861,6 +937,7 @@ export function TodayScreen({
   recentSummaries = [],
   isPro = false,
   onUpgrade = null,
+  journalEntries = [],
 }) {
   const [showProofPicker, setShowProofPicker] = useState(false);
   const [showReorder, setShowReorder] = useState(false);
@@ -979,7 +1056,7 @@ export function TodayScreen({
 
   if (habits.length === 0 && activeGoals.length === 0) return (
     <div>
-      <DailyChapters recentSummaries={recentSummaries} isPro={isPro} onUpgrade={onUpgrade} />
+      <DailyChapters recentSummaries={recentSummaries} isPro={isPro} onUpgrade={onUpgrade} journalEntries={journalEntries} />
       {onOpenCoachMic && !arcActive && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic} habitCompletionPercentage={pct} habitsLoggedTodayCount={loggedCount} totalTrackables={totalTrackables}/>}
       <div style={{ padding:"40px 28px 32px", textAlign:"center" }}>
         <div style={{ fontSize:48, marginBottom:16 }}>⚒️</div>
@@ -1019,6 +1096,7 @@ export function TodayScreen({
   return (
     <div>
       <style>{`@keyframes todayCompleteIn { from { opacity: 0.55; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }`}</style>
+      <DailyChapters recentSummaries={recentSummaries} isPro={isPro} onUpgrade={onUpgrade} journalEntries={journalEntries} />
       {!activeBlock && typeof onStartArc === "function" && (
         <button
           type="button"
@@ -1140,7 +1218,6 @@ export function TodayScreen({
           )}
         </div>
       </div>
-      <DailyChapters recentSummaries={recentSummaries} isPro={isPro} onUpgrade={onUpgrade} />
       {onGenerateReceipt && (
         <TodayReceiptCard
           entry={todayJournalEntry}
