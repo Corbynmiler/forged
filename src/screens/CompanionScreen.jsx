@@ -356,36 +356,11 @@ export function CompanionScreen({
   useEffect(() => { speech.setRingEl?.(emberRingRef.current); }, [speech]);
 
   // ── Speaking-state audio reactivity (best-effort, fails open) ──────────
-  // Lazily attaches a Web Audio analyser to the TTS <audio> element the
-  // first time speech actually starts, so the ember's core scales with the
-  // AI's own voice rather than a fixed rhythm. Never allowed to affect
-  // playback itself — any failure here just leaves the CSS pulse running.
-  const audioAnalyserSetupRef = useRef(false);
-  const audioAnalyserRef = useRef(null);
-  const audioCtxRef = useRef(null);
+  // Reads frequency data straight off useCoachTts's own analyser node (it
+  // owns the AudioContext that actually plays the reply) so the ember's core
+  // scales with the AI's own voice. Never allowed to affect playback itself
+  // — any failure here just leaves the CSS pulse running.
   const audioRafRef = useRef(null);
-
-  // Create (and attempt to resume) the AudioContext as close to a real user
-  // gesture as possible, instead of only when TTS playback actually starts.
-  // This turned out to be the actual cause of "state says Speaking, ember
-  // reacts, but genuinely no sound" — new AudioContexts are commonly created
-  // in a 'suspended' state (especially iOS Safari), and once
-  // createMediaElementSource() reroutes the <audio> element's output through
-  // a suspended context, that element is PERMANENTLY silent from then on —
-  // .play() still resolves fine, the element still reports "playing," but
-  // zero signal reaches the speakers. Every earlier fix in this area (fetch
-  // latency, Content-Length, concurrency) was real, but none of them could
-  // have mattered if this was silently true the whole time. Safe to call
-  // repeatedly — a no-op once created/running.
-  function primeEmberAudioContext() {
-    try {
-      if (!audioCtxRef.current) {
-        const AC = window.AudioContext || window.webkitAudioContext;
-        audioCtxRef.current = new AC();
-      }
-      audioCtxRef.current.resume?.().catch(() => {});
-    } catch { /* ignore — falls back to the CSS-only pulse if this never works */ }
-  }
 
   useEffect(() => {
     if (!coachTts.speaking) {
@@ -393,26 +368,7 @@ export function CompanionScreen({
       if (emberCoreRef.current) emberCoreRef.current.style.transform = "";
       return;
     }
-    const audioEl = coachTts.audioElRef?.current;
-    if (!audioEl) return;
-    // Some browsers auto-suspend an idle AudioContext — worth another
-    // resume attempt every time speaking starts, not just once.
-    primeEmberAudioContext();
-    if (!audioAnalyserSetupRef.current) {
-      audioAnalyserSetupRef.current = true;
-      try {
-        const ctx = audioCtxRef.current;
-        const source = ctx.createMediaElementSource(audioEl);
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 64;
-        source.connect(analyser);
-        analyser.connect(ctx.destination); // required — otherwise routing through an analyser silences output
-        audioAnalyserRef.current = analyser;
-      } catch {
-        audioAnalyserRef.current = null; // fine — falls back to the CSS-only ring pulse
-      }
-    }
-    const analyser = audioAnalyserRef.current;
+    const analyser = coachTts.analyserRef?.current;
     if (!analyser) return;
     const buf = new Uint8Array(analyser.frequencyBinCount);
     const tick = () => {
@@ -424,7 +380,7 @@ export function CompanionScreen({
     };
     tick();
     return () => { if (audioRafRef.current) cancelAnimationFrame(audioRafRef.current); };
-  }, [coachTts.speaking, coachTts.audioElRef]);
+  }, [coachTts.speaking, coachTts.analyserRef]);
 
   // Hydrate/roll today's thread — identical key scheme to the legacy coach
   // drawer, so both surfaces read the same day's conversation.
@@ -648,12 +604,12 @@ export function CompanionScreen({
   }
 
   function handleEmberTap() {
-    // Prime the analyser's AudioContext synchronously inside this real tap
-    // gesture — the best chance it has of actually unlocking on browsers
-    // (notably iOS Safari) that require audio-context-resume to happen
-    // within a genuine user-initiated event, not several async hops later
-    // once a reply has actually finished streaming.
-    primeEmberAudioContext();
+    // Prime the TTS AudioContext synchronously inside this real tap gesture
+    // — the best chance it has of actually unlocking on browsers (notably
+    // iOS Safari) that require audio-context-resume to happen within a
+    // genuine user-initiated event, not several async hops later once a
+    // reply has actually finished streaming.
+    coachTts.primeAudio?.();
     if (!speech.supported) { alert(speechUnsupportedHelpMessage()); return; }
     if (speech.listening) {
       // Stopping IS the send trigger — no separate confirm step. Read the
@@ -910,11 +866,11 @@ export function CompanionScreen({
               value={input}
               onChange={e => setInput(e.target.value)}
               onInput={e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 88) + "px"; }}
-              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !atFreeCap) { e.preventDefault(); primeEmberAudioContext(); send(input); } }}
+              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !atFreeCap) { e.preventDefault(); coachTts.primeAudio?.(); send(input); } }}
               placeholder="Type instead…"
               style={{ flex: 1, background: T.surface, border: `0.5px solid ${T.borderStrong}`, borderRadius: T.rsm, padding: "10px 14px", fontSize: 16, color: T.text, resize: "none", fontFamily: T.font, lineHeight: 1.5, outline: "none", minHeight: 42, maxHeight: 88 }}
             />
-            <button type="button" onClick={() => { primeEmberAudioContext(); send(input); }} disabled={!input.trim() || loading || atFreeCap}
+            <button type="button" onClick={() => { coachTts.primeAudio?.(); send(input); }} disabled={!input.trim() || loading || atFreeCap}
               aria-label="Send message"
               style={{ width: 40, height: 40, borderRadius: "50%", border: `0.5px solid ${T.border}`, flexShrink: 0, background: input.trim() && !loading ? T.gold : T.surface, cursor: input.trim() && !loading ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <svg width="15" height="15" viewBox="0 0 18 18" fill="none">
