@@ -96,6 +96,10 @@ const SITUATIONS = [
     id: "reflect", label: "Reflect", desc: "Journal mode — what mattered, what changed.",
     steer: "Journal/memory mode. Pull out what actually mattered, what's changed, the emotional tone underneath it, and any pattern worth noticing — and say plainly what's actually worth remembering going forward. Look back across what you remember (recent days, recurring themes, things they keep circling back to). This is about noticing a pattern they haven't said out loud themselves, which is worth more here than asking how they're feeling.",
   },
+  {
+    id: "ramble", label: "Ramble", desc: "Long-form — real length when it's earned, no agenda.",
+    steer: "Long-form companion mode. When what they're actually asking for calls for it — they've asked for the long version, asked something genuinely big or open-ended, or clearly just want to talk something through at real length — give a real long-form reply: several hundred words, ChatGPT-caliber, not a summary. Humor where it actually lands, not forced. Weave in what you actually remember about their life where it's genuinely relevant, the way a real companion who's been paying attention would — never as a checklist of callbacks. Real tangents and connections are welcome. This is NOT an instruction to always max out length — a quick check-in or a simple question in this mode still gets a right-sized reply; match the actual weight of what they're asking, same as a real person sizing their answer to the moment. Same as Just Chat: never redirect to the Arc, proof actions, habits, or tracked goals unless they bring it up themselves.",
+  },
 ];
 
 const STREAM_ID = "__companion_stream__";
@@ -160,6 +164,25 @@ function latestDayTitle(recentSummaries) {
   const list = Array.isArray(recentSummaries) ? recentSummaries : [];
   const last = list[list.length - 1];
   return (last?.title || "").trim() || null;
+}
+
+/**
+ * Most recent day that got an AI-judged XP reason, for the "Companion's
+ * read" line — completely separate from the real, live `profiles.xp` (which
+ * only ever updates via the deterministic per-habit-tap system). This reads
+ * `daily_summaries.xp_awarded`/`xp_reason`, written nightly by
+ * api/memory-rollover.js from real conversation + logs, never wired into the
+ * real XP total. Purely observational — a way to see the companion's own
+ * read on a day without it ever affecting the real Arc/XP system.
+ */
+function latestXpRead(recentSummaries) {
+  const list = Array.isArray(recentSummaries) ? recentSummaries : [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const s = list[i];
+    const reason = typeof s?.xp_reason === "string" ? s.xp_reason.trim() : "";
+    if (reason) return { reason, xp: Number.isFinite(s.xp_awarded) ? s.xp_awarded : null };
+  }
+  return null;
 }
 
 // ── The Ember — the companion's presence. Not a mic icon: a calm, living
@@ -285,11 +308,12 @@ export function CompanionScreen({
   journalEntries = [], coachMemory = null, voiceRepliesEnabled = false, coachVoiceId = null,
   onNavigateTo, onHabitCreated, onGoalCreated, onCoachLogsApplied, onHabitRenamed,
   onJournalLogged, onOpenEditArc, onUpgrade, previewNormalCoachGreeting = false,
-  onOpenProgress, onSaveVoicePrefs,
+  onOpenProgress, onSaveVoicePrefs, initialDraft = null, onDraftConsumed,
 }) {
-  const cName = coachName || "Coach";
+  const cName = coachName || "Companion";
   const greeting = composeGreeting(coachMemory?.recentSummaries);
   const dayTitle = latestDayTitle(coachMemory?.recentSummaries);
+  const xpRead = latestXpRead(coachMemory?.recentSummaries);
 
   const [situation, setSituation] = useState(SITUATIONS[0].id);
   const [showSituations, setShowSituations] = useState(false);
@@ -321,6 +345,21 @@ export function CompanionScreen({
   const coachPersistDayRef = useRef(todayStr());
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Other screens (Today/Hub nudges — "log your first habit", "lower this
+  // budget?", "add a proof action") used to open the old modal coach drawer
+  // with a pre-filled draft. That drawer is retired — this is the equivalent
+  // entry point now: the parent sets initialDraft + navigates here, this
+  // drops it straight into the input for the user to review/edit and send
+  // themselves (deliberately not auto-sent — this can be an Arc-mutating
+  // message, worth a beat to look at first).
+  useEffect(() => {
+    if (!initialDraft) return;
+    setInput(initialDraft);
+    setShowTextInput(true);
+    onDraftConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialDraft]);
   const [captureSaving, setCaptureSaving] = useState(false);
   const [error, setError] = useState(null);
   const streamActiveRef = useRef(false);
@@ -763,6 +802,14 @@ export function CompanionScreen({
             <div style={{ fontFamily: T.font, fontSize: 16.5, fontWeight: 400, color: T.text, lineHeight: 1.6, maxWidth: 300, margin: "0 auto" }}>
               {greeting.text} <span style={{ color: T.sub }}>{greeting.closer}</span>
             </div>
+            {xpRead ? (
+              <div style={{ marginTop: 14, fontSize: 11.5, color: T.hint, lineHeight: 1.5 }}>
+                <span style={{ fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", fontSize: 9.5 }}>
+                  Companion's read (experimental){xpRead.xp != null ? ` · ${xpRead.xp} xp` : ""}
+                </span>
+                <div style={{ marginTop: 3 }}>{xpRead.reason}</div>
+              </div>
+            ) : null}
           </div>
         ) : (
           <div style={{ width: "100%", maxWidth: 360 }}>

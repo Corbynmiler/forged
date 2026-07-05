@@ -108,7 +108,7 @@ import {
 import { OnboardingScreen, buildDemoHabits } from "./screens/OnboardingScreen.jsx";
 
 // Coach
-import { CoachBar, AICoach } from "./coach/AICoach.jsx";
+import { CoachBar } from "./coach/AICoach.jsx";
 
 /**
  * Returns true if Supabase has stored any session tokens in localStorage.
@@ -209,21 +209,14 @@ export default function App() {
   const [editGoalId,     setEditGoalId]     = useState(null);
   const [openGoalId,     setOpenGoalId]     = useState(null);
   const [showHistory, setShowHistory]= useState(false);
-  const [showCoach,   setShowCoach]  = useState(false);
-  /** How the coach sheet should prime input after open: voice vs keyboard. */
-  const [coachOpenMode, setCoachOpenMode] = useState(null);
   // Whether the user has ever opened the AI coach in this browser. Used to drive
   // a subtle pulse on the FAB for first-time users so it doesn't vanish into the bg.
   const [coachEverOpened, setCoachEverOpened] = useState(() => {
     try { return localStorage.getItem("forged_coach_opened") === "1"; } catch { return false; }
   });
   const [showCoachTeaser, setShowCoachTeaser] = useState(false);
-  /** Message auto-sent when AICoach mounts (e.g. nudge flows). Cleared after use. */
-  const [coachPendingMsg, setCoachPendingMsg] = useState(null);
-  /** Pre-fills the coach text input on open (not auto-sent). Cleared on close. */
+  /** Pre-fills the Companion (Talk) screen's input when a nudge elsewhere navigates there — not auto-sent. Cleared once consumed. */
   const [coachDraftInput, setCoachDraftInput] = useState(null);
-  /** Guards duplicate auto-send when Add proof action → Create new habit is tapped twice. */
-  const proofCoachLaunchRef = useRef(false);
   /** After coach creates a habit in the proof-action flow, link it to the active Arc. */
   const proofActionLinkNextRef = useRef(false);
   /** Ephemeral bubble above the coach FAB: `{ id, text }` while visible; `id` ties to the navigation that triggered it. */
@@ -251,7 +244,7 @@ export default function App() {
   const [previewNormalCoachGreeting, setPreviewNormalCoachGreeting] = useState(false);
   /** From profiles.stripe_customer_id — used for Stripe Customer Portal */
   const [stripeCustomerId, setStripeCustomerId] = useState(null);
-  const [coachName,      setCoachName]      = useState("Coach");
+  const [coachName,      setCoachName]      = useState("Companion");
   const [coachIcon,      setCoachIcon]      = useState("");
 
   // ── Notification state (App-level so it survives tab switches) ───────────────
@@ -1450,9 +1443,10 @@ export default function App() {
       const [{ data: mem }, { data: sums }] = await Promise.all([
         supabase.from("coach_memory").select("content, updated_at").eq("user_id", uid).maybeSingle(),
         // `title`/`structured` feed the Companion screen's living morning
-        // greeting ("Yesterday you: • …") — additive select, ignored by
-        // anything still only reading date/summary.
-        supabase.from("daily_summaries").select("date, summary, title, structured").eq("user_id", uid)
+        // greeting ("Yesterday you: • …"); `xp_awarded`/`xp_reason` feed the
+        // separate, clearly-labeled "Companion's read" line — additive
+        // select, ignored by anything still only reading date/summary.
+        supabase.from("daily_summaries").select("date, summary, title, structured, xp_awarded, xp_reason").eq("user_id", uid)
           .order("date", { ascending: false }).limit(7),
       ]);
       setCoachMemory({
@@ -1595,7 +1589,7 @@ export default function App() {
         }
         setRefCode(profile.ref_code ?? null);
         setStripeCustomerId(profile.stripe_customer_id ?? null);
-        setCoachName(profile.coach_name || "Coach");
+        setCoachName(profile.coach_name || "Companion");
         setCoachIcon((profile.coach_icon && String(profile.coach_icon).trim()) || "");
         setVoiceRepliesEnabled(profile.voice_replies_enabled === true);
         setCoachVoiceId(profile.coach_voice_id || null);
@@ -1712,8 +1706,6 @@ export default function App() {
   }
 
   function openArcCoachEdit() {
-    setShowCoach(false);
-    setCoachOpenMode(null);
     setArcCoachMode("edit");
     setShowArcCoach(true);
   }
@@ -2383,7 +2375,7 @@ export default function App() {
           setActiveBlock(null);
           setUser({ name: "", avatarUrl: null });
           setXp(0);
-          setCoachName("Coach");
+          setCoachName("Companion");
           setCoachIcon("");
           setOnboarded(null);
           setIsPro(false);
@@ -2759,7 +2751,7 @@ export default function App() {
 
   async function completeOnboarding({ name, habits: newHabits, coachName: newCoachName, emailUpdatesOptIn }) {
     const uid = userIdRef.current;
-    const resolvedCoach = newCoachName || "Coach";
+    const resolvedCoach = newCoachName || "Companion";
     setUser({ name });
     setXp(0);
     setCoachName(resolvedCoach);
@@ -3539,36 +3531,35 @@ export default function App() {
     addToast("✓ Habit updated");
   }
 
-  function openCoachWithMode(mode) {
+  // The old modal coach drawer (CoachBar/AICoach) is retired — Talk
+  // (CompanionScreen) is the one true conversation surface now. These
+  // functions used to open that modal; they now navigate to Talk instead,
+  // optionally pre-filling the input via `coachDraftInput` (passed through
+  // as CompanionScreen's `initialDraft` prop). Deliberately NOT auto-sent —
+  // some of these (proof-action creation) can mutate the Arc, worth a beat
+  // for the user to review before it goes out, where the old drawer used to
+  // send immediately on mount.
+  function openCoachWithMode(_mode) {
     try { localStorage.setItem("forged_coach_opened", "1"); } catch { /* ignore */ }
     setCoachEverOpened(true);
-    setCoachDraftInput(null);
-    setCoachOpenMode(mode);
-    setShowCoach(true);
+    navigateTo("companion");
   }
 
   function openCoachWithDraft(text) {
     try { localStorage.setItem("forged_coach_opened", "1"); } catch { /* ignore */ }
     setCoachEverOpened(true);
-    setCoachPendingMsg(null);
     setCoachDraftInput(String(text ?? "").trim());
-    setCoachOpenMode("text");
-    setShowCoach(true);
+    navigateTo("companion");
   }
 
-  /** Opens coach and auto-sends the first message (AICoach pendingMessage path). */
   function openCoachWithPendingMessage(text, { linkNextHabitAsProof = false } = {}) {
     const trimmed = String(text ?? "").trim();
     if (!trimmed) return;
-    if (proofCoachLaunchRef.current && showCoach) return;
-    proofCoachLaunchRef.current = true;
     proofActionLinkNextRef.current = !!linkNextHabitAsProof;
     try { localStorage.setItem("forged_coach_opened", "1"); } catch { /* ignore */ }
     setCoachEverOpened(true);
-    setCoachDraftInput(null);
-    setCoachPendingMsg(trimmed);
-    setCoachOpenMode("text");
-    setShowCoach(true);
+    setCoachDraftInput(trimmed);
+    navigateTo("companion");
   }
 
   function openCoachForProofAction() {
@@ -4010,6 +4001,8 @@ export default function App() {
           voiceRepliesEnabled={voiceRepliesEnabled}
           coachVoiceId={coachVoiceId}
           onSaveVoicePrefs={handleSaveVoicePrefs}
+          initialDraft={coachDraftInput}
+          onDraftConsumed={() => setCoachDraftInput(null)}
           coachMemory={coachMemory ? {
             content: coachMemory.content,
             recentSummaries: (coachMemory.recentSummaries || []).slice(isPro ? -7 : -3),
@@ -4166,7 +4159,7 @@ export default function App() {
 
         {/* Coach bar above nav (+ page guide / nudge / Today add). Hidden on Profile and while coach sheet open. */}
         {screen !== "profile" && (() => {
-          const coachLabelRaw = (coachName ?? "").trim() || "Coach";
+          const coachLabelRaw = (coachName ?? "").trim() || "Companion";
           const coachLabelShort = coachLabelRaw.length > 13 ? `${coachLabelRaw.slice(0, 12)}…` : coachLabelRaw;
           // Floating add only when no Arc is running — with an active Arc the
           // Arc-first surfaces own creation (proof actions on Today, Hub for
@@ -4175,20 +4168,16 @@ export default function App() {
             screen === "today" &&
             !activeBlock?.id &&
             (habits.length > 0 || goals.some(g => g.status !== "completed"));
-          const habitColor = habits.find(h => h.habitType !== "log")?.color || T.accent;
-          const showCoachBar =
-            !showCoach && ["today", "arc", "social", "hub"].includes(screen);
           const safeBottom = "env(safe-area-inset-bottom, 0px)";
           const aboveNav = `calc(62px + ${safeBottom})`;
-          const aboveCoachBar = `calc(132px + ${safeBottom})`;
           return (
             <>
-              {!showCoach && (pageGuide?.page === screen || coachPageNudge) ? (
+              {(pageGuide?.page === screen || coachPageNudge) ? (
                 <div
                   style={{
                     position:"fixed",
                     left:"max(14px, calc(50% - 201px))",
-                    bottom:aboveCoachBar,
+                    bottom:aboveNav,
                     zIndex:102,
                     display:"flex",
                     flexDirection:"row",
@@ -4202,7 +4191,7 @@ export default function App() {
                     <div
                       key={`guide-${pageGuide.page}`}
                       role="dialog"
-                      aria-label="Coach tip"
+                      aria-label="Companion tip"
                       style={{
                         position:"relative",
                         maxWidth:260,
@@ -4291,7 +4280,7 @@ export default function App() {
                   style={{
                     position:"fixed",
                     right:"max(14px, calc(50% - 201px))",
-                    bottom:aboveCoachBar,
+                    bottom:aboveNav,
                     zIndex:102,
                     height:44,
                     padding:"0 14px 0 12px",
@@ -4315,30 +4304,6 @@ export default function App() {
                   <span>Add</span>
                 </button>
               )}
-              {showCoachBar ? (
-                <div
-                  style={{
-                    position:"fixed",
-                    left:"50%",
-                    transform:"translateX(-50%)",
-                    width:"100%",
-                    maxWidth:430,
-                    bottom:aboveNav,
-                    zIndex:101,
-                    padding:"0 10px 0",
-                    boxSizing:"border-box",
-                  }}
-                >
-                  <CoachBar
-                    coachName={coachName}
-                    coachIcon={coachIcon}
-                    habitColor={habitColor}
-                    onOpenMic={() => openCoachWithMode("mic")}
-                    onOpenText={() => openCoachWithMode("text")}
-                    coachEverOpened={coachEverOpened}
-                  />
-                </div>
-              ) : null}
             </>
           );
         })()}
@@ -4346,7 +4311,7 @@ export default function App() {
         {/* Bottom nav */}
         <nav data-tour="nav" style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:430, maxWidth:"100vw", background:"linear-gradient(180deg, rgba(38,38,34,0.98) 0%, rgba(22,22,19,0.99) 100%)", backdropFilter:"blur(20px)", WebkitBackdropFilter:"blur(20px)", borderTop:`1px solid rgba(200,144,42,0.2)`, boxShadow:"0 -6px 32px rgba(0,0,0,0.5)", display:"flex", zIndex:100, paddingTop:8, paddingBottom:"max(11px, env(safe-area-inset-bottom, 0px))" }}>
           {NAV.map(n => (
-            <button key={n.id} onClick={() => setScreen(n.id)} style={{ flex:1, padding:"9px 4px 6px", border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3, fontSize:10, fontWeight:600, color:screen===n.id?T.accent:T.muted, letterSpacing:"0.02em", transition:"color 0.15s" }}>
+            <button key={n.id} data-tour={n.id === "companion" ? "companion-nav" : undefined} onClick={() => setScreen(n.id)} style={{ flex:1, padding:"9px 4px 6px", border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3, fontSize:10, fontWeight:600, color:screen===n.id?T.accent:T.muted, letterSpacing:"0.02em", transition:"color 0.15s" }}>
               {n.icon}{n.label}
             </button>
           ))}
@@ -4449,66 +4414,6 @@ export default function App() {
       {reflectId     && <ReflectModal  habit={reflectHabit}                  onClose={() => setReflectId(null)} onSave={handleSaveReflection}/>}
       {editId && !editGoalId && editHabit && !isGoalLikeHabitType(editHabit) && <EditModal habit={editHabit} onClose={() => setEditId(null)} onSave={handleEditSave}/>}
       {logId && logHabit?.habitType === "project"  && <LogProjectModal   habit={logHabit} onClose={() => setLogId(null)} onLog={handleLog}/>}
-      {showCoach   && <AICoach key={sessionUserId || "anon"} openInputMode={coachOpenMode}
-          pendingMessage={coachPendingMsg}
-          draftInput={coachDraftInput}
-          habits={habits} goals={goals} user={user} isPro={isPro} activeBlock={activeBlock}
-          onOpenEditArc={openArcCoachEdit}
-          onClose={() => {
-            setShowCoach(false);
-            setCoachOpenMode(null);
-            setCoachPendingMsg(null);
-            setCoachDraftInput(null);
-            proofCoachLaunchRef.current = false;
-            proofActionLinkNextRef.current = false;
-          }}
-          onUpgrade={() => setShowUpgrade(true)} coachName={coachName}
-          coachIcon={coachIcon}
-          coachAccentColor={habits.find(h => h.habitType !== "log")?.color || T.accent}
-          currentScreen={screen}
-          onNavigateTo={navigateTo}
-          onHabitCreated={h => {
-            setHabits(p => p.some(x => String(x.id) === String(h.id)) ? p.map(x => String(x.id) === String(h.id) ? h : x) : [...p, h]);
-            if (proofActionLinkNextRef.current && activeBlock?.id && h?.id) {
-              proofActionLinkNextRef.current = false;
-              void linkHabitAsProof(h.id);
-            }
-          }}
-          onGoalCreated={g   => setGoals(p  => p.some(x => String(x.id) === String(g.id)) ? p.map(x => String(x.id) === String(g.id) ? g : x) : [...p, g])}
-          previewNormalCoachGreeting={previewNormalCoachGreeting}
-          onCoachLogsApplied={applyCoachLogsBatch}
-          onHabitRenamed={(id, name) => setHabits(p => p.map(h => String(h.id) === String(id) ? { ...h, name } : h))}
-          onGoalPlanConfirm={handleGoalPlanConfirm}
-          journalEntries={journalEntries}
-          voiceRepliesEnabled={voiceRepliesEnabled}
-          coachVoiceId={coachVoiceId}
-          coachMemory={coachMemory ? {
-            content: coachMemory.content,
-            // Free: current-Arc depth (last 3 days). Pro: full 7-day window
-            // (plus the recall tool server-side for older context).
-            recentSummaries: (coachMemory.recentSummaries || []).slice(isPro ? -7 : -3),
-          } : null}
-          onJournalLogged={entries => {
-            // Re-fetch journal entries after AI writes so the Journal tab reflects it immediately
-            const uid = userIdRef.current;
-            if (uid) {
-              supabase.from("journal_entries").select("id, date, content, daily_context, is_ai_generated, manually_edited, created_at, updated_at")
-                .eq("user_id", uid).order("date", { ascending: false })
-                .then(({ data: jRows }) => { if (jRows) setJournalEntries(jRows); });
-            }
-          }}
-          onWrapToday={async () => {
-            setShowCoach(false);
-            setCoachOpenMode(null);
-            setCoachPendingMsg(null);
-            setCoachDraftInput(null);
-            proofCoachLaunchRef.current = false;
-            proofActionLinkNextRef.current = false;
-            const ok = await handleGenerateReceipt();
-            addToast(ok ? "Entry added to today's Arc." : "Couldn't create entry — try again from Today.");
-          }}
-        />}
-
       {completedArcBlock?.id && !activeBlock?.id && !hasDecidedArc(completedArcBlock.id) && (
         <ArcCompletedSheet
           block={completedArcBlock}

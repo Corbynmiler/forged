@@ -114,7 +114,7 @@ function buildCoachGreetingLine({ habits, goals }) {
 export function CoachGreeting({ coachName, coachIcon, habits, goals, habitAccent, onOpenMic, habitCompletionPercentage, habitsLoggedTodayCount, totalTrackables }) {
   const rawCoach = (coachName ?? "").trim();
   const hasNamedCoach = rawCoach.length > 0;
-  const displayName = rawCoach || "Coach";
+  const displayName = rawCoach || "Companion";
   const ringComplete =
     typeof habitCompletionPercentage === "number"
     && typeof totalTrackables === "number"
@@ -237,7 +237,7 @@ function TodayReceiptCard({ entry, loggedCount, generating, onGenerate, onOpenJo
             <button type="button" onClick={() => onOpenCoachWithDraft(contextDraft)}
               style={{ display:"block", width:"100%", padding:"7px 10px", marginTop:2, background:"rgba(255,255,255,0.04)", border:`0.5px solid ${T.border}`, borderRadius:T.rsm, cursor:"pointer", textAlign:"left", fontFamily:T.font }}>
               <span style={{ fontSize:12, color:T.muted }}>Gaps with no context — </span>
-              <span style={{ fontSize:12, color:T.sub, fontWeight:500 }}>tell the coach why →</span>
+              <span style={{ fontSize:12, color:T.sub, fontWeight:500 }}>tell your companion why →</span>
             </button>
           )}
           </button>
@@ -927,7 +927,7 @@ export function TodayScreen({
                 What season are you in?
               </div>
               <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.55 }}>
-                Pick an outcome or deadline, commit for a bounded period, and collect proof — the coach helps you shape it.
+                Pick an outcome or deadline, commit for a bounded period, and collect proof — your companion helps you shape it.
               </div>
             </div>
             <div style={{ flexShrink: 0, alignSelf: "center", fontSize: 12, fontWeight: 700, color: T.gold }}>

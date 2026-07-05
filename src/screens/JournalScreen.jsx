@@ -955,11 +955,11 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
 
           {/* ── Explanation microcopy ── */}
           {(() => {
-            const coachLabel = coachName && coachName !== "Coach" ? coachName : "your AI coach";
+            const coachLabel = coachName && coachName !== "Companion" ? coachName : "your AI companion";
             return (
               <div style={{ padding:"0 18px 18px" }}>
                 <div style={{ fontSize:13, color:T.sub, lineHeight:1.65 }}>
-                  You don't have to write this. Log habits, chat to {coachLabel}, add notes — your coach turns the day into a daily entry.
+                  You don't have to write this. Log habits, chat to {coachLabel}, add notes — your companion turns the day into a daily entry.
                 </div>
               </div>
             );
@@ -1034,7 +1034,7 @@ export function JournalScreen({ habits, goals = [], onReflect, onDeleteJournalLo
             })() : (
               <div style={{ padding:"20px 18px", borderRadius:T.r, border:`1.5px dashed ${T.border}`, background:T.raised }}>
                 <div style={{ fontSize:13, color:T.muted, lineHeight:1.7, marginBottom:16 }}>
-                  Log habits, chat to {coachName && coachName !== "Coach" ? coachName : "your AI coach"}, add notes — then tap below and your coach writes up the day.
+                  Log habits, chat to {coachName && coachName !== "Companion" ? coachName : "your AI companion"}, add notes — then tap below and your companion writes up the day.
                 </div>
                 <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
                   <button type="button" onClick={() => generateEntry(tStr)} disabled={generating}

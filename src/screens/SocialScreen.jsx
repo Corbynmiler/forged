@@ -245,13 +245,13 @@ export function AddActionSheet({ onAddHabit, onAddGoal, onAddLog, onClose }) {
   );
 }
 
-/** Bottom sheet: edit AI coach name and preset icon. */
+/** Bottom sheet: edit AI companion name and preset icon. */
 export function CoachSettingsSheet({ onClose, onSave, initialName, initialIcon }) {
   useScrollLock(true);
-  const [nameDraft, setNameDraft] = useState((initialName ?? "").trim() || "Coach");
+  const [nameDraft, setNameDraft] = useState((initialName ?? "").trim() || "Companion");
   const [iconDraft, setIconDraft] = useState(() => normalizeCoachIcon(initialIcon));
   useEffect(() => {
-    setNameDraft((initialName ?? "").trim() || "Coach");
+    setNameDraft((initialName ?? "").trim() || "Companion");
     setIconDraft(normalizeCoachIcon(initialIcon));
   }, [initialName, initialIcon]);
   return (
@@ -262,8 +262,8 @@ export function CoachSettingsSheet({ onClose, onSave, initialName, initialIcon }
         style={{ width:430, maxWidth:"100vw", background:T.raised, borderRadius:"20px 20px 0 0", padding:"22px 20px 36px", borderTop:`0.5px solid ${T.borderMid}`, boxSizing:"border-box", touchAction:"auto" }}
       >
         <div style={{ width:36, height:4, borderRadius:2, background:T.border, margin:"0 auto 18px" }}/>
-        <div style={{ fontFamily:T.serif, fontSize:20, color:T.text, marginBottom:14 }}>AI coach</div>
-        <label style={{ ...lbl, marginBottom:6 }}>Coach name</label>
+        <div style={{ fontFamily:T.serif, fontSize:20, color:T.text, marginBottom:14 }}>AI companion</div>
+        <label style={{ ...lbl, marginBottom:6 }}>Companion name</label>
         <input
           style={{ ...inp, marginBottom:8 }}
           value={nameDraft}
@@ -311,7 +311,7 @@ export function CoachSettingsSheet({ onClose, onSave, initialName, initialIcon }
           <button
             type="button"
             onClick={() => {
-              onSave({ name: clampProfileCoachName(nameDraft.trim() || "Coach"), icon: iconDraft });
+              onSave({ name: clampProfileCoachName(nameDraft.trim() || "Companion"), icon: iconDraft });
               onClose();
             }}
             style={{ flex:1, padding:13, borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer" }}

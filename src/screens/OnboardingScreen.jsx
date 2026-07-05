@@ -316,7 +316,7 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
         body: JSON.stringify({
           name: name.trim() || "there",
-          coachName: "Coach",
+          coachName: "Companion",
           messages: apiMessages,
           multiOptions: true,
         }),
@@ -434,7 +434,7 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
         onSaveProgress({
           name: name.trim() || "You",
           habits,
-          coachName: "Coach",
+          coachName: "Companion",
           emailUpdatesOptIn,
           arc: editedArc ? {
             title:        editedArc.title || resolveArcTitle("", editedArc.identity),
@@ -827,7 +827,7 @@ export function OnboardingScreen({ onComplete, onSkip, onSaveProgress, onCheckou
         <div style={{ flexShrink:0, paddingTop:"max(12px, env(safe-area-inset-top, 12px))", paddingBottom:12, paddingLeft:20, paddingRight:20, borderBottom:`0.5px solid ${T.border}`, display:"flex", alignItems:"center", gap:10, background:T.bg, minWidth:0 }}>
           <div style={{ width:40, height:40, borderRadius:"50%", background:"rgba(200,144,42,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>🤖</div>
           <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ fontSize:14, fontWeight:600, color:T.text, lineHeight:1.25 }}>Coach</div>
+            <div style={{ fontSize:14, fontWeight:600, color:T.text, lineHeight:1.25 }}>Companion</div>
             <div style={{ fontSize:11, color:T.gold, marginTop:1 }}>Step {STEP_NUMBERS[STEP_CHAT]} of {DISPLAY_TOTAL}</div>
           </div>
           <button

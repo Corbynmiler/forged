@@ -601,7 +601,7 @@ export function LimitCard({ habit, onTap, onUndo, onLogZero, onAddNote, onEditHa
             <button
               onClick={() => onOpenCoachWithDraft(`My ${habit.name} limit is ${budget}${unitSuffix}/day but I've been averaging ${reduceNudge.avgUsage}${unitSuffix} — what do you think about lowering it?`)}
               style={{ fontSize:11, color:T.muted, background:"none", border:`0.5px solid ${T.border}`, borderRadius:T.rsm, padding:"3px 9px", cursor:"pointer", whiteSpace:"nowrap" }}>
-              Ask coach
+              Ask companion
             </button>
           )}
         </div>
@@ -1617,7 +1617,7 @@ export const PAGE_TOURS = {
   ],
   social: [
     { target:"[data-tour='social-teaser']", title:"Forge together", body:"Add friends, share goals, and see who's still logging. Nudging a friend when they slip is a Pro feature — the rest of the accountability layer is free.", pad:8 },
-    { target:"[data-tour='coach-fab']", title:"Your AI coach", body:"Tap the floating coach anytime. Soon you'll be able to talk or type with a coach that knows your habits — set goals, log progress, and stay on track without the busywork.", callout:"top", pad:8 },
+    { target:"[data-tour='companion-nav']", title:"Your AI companion", body:"Tap Talk anytime — a companion that knows your habits, remembers your conversations, and can set goals or log progress without the busywork.", pad:8 },
   ],
   journal: [
     { target:"[data-tour='journal-viewmode']", title:"Switch your view", body:"Day view lists every entry in order. Week groups them by week. Month shows a calendar grid so you can spot gaps at a glance.", pad:6 },
@@ -1629,8 +1629,8 @@ export const PAGE_TOURS = {
     { target:"[data-tour='insights-streaks']", title:"Activity summary", body:"Quick read on streaks, your steadiest habit, and which day you usually log. Tap \"Show full activity breakdown\" for streak rows, 28-day rates, and the 12-week heatmap.", pad:8 },
   ],
   profile: [
-    { target:"[data-tour='profile-account']", title:"Your account", body:"Change your display name or rename your AI coach here. These are the names shown across the whole app.", pad:6 },
-    { target:"[data-tour='profile-upgrade']", title:"Early supporter access", body:"Unlocks unlimited habits and coach messages, voice logging, friend nudges, and full history — at a price locked in forever. First 100 users get it at $4.99/mo.", pad:6 },
+    { target:"[data-tour='profile-account']", title:"Your account", body:"Change your display name or rename your AI companion here. These are the names shown across the whole app.", pad:6 },
+    { target:"[data-tour='profile-upgrade']", title:"Early supporter access", body:"Unlocks unlimited habits and companion messages, voice logging, friend nudges, and full history — at a price locked in forever. First 100 users get it at $4.99/mo.", pad:6 },
     { target:"[data-tour='profile-feedback']", title:"Send feedback", body:"You're one of the first people using Forged. A quick note goes directly to the founder — it genuinely shapes what gets built next.", pad:6 },
     { target:"[data-tour='profile-signout']", title:"Sign out", body:"Your data is saved to your account, so you can sign in on any device and pick up exactly where you left off.", pad:6 },
   ],

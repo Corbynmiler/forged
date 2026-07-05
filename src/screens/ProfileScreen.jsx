@@ -448,12 +448,12 @@ export function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCo
       {/* Spoken replies — Pro only */}
       {isPro && onSaveVoicePrefs && (
         <div style={{ margin:"0 14px 12px", background:T.raised, borderRadius:T.r, border:`0.5px solid ${T.border}`, overflow:"hidden" }}>
-          <div style={{ padding:"10px 16px 6px", fontSize:10, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em" }}>Coach voice</div>
+          <div style={{ padding:"10px 16px 6px", fontSize:10, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.08em" }}>Companion voice</div>
           <div style={{ padding:"12px 16px 14px", borderBottom:`0.5px solid ${T.border}` }}>
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 }}>
               <div style={{ flex:1, minWidth:0 }}>
                 <div style={{ fontSize:14, color:T.text }}>Spoken replies</div>
-                <div style={{ fontSize:12, color:T.muted, marginTop:2, lineHeight:1.45 }}>Coach reads replies aloud after you speak</div>
+                <div style={{ fontSize:12, color:T.muted, marginTop:2, lineHeight:1.45 }}>Companion reads replies aloud after you speak</div>
               </div>
               <ToggleSwitch on={voiceRepliesEnabled} onClick={() => onSaveVoicePrefs({ voiceRepliesEnabled: !voiceRepliesEnabled, coachVoiceId })} ariaLabel="Spoken coach replies" />
             </div>
@@ -486,13 +486,13 @@ export function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCo
           <button type="button" onClick={() => setShowCoachSheet(true)} style={{ display:"flex", alignItems:"center", width:"100%", background:"none", border:"none", cursor:"pointer", gap:10 }}>
             <div style={{ fontSize:18, flexShrink:0 }}>🤖</div>
             <div style={{ flex:1, textAlign:"left", minWidth:0 }}>
-              <div style={{ fontSize:14, color:T.text }}>AI coach name</div>
+              <div style={{ fontSize:14, color:T.text }}>AI companion name</div>
               <div style={{
                 fontSize:12, color:T.muted, marginTop:1,
                 lineHeight:1.35, wordBreak:"break-word", overflowWrap:"anywhere",
               }}
               >
-                {(coachIcon && COACH_ICON_OPTIONS.includes(coachIcon)) ? <>{coachIcon} {coachName || "Coach"}</> : (coachName || "Coach")}
+                {(coachIcon && COACH_ICON_OPTIONS.includes(coachIcon)) ? <>{coachIcon} {coachName || "Companion"}</> : (coachName || "Companion")}
               </div>
             </div>
             <span style={{ fontSize:18, color:T.hint }}>›</span>
@@ -676,8 +676,8 @@ export function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCo
         <div style={{ padding:"4px 16px 16px" }}>
           {isPro ? (
             <div style={{ fontSize:14, color:T.text, lineHeight:1.6 }}>
-              You're on Forged Pro — Arc power mode: more coach, voice dumps, weekly Arc Reviews, and full history. 🙌<br/>
-              <span style={{ fontSize:12, color:T.muted }}>AI coach, voice logging, friend nudges, and full history are all unlocked.</span>
+              You're on Forged Pro — Arc power mode: more companion, voice dumps, weekly Arc Reviews, and full history. 🙌<br/>
+              <span style={{ fontSize:12, color:T.muted }}>AI companion, voice logging, friend nudges, and full history are all unlocked.</span>
               {stripeCustomerId ? (
                 <button
                   type="button"

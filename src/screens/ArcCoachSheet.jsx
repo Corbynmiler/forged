@@ -69,7 +69,7 @@ function apiMessagesFromUi(msgs) {
 function buildRequestBody({ name, coachName, messages, existingHabits, arc, isEditMode, multiOptions, priorArc }) {
   return {
     name: name || "there",
-    coachName: coachName || "Coach",
+    coachName: coachName || "Companion",
     habitName: "",
     habitType: "daily",
     messages,
@@ -222,7 +222,7 @@ export default function ArcCoachSheet({
     { autoRestart: true },
   );
 
-  const coachDisplay = (coachName || "Coach").trim() || "Coach";
+  const coachDisplay = (coachName || "Companion").trim() || "Companion";
   const avatar = (coachIcon || "").trim() || "🤖";
   const showConfirmCard = !isEdit && selectedIdx != null && editedArc;
   const inputLocked = isEdit ? !!arcDraft : showConfirmCard;
@@ -870,7 +870,7 @@ export default function ArcCoachSheet({
                 onInput={e => { e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, 88)}px`; }}
                 onFocus={onComposerFocus}
                 onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendMessage(); } }}
-                placeholder={speech.listening ? "Listening…" : (loadingOpener ? "Coach is typing…" : "Your answer…")}
+                placeholder={speech.listening ? "Listening…" : (loadingOpener ? "Companion is typing…" : "Your answer…")}
                 disabled={sending || loadingOpener}
                 style={{
                   width: "100%", boxSizing: "border-box",

@@ -34,7 +34,7 @@ export function clampProfileDisplayName(s) {
 
 export function clampProfileCoachName(s) {
   const t = String(s ?? "").trim().slice(0, PROFILE_COACH_NAME_MAX);
-  return t || "Coach";
+  return t || "Companion";
 }
 
 export const HABIT_TYPES = {

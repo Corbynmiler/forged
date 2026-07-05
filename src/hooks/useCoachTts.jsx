@@ -7,9 +7,14 @@ import { todayStr } from "../utils.js";
  * play them back-to-back instead of waiting for one TTS call covering the
  * entire reply — cuts time-to-first-audio for anything longer than a single
  * sentence. Capped defensively so a very long reply can't fan out into an
- * unbounded number of requests.
+ * unbounded number of requests. Raised from 8 to support the "Ramble"
+ * long-form mode (real 5-10 minute replies) — at 8, a long reply's overflow
+ * sentences all got merged into one oversized final chunk, which could
+ * exceed api/tts.js's per-request 2000-char cap and fail outright. 60 is
+ * comfortably more sentences than even a 10-minute reply needs, so the merge
+ * path shouldn't trigger for realistic long-form replies.
  */
-const MAX_SPEECH_CHUNKS = 8;
+const MAX_SPEECH_CHUNKS = 60;
 export function splitIntoSpeechChunks(text) {
   const trimmed = String(text || "").trim();
   if (!trimmed) return [];
