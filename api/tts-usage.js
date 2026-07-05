@@ -5,8 +5,8 @@ const SUPABASE_URL = "https://apdmvbzfjuvxworjepze.supabase.co";
 const SUPABASE_ANON_KEY =
   "sb_publishable_GdMepnUv2W4VRiOuV23xiA_O4J11RMl";
 
-/** Same fallback default as api/tts.js — keep in sync if that changes. */
-const TTS_MONTHLY_CHAR_LIMIT = parseInt(process.env.TTS_MONTHLY_CHAR_LIMIT || "50000", 10);
+/** Same fallback default as api/tts.js (matches the real ElevenLabs free-tier limit) — keep in sync if that changes. */
+const TTS_MONTHLY_CHAR_LIMIT = parseInt(process.env.TTS_MONTHLY_CHAR_LIMIT || "10000", 10);
 
 /**
  * Preview-only developer endpoint: how much of the ElevenLabs quota is left.

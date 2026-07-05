@@ -2,7 +2,15 @@
 
 **Branch:** `claude/forged-ai-companion-redesign-agyjl7`
 **Status:** preview/experimental only. `main` (production) has not been touched, merged into, or modified at any point on this branch.
-**Last updated:** 2026-07-05 (seventh round today) — small, targeted UX pass on the Talk screen from real heavy usage: spoken-reply playback controls (pause/resume/stop/rewind 10s) and a preview-only ElevenLabs usage monitor. See "Seventh round."
+**Last updated:** 2026-07-05 (eighth round today) — quick fix: `TTS_MONTHLY_CHAR_LIMIT` was wrong. See "Eighth round" below, then "Seventh round" for the playback controls + usage monitor it corrects.
+
+### Eighth round — fixed the TTS monthly cap: it was 5x the real ElevenLabs limit
+
+**The bug:** `TTS_MONTHLY_CHAR_LIMIT` was set to 50,000 chars/mo everywhere (`theme.js`, `api/tts.js`, `api/tts-usage.js`'s fallback), based on "~$2.50 COGS at Flash pricing" — math that only applies on a **paid** ElevenLabs plan. The user confirmed the real account is still on ElevenLabs' **free tier**, which caps at 10,000 chars/mo, account-wide. So the app had been enforcing (and displaying, once the round-seven usage monitor shipped) a self-imposed cap 5x higher than what ElevenLabs would actually allow — meaning a user could see "usage: fine, plenty left" from the app's own tracking right up until ElevenLabs itself started rejecting requests outright, with no warning.
+
+**Fixed:** the constant is now `10000` in all three places (`theme.js`'s display copy, `api/tts.js`'s server-enforced cap, `api/tts-usage.js`'s local-estimate fallback), plus the stale "50000" reference in `AGENTS.md`'s env var docs. `ProfileScreen.jsx`'s "~Xk characters/month included" line already computed off the constant, so it updates automatically — no separate fix needed there.
+
+**Still worth knowing:** this app currently runs on **one shared ElevenLabs account** (one `ELEVENLABS_API_KEY`) — the 10,000/mo limit is account-wide, not per-user. Right now there's effectively one real user, so a 10,000/mo *per-user* cap and a 10,000/mo *account-wide* cap are the same thing in practice. If this app ever has multiple real users sharing this same free-tier key, a per-user cap of 10,000 each would let them collectively blow past the account's real 10,000 total — that's a genuine future problem, not solved here, just worth flagging before it surprises anyone.
 
 ### Seventh round — spoken-reply playback controls + ElevenLabs usage monitor
 

@@ -173,7 +173,7 @@ Local dev: `.env.local` (gitignored). Production: Vercel project env vars.
 Required:
 - `ELEVENLABS_API_KEY` — Pro spoken coach replies (optional; `/api/tts` fails safely when unset)
 - `ELEVENLABS_DEFAULT_VOICE_ID` — optional fallback voice
-- `TTS_MONTHLY_CHAR_LIMIT` — optional override (default 50000 chars/mo)
+- `TTS_MONTHLY_CHAR_LIMIT` — optional override (default 10000 chars/mo, matching the real ElevenLabs free-tier account limit)
 - `ANTHROPIC_API_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_MONTHLY_PRICE_ID`, `STRIPE_ANNUAL_PRICE_ID`

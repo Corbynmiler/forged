@@ -101,8 +101,16 @@ export const COACH_VOICE_OPTIONS = [
   { id: "21m00Tcm4TlvDq8ikWAM", label: "Grounded", desc: "Grounded, friendly" },
 ];
 
-/** ~50k chars/mo ≈ $2.50 COGS at Flash pricing — enforced server-side in api/tts.js */
-export const TTS_MONTHLY_CHAR_LIMIT = 50000;
+/**
+ * Matches the real ElevenLabs free-tier account limit (10,000 chars/mo) —
+ * this app currently runs on a single shared free-tier ElevenLabs account,
+ * so the app's own per-user cap has to fit inside that real ceiling, not an
+ * assumed paid-tier number. Was wrongly set to 50,000 (~$2.50 COGS math
+ * that only applies on a paid plan) — corrected after confirming the
+ * account is actually still on the free 10k/mo tier. Enforced server-side
+ * in api/tts.js; also the fallback default in api/tts-usage.js.
+ */
+export const TTS_MONTHLY_CHAR_LIMIT = 10000;
 
 /**
  * Live Stripe prices stay on env price IDs ($4.99/mo today).
