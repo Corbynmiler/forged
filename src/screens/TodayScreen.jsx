@@ -1,7 +1,7 @@
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
 import { useState, useRef, useEffect } from "react";
 import { T, COACH_ICON_OPTIONS } from "../theme.js";
-import { todayStr, daysAgo, parseLocal, isSatisfiedForTodayRing, getStreak, stripJournalTitleLine, composeCompanionNarrative } from "../utils.js";
+import { todayStr, daysAgo, parseLocal, isSatisfiedForTodayRing, getStreak, stripJournalTitleLine, fmtEntryDate } from "../utils.js";
 import { Ring, SLabel, Modal, GBtn } from "../components/ui.jsx";
 import {
   DailyCard, WeeklyCard, ProjectCard, LimitCard, LogCard,
@@ -112,21 +112,108 @@ function buildCoachGreetingLine({ habits, goals }) {
 }
 
 /**
- * Leads Today with a real observation from the companion — the same
- * `daily_summaries.structured.narrative` the Talk screen's greeting is built
- * from, not a separate rules-engine voice. This is the "quieter, reframed
- * around what the companion noticed" entry point: Today stops being its own
- * checklist-first surface with its own personality and instead opens with
- * what the one companion actually noticed, the same as it would on Talk.
+ * A single day's entry in the archive — date, the ready-made narrative the
+ * nightly rollover wrote specifically to be read back (falling back to
+ * title/summary for older rows from before that field existed), and the
+ * AI-judged XP read for that day when present. Deliberately not collapsed —
+ * these are short (1-2 sentences), and a scrapbook you can actually scan
+ * beats a list you have to tap through one at a time.
  */
-function CompanionNoticed({ text }) {
-  if (!text) return null;
+function DailyChapterCard({ entry }) {
+  const narrative = (entry?.structured?.narrative || entry?.summary || "").trim();
+  const title = (entry?.title || "").trim();
+  const xpReason = typeof entry?.xp_reason === "string" ? entry.xp_reason.trim() : "";
+  const xp = Number.isFinite(entry?.xp_awarded) ? entry.xp_awarded : null;
+  if (!narrative && !title) return null;
   return (
-    <div style={{ margin: "14px 14px 0", padding: "14px 16px", background: T.raised, borderRadius: T.r, border: `0.5px solid ${T.border}` }}>
-      <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.hint, marginBottom: 5 }}>
+    <div style={{ padding: "14px 16px", background: T.raised, borderRadius: T.r, border: `0.5px solid ${T.border}` }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: T.gold, letterSpacing: "0.04em", marginBottom: 6 }}>
+        {fmtEntryDate(entry.date)}
+      </div>
+      {title && <div style={{ fontFamily: T.serif, fontSize: 15, color: T.text, marginBottom: 4, lineHeight: 1.3 }}>{title}</div>}
+      {narrative && <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.55 }}>{narrative}</div>}
+      {(xpReason || xp != null) && (
+        <div style={{ fontSize: 11.5, color: T.hint, lineHeight: 1.5, marginTop: 8, paddingTop: 8, borderTop: `0.5px solid ${T.border}` }}>
+          <span style={{ fontWeight: 700 }}>Companion's read{xp != null ? ` (${xp} xp)` : ""}{xpReason ? ":" : ""}</span>{xpReason ? ` ${xpReason}` : ""}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The real daily-memory archive — replaces a single "yesterday" teaser line
+ * with the actual companion-narrated history: every day the nightly
+ * rollover has summarized, most recent first, rendered as a small chapter
+ * rather than a report row. This is Today/Noticed's real reason to exist
+ * beyond habit logging — a place worth scrolling back into.
+ *
+ * Free accounts see the same recent window as the rest of the app's history
+ * gating (last 7 days — matches HistoryModal's `daysAgo(6)` cutoff exactly,
+ * so the paywall story is consistent instead of inventing a new rule here).
+ * Older chapters are blurred with the same lock-and-unlock pattern already
+ * used for habit history, not a separate one-off paywall design.
+ */
+function DailyChapters({ recentSummaries, isPro, onUpgrade }) {
+  const today = todayStr();
+  const cutoff = daysAgo(6);
+  const chapters = (Array.isArray(recentSummaries) ? recentSummaries : [])
+    .filter(s => s?.date && s.date !== today)
+    .slice()
+    .reverse(); // most recent first (source is oldest-first)
+
+  // Today isn't a chapter yet — it's still being written, and won't become
+  // one until tonight's rollover. Naming that explicitly (rather than just
+  // having the archive start at yesterday) makes the metaphor complete: this
+  // isn't a report you're behind on, it's a page that fills in as the day
+  // happens, no action required.
+  const todayGhost = (
+    <div style={{ padding: "14px 16px", borderRadius: T.r, border: `0.5px dashed ${T.borderStrong}` }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: T.muted, letterSpacing: "0.04em", marginBottom: 4 }}>Today</div>
+      <div style={{ fontSize: 12.5, color: T.hint, lineHeight: 1.5, fontStyle: "italic" }}>Still being written — talk to your companion, and tonight this becomes a chapter.</div>
+    </div>
+  );
+
+  if (!chapters.length) {
+    return (
+      <div style={{ margin: "14px 14px 0" }}>
+        <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.hint, marginBottom: 8, padding: "0 2px" }}>
+          Your companion noticed
+        </div>
+        {todayGhost}
+      </div>
+    );
+  }
+
+  const visible = isPro ? chapters : chapters.filter(s => s.date >= cutoff);
+  const locked = chapters.slice(visible.length);
+
+  return (
+    <div style={{ margin: "14px 14px 0" }}>
+      <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.hint, marginBottom: 8, padding: "0 2px" }}>
         Your companion noticed
       </div>
-      <div style={{ fontSize: 13.5, color: T.sub, lineHeight: 1.55 }}>{text}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {todayGhost}
+        {visible.map(s => <DailyChapterCard key={s.date} entry={s} />)}
+      </div>
+      {locked.length > 0 && (
+        <div style={{ position: "relative", marginTop: 8, borderRadius: T.r, overflow: "hidden" }}>
+          <div style={{ filter: "blur(3px)", pointerEvents: "none", userSelect: "none", display: "flex", flexDirection: "column", gap: 8 }}>
+            {locked.slice(0, 2).map(s => <DailyChapterCard key={s.date} entry={s} />)}
+          </div>
+          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, background: "rgba(14,14,14,0.72)", padding: "16px" }}>
+            <div style={{ fontSize: 12, color: T.text, fontWeight: 600, textAlign: "center" }}>
+              {locked.length} more chapter{locked.length === 1 ? "" : "s"} in your archive
+            </div>
+            {onUpgrade && (
+              <button type="button" onClick={onUpgrade} style={{ padding: "8px 18px", borderRadius: T.rsm, border: "none", background: T.gold, color: "#0F0F0D", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
+                Unlock full archive →
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -772,8 +859,9 @@ export function TodayScreen({
   onUnlinkProofItem = null,
   onOpenHub = null,
   recentSummaries = [],
+  isPro = false,
+  onUpgrade = null,
 }) {
-  const companionNoticed = composeCompanionNarrative(recentSummaries);
   const [showProofPicker, setShowProofPicker] = useState(false);
   const [showReorder, setShowReorder] = useState(false);
   const [proofOrder, setProofOrder] = useState(() => {
@@ -845,6 +933,14 @@ export function TodayScreen({
     : pct < 50  ? "Building momentum."
     : pct < 100 ? "More than halfway."
     : timeGreeting;
+  // Replaces the old separate CoachGreeting mini-header (icon + name + its
+  // own status line) sitting right above this same ring — two components
+  // independently describing "how's today going" was the exact redundancy
+  // this redesign is trying to remove. buildCoachGreetingLine carries real,
+  // specific signal (goal deadlines, streaks, skip-day patterns) the ring's
+  // own plain `ringSummary` doesn't compute, so it becomes the ring's
+  // subtitle instead of a second header, rather than being dropped.
+  const smartGreetingLine = !arcActive ? buildCoachGreetingLine({ habits, goals }) : null;
   const habitsForSections = arcActive ? otherTrackHabits : habits;
   const daily   = habitsForSections.filter(h => h.habitType === "daily");
   const limit   = habitsForSections.filter(h => h.habitType === "limit");
@@ -883,7 +979,7 @@ export function TodayScreen({
 
   if (habits.length === 0 && activeGoals.length === 0) return (
     <div>
-      <CompanionNoticed text={companionNoticed} />
+      <DailyChapters recentSummaries={recentSummaries} isPro={isPro} onUpgrade={onUpgrade} />
       {onOpenCoachMic && !arcActive && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic} habitCompletionPercentage={pct} habitsLoggedTodayCount={loggedCount} totalTrackables={totalTrackables}/>}
       <div style={{ padding:"40px 28px 32px", textAlign:"center" }}>
         <div style={{ fontSize:48, marginBottom:16 }}>⚒️</div>
@@ -923,7 +1019,6 @@ export function TodayScreen({
   return (
     <div>
       <style>{`@keyframes todayCompleteIn { from { opacity: 0.55; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }`}</style>
-      <CompanionNoticed text={companionNoticed} />
       {!activeBlock && typeof onStartArc === "function" && (
         <button
           type="button"
@@ -986,7 +1081,6 @@ export function TodayScreen({
           }}
         />
       )}
-      {onOpenCoachMic && !arcActive && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic} habitCompletionPercentage={pct} habitsLoggedTodayCount={loggedCount} totalTrackables={totalTrackables}/>}
       {showDriftCard && (
         <DriftCard
           activeBlock={activeBlock}
@@ -1035,7 +1129,7 @@ export function TodayScreen({
                   : (!arcActive && pct === 100 && totalTrackables > 0 ? "Forged for today" : greeting)}
               </div>
               <div style={{ fontSize:13, color:T.muted }}>
-                {arcActive ? `Day ${arcDayX} · ${ringSummary || "show proof"}` : (ringSummary || " ")}
+                {arcActive ? `Day ${arcDayX} · ${ringSummary || "show proof"}` : (smartGreetingLine || ringSummary || " ")}
               </div>
             </>
           )}
@@ -1046,6 +1140,7 @@ export function TodayScreen({
           )}
         </div>
       </div>
+      <DailyChapters recentSummaries={recentSummaries} isPro={isPro} onUpgrade={onUpgrade} />
       {onGenerateReceipt && (
         <TodayReceiptCard
           entry={todayJournalEntry}
@@ -1211,9 +1306,22 @@ export function TodayScreen({
         // Other Habits, Goals, and Loose Ends are hidden from Today and live on
         // the Hub screen (accessed via the link below). Data is intact — only
         // the rendering is gated.
+        // Without an active Arc, the habit/goal grid used to render fully
+        // open, always — the single biggest remaining "habit tracker"
+        // signal on this screen. Wrapping it in one collapsed-by-default
+        // section (reusing the same SectionCollapsible pattern already used
+        // for Goals/Other-habits when an Arc IS active) turns it into
+        // something you open on purpose to log, not the page's default
+        // dominant content — the ring above already gives the at-a-glance
+        // status without needing the full grid visible.
+        const trackedInner = [goalsSection, ...legacyHabitSections, logsSection].filter(Boolean);
+        const trackedSection = trackedInner.length > 0
+          ? <SectionCollapsible key="tracked" label={`Today's log${ringSummary ? ` — ${ringSummary}` : ""}`} defaultOpen={false}>{trackedInner}</SectionCollapsible>
+          : null;
+
         const sections = arcActive
           ? [proofSection, logsSection].filter(Boolean)
-          : [goalsSection, ...legacyHabitSections, logsSection].filter(Boolean);
+          : [trackedSection].filter(Boolean);
 
         return sections.map((sec, i) =>
           i === 0 ? <div key={i} data-tour="today-first-section">{sec}</div> : <div key={i}>{sec}</div>

@@ -1588,7 +1588,7 @@ export const GLOBAL_TOUR = [
   {
     welcome: true, target: null,
     title: "Welcome to Forged.",
-    body: "This tour takes about 30 seconds. It'll show you what each screen does and how to get the most out of it.",
+    body: "This tour takes about 30 seconds. Forged is a companion that remembers your life over time — here's how the pieces fit together.",
   },
   {
     target: "[data-tour='today-summary']",
@@ -1599,13 +1599,19 @@ export const GLOBAL_TOUR = [
   {
     target: "[data-tour='today-first-section']",
     title: "Logging a habit",
-    body: "Tap the circle on any habit to log it for today. Tap it again — or hold — for more options: reflect, skip the day, add a note, or undo.",
+    body: "Tap to see today's habits, then tap the circle on any of them to log it. Tap it again — or hold — for more options: reflect, skip the day, add a note, or undo.",
     pad: 6,
   },
   {
+    target: "[data-tour='companion-nav']",
+    title: "Talk to your companion",
+    body: "This is the front door. Talk anytime — it remembers what you've told it, notices patterns, and can log or plan things for you as you talk.",
+    callout: "top", pad: 8,
+  },
+  {
     target: "[data-tour='nav']",
-    title: "Five screens, one app",
-    body: "Today logs habits. Journal starts with Activity — what you actually logged — then the Journal tab for your daily story. Insights shows patterns. Social is where Forge Pro crew features will live. Profile tracks your XP and account.",
+    title: "Three screens, one companion",
+    body: "Talk is where you think out loud. Noticed is your daily record — what happened, what it noticed, and today's habits when you want to log something directly. You holds your account, direction, and settings.",
     pad: 4, radius: 16, callout: "top",
   },
 ];

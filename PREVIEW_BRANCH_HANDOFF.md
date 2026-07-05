@@ -2,7 +2,27 @@
 
 **Branch:** `claude/forged-ai-companion-redesign-agyjl7`
 **Status:** preview/experimental only. `main` (production) has not been touched, merged into, or modified at any point on this branch.
-**Last updated:** 2026-07-05 (fourth round today) — explicit instruction this round: stop renovating the old Forged IA, design from first principles instead ("what would the complete experience look like if designed today"), reusing the backend but not feeling obligated to reuse the old screens/nav. Full V2 vision proposed below; smallest real step toward it shipped (nav collapsed from 4 tabs to 3 — see "Fourth round").
+**Last updated:** 2026-07-05 (fifth round today) — explicit instruction this round: work in full milestones, not tiny phases; think like a product lead, not just an engineer; don't stop until "Noticed" is a genuinely finished experience. See "Fifth round" for what shipped — it's a real, complete piece of the V2 vision from the fourth round, not another incremental patch.
+
+### Fifth round — Noticed becomes a real daily-memory archive (milestone, complete)
+
+**The ask:** turn Noticed into the real daily memory archive; make daily chapters feel worth revisiting; keep reducing the old habit-tracker feeling; bundle related work into one finished milestone instead of stopping after the first piece.
+
+**What shipped, as one coherent pass through `TodayScreen.jsx` (the screen behind the "Noticed" tab), `App.jsx`, and `utils.js`:**
+
+1. **A real archive, not a single teaser line.** The "Your companion noticed" block from round three (one sentence about yesterday) is replaced by `DailyChapters` — every day the nightly rollover has actually summarized, most recent first, each rendered as a small chapter: date, title, the full narrative recap, and the AI-judged "Companion's read" (XP + reason) for that specific day when present. `daily_summaries` fetch depth raised from 7 to 30 days in `App.jsx` (`loadCoachMemory`) to give the archive real depth — Talk's own greeting/memory context is unaffected (it slices the most recent 3-7 from this same pool, same as before).
+2. **A "Today — still being written" placeholder always leads the archive.** Makes the metaphor complete: today isn't a gap or something you're behind on, it's a page that's filling in as the day happens and becomes a real chapter tonight.
+3. **Free/Pro gating reuses the app's existing convention, not a new rule.** Chapters older than 7 days are blurred with the same lock-and-unlock visual pattern already used for habit history (`HistoryModal`'s `daysAgo(6)` cutoff) — same monetization story everywhere, not a one-off invented here.
+4. **The habit/goal grid is now collapsed by default when there's no active Arc** — wrapped in the same `SectionCollapsible` pattern already used elsewhere in this file (Goals/Other-habits when an Arc is active), labeled `"Today's log — {X of Y logged}"`. This was the single biggest remaining "checklist, not companion" visual signal on the screen; now it's a tool you open on purpose, with the ring above still giving the at-a-glance status. Onboarding's `GLOBAL_TOUR` (`habitCards.jsx`) updated to match — its copy was also badly stale (referenced "Five screens: Today, Journal, Insights, Social, Profile," none of which are real top-level screens anymore) — rewritten for the real 3-tab structure and the new collapsed-section interaction, plus a new step introducing Talk itself via the `companion-nav` tour anchor added last round.
+5. **Removed a genuinely redundant status line.** `TodayScreen` was showing TWO independently-computed "how's today going" messages stacked on top of each other — the old `CoachGreeting` mini-header (icon + name + its own rules-engine line) directly above the ring/status card, which computes its own separate greeting text. `CoachGreeting`'s underlying logic (`buildCoachGreetingLine`) is genuinely more specific than the ring's plain text (it surfaces goal deadlines, streaks, and skip-day patterns) — so rather than deleting it, it's now folded into the ring card's own subtitle line, and the separate mini-header is gone. One status message, not two, and no real signal lost. (`CoachGreeting` the component still exists and is still used in the zero-habits empty state, where there's no ring to fold into.)
+
+**What did NOT change:** all underlying data (habits, goals, logs, `daily_summaries`, journal entries) and every interaction inside the habit/proof cards (tap, undo, reflect, skip, drag-reorder) — untouched, just reached through one extra tap when there's no active Arc. Arc-active mode's "proof actions only" behavior is unchanged.
+
+**Verified:** `npm run build` passes after every step. Not verified: real visual review in a browser (no live session in this sandbox) — the archive's card layout, the collapsed section's default state, and the blur/unlock treatment are reasoned from the same patterns already proven elsewhere in this codebase, not screenshotted.
+
+**Files touched:** `src/screens/TodayScreen.jsx` (the bulk of this milestone), `src/App.jsx` (fetch depth, `isPro`/`onUpgrade` passthrough), `src/utils.js` (added then removed `composeCompanionNarrative` — superseded mid-round by per-entry rendering directly in `DailyChapterCard`, removed rather than left as dead code), `src/components/habitCards.jsx` (`GLOBAL_TOUR` rewrite).
+
+---
 
 ### Fourth round — Version 2 information architecture (proposed) + step 1 (shipped)
 
