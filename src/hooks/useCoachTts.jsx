@@ -147,26 +147,45 @@ export function useCoachTts({ enabled = false, isPro = false, voiceId = null } =
       const token = sbSession?.access_token;
       if (!token || session !== sessionRef.current) return;
 
-      // Fire EVERY chunk's fetch immediately, in parallel — not staggered
-      // one-ahead. A staggered prefetch (start chunk N+1 only once chunk N's
-      // fetch resolves, then race it against chunk N's own playback) only
-      // ever gives chunk N+1 exactly chunk N's playback duration to finish
-      // downloading. That's not enough margin for a short sentence — a
-      // quick "Right." or "Got it." plays out in well under a second, which
-      // is often shorter than one full network+synthesis round trip, so the
-      // next chunk isn't ready yet and there's an audible gap right at the
-      // sentence boundary — reported as "cuts out," "pauses too long at
-      // full stops," "doesn't feel continuous." Firing every chunk's fetch
-      // at t=0 instead means chunk 2, 3, 4... each get the ENTIRE elapsed
-      // playback time of every prior chunk as head start, not just one
-      // chunk's worth — by the time it's a later chunk's turn, it has
-      // almost always already finished downloading.
-      const chunkPromises = chunks.map(c => fetchChunkAudioUrl(c, token, session));
+      // Prefetch with a bounded sliding window instead of either extreme:
+      //   - staggered one-ahead (the original bug): chunk N+1 only starts
+      //     fetching once chunk N's fetch RESOLVES, then races chunk N's
+      //     own playback — for a short sentence (well under a second to
+      //     speak), that's not enough time for a real round trip, producing
+      //     an audible gap at every sentence boundary.
+      //   - fire-everything-at-once (tried, made it worse): ElevenLabs caps
+      //     CONCURRENT requests per account (free tier: 2; Starter: 3) —
+      //     firing all chunks simultaneously blew straight through that and
+      //     got the extra requests rejected outright ("Could not generate
+      //     speech right now").
+      // A window of 2 concurrent fetches stays safely within even the free
+      // tier's limit while still giving every chunk beyond the first two a
+      // real head start — chunk N starts fetching as soon as chunk N-2's
+      // fetch RESOLVES (immediately, before chunk N-2 even plays), instead
+      // of only starting once chunk N-1's playback is already underway.
+      // Raise the window if this account is confirmed to be on a higher
+      // ElevenLabs tier with more concurrency headroom.
+      const CONCURRENT_TTS_FETCH_WINDOW = 2;
+      const windowSize = Math.min(CONCURRENT_TTS_FETCH_WINDOW, chunks.length);
+      const chunkPromises = new Array(chunks.length);
+      for (let i = 0; i < windowSize; i++) {
+        chunkPromises[i] = fetchChunkAudioUrl(chunks[i], token, session);
+      }
 
       for (let i = 0; i < chunks.length; i++) {
         if (session !== sessionRef.current) return;
         const { url, quotaExhausted } = await chunkPromises[i];
         if (session !== sessionRef.current) { if (url) URL.revokeObjectURL(url); return; }
+        // Only start the next fetch AFTER this slot's request has actually
+        // resolved (freeing it), not before — starting it earlier would
+        // briefly push concurrency to windowSize+1, exactly the mistake
+        // that caused ElevenLabs to reject requests outright. Verified with
+        // a standalone simulation that this ordering never exceeds the
+        // window, for any chunk count.
+        const nextIdx = i + windowSize;
+        if (nextIdx < chunks.length) {
+          chunkPromises[nextIdx] = fetchChunkAudioUrl(chunks[nextIdx], token, session);
+        }
         if (quotaExhausted) break; // further chunks will fail the same way — stop early
         if (url) await playChunkUrl(url, session);
       }
