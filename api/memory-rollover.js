@@ -24,6 +24,11 @@ function shiftDate(ymd, deltaDays) {
 const MEMORY_MAX_CHARS = 1500;
 const MAX_DAYS_PER_CALL = 2; // cost bound: at most two day-summaries per call
 const XP_DAILY_CAP = 50; // bound on AI-judged XP per day — matches the design doc's 0-50/day range
+// Cost bound for Phase 2a (conversation_messages -> rollover): a very chatty
+// day shouldn't blow up this job's token cost. Env override, not a new config
+// system, so it's a one-line change to raise later — matches TTS_MONTHLY_CHAR_LIMIT's
+// pattern in api/tts.js.
+const CONVERSATION_DIGEST_MAX_CHARS_PER_DAY = parseInt(process.env.CONVERSATION_DIGEST_MAX_CHARS_PER_DAY || "4000", 10);
 
 /** Compact one day of habit logs + notes into a short plain-text digest for the model. */
 function buildDayDigest(date, habits, journalRow) {
@@ -51,6 +56,26 @@ function buildDayDigest(date, habits, journalRow) {
   const entry = (journalRow?.content || "").trim();
   if (entry) lines.push(`- evidence entry: ${entry.slice(0, 400)}`);
   return lines.join("\n");
+}
+
+// ── PREVIEW BRANCH — memory architecture, Phase 2a step 2 ─────────────────
+// Turns one day's raw conversation_messages rows into a compact transcript
+// for the extraction prompt — this is the actual fix for "judge from
+// context, not checklists": the system prompt already asked the model to
+// read "conversation content" (see below), but until now nothing real was
+// ever passed in under that name. Capped per day (see
+// CONVERSATION_DIGEST_MAX_CHARS_PER_DAY) so a very talkative day can't blow
+// up this job's token cost — truncates rather than dropping the day
+// entirely, since a partial real transcript still beats none.
+function buildConversationDigest(rows) {
+  if (!rows?.length) return "";
+  const lines = rows
+    .map(r => `${r.role === "user" ? "User" : "Companion"}: ${String(r.content || "").trim()}`)
+    .filter(l => l && !/^(User|Companion):\s*$/.test(l));
+  const full = lines.join("\n");
+  return full.length > CONVERSATION_DIGEST_MAX_CHARS_PER_DAY
+    ? full.slice(0, CONVERSATION_DIGEST_MAX_CHARS_PER_DAY) + "\n[…conversation truncated for length]"
+    : full;
 }
 
 function parseModelJson(text) {
@@ -103,11 +128,46 @@ async function handler(req, res) {
     const summarized = new Set((existing || []).map(r => r.date));
     const journalByDate = new Map((journalRows || []).map(r => [r.date, r]));
 
-    // Most recent un-summarized days that actually have activity.
+    // ── PREVIEW BRANCH — memory architecture, Phase 2a step 2 ───────────────
+    // Read from conversation_messages (staged/applied separately from this
+    // change — supabase/pending_migrations/20260705120000_conversation_messages.sql).
+    // Isolated in its own try/catch, not folded into the Promise.all above,
+    // so an environment where the migration hasn't landed yet still gets the
+    // existing habit/journal digest working exactly as before — same
+    // fail-soft discipline as every other addition on this branch.
+    let convoRows = [];
+    try {
+      const { data, error: convoErr } = await db
+        .from("conversation_messages")
+        .select("day, role, content")
+        .eq("user_id", userId)
+        .in("day", windowDates)
+        .order("created_at", { ascending: true });
+      if (convoErr) throw convoErr;
+      convoRows = data || [];
+    } catch (convoErr) {
+      console.warn("[memory-rollover] conversation_messages not read (table likely not created yet)", convoErr?.message || convoErr);
+    }
+    const convoByDate = new Map();
+    for (const row of convoRows) {
+      if (!row?.day) continue;
+      if (!convoByDate.has(row.day)) convoByDate.set(row.day, []);
+      convoByDate.get(row.day).push(row);
+    }
+
+    // Most recent un-summarized days that actually have activity — either
+    // habit/journal activity, real conversation, or both. (Previously a day
+    // with only conversation and no habit logs/journal entry would have
+    // produced an empty digest and been silently skipped forever.)
     const pending = [];
     for (const d of windowDates) {
       if (summarized.has(d)) continue;
-      const digest = buildDayDigest(d, habitRows, journalByDate.get(d));
+      const habitJournalDigest = buildDayDigest(d, habitRows, journalByDate.get(d));
+      const conversationDigest = buildConversationDigest(convoByDate.get(d));
+      const digest = [
+        habitJournalDigest,
+        conversationDigest ? `Conversation that day:\n${conversationDigest}` : "",
+      ].filter(Boolean).join("\n\n");
       if (digest.trim()) pending.push({ date: d, digest });
       if (pending.length >= MAX_DAYS_PER_CALL) break;
     }

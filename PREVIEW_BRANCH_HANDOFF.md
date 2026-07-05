@@ -2,7 +2,7 @@
 
 **Branch:** `claude/forged-ai-companion-redesign-agyjl7` (preview only — `main`/production untouched)
 **Purpose:** this is not "Forged with AI added." It's a new AI life companion that reuses Forged's backend, auth, memory, and APIs — but earns its UI from scratch. Wins on continuity, not capability: memory is the product, conversation is the interface. Being built for one user first — the bar is "would you use this instead of ChatGPT for life updates, reflection, planning, and thinking."
-**Last updated:** 2026-07-05 (Phase 2, step 1) — started building the memory architecture (Phase 2a): staged a `conversation_messages` table (**not yet applied — needs your review**, see §3) and wired the Companion screen to write every turn to it, fail-soft. Nothing else from Phase 2 has been touched yet — this is deliberately the smallest safe first step.
+**Last updated:** 2026-07-05 (Phase 2a, step 2) — `conversation_messages` (staged last round) is now applied and confirmed writing correctly. This round wires `api/memory-rollover.js` to actually read from it, folding real conversation content into the nightly extraction digest alongside the existing habit/journal signals. No new migration this round — schema unchanged.
 
 This file is the single source of truth for anyone (human or Cursor) picking this branch up cold. Update it at the end of every phase — do not let it drift from what's actually in the diff.
 
@@ -14,9 +14,9 @@ You asked directly: have we accidentally discovered a better product than the on
 
 Every round of real feedback has been about the companion surface (the Ember, the greeting, the conversation modes, memory, voice) — never once about Today, Arc, habits, streaks, or XP-as-a-tally. Those systems haven't been discussed, tuned, or endorsed in this entire branch; they've just been sitting underneath, unquestioned, while the actual product got redesigned around them repeatedly. Your own benchmark for this branch was never "is this a better habit tracker" — it was "would I use this instead of ChatGPT for life updates, reflection, planning, and thinking." That's a different product category, and this branch has been quietly building toward it without the roadmap ever saying so out loud.
 
-The deeper tension is structural, not cosmetic: this branch's own stated direction — *"the AI should judge progress using context, not checklists," "keep XP explainable, but don't make it dependent on habits"* — is in direct conflict with Arc/habits/streaks, a fixed, deterministic, checklist-driven system by design. Every round of prompt-tightening on the rollover job has been quietly working *around* that tension, not resolving it. It doesn't resolve until the underlying model changes — which is exactly what Phase 2 (§1) is for.
+The deeper tension is structural, not cosmetic: this branch's own stated direction — *"the AI should judge progress using context, not checklists," "keep XP explainable, but don't make it dependent on habits"* — is in direct conflict with Arc/habits/streaks, a fixed, deterministic, checklist-driven system by design. Every round of prompt-tightening on the rollover job has been quietly working *around* that tension, not resolving it. This round is the first one that actually starts resolving it — see §3.
 
-**What this doesn't mean:** delete Today/Arc/habits outright. That data model is real, live, working code with real rows in a shared production database. It means the plan below treats the companion as the product going forward and treats Today/Arc/habits as a *backing data source the companion reads and writes on your behalf* — not a set of screens you actively manage.
+**What this doesn't mean:** delete Today/Arc/habits outright. That data model is real, live, working code with real rows in a shared production database. It means the plan treats the companion as the product going forward and treats Today/Arc/habits as a *backing data source the companion reads and writes on your behalf* — not a set of screens you actively manage.
 
 ---
 
@@ -26,17 +26,17 @@ The deeper tension is structural, not cosmetic: this branch's own stated directi
 
 | Step | What | Status |
 |---|---|---|
-| **2a. Memory architecture** | `conversation_messages` (raw per-turn log) → extraction → embeddings/retrieval, so the companion has real, growing context to draw from. | 🔶 **In progress — step 1 of several, see §3.** |
+| **2a. Memory architecture** | `conversation_messages` (raw per-turn log) → extraction → embeddings/retrieval. | 🔶 **In progress.** Write side: done, applied, verified. Read side (rollover extraction): done this round, unverified against a real rollover run (see §6). Embeddings/retrieval: not started — still the real blocker for genuine cross-time recall. |
 | **2b. Retire the old CoachBar/modal drawer** | The floating chat surface that duplicates the Companion screen. | ⛔ Not started — next up, can run in parallel with the rest of 2a. |
 | **2c. Reframe Today around the companion** | Today stops being a checklist you manage and becomes a quiet log of what the companion already captured. | ⛔ Not started — depends on 2a existing first. |
-| **2d. Resolve the XP collision** | Deterministic per-tap XP vs. AI-judged observational XP — pick one, merge them, or make a deliberate call to keep both. | ⛔ Not started — your call, not mine (see §1 of the prior revision of this doc for the three options, preserved below in §8). |
+| **2d. Resolve the XP collision** | Deterministic per-tap XP vs. AI-judged observational XP — pick one, merge them, or make a deliberate call to keep both. | ⛔ Not started — your call, not mine (three options preserved in the appendix). |
 | **2e. Rename Coach → Companion** | Only once 2a-2d make it true, not just cosmetic. | ⛔ Not started, intentionally last. |
 
-Full reasoning for this sequencing (why each step blocks the next) is preserved in §8 (carried over from the round that proposed it) rather than repeated here.
+Full reasoning for this sequencing is preserved in the appendix rather than repeated every round.
 
 ---
 
-## 2. Memory architecture design (unchanged from last round, still the target)
+## 2. Memory architecture design (unchanged, still the target)
 
 ```
 conversation_messages (raw, every turn) → nightly extraction (existing job)
@@ -45,46 +45,138 @@ conversation_messages (raw, every turn) → nightly extraction (existing job)
   → ChatGPT import eventually converges onto this same pipeline, backdated
 ```
 
-Full diagram, reasoning, and the deliberate "don't embed raw conversation_messages, only memory_facts" scope decision are preserved in §8. This round builds the first box in that diagram.
+This round builds the arrow between box 1 and box 2 — real conversation content now actually reaches the extraction job. Box 3 (embeddings/retrieval) is still the piece that turns "you changed your opinion since April" from wishful thinking into something real; not started. Full diagram and reasoning preserved in the appendix.
 
 ---
 
-## 3. This round's change — Phase 2a, step 1: `conversation_messages`
+## 3. This round's change — Phase 2a, step 2: rollover reads real conversation
 
-**What changed:**
-1. **Staged a new migration** — `supabase/pending_migrations/20260705120000_conversation_messages.sql` — creating one new table. **Not applied. Needs your review before it exists anywhere.**
-2. **Wired `src/screens/CompanionScreen.jsx`** to write every turn (your message, and the assistant's finalized reply) to that table, fail-soft — a missing table (before you apply the migration) just logs a warning and changes nothing else.
+**What changed, in `api/memory-rollover.js` only:**
 
-**What this deliberately does NOT do yet:** nothing reads from this table. `api/memory-rollover.js` still extracts from curated notes/habit logs exactly as before — it hasn't been touched this round. Once you've confirmed real rows are accumulating correctly (§6), the next step is extending the rollover job to read from this table instead of (or alongside) its current sources. That's a separate, slightly bigger step, kept out of this one on purpose.
+1. **New query** against `conversation_messages` for the same candidate date window the job already computes, isolated in its own `try`/`catch` (not folded into the existing `Promise.all`) — so an environment where the migration somehow hasn't landed still gets the existing habit/journal digest working exactly as before, unaffected.
+2. **New `buildConversationDigest(rows)` function** — turns a day's raw turns into a compact `User: .../Companion: ...` transcript, capped at `CONVERSATION_DIGEST_MAX_CHARS_PER_DAY` (**default 4000 characters/day**, overridable via that env var — a one-line change if you want it higher, no new config system).
+3. **Merged into the existing per-day digest** — a day's final digest is now the habit/journal digest plus (if any exists) a "Conversation that day:" section, joined together. Both empty is skipped (unchanged); either one alone is enough to include the day (see next point).
+4. **Real correctness fix, not just an addition:** previously, a day with real conversation but zero habit logs/journal entries produced an *empty* digest and was silently skipped — never summarized at all. That gap is now closed; conversation alone is enough to trigger a summary.
+5. **No prompt rewrite needed.** The extraction system prompt already said it receives "habit logs, personal notes, evidence entries, conversation content" and already instructs "read what they actually said — notes, evidence entries, conversation content" when judging XP. That's been true in *wording* since two rounds ago; this change is what finally makes it true in *fact*. Nothing about the prompt text changed this round.
 
-### Migration package — full review
+**Verified without live credentials, honestly:** wrote a standalone logic test (mock rows, no network — same pattern as this branch's earlier `test-rollover-logic.mjs`/`test-xp-clamp.mjs` checks) covering: empty/null rows, basic formatting, blank-content filtering, truncation past the 4000-char cap, and — the important one — that a conversation-only day (no habit logs) now produces a non-empty digest while a habit-only day (no conversation) is completely unaffected. All passed. This confirms the logic is sound; it does not confirm what a real Haiku call does with real conversation content in front of it — that needs a real rollover run (§6).
 
-**File:** `supabase/pending_migrations/20260705120000_conversation_messages.sql` (full contents also below)
+---
 
-**1. Does it affect shared Supabase data?** It adds one new table and nothing else — no existing table, column, row, or RLS policy is touched. Preview and `main` share this database; `main`'s deployed code has no reference to this table anywhere, so applying this migration changes nothing about how `main` behaves. Real data only ever gets written when your account uses the Companion screen (preview-only UI) — there's no other writer.
+## 4. Files touched this round
 
-**2. Is it additive-only?** Yes — entirely `create table if not exists` / `create index if not exists` / a single RLS policy scoped to `auth.uid() = user_id`. Nothing is altered, dropped, or renamed.
+| File | What | Risk |
+|---|---|---|
+| `api/memory-rollover.js` | Added `CONVERSATION_DIGEST_MAX_CHARS_PER_DAY` constant, `buildConversationDigest()`, a new fail-soft query against `conversation_messages`, and merged its output into the per-day digest fed to the extraction model. Fixed the "conversation-only day gets silently skipped" gap as a side effect of the merge logic. | Medium — this is a real behavioral change to a live, production-relied-upon nightly job (what the model actually sees, which affects `xp_delta`/`facts`/`narrative` output). Mitigated: fail-soft on the new query (falls back to old behavior on any read error), a character cap bounding cost, and standalone logic tests before shipping. Since preview and `main` are separate deployments, this only runs inside the preview deployment regardless. |
 
-**3. Rollback, if you ever want to undo it:**
-```sql
-drop table if exists public.conversation_messages;
+**No other files changed this round. No migration — schema was already applied last round.**
+
+---
+
+## 5. Decisions made this round (and why)
+
+**Isolated the new query in its own try/catch rather than adding it to the existing `Promise.all`.** `Promise.all` fails all-or-nothing; if the new query ever errored in some environment, bundling it in would risk breaking the four existing, working queries (habit rows, journal rows, rolling memory, active Arc) that this job has depended on for months. Isolating it means the worst case is "no conversation content this run," never "the whole job breaks."
+
+**Fixed the conversation-only-day gap deliberately, not as an accidental side effect left unremarked.** Calling it out explicitly here because it's a real behavior change beyond "wire up the new data source" — previously, a day where you only talked to the companion and logged nothing would never get a title, a narrative, or an XP judgment at all. Worth knowing this was silently true before this round.
+
+**Capped conversation length per day with a plain constant + env override, not a smarter summarization/pre-truncation scheme.** You said "make it easy to increase later... but don't overcomplicate it yet." A `parseInt(process.env.X || "4000", 10)` constant is a one-line change to raise, matches the exact pattern already used by `TTS_MONTHLY_CHAR_LIMIT` in `api/tts.js`, and needed zero new infrastructure. Truncates from the end with a visible `[…truncated]` marker rather than trying to be clever about *which* part of a day's conversation matters most — that's a real design problem (recency vs. importance) worth solving properly later if it ever actually triggers, not guessed at now.
+
+**Verified via a standalone logic test instead of just reading the code twice.** Same discipline as this branch's very first XP-clamping check — a plain assertion script costs a few minutes and catches real edge cases (the conversation-only-day gap was actually confirmed, not just asserted, this way) that re-reading code carefully can still miss.
+
+**Did not touch the system prompt.** It already asked for exactly this ("conversation content") in language written two rounds ago — changing prompt wording in the same pass as changing what data actually flows in would make it harder to tell, later, whether an output-quality change came from the new data or new wording. Isolate the variable.
+
+---
+
+## 6. Risks / open items
+
+- **Unverified against a real Haiku call with real conversation content.** No Anthropic credentials in this sandbox. The logic that assembles the digest is tested (§3); what the model actually *does* with a real transcript in front of it — does `xp_delta` genuinely start reflecting conversation-only effort, does `narrative` start naming things you only ever said out loud, not logged — needs a real rollover run against real data.
+- **Cost is now somewhat conversation-length-dependent** where it wasn't before, bounded by the 4000 char/day cap (roughly ~1000 extra tokens/day in the worst case, on top of the existing habit/journal digest) — worth keeping an eye on `input_tokens` in the job's own logging (already present) after a few real runs.
+- **The embeddings/retrieval piece (box 3 of the architecture) still doesn't exist.** This round makes the *input* to nightly extraction richer; it does not yet give the companion a way to reach back further than the rolling summary window at reply-time. "You changed your opinion since April" still isn't possible yet — that's still blocked on the embeddings vendor decision.
+- Everything from prior rounds' risk lists (Blue Ember unverified in the real app, transcription word-loss diagnosed-not-fixed, XP collision needs your call, two chat surfaces still both live, ElevenLabs connectivity unknown from this sandbox) still stands unchanged — preserved in the appendix.
+
+---
+
+## 7. How to test (plain English)
+
+Rollover only processes **unsummarized** days — it never re-runs a day that already has a `daily_summaries` row. So the real test needs either a fresh day to roll over naturally, or a day you know is still unsummarized:
+
+1. **Talk to the Companion screen today** (or on any day that hasn't rolled over yet) — a real conversation, not just a one-line test, so there's actual substance for the model to work with.
+2. **Let that day roll over naturally** — this happens the next time the app calls the rollover endpoint for an account with an unsummarized prior day (normally triggered automatically; if you want to force it sooner, the endpoint is `POST /api/memory-rollover` with your auth token and a `client_date`, but the normal flow of just using the app the next day is the simplest test and needs nothing extra from you).
+3. **Read the result** — the greeting on the day *after* the rollover, and/or query `daily_summaries` directly for that date:
+   ```sql
+   select date, title, structured->>'narrative' as narrative, xp_awarded, xp_reason
+   from public.daily_summaries
+   where user_id = auth.uid()
+   order by date desc limit 3;
+   ```
+4. **Judge it against what actually happened that day, specifically in conversation** — did the narrative/xp_reason reference something you only ever *said*, not logged as a habit? That's the signal this round's change is supposed to produce. If a day had real conversation but no habit logs and it still got a title/narrative/xp at all (rather than being skipped entirely), that alone confirms the correctness fix in §3.4 worked.
+
+---
+
+## 8. Next steps
+
+1. **A real rollover run against real data** — the only way to actually judge whether this round's change improved anything, per §7. Needs a day or two of normal use.
+2. **Embeddings vendor decision** (Voyage API vs. a Supabase Edge Function running `gte-small`) — this is the actual remaining blocker for real cross-time retrieval, box 3 of the architecture, and has been sitting unresolved for a while now.
+3. **2b — retire the old CoachBar/modal drawer.** Doesn't depend on any of the above, and it's been flagged for six-plus rounds now.
+
+---
+
+## Appendix — preserved detail from earlier rounds
+
+*(Kept verbatim for reference rather than re-litigated each round. §1-§2 are the current summary of this material.)*
+
+### Full Phase 2 sequencing reasoning
+
+**2a. Build the real memory architecture first.** Everything else depends on this existing. Without it, "remove the old mental model" just means deleting screens with nowhere for that functionality to actually go.
+
+**2b. Retire the redundant old chat surface** (CoachBar + modal `AICoach` drawer). A prerequisite for 2c-2e: you can't credibly "remove the old mental model" while a second, parallel implementation of it is still sitting there.
+
+**2c. Reframe Today around the companion, not a checklist.** Today's job changes to a quiet, secondary log of what got captured (for correction/inspection), not a screen you visit to manage your day.
+
+**2d. Make an explicit call on XP.** Two systems running in parallel: the real, deterministic, per-tap total (production, load-bearing), and the AI-judged observational total (preview-only, currently just logged, not shown). Pick one of: (i) the AI-judged version becomes the real, user-facing total and the per-tap system is retired, (ii) formally merge them with clear rules, or (iii) keep them parallel on purpose (weakest option).
+
+**2e. Only then, rename.** "Coach" frames the AI as an instructor; "companion" implies a peer. `coachMemory`, `coachName`, `buildCoachSystemPrompts`, `AICoach.jsx` are load-bearing identifiers — renaming before 2a-2d are actually true would just be cosmetic.
+
+**On "Eyes":** no literal feature/screen by that name was found in the codebase — read as shorthand for the tracking/surveillance framing of habit-logging in general, addressed via 2c/2d.
+
+**Not proposed:** deleting the Arc/habit data model or its tables. Proof-actions-as-habits remains a reasonable mechanism for the companion to use when committing to something concrete.
+
+### Full memory architecture diagram
+
 ```
-Safe — nothing else references this table yet (the rollover job hasn't been wired to read from it).
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. RAW LAYER — conversation_messages                             │
+│    Every turn, every day. Ground truth, written live.             │
+│    ✅ Applied. ✅ Client writes confirmed. ✅ Rollover now reads it. │
+└───────────────────────────┬────────────────────────────────────┘
+                             │ nightly rollover reads recent days
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. EXTRACTION (existing job)                                      │
+│    - daily_summaries row (title, narrative, structured, xp)       │
+│    - memory_facts rows (atomic, durable, embeddable)               │
+│    - updated coach_memory.content (rolling prose, size-capped)     │
+└───────────────────────────┬────────────────────────────────────┘
+                             │ embeddings generated for memory_facts
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. RETRIEVAL (the missing piece — not started)                    │
+│    Embed the current message, vector-search memory_facts (top-K,  │
+│    regardless of recency), inject into system_volatile.           │
+└───────────────────────────┬────────────────────────────────────┘
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 4. IMPORTED HISTORY (ChatGPT export)                               │
+│    Long-term: converge onto the same pipeline as #2, backdated.   │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-**4. Pre-apply checklist:**
-- [ ] Read the full SQL below (or the file directly).
-- [ ] Confirm you're applying it to the same Supabase project this branch already uses (`apdmvbzfjuvxworjepze`, per the prior migrations' verified checks).
-- [ ] No backup needed beyond your normal one — this is a brand-new, empty table.
+Deliberate scope decision: don't embed raw `conversation_messages` for long-term semantic search — only `memory_facts`. Keep `conversation_messages` as a recency-bounded window (30-90 days) the rollover job reads, not something queried directly at reply-time.
 
-**5. How to apply:** same as the two prior migrations on this branch — either (a) paste the SQL into the Supabase SQL editor and run it, or (b) move/rename the file into `supabase/migrations/` with a fresh timestamp and run it through this project's normal migration process.
+### Phase 2a, step 1 (write side) — migration review, preserved for reference
 
-**6. Post-apply checklist:**
-- [ ] `select * from public.conversation_messages limit 1;` — should return zero rows, no error (confirms the table exists and RLS didn't block an empty select).
-- [ ] Use the Companion screen (send a message, get a reply).
-- [ ] `select role, day, situation, left(content, 60), created_at from public.conversation_messages order by created_at desc limit 10;` — should show your just-sent turn(s), one row per user message and one per assistant reply.
-- [ ] Confirm the app itself shows no difference in behavior — this is purely a background write, nothing user-visible changes.
+Applied and confirmed working (verified: real rows landed with correct `role`/`day`/`situation`/`content` after using the Companion screen). Full original SQL:
 
-**Full migration SQL** (identical to the staged file):
 ```sql
 create table if not exists public.conversation_messages (
   id         uuid primary key default gen_random_uuid(),
@@ -108,111 +200,13 @@ create policy "Own conversation_messages"
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 ```
-(The staged file has considerably more inline commentary explaining each choice — this is the executable content only.)
 
----
+Rollback if ever needed: `drop table if exists public.conversation_messages;` — no longer fully side-effect-free now that the rollover job reads from it (see §3), but still safe (rollover's read is fail-soft and falls back to the pre-existing habit/journal-only digest if the table disappears).
 
-## 4. Files touched this round
+`src/screens/CompanionScreen.jsx` writes to this table via `persistConversationMessage()` — fire-and-forget, not awaited, three call sites (user message, streaming assistant finalization, non-streaming fallback).
 
-| File | What | Risk |
-|---|---|---|
-| `supabase/pending_migrations/20260705120000_conversation_messages.sql` | New, staged, **not applied**. See §3 for full review. | None until applied — it's just a file. Once applied: low (additive-only, new table, no existing data touched). |
-| `src/screens/CompanionScreen.jsx` | Added `persistConversationMessage()` (fail-soft insert) and three call sites: after a user message is added, after an assistant reply is finalized (streaming path), and after the non-streaming fallback path. Not awaited at the call site — never adds latency to the conversation. | Low — purely additive; if the table doesn't exist yet, every call catches its own error and logs a console warning, with zero effect on the existing send/receive flow (verified: `npm run build` passes, logic path unchanged for anyone who hasn't applied the migration). |
+### Other prior-round changes (still live, unrelated to memory architecture)
 
-**No other files changed this round.**
-
----
-
-## 5. Decisions made this round (and why)
-
-**Split "build the memory architecture" into write-then-read instead of one big step.** The temptation was to stage the table *and* wire the rollover job to read from it in one pass, since that's the actual end goal. Didn't do that — writing to a new table is a small, easily-verified, fully reversible change (check row count, done); rewiring an existing, real, production-relied-upon nightly job to read from a *new, unverified* data source in the same pass would compound two unverified things together. Confirming rows land correctly first de-risks the read-side change that follows.
-
-**No embedding column on this table.** Matches the memory-architecture design from last round explicitly: `conversation_messages` is a recency-bounded window for the rollover job to read, not something searched directly by similarity. Only the compressed `memory_facts` layer gets embedded. Kept that decision consistent rather than convenient-but-inconsistent (adding a vector column "just in case" would contradict the design written down last round).
-
-**Reused the exact RLS/insert pattern from the existing `memory_facts` client-side write**, rather than inventing a new trust model. `OnboardingScreen.jsx`'s ChatGPT-import save already establishes "client-side insert is fine because RLS already scopes it to `auth.uid() = user_id`" — same reasoning applies here, no reason to route this through a new server endpoint.
-
-**Fire-and-forget, not awaited.** The persistence call is genuinely background bookkeeping — awaiting it would tie the visible "did my message send" experience to a write whose only job is helping a future nightly job, which is exactly backwards.
-
----
-
-## 6. Risks / open items
-
-- **Nothing has been verified against a real database yet** — no Supabase write access from this sandbox. The `npm run build` passing confirms the code is syntactically and logically sound (no reference errors, same control flow for both the migration-applied and migration-not-yet-applied cases), but "rows actually land correctly" needs your hands (see the post-apply checklist in §3).
-- **The migration is unapplied by design** — nothing changes about your actual data until you choose to run it.
-- **The rollover job still doesn't read this table** — extraction, XP judgment, and the greeting narrative are all unaffected by this round; they still work exactly as before, from the same sources as before.
-- Everything from the prior round's risk list (Blue Ember unverified in the real app, transcription word-loss diagnosed-not-fixed, XP collision needs your call, two chat surfaces still both live, ElevenLabs connectivity unknown from this sandbox) still stands unchanged — see §8 for the preserved detail.
-
----
-
-## 7. How to test
-
-1. **Before applying the migration:** use the Companion screen normally — nothing should look or feel different. If you open the browser console, you may see a warning like `[companion] conversation_messages insert failed (migration likely not applied yet)` — that's expected and harmless.
-2. **Apply the migration** — see §3 for the exact SQL and steps.
-3. **After applying:** use the Companion screen again (send a couple of messages, get replies) — then run the verification query from §3's post-apply checklist and confirm rows are showing up with the right `role`/`day`/`situation`/`content`.
-4. **Confirm no regression:** the conversation itself should look, sound, and behave identically to before this change — this step is invisible by design.
-
----
-
-## 8. Next 3 steps
-
-1. **You confirm rows are landing correctly** (§7) once you've applied the migration — this is the gate before touching the rollover job.
-2. **Extend `api/memory-rollover.js` to read from `conversation_messages`** instead of (or alongside) curated notes/habit logs — the actual payoff of this step, and a real code change to a live nightly job, so it'll get its own careful review pass rather than being bundled into this step.
-3. **Start 2b in parallel** — retire the old CoachBar/modal drawer. Doesn't depend on 2a, and it's been flagged for six rounds now.
-
----
-
-## Appendix — preserved detail from the round that proposed Phase 2
-
-*(Kept verbatim for reference rather than re-litigated each round. Supersedes nothing above; §1-§2 are the current summary of this material.)*
-
-### Full Phase 2 sequencing reasoning
-
-**2a. Build the real memory architecture first.** Everything else depends on this existing. Without it, "remove the old mental model" just means deleting screens with nowhere for that functionality to actually go — the companion needs somewhere to read/write habit-like state from conversation before habits-as-screens can stop being the primary interface for it.
-
-**2b. Retire the redundant old chat surface** (CoachBar + modal `AICoach` drawer). This is also a prerequisite for 2c-2e: you can't credibly "remove the old mental model" while a second, parallel implementation of it is still sitting there.
-
-**2c. Reframe Today around the companion, not a checklist.** Today's current job assumes the user is the one doing the bookkeeping. If the companion is doing that bookkeeping by noticing what you say, Today's job changes to a quiet, secondary log of what got captured (for correction/inspection), not a screen you visit to manage your day.
-
-**2d. Make an explicit call on XP.** Two systems running in parallel: the real, deterministic, per-tap total (production, load-bearing), and the AI-judged observational total (preview-only, currently just logged, not shown). Pick one of: (i) the AI-judged version becomes the real, user-facing total and the per-tap system is retired, (ii) formally merge them with clear rules, or (iii) keep them parallel on purpose (weakest option).
-
-**2e. Only then, rename.** "Coach" frames the AI as an instructor; "companion" implies a peer. `coachMemory`, `coachName`, `buildCoachSystemPrompts`, `AICoach.jsx` are load-bearing identifiers — renaming before 2a-2d are actually true would just be cosmetic.
-
-**On "Eyes":** no literal feature/screen by that name was found in the codebase — read as shorthand for the tracking/surveillance framing of habit-logging in general, addressed via 2c/2d. Flag directly if something more specific was meant.
-
-**Not proposed:** deleting the Arc/habit data model or its tables. Proof-actions-as-habits remains a reasonable mechanism for the companion to use when committing to something concrete — the change is that it stops being the primary interface and primary source of truth for progress.
-
-### Full memory architecture diagram
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ 1. RAW LAYER — conversation_messages                             │
-│    Every turn, every day. Ground truth, written live.             │
-└───────────────────────────┬────────────────────────────────────┘
-                             │ nightly rollover reads recent days
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 2. EXTRACTION (existing job)                                      │
-│    - daily_summaries row (title, narrative, structured, xp)       │
-│    - memory_facts rows (atomic, durable, embeddable)               │
-│    - updated coach_memory.content (rolling prose, size-capped)     │
-└───────────────────────────┬────────────────────────────────────┘
-                             │ embeddings generated for memory_facts
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 3. RETRIEVAL (the missing piece)                                   │
-│    Embed the current message, vector-search memory_facts (top-K,  │
-│    regardless of recency), inject into system_volatile.           │
-└───────────────────────────┬────────────────────────────────────┘
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 4. IMPORTED HISTORY (ChatGPT export)                               │
-│    Long-term: converge onto the same pipeline as #2, backdated.   │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-Deliberate scope decision: don't embed raw `conversation_messages` for long-term semantic search — only `memory_facts`. Keep `conversation_messages` as a recency-bounded window (30-90 days) the rollover job reads, not something queried directly at reply-time.
-
-### Prior round's other changes (still live, unrelated to this round)
-
-- **Blue Ember** — implemented: calm mid-blue (soft sky-blue core cooling to muted steel-blue), idle state dims toward the background (opacity-only, ~half-brightness, new `emberBreatheDormant` animation), full brightness on listening/thinking/speaking. Unverified in the real app — confirmed only via a disposable rendered preview.
-- **Transcription word-loss after a pause** — investigated, not fixed. Confirmed `continuous=true` is already active on desktop (rules out a JS-level restart there); the likely cause is a native browser-engine artifact below the level of any event the code receives. `continuous=false` on iOS/Android is an intentional prior workaround for a worse bug — not changed blind. Real fix (custom audio capture bypassing native `SpeechRecognition` chunking) named as a sized future item, not attempted this round.
+- **Blue Ember** — calm mid-blue (soft sky-blue core cooling to muted steel-blue), idle state dims toward the background (opacity-only, ~half-brightness, `emberBreatheDormant` animation), full brightness on listening/thinking/speaking. Unverified in the real app — confirmed only via a disposable rendered preview.
+- **Transcription word-loss after a pause** — investigated, not fixed. `continuous=true` confirmed already active on desktop (rules out a JS-level restart there); likely a native browser-engine artifact below the level of any event the code receives. `continuous=false` on iOS/Android is an intentional prior workaround for a worse bug — not changed blind. Real fix (custom audio capture bypassing native `SpeechRecognition` chunking) named as a sized future item.
+- **Conversation modes v3, greeting v3, iOS Chrome mic fix, stale-PWA banner, ElevenLabs connectivity checklist** — all still live and unchanged; see git history of this file for the full original write-ups if needed.
