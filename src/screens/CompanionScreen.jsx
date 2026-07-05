@@ -138,18 +138,21 @@ function latestDayTitle(recentSummaries) {
 // rather than "busy": a clean circular core (no distortion — a warped shape
 // reads as an accident, not intentional), a soft ambient bloom that breathes,
 // and a couple of quiet sonar-style rings that only appear while listening
-// or speaking. Palette is "Moonstone" — pale lavender-white cooling to a
-// muted slate edge — chosen over the original warm orange/gold specifically
-// to read as calm and premium rather than a literal fireball; the name
-// "Ember" is now just this component's internal identifier, not a design
-// commitment to fire as a metaphor. States are visually distinct:
-//  - idle: slow, quiet breathing — waiting. A couple of faint sparks drift up.
-//  - listening: brighter, tighter breathing + expanding rings; real mic
+// or speaking. Palette is a calm mid-blue (soft sky-blue highlight cooling to
+// a muted steel-blue edge — deliberately not cyan/electric, not navy-dark,
+// not the lavender "Moonstone" tried previously) landing between ChatGPT
+// voice mode's blue and Apple Intelligence's blue. At idle the core and
+// bloom are both deliberately dimmed (opacity only, no size/shape change) so
+// the presence recedes toward the background instead of sitting there lit up
+// with nothing happening — it should read as "quietly there," not "on."
+// States are visually distinct:
+//  - idle: dim, receded, slow breathing — waiting. A couple of faint sparks drift up.
+//  - listening: full brightness, tighter breathing + expanding rings; real mic
 //    amplitude layers on top where the browser provides it (desktop).
-//  - thinking: steady glow with a soft light sweep crossing the core —
-//    processing, not waiting or reacting.
-//  - speaking: rings + a core that scales with the AI's own voice where Web
-//    Audio access succeeds, otherwise a steady rhythmic pulse.
+//  - thinking: full brightness, steady glow with a soft light sweep crossing
+//    the core — processing, not waiting or reacting.
+//  - speaking: full brightness, rings + a core that scales with the AI's own
+//    voice where Web Audio access succeeds, otherwise a steady rhythmic pulse.
 const EMBER_SPARKS = [
   { left: "28%", delay: "0s",   dur: "3.6s" },
   { left: "58%", delay: "1.3s", dur: "4.1s" },
@@ -159,10 +162,11 @@ const EMBER_SPARKS = [
 function Ember({ state, onTap, ringRef, coreRef, label }) {
   const showSparks = state === "idle" || state === "listening";
   const showRings = state === "listening" || state === "speaking";
+  const isIdle = state === "idle";
   const auraAnim =
-    state === "idle" ? "emberBreatheIdle 4.4s ease-in-out infinite"
+    state === "idle" ? "emberBreatheDormant 5s ease-in-out infinite"
     : state === "listening" ? "emberBreatheActive 1.4s ease-in-out infinite"
-    : state === "thinking" ? "emberBreatheIdle 2.4s ease-in-out infinite"
+    : state === "thinking" ? "emberBreatheActive 2.6s ease-in-out infinite"
     : "emberBreatheActive 0.6s ease-in-out infinite";
 
   return (
@@ -180,7 +184,7 @@ function Ember({ state, onTap, ringRef, coreRef, label }) {
       {showSparks ? EMBER_SPARKS.map((s, i) => (
         <div key={i} aria-hidden style={{
           position: "absolute", left: s.left, bottom: "60%", width: 3, height: 3, borderRadius: "50%",
-          background: "radial-gradient(circle, #F5F3FC 0%, #C4C0E6 60%, transparent 100%)",
+          background: "radial-gradient(circle, #EAF2FE 0%, #7FAEEA 60%, transparent 100%)",
           animation: `emberSpark ${s.dur} ease-in infinite`, animationDelay: s.delay, opacity: 0,
         }} />
       )) : null}
@@ -190,33 +194,40 @@ function Ember({ state, onTap, ringRef, coreRef, label }) {
         {showRings ? [0, 1].map(i => (
           <div key={i} aria-hidden style={{
             position: "absolute", inset: 0, borderRadius: "50%",
-            border: `1px solid rgba(196,192,230,${state === "speaking" ? 0.3 : 0.36})`,
+            border: `1px solid rgba(127,174,234,${state === "speaking" ? 0.26 : 0.30})`,
             animation: "emberRingPulse 2.2s ease-out infinite",
             animationDelay: `${i * 1.1}s`,
           }} />
         )) : null}
 
-        {/* ambient bloom — breathes/reacts via direct style writes (ringRef), no shape distortion */}
+        {/* ambient bloom — breathes/reacts via direct style writes (ringRef), no shape distortion.
+            Lower alpha than earlier palettes on purpose — "less glow, more premium." */}
         <div
           ref={ringRef}
           aria-hidden
           data-ember-state={state}
           style={{
             position: "absolute", inset: -4, borderRadius: "50%",
-            background: "radial-gradient(circle, rgba(196,192,230,0.40) 0%, rgba(150,146,190,0.16) 45%, transparent 72%)",
-            filter: "blur(14px)",
+            background: "radial-gradient(circle, rgba(127,174,234,0.28) 0%, rgba(76,130,201,0.10) 45%, transparent 72%)",
+            filter: "blur(13px)",
             animation: auraAnim,
+            opacity: isIdle ? 0.55 : 1,
+            transition: "opacity 0.7s ease",
           }}
         />
 
-        {/* core — a clean, deliberate circle: soft pale-lavender highlight cooling to a muted slate edge (Moonstone palette) */}
+        {/* core — a clean, deliberate circle: soft sky-blue highlight cooling to a muted steel-blue
+            edge, not navy/black. Dimmed (opacity only, never resized) at idle so it recedes into the
+            interface until the companion is actually listening/thinking/speaking. */}
         <div
           ref={coreRef}
           aria-hidden
           style={{
             position: "absolute", width: "56%", height: "56%", borderRadius: "50%",
-            background: "radial-gradient(circle at 35% 30%, #FFFFFF 0%, #F3F1FA 14%, #D9D6EC 36%, #B8B4D6 60%, #8D89AE 84%, #5C5A78 100%)",
-            boxShadow: "0 0 26px rgba(196,192,230,0.42), 0 0 56px rgba(150,146,190,0.20)",
+            background: "radial-gradient(circle at 35% 30%, #FFFFFF 0%, #EAF2FE 10%, #BBD6F7 28%, #7FAEEA 50%, #4C82C9 72%, #2E4F72 100%)",
+            boxShadow: "0 0 18px rgba(127,174,234,0.32), 0 0 40px rgba(76,130,201,0.14)",
+            opacity: isIdle ? 0.5 : 1,
+            transition: "opacity 0.7s ease",
           }}
         />
 
@@ -604,9 +615,9 @@ export function CompanionScreen({
   return (
     <div style={{ position: "relative", minHeight: "100dvh", display: "flex", flexDirection: "column", paddingTop: "calc(env(safe-area-inset-top, 0px) + 28px)", paddingBottom: 8 }}>
       <style>{`
-        @keyframes emberBreatheIdle {
-          0%, 100% { transform: scale(1); opacity: 0.72; }
-          50%      { transform: scale(1.07); opacity: 0.94; }
+        @keyframes emberBreatheDormant {
+          0%, 100% { transform: scale(1); opacity: 0.4; }
+          50%      { transform: scale(1.03); opacity: 0.6; }
         }
         @keyframes emberBreatheActive {
           0%, 100% { transform: scale(1.02); opacity: 0.86; }

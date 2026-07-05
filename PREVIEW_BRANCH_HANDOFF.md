@@ -1,195 +1,160 @@
 # Forged — Preview Branch Handoff
 
 **Branch:** `claude/forged-ai-companion-redesign-agyjl7` (preview only — `main`/production untouched)
-**Purpose:** this is not "Forged with AI added." It's a new AI life companion that reuses Forged's backend, auth, memory, and APIs — but earns its UI from scratch. Wins on continuity, not capability: memory is the product, conversation is the interface. Explicitly being built for one user first (not generic users yet) — the bar is "would you use this instead of ChatGPT for life updates, reflection, planning, and thinking."
-**Last updated:** 2026-07-05 (bug-fix pass) — fixed iOS Chrome's mic silently doing nothing after permission grant, added a stale-PWA version-check banner for the home-screen-app case, shrank the greeting from a giant serif headline to calm body text and made its wording casual/compressed, redesigned conversation modes a third time with real per-mode behavioral steering + visible descriptions, strengthened the anti-question-loop instruction into a hard constraint, and implemented the Moonstone color direction on the Ember (was previously proposed-only).
+**Purpose:** this is not "Forged with AI added." It's a new AI life companion that reuses Forged's backend, auth, memory, and APIs — but earns its UI from scratch. Wins on continuity, not capability: memory is the product, conversation is the interface. Being built for one user first — the bar is "would you use this instead of ChatGPT for life updates, reflection, planning, and thinking."
+**Last updated:** 2026-07-05 (strategic re-baseline + small fixes) — implemented the Blue Ember direction, investigated (but did not blind-fix) the mid-pause transcription drop, and — the main thing this round — wrote an honest reassessment of what this branch has actually become, a concrete memory architecture design, and a real Phase 2 proposal. **No large removal/rename work was done this round — that's a decision for you to review first, per your explicit instruction.**
 
 This file is the single source of truth for anyone (human or Cursor) picking this branch up cold. Update it at the end of every phase — do not let it drift from what's actually in the diff.
 
 ---
 
-## 0. Master plan (roadmap)
+## 0. The honest reassessment (read this first)
 
-### Complete, and still the right shape
-- **Faster voice replies** — sentence-chunked TTS, streamed/played back-to-back.
-- **Memory layer (schema + extraction)** — `memory_facts`, `xp_events`, extended `daily_summaries` (title/commitments/emotional_context/structured/xp). Migrations applied and live.
-- **ChatGPT memory import** — onboarding paste-and-review step.
-- **The Ember's shape** (clean circle, breathing bloom, sonar rings, thinking-sweep, sparks) — settled two rounds ago, only its color has changed since.
+You asked directly: have we accidentally discovered a better product than the one we planned? **Yes, I think so — and the evidence is in what's actually happened over the last five rounds, not just in how it feels.**
 
-### Complete as originally scoped, direction still evolving
-- **AI-judged XP.** The observational nightly judgment (0-50, stored, not wired to the real total) is done and live. The standing instruction ("judge from context, not checklists") still has a real ceiling: the judgment can't see actual conversation content yet, only curated notes and habit logs. `conversation_messages` (below) is what actually closes this.
-- **The Companion screen itself.** Now four redesign rounds deep (mic-first screen → Ember/homepage pivot → transcript/carousel bug fixes → this round's taste + reliability pass). Expected to keep moving at your direction — that's the exploratory point of this branch, not scope creep.
+Every round of real feedback has been about the companion surface (the Ember, the greeting, the conversation modes, memory, voice) — never once about Today, Arc, habits, streaks, or XP-as-a-tally. Those systems haven't been discussed, tuned, or endorsed in this entire branch; they've just been sitting underneath, unquestioned, while the actual product got redesigned around them three times. Your own benchmark for this branch was never "is this a better habit tracker" — it was "would I use this instead of ChatGPT for life updates, reflection, planning, and thinking." That's not a habit-tracker question. That's a different product category, and this branch has been quietly building toward it for a while without the roadmap ever saying so out loud.
 
-### This round's fixes, superseding prior versions
-- **Conversation modes v3** (Just chat / Build / Think / Decide / Reflect) — same five labels as last round, but steering text rewritten to be measurably more directive per mode (see §2), plus a `desc` one-liner shown in the dropdown and as a transient caption on selection. Supersedes last round's v2 steer text, which the testing feedback said still "felt undercooked."
-- **Greeting v3** — same `structured.narrative` field from last round, but the extraction prompt now explicitly asks for a short, casual, topic-compressed sentence ("Yesterday was mostly CloseCraft, pouch discipline, and keeping the basics alive") instead of a fully-clausal sentence, and the client renders it at body size in the UI font, not display-size serif. Supersedes last round's font/size choice and the prompt's clausal-sentence bias.
-- **Ember palette: Moonstone, implemented.** Last round proposed six untouched concepts; this round actually swapped the core/bloom/ring/spark colors in `CompanionScreen.jsx` to the Moonstone palette (pale lavender-white cooling to muted slate). Shape/animation are unchanged. If it doesn't land, Amber Glass's exact values are still sitting in the git history of the previous round's disposable preview harness commit message / this doc's prior revision — a same-shape recolor, not a rebuild.
+The deeper tension is structural, not cosmetic: this branch's own stated direction — *"the AI should judge progress using context, not checklists," "keep XP explainable, but don't make it dependent on habits"* — is in direct conflict with Arc/habits/streaks, which is a fixed, deterministic, checklist-driven system by design. You can't fully get to "judged from context" while the thing supplying most of the context is a rigid proof-action checklist. Every round of prompt-tightening on the rollover job has been quietly working *around* that tension, not resolving it. It doesn't resolve until the underlying model changes.
 
-### Newly identified and fixed this round (not roadmap items — real bugs)
-- **iOS Chrome mic silently doing nothing after permission grant.**
-- **Stale UI on the iPhone home-screen PWA.**
-- **TTS/voice failures (e.g. ElevenLabs not configured) were completely silent** — found while investigating the ElevenLabs question below; not something you reported, but the same "don't silently fail" principle applied.
-
-### No longer relevant — superseded, not just done
-- Everything listed here last round (coach auto-open, the notifications-vs-real-screen framing, conversation modes v1) — unchanged, still dead.
-- **Conversation modes v2** — replaced by v3 above (same names, meaningfully rewritten steering + new UI).
-- **Greeting v2 (bullets → prose, display-serif at 21px)** — replaced by v3 above (same data source, smaller/calmer presentation + casual phrasing).
-
-### Remaining roadmap
-1. **Hand-test this round.** Everything below in §6.
-2. **Retire the old CoachBar / modal drawer.** Flagged for four sessions running now. Two ways to reach the same conversation is a real inconsistency.
-3. **`conversation_messages` (raw per-turn transcript, server-side).** The structural fix for "judge from context, not checklists" — stage the table, wire the Companion screen to persist every turn (fail-soft), extend the rollover digest-builder to read from it.
-4. **Embeddings vendor decision** (Voyage API vs. a Supabase Edge Function running `gte-small`) — unblocks real semantic retrieval.
-5. **Notifications rewrite**, **"What I remember" screen + Arc inference** — lower priority, unstarted.
+**What I don't think this means:** delete Today/Arc/habits outright, today, in this round. That data model (habits, logs, streaks, Arc, XP) is real, live, working code with real rows in a shared production database — and per your own instruction this round, big removal work happens *after* you've reviewed the plan, not before. What it does mean is that the plan below (Phase 2) treats the companion as the product going forward and treats Today/Arc/habits as a *backing data source the companion reads and writes on your behalf* — not a set of screens you actively manage. That's a real, large shift, and I think it's the right one.
 
 ---
 
-## 1. This round's bug-fix pass — root causes and fixes
+## 1. Phase 2 — the new roadmap
 
-### 1. iOS Chrome mic: tap → permission prompt → Allow → nothing happens
+**If Phase 1 was "prove a voice-first companion is technically viable"** (Ember, memory schema, streaming voice, conversation modes, the greeting) **— Phase 2 is "stop layering the companion on top of the old app, and start collapsing the old app into the companion."**
 
-**Root cause, found in `src/hooks/useSpeechInput.jsx`:** every browser on iOS (Chrome, Edge, Firefox included — "CriOS" is just Chrome's UI chrome around the same engine) is required by Apple to run on WebKit under the hood. WebKit requires `SpeechRecognition.start()` to be called **synchronously inside the original user-gesture handler** — the same tap that triggered it. `shouldPrimeMicBeforeWebSpeech()` was matching iOS Chrome/Edge/Firefox against the desktop-Chromium branch (their UA string contains "Chrome" too), which does an `await navigator.mediaDevices.getUserMedia(...)` "priming" step *before* starting recognition. That `await` doesn't resolve until after the user taps "Allow" on the permission dialog — by which point the synchronous gesture context is gone, so `recog.start()` silently does nothing: no error event, no transcript, nothing. Real Safari never hit this because it was already excluded from the priming branch (`pureWebKitSafari`); iOS Chrome/Edge/Firefox weren't.
+Proposed sequence — each step is a real prerequisite for the next one, not an arbitrary ordering:
 
-**Fix:** `shouldPrimeMicBeforeWebSpeech()` now excludes all of iOS (`isAppleMobileDevice()`), not just literal Safari — iOS Chrome now goes straight to `beginRecognition()` synchronously inside the tap handler, exactly like Safari does, preserving the gesture chain.
+**2a. Build the real memory architecture first.** Everything else below depends on this existing. See §2 for the full design. Without it, "remove the old mental model" just means deleting screens with nowhere for that functionality to actually go — the companion needs somewhere to read/write habit-like state from conversation before habits-as-screens can stop being the primary interface for it.
 
-**Also added — a watchdog for any *other* silent failure mode:** if `recog.start()` is called but neither `onstart` nor `onerror` fires within 4 seconds (permission dialogs, other iOS quirks, anything not yet seen), it's now treated as a failure: `errorOccurredRef` is set, `stopAll()` runs, and a message is surfaced via the new `speechStartWatchdogMessage()` — which specifically says "try Safari" when the browser is a known iOS non-Safari wrapper (CriOS/FxiOS/EdgiOS/OPiOS), otherwise a generic "try again or type instead." This directly satisfies "don't silently fail" as a backstop, independent of whether the root-cause fix above covers every case.
+**2b. Retire the redundant old chat surface** (CoachBar + modal `AICoach` drawer). Flagged for five rounds now. This is overdue on its own merits, and it's also a prerequisite for 2c-2e: you can't credibly "remove the old mental model" while a second, parallel implementation of it is still sitting there.
 
-**Unverified — no iPhone in this sandbox.** The root-cause fix (removing the priming step) is a well-understood, direct match for the reported symptom, not a guess. The watchdog is defense-in-depth. First real test: iPhone, Chrome, tap the Ember, grant mic permission, confirm it actually starts listening.
+**2c. Reframe Today around the companion, not a checklist.** Today's current job — "show habit-completion state, let the user tick things off" — assumes the user is the one doing the bookkeeping. If the companion is doing that bookkeeping *by noticing what you say*, Today's job changes to something more like: a quiet, secondary log of what got captured (for correction/inspection), not a screen you visit to manage your day. This is a real redesign of that screen's purpose, not a rename.
 
-### 2. Stale UI on the iPhone home-screen PWA
+**2d. Make an explicit call on XP.** Right now there are two XP systems running in parallel: the real, deterministic, per-tap total (production, load-bearing), and the AI-judged observational total (preview-only, currently just logged, not shown). They are on a collision course by design — this branch has spent two rounds pushing the AI-judged version further from checklists specifically. Phase 2 needs to pick one of: (i) the AI-judged version becomes the real, user-facing total and the per-tap system is retired, (ii) they're formally merged with clear rules for how each contributes, or (iii) they stay parallel on purpose (weakest option — it's the thing currently keeping both mental models alive at once).
 
-**Investigated:** `vercel.json` already serves `index.html` with `Cache-Control: no-cache, no-store, must-revalidate`, and every build gets a uniquely-hashed JS bundle filename (`/assets/index-HASH.js`) — so a real network reload always gets the latest deploy. `public/sw.js` has no `fetch`/cache-API logic at all (it only handles push notifications) — it was never caching anything. **This is not a caching bug; there's nothing to purge.**
+**2e. Only then, rename.** "Coach" frames the AI as an instructor in a hierarchical relationship; "companion" (your own word, and "mate-to-mate" for the default mode) implies a peer. That's not just UI copy — `coachMemory`, `coachName`, `buildCoachSystemPrompts`, `AICoach.jsx` are load-bearing identifiers throughout the codebase. Renaming them is mechanical but not risk-free (it's the protected personality file, plus every consumer of its exports), and renaming before 2a-2d are actually true would just be cosmetic — the code would say "companion" while still behaving like a coach watching a checklist. Do this last, once it's true.
 
-**Actual cause:** iOS keeps a home-screen web app's WKWebView process alive in the background rather than reloading it on every icon tap — exactly like a native app being backgrounded and resumed. Tapping the icon can just bring the *same in-memory session* back to the foreground, with no network request made at all — headers don't matter if no request happens. This is a well-known iOS PWA behavior, not something fixable from response headers.
+**On "Eyes":** I couldn't find this as a literal feature/screen name anywhere in the codebase — if you meant something specific, point me at it directly next round. I've read it as shorthand for the tracking/surveillance framing of habit-logging in general ("is the app watching whether I did the thing") and addressed that as part of 2c/2d above.
 
-**Also worth checking on your end:** if the URL you added to your home screen is a specific Vercel *preview deployment* URL (the unique-per-deploy `...-git-....vercel.app` link) rather than the branch's stable alias, that link is permanently frozen to whatever was deployed at that moment by design — a second, simpler explanation worth ruling out alongside the fix below.
-
-**Fix — `src/main.jsx`:** on every resume (`visibilitychange` → visible, and `pageshow`), fetch `/index.html` with `cache: "no-store"`, compare the `<script type="module">` path it references against the one actually running, and if they differ, show a small non-intrusive bottom banner ("A newer version of Forged is ready" + a Refresh button). Deliberately never auto-reloads — that could cut off an in-progress conversation or dictation. Debounced to at most once per 30 seconds so it doesn't spam-fetch on rapid focus events. No-ops harmlessly in local dev (unhashed script path never differs).
-
-**Unverified — needs a real iPhone home-screen install + a real new deploy to trigger against.** First test: reopen the installed app after a new deploy has gone out; confirm the banner appears and Refresh actually updates it.
-
-### 3. Greeting was "a giant formal sentence with weird phrasing"
-
-Two independent fixes, since this was both a visual and a content problem:
-
-**Visual — `CompanionScreen.jsx`:** was `T.serif` (DM Serif Display, a display headline font) at 21px, center-block. Now `T.font` (the same DM Sans used everywhere else in the app) at 16.5px, rendered as one flowing paragraph (opener + narrative + closer inline, not stacked). A greeting is something a companion says to you, not a poster headline.
-
-**Content — `api/memory-rollover.js`:** the `structured.narrative` prompt (added last round) asked for "one to two flowing sentences" without a length/register ceiling, which the model was filling with full, elaborately-claused sentences. Rewrote the instruction to explicitly demand brevity and to prefer a compressed topic-list over spelled-out clauses — with your own example baked directly into the prompt as the target: *"Yesterday was mostly CloseCraft, pouch discipline, and keeping the basics alive."* beats *"You worked on CloseCraft, showed pouch discipline, and kept up the basics."* Full clauses are now reserved for days with one or two genuinely distinct, name-worthy events — never three-plus stacked clauses.
-
-Also softened the time-of-day prefix itself: `timeOfDayGreeting()` now returns "Morning"/"Afternoon"/"Evening"/"Still up" instead of "Good morning"/"Good afternoon" — casual, matches your example.
-
-**Unverified against a real model call** — no Anthropic credentials in this sandbox. First test: let a real day roll over, read the actual `structured.narrative` text.
-
-### 4 & 5. Conversation modes undercooked + over-asking questions
-
-**Modes now carry a `desc` field** (e.g. Build → "Practical and direct — product & execution.") shown two ways: inline under each option in the dropdown (so you can tell them apart before picking), and as a small transient caption that fades in near the pill for ~3 seconds right after you pick one — so switching modes is *felt* immediately, not just something that silently changes the next reply.
-
-**Steering text rewritten to be measurably more directive**, not just longer — each mode now names its own specific failure mode and forbids it explicitly:
-- **Just chat** — mate-to-mate, no agenda; a question is fine sometimes but never the default move.
-- **Build** — co-founder-mid-build energy; terse, direct, practical; *does not ask a clarifying question unless the next action is genuinely impossible to name without one.*
-- **Think** — long-form is a hard requirement here, not a suggestion; *a short reply is explicitly called out as wrong in this mode*; never ends on a question.
-- **Decide** — must state a real opinion before listing tradeoffs, must name the strongest counter-case; *sitting on the fence or handing the decision back with a question is named as this mode's one failure mode.*
-- **Reflect** — weekly-review energy; surfaces patterns as plain observations; explicitly not about prompting the user to share more.
-
-**The shared baseline instruction (`RESPONSE_STYLE_STEER`) is now a hard constraint, not a soft preference** — it literally says "THIS IS A HARD CONSTRAINT, NOT A SOFT PREFERENCE" and asks the model to check itself before adding a question rather than just discouraging the habit.
-
-**Important honesty check:** this is prompt engineering, not a mechanism with a verifiable guarantee. Claude (or any LLM) can still ask a question at the end of a reply despite explicit instructions not to — prompts shift the *tendency*, they don't enforce a hard rule the way code does. If this still feels present after testing, the next lever (not pulled yet) is a lightweight server-side check that flags/regenerates a reply if it detects a trailing question mark when the situation calls for none — a real mechanism, not another paragraph of instructions. Flagging this now rather than promising prompt tuning alone will fully solve it.
-
-**Unverified against real replies** — needs a handful of real exchanges per mode to judge.
-
-### 6. Ember color
-
-Implemented **Moonstone** directly in `CompanionScreen.jsx` (previously proposed-only, in a disposable preview harness, last round). Core gradient, ambient bloom, sonar rings, and sparks all recolored from warm orange/gold to pale lavender-white cooling to a muted slate edge. Shape, animation timing, and state logic (idle/listening/thinking/speaking) are byte-for-byte unchanged — this was purely a materials swap, verified visually in a disposable Playwright-screenshotted preview before porting in (see screenshot delivered in chat this round).
-
-**If it doesn't land in real use:** Amber Glass was the other candidate you named — it's a same-shape recolor (different core/bloom/ring/spark hex values only), not a rebuild, so trying it is a small, low-risk change.
-
-### Bonus fix found while answering the ElevenLabs question (§3 below)
-
-**TTS failures were completely silent in the UI.** `useCoachTts.jsx` already tracked a `ttsError` string (e.g. "Spoken replies are not configured yet." when `ELEVENLABS_API_KEY` is unset server-side) — but `CompanionScreen.jsx` never rendered it anywhere. If voice replies were on but misconfigured, a reply would just never get spoken with zero visible sign why. Now rendered next to the existing chat-error line. Same "don't silently fail" principle as the mic fix above, just a different subsystem.
+**What I'm not proposing:** deleting the Arc/habit data model or its tables. Proof-actions-as-habits is still a reasonable mechanism for the companion to use *when you actually want to commit to something concrete* (Build mode already implies this) — the change is that it stops being the primary interface and the primary source of truth for progress. If, after 2a-2d, it turns out large parts of that code are genuinely dead weight, I'd rather say so explicitly then and cut it than pre-emptively guess now.
 
 ---
 
-## 2. Files touched this round
+## 2. Memory architecture — designed now, not yet built
+
+The goal stated directly: real callbacks like *"you're doing the same thing you did while rebuilding Forged"* or *"you've changed your opinion on this since April"* — not fabricated, not vague, actually grounded in something real that happened. Here's how the four pieces already in play (or already planned) compose into one system:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. RAW LAYER — conversation_messages (not yet built)             │
+│    Every turn, every day, forever (or until pruned). Ground      │
+│    truth. Written live as the conversation happens, not just     │
+│    reconstructed after the fact from localStorage.                │
+└───────────────────────────┬────────────────────────────────────┘
+                             │ nightly rollover reads recent days
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. EXTRACTION (existing job, already reading real content)       │
+│    Produces, per day:                                            │
+│    - daily_summaries row (title, narrative, structured, xp)      │
+│    - memory_facts rows (atomic, durable, embeddable)              │
+│    - updated coach_memory.content (rolling prose, size-capped)    │
+└───────────────────────────┬────────────────────────────────────┘
+                             │ embeddings generated for memory_facts
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. RETRIEVAL (the missing piece — this is what makes callbacks   │
+│    real instead of recency-biased or fabricated)                 │
+│    Before each reply: embed the user's current message, run a    │
+│    vector similarity search against memory_facts (top-K,         │
+│    regardless of recency), inject the results into                │
+│    system_volatile alongside the existing rolling summary.        │
+└───────────────────────────┬────────────────────────────────────┘
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 4. IMPORTED HISTORY (ChatGPT export — exists today, onboarding-   │
+│    only, bespoke one-shot extraction straight to memory_facts).   │
+│    Long-term: converge this onto the SAME extraction pipeline as  │
+│    #2, just backdated — "day zero," not a permanently separate    │
+│    code path.                                                     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Why this, specifically, answers "you changed your mind since April":** today, the model only ever sees the rolling `coach_memory` prose plus the last 3-7 days of `daily_summaries` — genuinely nothing from April survives that window unless it happens to still be phrased into the ever-shrinking rolling summary. Without retrieval, asking the model to recall April forces a choice between hallucinating a plausible-sounding answer (fake memory — exactly what you said you don't want) or honestly saying it doesn't know. Layer 3 (retrieval) is what actually closes that gap — it's not a new idea, it's the same `recall` tool / embeddings-vendor decision already sitting on the roadmap as a blocked item; this design just makes explicit *why* it's the thing that matters most, not just another nice-to-have.
+
+**A deliberate scope decision, stated explicitly so it doesn't get silently assumed later:** don't embed raw `conversation_messages` for long-term semantic search — only `memory_facts` (already compressed, durable, individually meaningful). Keep `conversation_messages` itself as a recency-bounded window (say, 30-90 days) that the *rollover job* reads for extraction, not something queried directly at reply-time. This keeps embedding cost and retrieval complexity bounded — search the compressed signal, not the entire raw transcript of a life.
+
+**Sequencing relative to Phase 2 above:** this is 2a. Nothing else in Phase 2 has real teeth without it.
+
+---
+
+## 3. This round's concrete changes
+
+### Blue Ember — implemented
+Recolored (not reshaped) from Moonstone (pale lavender-white) to a calm mid-blue: a soft sky-blue highlight cooling to a muted steel-blue edge — deliberately not cyan/electric, not navy-dark, landing between ChatGPT voice mode's blue and Apple Intelligence's blue. **New this round, not just a recolor:** the idle state is now deliberately dimmed — both the core and the ambient bloom drop to roughly half-opacity at idle (a smooth 0.7s transition, no size/shape change) and use a much subtler dedicated breathing animation (`emberBreatheDormant`, new — previously idle and thinking incorrectly shared one animation). Listening/thinking/speaking are all full-brightness and visually distinct from each other, same as before. Verified visually in a disposable Playwright-screenshotted preview (delivered in chat this round) before porting into `CompanionScreen.jsx`.
+
+### Transcription word-loss after a 1-2s pause — investigated, not blind-fixed
+Traced through `useSpeechInput.jsx` carefully rather than guessing at a fix. Findings:
+
+- **On desktop** (the likely test environment, based on "I paused for 1-2 seconds"): `recog.continuous` is already `true` — confirmed by reading the actual branching logic, not assumed. In `continuous` mode, the browser's own speech engine is *not* supposed to end the session over a short pause; it should keep listening and simply mark the just-spoken phrase as final while continuing to accept new audio in the same session. **This means the JS-level "session ends, then gets restarted" theory does not apply on desktop** — there is no restart happening for a short pause there. The most likely explanation is a boundary artifact inside the browser's own native continuous-recognition pipeline itself (a documented behavior across Chrome/Safari's Web Speech implementations: the first fragment of a new utterance right after a VAD-detected pause can get clipped) — this happens below the level of any event our code receives. There is no hook that exposes "the engine briefly stopped buffering audio internally"; we only ever see whatever transcript it decides to hand back.
+- **On iOS/Android** (the SR-only path), `continuous` is intentionally forced `false` — a deliberate, previously-discovered workaround for a *worse* bug ("iOS WebKit: continuous=true often stops immediately," per the existing code comment). On these platforms, a pause genuinely does end the recognition session and trigger a real restart (a new `SpeechRecognition` instance, `.start()` called synchronously in `onend` — already the fastest the JS event loop allows), and there is a real, physical gap here where audio capture briefly isn't happening. This is a plausible, if smaller, contributor on mobile specifically.
+
+**Why I didn't change `continuous` for iOS/Android this round:** flipping it back to `true` to close that gap directly risks reintroducing the "stops immediately" bug that caused it to be set to `false` in the first place — a platform quirk discovered through real device testing previously, which I have no way to re-verify in this sandbox. Changing platform-specific recognition config blind, on a bug I can't reproduce or test against a real mic, is exactly the kind of unverified guess that breaks things quietly on someone else's phone.
+
+**The real, durable fix, named honestly rather than promising another prompt-level patch will close it:** stop relying on the browser's native `SpeechRecognition` chunking entirely — capture continuous raw audio ourselves (`MediaRecorder`/`AudioWorklet`) and run our own VAD/chunking against a real streaming ASR backend. That removes the "black box" behavior entirely, at the cost of being a genuine infrastructure project (server-side streaming ASR, cost, latency work), not a quick patch. Flagging this as a sized future item rather than shipping something unverified.
+
+### Everything else requested this round
+Deliberately **not** touched: Today/Arc/You/Coach naming, screen removal, memory-architecture implementation. Per your explicit instruction, this round's job was the reassessment above, not execution of it.
+
+---
+
+## 4. Files touched this round
 
 | File | What | Risk |
 |---|---|---|
-| `src/hooks/useSpeechInput.jsx` | `shouldPrimeMicBeforeWebSpeech()` now excludes all iOS, not just literal Safari (the actual mic fix). Added a 4s start-watchdog + `speechStartWatchdogMessage()` for any other silent-start case. | Medium — touches the real mic-start path for every platform, but the change is narrowly scoped (one added exclusion + a bounded, cleanly-cleared timeout) and every existing platform's behavior is unchanged. |
-| `src/main.jsx` | Added the stale-PWA version-check banner (visibilitychange/pageshow → no-store fetch of index.html → compare bundle path → manual-refresh banner). | Low — purely additive, no-ops in dev, never auto-reloads. |
-| `api/memory-rollover.js` | Tightened the `structured.narrative` prompt instruction for brevity/casualness with your example baked in. | Low — prompt-only change to a real nightly job, not protected. |
-| `src/screens/CompanionScreen.jsx` | Greeting: smaller/calmer typography, casual time-of-day words. Modes: `desc` field, transient selection caption, rewritten per-mode steer text, hardened shared baseline. Ember: Moonstone palette swap. Rendered the previously-silent `coachTts.ttsError`. | Medium — large diff by line count, but each piece (typography, prompt steer text, color values, one new error render) is independently low-risk; no changes to send/stream logic. |
+| `src/screens/CompanionScreen.jsx` | Ember recolored to Blue; idle state now dims (opacity-only) instead of staying fully lit; new `emberBreatheDormant` keyframe replaces the idle/thinking animation that was previously (incorrectly) shared. | Low — color/opacity/animation-name change only, shape and state logic untouched. |
 
-**Nothing implemented for anything beyond the 7 numbered items requested.** No new features.
-
-**Still fully untouched:** `api/chat.js`, `src/coach/AICoach.jsx`, `src/coach/CoachApp.jsx`, `api/coach-summary.js`, `api/coach-intro.js`, `src/App.jsx`, `src/hooks/useCoachTts.jsx`, `src/screens/OnboardingScreen.jsx`, `public/sw.js`, `vercel.json`, the real `supabase/migrations/` directory, all Stripe/billing files, `package.json`.
+**No other files changed this round.** The transcription investigation produced no code change (see §3 for why). The strategic/architecture work is entirely this document.
 
 ---
 
-## 3. ElevenLabs — is it actually connected, and what to do if not
+## 5. Decisions made this round (and why)
 
-**I cannot check your Vercel project's environment variables from this sandbox** — there's no access to your Vercel dashboard or its env var store from here, so I genuinely don't know whether `ELEVENLABS_API_KEY` is set for this preview deployment. Here's exactly how to check and fix it yourself:
+**Wrote the reassessment as an actual opinion, not a balanced menu of options.** You asked directly whether we'd found a better product and said not to preserve old ideas out of inertia. Giving a hedged "here are three possible directions, you decide" answer would have dodged the actual question. Said plainly: yes, the evidence points at a category shift, here's the specific structural tension (checklist-XP vs. context-judged-XP) that proves it's not just a feeling, and here's a concrete sequenced plan — while being equally direct about what I'm *not* recommending (wholesale deletion, right now, without your review).
 
-1. **Go to** vercel.com → your Forged project → **Settings → Environment Variables**.
-2. **Look for `ELEVENLABS_API_KEY`.** If it's missing entirely, voice replies are not connected — `/api/tts` returns a 503 with "Spoken replies are not configured yet." (this is a deliberate fail-safe, not a crash).
-3. **Check which environments it's scoped to.** Vercel env vars are scoped to Production / Preview / Development independently — a key set only for "Production" will NOT be available to this preview branch's deployments. Make sure Preview is checked (or "All Environments").
-4. **Get a key:** elevenlabs.io → your account → Profile → API Keys. Any paid or free-tier key works; the app uses their `eleven_flash_v2_5` model specifically (fast/cheap, not their highest-quality model).
-5. **Optional:** `ELEVENLABS_DEFAULT_VOICE_ID` — if unset, falls back to a default ElevenLabs stock voice ID already hardcoded in `api/tts.js`. Only needed if you want a specific voice.
-6. **After adding/changing env vars, redeploy** — Vercel doesn't hot-reload serverless function env vars into already-running deployments.
+**Sequenced Phase 2 around a real dependency chain, not just a priority-ordered wishlist.** Each step (2a→2e) actually blocks the next one technically, not just "feels more important" — memory architecture has to exist before Today can stop being the primary interface for progress; the XP collision has to be resolved before renaming "Coach"→"Companion" means anything real instead of cosmetic.
 
-**Separately, even with the key configured, voice replies won't play unless BOTH of these are true for the account you're testing with:**
-- The account's `profiles.is_pro` is `true` (voice replies are a Pro-only feature in the existing code, unrelated to this branch).
-- The in-app "voice replies" toggle is turned on (Profile screen → voice settings) — it defaults to **off** for every account.
+**Did not implement the memory architecture or any renaming/removal this round.** You were explicit: "update the roadmap with this new direction before building anything major." Writing the design and the plan is this round's job; building 2a onward is next round's, after you've had a chance to push back on the sequencing itself.
 
-If you turn both on and it still doesn't speak, the newly-added `ttsError` line in the Companion screen (see §1, bonus fix) should now actually tell you why instead of failing silently.
+**Investigated the transcription bug thoroughly and reported the finding honestly instead of shipping a guess.** Confirmed via code-reading (not assumption) that `continuous=true` already applies on desktop, which rules out the "restarting recognition" theory for the most likely test environment and points at a native-engine artifact instead. Named the real fix (custom audio capture, bypassing the browser's native chunking) rather than implying a small tweak would close what looks like an engine-level limitation.
+
+**Implemented the Blue Ember directly, including the "recede at idle" behavior, rather than proposing more concepts first.** You'd already converged on a direction ("somewhere between ChatGPT voice blue and Apple Intelligence blue") specific enough to build, unlike the six-way fireball/moonstone exploration two rounds ago. Verified visually before committing, same discipline as every prior visual change.
 
 ---
 
-## 4. Decisions made this round (and why)
+## 6. Risks / open items
 
-**Fixed the iOS Chrome mic bug at the actual WebKit-constraint root cause, not with a retry/fallback wrapper.** Could have added a "if it fails, try again automatically" loop. Rejected that — the async-gap-breaks-the-gesture problem is deterministic on WebKit, so retrying the same broken sequence would just fail the same way every time. Fixed the actual branching logic that misclassified iOS Chrome as needing desktop Chromium's priming step.
-
-**Added a watchdog in addition to the root-cause fix, not instead of it.** The explicit instruction was "don't silently fail" as a general principle, not just for the one reported case. A 4-second no-onstart/no-onerror watchdog is a cheap, generic backstop for whatever the *next* undiscovered silent-failure mode turns out to be, on any platform — not just iOS Chrome.
-
-**Diagnosed the PWA issue as "not a caching bug" rather than reflexively adding a service-worker cache-clearing routine.** Reading `vercel.json` and `sw.js` first showed the server-side caching story is already correct and the SW does no caching at all — adding cache-clearing logic to a service worker with no cache would have been solving a problem that doesn't exist while missing the real one (iOS process suspension). The version-check banner targets the actual mechanism.
-
-**Rewrote the modes' steering text around explicit failure modes, not just longer descriptions of the desired behavior.** "Be terse" is weaker than "do not ask a clarifying question unless the next action is genuinely impossible to name without one" — naming the specific thing NOT to do, per mode, is more concrete for a model to actually follow than a general vibe description.
-
-**Was explicit in this doc about prompt engineering's real limits on "stop asking questions."** Could have just said "fixed" and left it there. Chose to flag that this is inherently probabilistic, not a hard guarantee, and named the actual mechanism-level fix (a trailing-question-mark check/regeneration) that would exist if prompt tuning alone doesn't fully close it — so the next round of feedback (if this still shows up) has a concrete next lever already identified instead of another round of "make the prompt even more forceful."
-
-**Implemented Moonstone rather than asking for confirmation first.** You'd already narrowed it to "likely Moonstone or Amber Glass" and said "pick... and implement one cleaner version" — that's a decision delegated to me, not still open. Verified visually before committing, same as every other visual change this branch.
+- **The Blue Ember is unverified in the real app** — confirmed visually via a disposable rendered preview (screenshot delivered in chat), not inside a real authenticated session.
+- **The transcription word-loss is diagnosed, not fixed** — see §3. If it's mainly a mobile-only issue (the more likely-to-be-fixable half of it), worth confirming which platform you were testing on when you noticed it, so the next round's investigation (if you want one) starts from a narrower, more confident base.
+- **Phase 2 (§1) and the memory architecture (§2) are designs, not code** — nothing about them has been built, tested, or even started.
+- **The XP collision (2d) has no default answer yet** — this needs your call, not mine, since it changes what the user-facing number actually means.
+- **Two chat surfaces (Ember + old modal drawer) are still live simultaneously** — unchanged, now six rounds flagged.
+- Everything else from prior rounds (embedding column unpopulated, `conversation_messages` not built, migrations already applied and verified, ElevenLabs connectivity unknown from this sandbox — see the previous revision of this doc in git history for that checklist) still stands unchanged.
 
 ---
 
-## 5. Risks / open items
+## 7. How to test / what to look at
 
-- **The iOS Chrome mic fix is unverified on a real iPhone** — no iOS device in this sandbox. The root-cause diagnosis (synchronous-gesture requirement broken by an awaited permission prompt) is a well-documented WebKit constraint, not a guess, but "should work" isn't "confirmed."
-- **The stale-PWA banner is unverified against a real home-screen install** — needs an actual new deploy to go out while the app is installed and backgrounded to trigger meaningfully.
-- **Greeting content is unverified against a real model call** — no Anthropic credentials in this sandbox.
-- **Conversation mode steering is unverified against real replies**, and — per §1 — is inherently probabilistic rather than a hard guarantee even once tested.
-- **ElevenLabs connection status is genuinely unknown from this sandbox** — see §3, this requires you to check the Vercel dashboard directly.
-- **Two chat surfaces (Ember + old modal drawer) are still live simultaneously** — unchanged open item, still not resolved, now five sessions running.
-- Everything else from prior sessions (embedding column unpopulated, `conversation_messages` not built, migrations already applied and verified) still stands unchanged.
-
----
-
-## 6. How to test safely
-
-1. **iOS Chrome mic:** open the preview link in Chrome on an iPhone, tap the Ember, grant mic permission — confirm it actually starts listening (ring/state changes, words appear) instead of nothing happening.
-2. **Stale PWA:** after this branch's next deploy goes out, reopen the already-installed home-screen app — confirm the "newer version ready" banner appears within ~30s of foregrounding, and that Refresh actually updates it.
-3. **Greeting:** after a real day rolls over, check the greeting reads as one calm, normal-sized line — not a giant headline, not a report.
-4. **Modes:** open the mode dropdown — confirm each one shows a one-line description. Pick one — confirm a caption briefly appears near the pill. Send the same real message in a couple of different modes — confirm the replies are genuinely different in shape (Think noticeably longer, Decide stating an opinion, etc.) and check whether replies still default to ending in a question.
-5. **Ember:** confirm it now reads as pale/cool/calm (Moonstone) rather than orange/gold.
-6. **ElevenLabs:** follow §3 — check the Vercel env var, confirm `is_pro` + the voice-replies toggle are both on, and if a voice reply still doesn't play, check whether the new `ttsError` text now explains why.
-
----
-
-## 7. Continuing in Cursor — orientation for a cold start
-
-If you're picking this branch up in Cursor without this conversation's context: this file (§0-§6 above) is the full state of the world. In short — this is `CompanionScreen.jsx` (the new home screen, an Ember presence + natural greeting + a floating conversation carousel, not a chat log) sitting on top of the existing Forged backend (Supabase auth/DB, `/api/chat` streaming, `/api/memory-rollover` nightly extraction, `/api/tts` for voice). The old Forged UI (Today/Arc/Social/Hub screens, the floating CoachBar) still exists and still works — it's reachable via the bottom nav — but the Companion screen is now the default landing screen and the thing actively being iterated on. `src/coach/AICoach.jsx` is protected (see `.claude/hooks/protected-paths.txt`) and has several functions exported specifically so `CompanionScreen.jsx` could reuse its tuned personality/prompt logic without forking it — don't fork that file, extend the export list further if you need something else from it. Everything else touched this session (`useSpeechInput.jsx`, `main.jsx`, `memory-rollover.js`) is a normal, editable file.
+- **Blue Ember:** open the Companion screen — confirm idle reads as calm/receded (not glowing), and confirm listening/thinking/speaking each clearly "wake up" to full brightness. Confirm the color reads as blue, not cyan, not navy, not purple/lavender.
+- **Transcription:** if you're able, note specifically which browser/device you were on when you noticed the word-loss — that's the single most useful piece of information for narrowing this further, since desktop and mobile have genuinely different underlying mechanisms per §3.
+- **Phase 2 / memory architecture:** nothing to click through — read §1 and §2, push back on anything that's wrong before it becomes code.
 
 ---
 
 ## 8. Next 3 steps
 
-1. **Hand-test this round** (§6) — especially the iOS Chrome mic fix and the PWA banner, since those are the two most "will this actually work in the real world" items and the ones this sandbox has zero way to verify directly.
-2. **Retire the old CoachBar/modal drawer.** Overdue — flagged five sessions running.
-3. **Stage `conversation_messages`** — the real structural fix for context-aware XP/facts judgment, and a likely prerequisite for the mode-steering work above to have richer material to work with (a full turn history to reason over, not just the current message).
+1. **Your review of §1 and §2** — specifically: does the 2a→2e sequencing seem right, and do you want to make the XP call (2d) now or defer it until 2a-2c are further along?
+2. **If approved, start 2a** — stage `conversation_messages` (table only, not applied — same pattern as every prior migration on this branch) and design the retrieval step (embeddings vendor decision is the actual blocker here, still unresolved: Voyage API vs. a Supabase Edge Function running `gte-small`).
+3. **Retire the old CoachBar/modal drawer (2b)** — can start in parallel with 2a since it doesn't depend on the memory architecture, and it's been overdue for five rounds independent of any of this.
