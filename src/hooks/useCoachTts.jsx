@@ -147,18 +147,27 @@ export function useCoachTts({ enabled = false, isPro = false, voiceId = null } =
       const token = sbSession?.access_token;
       if (!token || session !== sessionRef.current) return;
 
-      // Kick off the first chunk, and always keep the NEXT chunk's fetch
-      // in flight while the current one plays — by the time playback of
-      // chunk N ends, chunk N+1's audio is usually already downloaded.
-      let nextChunkPromise = fetchChunkAudioUrl(chunks[0], token, session);
+      // Fire EVERY chunk's fetch immediately, in parallel — not staggered
+      // one-ahead. A staggered prefetch (start chunk N+1 only once chunk N's
+      // fetch resolves, then race it against chunk N's own playback) only
+      // ever gives chunk N+1 exactly chunk N's playback duration to finish
+      // downloading. That's not enough margin for a short sentence — a
+      // quick "Right." or "Got it." plays out in well under a second, which
+      // is often shorter than one full network+synthesis round trip, so the
+      // next chunk isn't ready yet and there's an audible gap right at the
+      // sentence boundary — reported as "cuts out," "pauses too long at
+      // full stops," "doesn't feel continuous." Firing every chunk's fetch
+      // at t=0 instead means chunk 2, 3, 4... each get the ENTIRE elapsed
+      // playback time of every prior chunk as head start, not just one
+      // chunk's worth — by the time it's a later chunk's turn, it has
+      // almost always already finished downloading.
+      const chunkPromises = chunks.map(c => fetchChunkAudioUrl(c, token, session));
+
       for (let i = 0; i < chunks.length; i++) {
         if (session !== sessionRef.current) return;
-        const { url, quotaExhausted } = await nextChunkPromise;
+        const { url, quotaExhausted } = await chunkPromises[i];
         if (session !== sessionRef.current) { if (url) URL.revokeObjectURL(url); return; }
         if (quotaExhausted) break; // further chunks will fail the same way — stop early
-        nextChunkPromise = i + 1 < chunks.length
-          ? fetchChunkAudioUrl(chunks[i + 1], token, session)
-          : Promise.resolve({ url: null, quotaExhausted: false });
         if (url) await playChunkUrl(url, session);
       }
     } finally {
