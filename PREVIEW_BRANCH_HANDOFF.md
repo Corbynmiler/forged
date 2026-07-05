@@ -2,7 +2,29 @@
 
 **Branch:** `claude/forged-ai-companion-redesign-agyjl7`
 **Status:** preview/experimental only. `main` (production) has not been touched, merged into, or modified at any point on this branch.
-**Last updated:** 2026-07-05 (sixth round today) — the diagnosis this round: Noticed was still visually three products stacked on top of each other (old Forged's proof rings/Arc hero card, the new companion archive, and the old Arc screen's timeline pattern sitting unused elsewhere). This round redesigns Noticed's actual visual hierarchy so the companion's memory leads and the Arc/proof chrome is demoted to a quiet secondary strip, and repurposes the old Arc timeline's richest component (`ReceiptExpandedBody`) as the foundation for a real "open a chapter like a journal entry" interaction. See "Sixth round."
+**Last updated:** 2026-07-05 (seventh round today) — small, targeted UX pass on the Talk screen from real heavy usage: spoken-reply playback controls (pause/resume/stop/rewind 10s) and a preview-only ElevenLabs usage monitor. See "Seventh round."
+
+### Seventh round — spoken-reply playback controls + ElevenLabs usage monitor
+
+**1. Playback controls (pause / resume / stop / rewind 10s)**
+
+`useCoachTts.jsx` plays a reply as a sequence of gapless `AudioBufferSourceNode`s scheduled on one `AudioContext` clock (see the round-4 stutter fix). That made pause/resume genuinely simple: **pause/resume now suspend/resume the whole `AudioContext`** — every scheduled source freezes and continues in lockstep automatically, no per-chunk offset bookkeeping needed. Stop reuses the existing `stopSpeaking()` (already stopped cleanly whenever a new reply started, per the original request — confirmed, not new this round).
+
+Rewind is the genuinely new piece: every decoded chunk this reply is recorded as `{start, end, buffer}` in reply-elapsed seconds (`chunkMarksRef`). Rewinding derives "how far into this reply are we" from `ctx.currentTime` minus a tracked origin, jumps back 10s, stops everything currently scheduled, and reschedules the already-decoded chunks that cover the new position — using `AudioBufferSourceNode.start(when, offset)`'s own offset parameter for the one chunk that gets entered mid-buffer. No re-fetching, since you can only ever rewind into content that's already played (and therefore already decoded). If `speak()`'s loop is still fetching *later* chunks when a rewind happens, a shared ref (`nextStartTimeRef`, not a closure-local) redirects where those land once they arrive, so they queue up after the rewound audio instead of at their stale pre-rewind time. Traced through by hand with concrete numbers (chunk durations, mid-chunk rewind targets) rather than just written and hoped — see the code comments in `useCoachTts.jsx` for the exact reasoning.
+
+New floating `PlaybackBar` in `CompanionScreen.jsx`: rewind-10s / pause-or-resume / stop, shown only while `coachTts.speaking` is true, right below the Ember's status caption. Deliberately **not** `position: fixed` — it's in normal document flow within that already-dynamic caption area, so it never overlaps the conversation carousel above it and reserves no space when nothing's playing. Caption text also now distinguishes "Paused" from "Speaking…".
+
+**Unverified:** real playback in a browser — the AudioContext suspend/resume and `start(when, offset)` behavior is standard, well-documented Web Audio API, and the arithmetic was hand-traced, but this needs a real listen (pause mid-sentence, resume, rewind across a chunk boundary, rewind near the very start) before calling it solid.
+
+**2. ElevenLabs usage monitor (creator-only, preview-only)**
+
+New `api/tts-usage.js`. Tries the **real** ElevenLabs number first: `GET https://api.elevenlabs.io/v1/user/subscription` (a documented, stable ElevenLabs endpoint) returns `character_count`/`character_limit` for the account tied to `ELEVENLABS_API_KEY` — the actual constraint that matters, since this is one shared ElevenLabs account behind every user of this app, not a per-user limit. Falls back to our own `tts_usage` table (already written on every synthesis in `api/tts.js`) if the ElevenLabs call fails or its response shape doesn't match what's expected — clearly labeled `"local_estimate"` vs `"elevenlabs"` in the response so the client never presents an estimate as the real number.
+
+**Honest caveat:** the ElevenLabs response field names (`character_count`, `character_limit`, `next_character_count_reset_unix`) are from training knowledge of ElevenLabs' documented API, not verified against a live call in this sandbox (no network access to elevenlabs.io here). The code is defensive — if the shape doesn't match, it falls through to the local estimate rather than showing broken numbers — but this needs a real test against the actual account before fully trusting the "real ElevenLabs number" path.
+
+Client side: `TtsUsageBadge` in `CompanionScreen.jsx`, under the voice pill. Collapsed badge, expands on tap to show used/remaining/limit, a thin progress bar, which source it came from, and a reset date when ElevenLabs provides one. Gated to `isPro && user?.id === CREATOR_ID` — belt-and-suspenders on top of this whole branch never reaching `main`: only the creator account sees it, not every preview tester, and definitely never a production user. Fetches once on first expand, not proactively on every screen load — refresh button for a manual re-check.
+
+**Files touched:** `src/hooks/useCoachTts.jsx` (playback controls), `src/screens/CompanionScreen.jsx` (`PlaybackBar`, `TtsUsageBadge`), `api/tts-usage.js` (new).
 
 ### Sixth round — Noticed's hierarchy redesign: memory leads, old Forged chrome demoted
 

@@ -6,7 +6,7 @@
 // ../coach/AICoach.jsx) rather than forking it — this screen owns its own
 // presentation and streaming loop, not the personality itself.
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
-import { T, FREE_DAILY_LIMIT, COACH_VOICE_OPTIONS } from "../theme.js";
+import { T, FREE_DAILY_LIMIT, COACH_VOICE_OPTIONS, CREATOR_ID } from "../theme.js";
 import {
   detectsArcEditIntent,
   formatCoachChatDisplay,
@@ -300,6 +300,147 @@ function Ember({ state, onTap, ringRef, coreRef, label }) {
         <span aria-hidden style={{ position: "absolute", bottom: "32%", right: "26%", width: 7, height: 7, borderRadius: "50%", background: "#E74C3C", boxShadow: "0 0 7px #E74C3C" }} />
       ) : null}
     </button>
+  );
+}
+
+/**
+ * Spoken-reply transport controls — pause/resume, stop, rewind 10s. Shown
+ * only while there's an active reply (coachTts.speaking), right below the
+ * Ember's status caption — in normal document flow (not position:fixed), so
+ * it never overlaps the carousel/conversation above it and never reserves
+ * space when there's nothing playing. Lets you pause the companion mid-reply
+ * — walking, mid-conversation with someone else, heads-down working — the
+ * exact gap that prompted this: no way to stop/resume/rewind a spoken reply
+ * once it started.
+ */
+function PlaybackBar({ paused, onPause, onResume, onRewind, onStop }) {
+  const iconBtn = {
+    width: 34, height: 34, borderRadius: "50%", border: `0.5px solid ${T.borderStrong}`,
+    background: T.surface, color: T.text, cursor: "pointer",
+    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+  };
+  return (
+    <div
+      role="group"
+      aria-label="Spoken reply controls"
+      style={{
+        display: "flex", alignItems: "center", gap: 8, marginTop: 8,
+        background: "rgba(24,24,22,0.9)", border: `0.5px solid ${T.border}`,
+        borderRadius: 30, padding: "5px 8px",
+        boxShadow: "0 4px 18px rgba(0,0,0,0.3)",
+      }}
+    >
+      <button type="button" onClick={onRewind} aria-label="Rewind 10 seconds" style={iconBtn}>
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+          <path d="M12 5V1L7 6l5 5V7a5 5 0 1 1-4.9 6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+          <text x="12.3" y="17.3" fontSize="6.5" fontWeight="700" fill="currentColor" textAnchor="middle" fontFamily="sans-serif">10</text>
+        </svg>
+      </button>
+      <button
+        type="button"
+        onClick={paused ? onResume : onPause}
+        aria-label={paused ? "Resume playback" : "Pause playback"}
+        style={{ ...iconBtn, width: 38, height: 38, background: T.gold, border: "none" }}
+      >
+        {paused ? (
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="#1a1a16"><path d="M6 4l15 8-15 8V4Z" /></svg>
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="#1a1a16"><rect x="5" y="4" width="5" height="16" rx="1.5" /><rect x="14" y="4" width="5" height="16" rx="1.5" /></svg>
+        )}
+      </button>
+      <button type="button" onClick={onStop} aria-label="Stop playback" style={iconBtn}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+          <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Preview-only developer badge: how much of the ElevenLabs quota is left.
+ * Creator-account-only (checked by the caller), on top of this whole branch
+ * never shipping to `main` in the first place — belt and suspenders, since
+ * this is explicitly internal information, not something any other preview
+ * tester should see. Fetches /api/tts-usage once when the voice picker is
+ * opened (not proactively on every screen load — genuinely nobody needs
+ * this number until they're specifically thinking about voice usage) and
+ * lets you refresh manually. Collapsed by default; tap to expand for the
+ * source ("real ElevenLabs number" vs "estimated from our own tracking")
+ * and reset date when ElevenLabs' API provides one.
+ */
+function TtsUsageBadge({ enabled }) {
+  const [open, setOpen] = useState(false);
+  const [usage, setUsage] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState(null);
+  const fetchedRef = useRef(false);
+
+  async function fetchUsage() {
+    setLoading(true);
+    setErr(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) { setErr("Not signed in"); return; }
+      const res = await fetch("/api/tts-usage", { headers: { Authorization: `Bearer ${token}` } });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) { setErr(json.error || "Could not load usage"); return; }
+      setUsage(json);
+    } catch {
+      setErr("Could not load usage");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (!enabled) return null;
+
+  function handleOpen() {
+    const next = !open;
+    setOpen(next);
+    if (next && !fetchedRef.current) { fetchedRef.current = true; fetchUsage(); }
+  }
+
+  const pct = usage?.limit ? Math.min(100, Math.round((usage.used / usage.limit) * 100)) : null;
+
+  return (
+    <div style={{ marginTop: 4 }}>
+      <button
+        type="button"
+        onClick={handleOpen}
+        style={{
+          display: "flex", alignItems: "center", gap: 5, padding: "4px 9px", borderRadius: 20,
+          border: `0.5px solid ${T.border}`, background: "rgba(24,24,22,0.85)", color: T.hint,
+          fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: T.font,
+        }}
+      >
+        🎙️ {usage ? `${usage.used.toLocaleString()}/${usage.limit.toLocaleString()}` : "TTS usage"}
+      </button>
+      {open ? (
+        <div style={{ marginTop: 5, padding: "9px 11px", borderRadius: T.rsm, background: T.raised, border: `0.5px solid ${T.border}`, minWidth: 190, fontFamily: T.font }}>
+          {loading ? (
+            <div style={{ fontSize: 11, color: T.muted }}>Loading…</div>
+          ) : err ? (
+            <div style={{ fontSize: 11, color: T.accent }}>{err}</div>
+          ) : usage ? (
+            <>
+              <div style={{ height: 4, borderRadius: 2, background: T.surface, overflow: "hidden", marginBottom: 6 }}>
+                <div style={{ height: "100%", width: `${pct}%`, background: pct > 90 ? T.accent : T.gold, borderRadius: 2 }} />
+              </div>
+              <div style={{ fontSize: 11, color: T.sub }}>{usage.used.toLocaleString()} used · {usage.remaining.toLocaleString()} left of {usage.limit.toLocaleString()}</div>
+              <div style={{ fontSize: 9.5, color: T.hint, marginTop: 4 }}>
+                {usage.source === "elevenlabs" ? "Real ElevenLabs account quota" : "Estimated — tracked locally, not from ElevenLabs"}
+                {usage.resetsAt ? ` · resets ${new Date(usage.resetsAt).toLocaleDateString()}` : ""}
+              </div>
+            </>
+          ) : null}
+          <button type="button" onClick={fetchUsage} disabled={loading} style={{ marginTop: 6, background: "none", border: "none", color: T.gold, fontSize: 10.5, fontWeight: 600, cursor: "pointer", padding: 0, fontFamily: T.font }}>
+            Refresh
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -786,6 +927,7 @@ export function CompanionScreen({
               })}
             </div>
           ) : null}
+          <TtsUsageBadge enabled={isPro && user?.id === CREATOR_ID} />
         </div>
       ) : null}
 
@@ -884,6 +1026,7 @@ export function CompanionScreen({
             {atFreeCap ? null
               : speech.listening ? "Listening — tap to stop and send"
               : loading ? "Thinking…"
+              : coachTts.paused ? "Paused"
               : coachTts.speaking ? "Speaking…"
               : "Tap to talk"}
           </div>
@@ -895,6 +1038,15 @@ export function CompanionScreen({
             <div style={{ fontSize: 10.5, color: T.hint, textAlign: "center" }}>
               {SITUATIONS.find(s => s.id === situation)?.desc}
             </div>
+          ) : null}
+          {coachTts.speaking ? (
+            <PlaybackBar
+              paused={coachTts.paused}
+              onPause={coachTts.pauseSpeaking}
+              onResume={coachTts.resumeSpeaking}
+              onRewind={coachTts.rewindSpeaking}
+              onStop={coachTts.stopSpeaking}
+            />
           ) : null}
         </div>
       </div>
