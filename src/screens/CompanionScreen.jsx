@@ -39,16 +39,18 @@ import {
 // question every turn. ──
 const RESPONSE_STYLE_STEER = "RESPONSE STYLE: Match the range of a sharp, well-read conversational partner, not a coaching app's follow-up loop. Most replies should NOT end in a question — lead with a real observation, an honest take, an explanation, a relevant story or analogy, or a connection to something you remember about them. Ask a question only when you genuinely need the answer to help, not as a reflex closer on every turn. Vary the shape and length of your replies to match the weight of what they said — a throwaway comment gets a throwaway reply, a real problem gets real thought.";
 
-// ── Situations — purpose-driven lenses over one shared memory. Each one asks
-// for a genuinely different response shape, not just a different tone.
-// Steering text is appended to the cached system_stable block; retrieval,
-// memory, and XP stay identical across situations. ──
+// ── Situations — designed around how the user actually reaches for AI, not
+// generic coaching postures. Each one asks for a genuinely different
+// response shape (length, structure, stance) on top of the shared
+// RESPONSE_STYLE_STEER baseline above, not just a different tone. Steering
+// text is appended to the cached system_stable block; retrieval, memory, and
+// XP stay identical across situations. ──
 const SITUATIONS = [
-  { id: "chat",        label: "Just chat",         steer: "This is open, undirected conversation. Respond like a sharp, well-read friend would: react to what's actually interesting in what they said, bring your own honest take or a connection to something you know about their life, and let a question arise naturally only when you're truly curious or it would genuinely help — don't default to one every turn." },
-  { id: "planning",    label: "I'm planning",      steer: "The user has flagged this as a planning conversation. Lay out the real tradeoffs and what actually matters here given what you know about them, then give your own honest read on which way you'd lean and why. Ask a clarifying question only if you're genuinely missing something you need — don't just interview them." },
-  { id: "building",    label: "I'm building",      steer: "The user has flagged this as a building/execution conversation. Be terse and concrete: reflect what's actually been done, name the specific next action, and connect it to the broader thing they're building if relevant. Skip preamble and skip questions unless one is actually blocking the next step." },
-  { id: "stuck",       label: "I'm stuck",         steer: "The user has flagged that they're stuck. Slow down — don't jump to advice or solutions. State the pattern or loop you actually notice in what they're describing (referencing relevant history if you know it) as a plain observation, not a question. Only ask something if it would genuinely help them see the loop more clearly." },
-  { id: "perspective", label: "I need perspective", steer: "The user has flagged that they want perspective, not fixing. Listen first, but don't just reflect their feelings back at them — bring something of your own: a genuine outside view, a relevant story or analogy, or a connection they might not have made themselves. Offer it once it feels like they're ready for it, not immediately." },
+  { id: "chat",     label: "Just chat", steer: "This is open, undirected conversation. Respond like a sharp, well-read friend would: react to what's actually interesting in what they said, bring your own honest take or a connection to something you know about their life, and let a question arise naturally only when you're truly curious or it would genuinely help — don't default to one every turn." },
+  { id: "build",    label: "Build",     steer: "Founder/execution mode — products, code, marketing, shipping. Be terse and concrete: assume real competence and skip the preamble. Respond like a sharp co-founder in the middle of building something, not a coach — reflect exactly what's been done, name the specific next action or decision, and give a direct, practical, opinionated technical or marketing take rather than open-ended exploration. Ask a question only if it's genuinely blocking the next step; default to moving things forward, not clarifying." },
+  { id: "think",    label: "Think",     steer: "Long-form thinking mode — go deep instead of asking another question. Take real space: develop an idea across several sentences or a full paragraph, tell a relevant story or analogy, and actively connect what they're saying now to things you remember about them. Depth is the point of this mode specifically — a short, safe, one-line reply is a failure here even where it would be perfectly fine in another mode." },
+  { id: "decide",   label: "Decide",    steer: "Decision-support mode. Don't just lay out neutral tradeoffs — have an actual opinion and say what you'd do and why. Challenge the framing if it's wrong, push back on weak reasoning, and name the strongest case against whatever they seem to be leaning toward. The goal is a sharper decision, not a balanced list — hedge only where the honest answer really is \"it depends,\" never as a default posture." },
+  { id: "reflect",  label: "Reflect",   steer: "Reflective/journal mode — weekly-review energy, not a single-message answer. Look for patterns across what you remember (recent days, recurring themes, things they keep circling back to) and name them plainly, as an observation, not a question. Noticing a trend they haven't said out loud themselves is worth more here than asking how they're feeling." },
 ];
 
 const STREAM_ID = "__companion_stream__";
@@ -62,32 +64,48 @@ function timeOfDayGreeting() {
   return "Good evening";
 }
 
+// Older daily_summaries rows (written before the rollover prompt produced a
+// ready `narrative` sentence) only have `wins` — an array of short phrases.
+// Reads as a flowing sentence instead of a bulleted list: "Yesterday you
+// finished the Companion redesign, played poker, and postponed the Azir
+// meeting." rather than three separate bullet lines.
+function joinWinsAsSentence(wins) {
+  const clean = wins.map(w => String(w || "").replace(/[.!]+\s*$/, "").trim()).filter(Boolean);
+  if (!clean.length) return "";
+  // Only the first clause keeps its original capitalization — the rest read
+  // as a mid-sentence continuation.
+  const parts = clean.map((s, i) => (i === 0 ? s : s.charAt(0).toLowerCase() + s.slice(1)));
+  if (parts.length === 1) return `${parts[0]}.`;
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}.`;
+  return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}.`;
+}
+
 /**
  * Composes the living homepage greeting from real, already-extracted data —
- * no new LLM call. Reads the most recent daily_summaries row's `structured`
- * (wins, written in natural phrasing by the tightened rollover prompt) or
- * falls back to `summary`/`title`. Never shows raw/mechanical backend text —
- * if nothing usable exists yet, falls back to a plain opener.
+ * no new LLM call. Prefers `structured.narrative` (a ready 1-2 sentence
+ * recap written by the rollover prompt specifically for this greeting) —
+ * falls back to reading older rows' `wins` array as a flowing sentence, then
+ * to `title`/`summary`. Never a checklist — this should read like a friend
+ * naming what happened, not a report. If nothing usable exists yet, falls
+ * back to a plain opener.
  */
-// Returns { opener, bullets, closer } rather than one flat string — a
-// bulleted list reads badly if every line gets center-justified on its own,
-// so the caller renders `bullets` as a left-aligned block while `opener`/
-// `closer` stay centered.
 function composeGreeting(recentSummaries) {
   const hi = timeOfDayGreeting();
   const list = Array.isArray(recentSummaries) ? recentSummaries : [];
   const last = list[list.length - 1]; // oldest-first — last entry is most recent
-  const wins = Array.isArray(last?.structured?.wins) ? last.structured.wins.filter(w => typeof w === "string" && w.trim()) : [];
   const closer = "What's on your mind?";
-  if (wins.length) {
-    return { opener: `${hi}. Yesterday you:`, bullets: wins.slice(0, 4).map(w => w.trim()), closer };
-  }
+
+  const narrative = (last?.structured?.narrative || "").trim();
+  if (narrative) return { text: `${hi}. ${narrative}`, closer };
+
+  const wins = Array.isArray(last?.structured?.wins) ? last.structured.wins.filter(w => typeof w === "string" && w.trim()) : [];
+  if (wins.length) return { text: `${hi}. Yesterday you ${joinWinsAsSentence(wins)}`, closer };
+
   const title = (last?.title || "").trim();
   const summary = (last?.summary || "").trim();
-  if (title || summary) {
-    return { opener: `${hi}. ${title ? `Yesterday: ${title}.` : summary}`, bullets: [], closer };
-  }
-  return { opener: `${hi}.`, bullets: [], closer };
+  if (title || summary) return { text: `${hi}. ${title ? `Yesterday: ${title}.` : summary}`, closer };
+
+  return { text: `${hi}.`, closer };
 }
 
 /** Most recent day's title, for the quiet status line above the greeting. */
@@ -611,15 +629,8 @@ export function CompanionScreen({
               </div>
             ) : null}
             <div style={{ fontFamily: T.serif, fontSize: 21, color: T.text, lineHeight: 1.5 }}>
-              <div>{greeting.opener}</div>
-              {greeting.bullets.length ? (
-                <div style={{ display: "inline-block", textAlign: "left", marginTop: 10 }}>
-                  {greeting.bullets.map((b, i) => (
-                    <div key={i}>•  {b}</div>
-                  ))}
-                </div>
-              ) : null}
-              <div style={{ marginTop: greeting.bullets.length ? 16 : 10 }}>{greeting.closer}</div>
+              <div>{greeting.text}</div>
+              <div style={{ marginTop: 10 }}>{greeting.closer}</div>
             </div>
           </div>
         ) : (
