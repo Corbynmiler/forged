@@ -31,6 +31,36 @@ import {
   CaptureSavingLine,
 } from "../coach/AICoach.jsx";
 
+// ── PREVIEW BRANCH — memory architecture, Phase 2a ─────────────────────────
+// Fail-soft, best-effort persistence of each turn to `conversation_messages`
+// (staged, not yet applied — see supabase/pending_migrations/). This is the
+// raw ground-truth layer the nightly rollover job will eventually read from
+// instead of only curated notes/habit logs — the real fix for "judge from
+// context, not checklists." Deliberately NOT awaited at the call site: this
+// must never add latency to sending/receiving a message, and a missing
+// table (before the migration is applied) must never surface as a user-
+// visible error — same fail-soft pattern as every other new write on this
+// branch. RLS already permits a client-side insert where
+// auth.uid() = user_id (mirrors the existing memory_facts client insert),
+// so no dedicated server route is needed for this.
+async function persistConversationMessage(userId, day, role, content, situationId) {
+  const trimmed = String(content || "").trim();
+  if (!userId || !trimmed) return;
+  try {
+    await supabase.from("conversation_messages").insert({
+      user_id: userId,
+      day,
+      role,
+      content: trimmed.slice(0, 8000),
+      situation: situationId || null,
+    });
+  } catch (e) {
+    // Expected until the migration is applied — never let this affect the
+    // actual conversation.
+    console.warn("[companion] conversation_messages insert failed (migration likely not applied yet):", e);
+  }
+}
+
 // ── Applies to every situation, always — the base personality (tuned in
 // AICoach.jsx) tends to close turns with a follow-up question. This screen's
 // bar is "would Corbyn use this instead of ChatGPT for thinking out loud,"
@@ -443,6 +473,7 @@ export function CompanionScreen({
     const next = [...base, userMsg];
     setMessages(next);
     if (user?.id) saveCoachDayMessages(user.id, sendDay, next);
+    if (user?.id) void persistConversationMessage(user.id, sendDay, "user", trimmed, situation);
     setInput("");
     setLoading(true);
 
@@ -526,6 +557,7 @@ export function CompanionScreen({
                   if (user?.id) saveCoachDayMessages(user.id, doneDay, nextMsgs);
                   return nextMsgs;
                 });
+                if (user?.id) void persistConversationMessage(user.id, doneDay, "assistant", finalContent, situation);
 
                 if (voiceRepliesEnabled && isPro && finalContent) coachTts.speak(finalContent);
 
@@ -556,6 +588,7 @@ export function CompanionScreen({
         const data = await res.json();
         setLoading(false);
         setMessages(prev => [...prev, { role: "assistant", content: data.reply || "", ts: Date.now() }]);
+        if (user?.id && data.reply) void persistConversationMessage(user.id, sendDay, "assistant", data.reply, situation);
       }
     } catch (e) {
       streamActiveRef.current = false;
