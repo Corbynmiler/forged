@@ -387,16 +387,19 @@ function ListenButton({ onClick }) {
 }
 
 /**
- * Preview-only developer badge: how much of the ElevenLabs quota is left.
+ * Preview-only developer readout: how much of the ElevenLabs quota is left.
+ * Deliberately a quiet text link (matching the "type instead" link style
+ * elsewhere on this screen), not a bordered/emoji badge — this is internal
+ * developer info, not a UI element that should compete for attention.
  * Creator-account-only (checked by the caller), on top of this whole branch
  * never shipping to `main` in the first place — belt and suspenders, since
  * this is explicitly internal information, not something any other preview
- * tester should see. Fetches /api/tts-usage once when the voice picker is
- * opened (not proactively on every screen load — genuinely nobody needs
- * this number until they're specifically thinking about voice usage) and
- * lets you refresh manually. Collapsed by default; tap to expand for the
- * source ("real ElevenLabs number" vs "estimated from our own tracking")
- * and reset date when ElevenLabs' API provides one.
+ * tester should see. Fetches /api/tts-usage once when tapped (not
+ * proactively on every screen load — genuinely nobody needs this number
+ * until they're specifically thinking about voice usage) and lets you
+ * refresh manually. Collapsed by default; tap to expand for remaining
+ * chars, source ("real ElevenLabs number" vs "estimated from our own
+ * tracking"), and reset date when ElevenLabs' API provides one.
  */
 function TtsUsageBadge({ enabled }) {
   const [open, setOpen] = useState(false);
@@ -434,37 +437,37 @@ function TtsUsageBadge({ enabled }) {
   const pct = usage?.limit ? Math.min(100, Math.round((usage.used / usage.limit) * 100)) : null;
 
   return (
-    <div style={{ marginTop: 4 }}>
+    <div style={{ marginTop: 6 }}>
       <button
         type="button"
         onClick={handleOpen}
         style={{
-          display: "flex", alignItems: "center", gap: 5, padding: "4px 9px", borderRadius: 20,
-          border: `0.5px solid ${T.border}`, background: "rgba(24,24,22,0.85)", color: T.hint,
-          fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: T.font,
+          background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: T.font,
+          fontSize: 10.5, color: T.hint, textDecoration: "underline", textUnderlineOffset: 2,
+          textDecorationColor: "rgba(168,164,156,0.35)",
         }}
       >
-        🎙️ {usage ? `${usage.used.toLocaleString()}/${usage.limit.toLocaleString()}` : "TTS usage"}
+        {usage ? `${usage.used.toLocaleString()} / ${usage.limit.toLocaleString()} chars` : "TTS usage"}
       </button>
       {open ? (
-        <div style={{ marginTop: 5, padding: "9px 11px", borderRadius: T.rsm, background: T.raised, border: `0.5px solid ${T.border}`, minWidth: 190, fontFamily: T.font }}>
+        <div style={{ marginTop: 6, minWidth: 168 }}>
           {loading ? (
-            <div style={{ fontSize: 11, color: T.muted }}>Loading…</div>
+            <div style={{ fontSize: 10.5, color: T.hint }}>Loading…</div>
           ) : err ? (
-            <div style={{ fontSize: 11, color: T.accent }}>{err}</div>
+            <div style={{ fontSize: 10.5, color: T.accent }}>{err}</div>
           ) : usage ? (
             <>
-              <div style={{ height: 4, borderRadius: 2, background: T.surface, overflow: "hidden", marginBottom: 6 }}>
-                <div style={{ height: "100%", width: `${pct}%`, background: pct > 90 ? T.accent : T.gold, borderRadius: 2 }} />
+              <div style={{ height: 2, borderRadius: 1, background: "rgba(255,255,255,0.08)", overflow: "hidden", marginBottom: 5 }}>
+                <div style={{ height: "100%", width: `${pct}%`, background: pct > 90 ? T.accent : T.hint, borderRadius: 1 }} />
               </div>
-              <div style={{ fontSize: 11, color: T.sub }}>{usage.used.toLocaleString()} used · {usage.remaining.toLocaleString()} left of {usage.limit.toLocaleString()}</div>
-              <div style={{ fontSize: 9.5, color: T.hint, marginTop: 4 }}>
-                {usage.source === "elevenlabs" ? "Real ElevenLabs account quota" : "Estimated — tracked locally, not from ElevenLabs"}
+              <div style={{ fontSize: 10, color: T.hint, lineHeight: 1.5 }}>
+                {usage.remaining.toLocaleString()} left this month
+                {usage.source !== "elevenlabs" ? " (estimated)" : ""}
                 {usage.resetsAt ? ` · resets ${new Date(usage.resetsAt).toLocaleDateString()}` : ""}
               </div>
             </>
           ) : null}
-          <button type="button" onClick={fetchUsage} disabled={loading} style={{ marginTop: 6, background: "none", border: "none", color: T.gold, fontSize: 10.5, fontWeight: 600, cursor: "pointer", padding: 0, fontFamily: T.font }}>
+          <button type="button" onClick={fetchUsage} disabled={loading} style={{ marginTop: 4, background: "none", border: "none", color: T.hint, fontSize: 10, cursor: "pointer", padding: 0, fontFamily: T.font, textDecoration: "underline", textUnderlineOffset: 2, textDecorationColor: "rgba(168,164,156,0.35)" }}>
             Refresh
           </button>
         </div>

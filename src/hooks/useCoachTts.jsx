@@ -53,11 +53,16 @@ const REWIND_SECONDS = 10;
  * earlier, using AudioBufferSourceNode's own `offset` start parameter
  * rather than re-fetching anything.
  *
- * `cacheKey` (the message's stable ts, passed by the caller) makes replaying
- * a message free: each chunk's decoded AudioBuffer is kept in memory for the
- * rest of the session (audioCacheRef), and its raw bytes are also written to
+ * `cacheKey` (the message's stable ts, passed by the caller) plus the
+ * current `voiceId` together make replaying a message in the SAME voice
+ * free: each chunk's decoded AudioBuffer is kept in memory for the rest of
+ * the session (audioCacheRef), and its raw bytes are also written to
  * IndexedDB (src/lib/ttsCache.js) so a replay survives a page refresh too —
- * "for today only," pruned once per session against today's date.
+ * "for today only," pruned once per session against today's date. Scoping
+ * the cache by voice as well as message means switching voices and
+ * replaying the same message correctly re-synthesizes (a different voice is
+ * a genuinely different, separately-billed generation) instead of silently
+ * playing back stale audio in the old voice.
  */
 export function useCoachTts({ enabled = false, isPro = false, voiceId = null } = {}) {
   const audioCtxRef = useRef(null);
@@ -70,7 +75,7 @@ export function useCoachTts({ enabled = false, isPro = false, voiceId = null } =
   const positionOriginRef = useRef(0);
   /** Ref (not a closure-local) so rewind() can redirect where the still-running speak() loop schedules its NEXT not-yet-decoded chunk. */
   const nextStartTimeRef = useRef(0);
-  /** In-memory decoded-AudioBuffer cache, keyed by `${cacheKey}:${chunkIndex}` — survives for the life of this hook instance (the whole session), not just one speak() call. */
+  /** In-memory decoded-AudioBuffer cache, keyed by `${cacheKey}:${voiceId}:${chunkIndex}` — survives for the life of this hook instance (the whole session), not just one speak() call. */
   const audioCacheRef = useRef(new Map());
   const prunedRef = useRef(false);
   const [speaking, setSpeaking] = useState(false);
@@ -306,7 +311,16 @@ export function useCoachTts({ enabled = false, isPro = false, voiceId = null } =
       // it only throttles genuine network fetches.)
       const CONCURRENT_TTS_FETCH_WINDOW = 2;
       const windowSize = Math.min(CONCURRENT_TTS_FETCH_WINDOW, chunks.length);
-      const chunkKey = i => (cacheKey ? `${cacheKey}:${i}` : null);
+      // Voice ID is part of the cache key, not just the message's ts —
+      // otherwise replaying a message after switching voices would silently
+      // play back the OLD voice's cached audio instead of either regenerating
+      // in the new voice or making it obvious nothing changed. Scoping the
+      // cache per (message, voice) pair means: first listen in a given voice
+      // costs real ElevenLabs characters (unavoidable — a different voice is
+      // a genuinely different synthesis, same cost as the first generation);
+      // every later replay in that SAME voice stays free; switching voice and
+      // replaying correctly re-synthesizes rather than reusing stale audio.
+      const chunkKey = i => (cacheKey ? `${cacheKey}:${voiceId || "default"}:${i}` : null);
       const chunkPromises = new Array(chunks.length);
       for (let i = 0; i < windowSize; i++) {
         chunkPromises[i] = fetchChunkBuffer(chunks[i], token, session, ctx, chunkKey(i));

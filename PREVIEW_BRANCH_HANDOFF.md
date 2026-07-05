@@ -2,7 +2,19 @@
 
 **Branch:** `claude/forged-ai-companion-redesign-agyjl7`
 **Status:** preview/experimental only. `main` (production) has not been touched, merged into, or modified at any point on this branch.
-**Last updated:** 2026-07-05 (ninth round today) — audio UX/cost pass: replies are no longer spoken automatically (real ElevenLabs cost per reply, and most turns don't need to be read aloud). Each assistant message now has its own tap-to-listen control, generated audio is cached (in-memory + IndexedDB, today only) so replaying never re-calls ElevenLabs, and the voice roster is male-only with companion-style names. See "Ninth round."
+**Last updated:** 2026-07-05 (tenth round today) — two small follow-ups to round nine, from a direct question: a real caching bug (the cache didn't know about voice) and a design complaint (the usage readout was visually "loud"). See "Tenth round" below, then "Ninth round" for the tap-to-play system this refines.
+
+### Tenth round — voice-aware cache key + quieter usage readout
+
+**1. Real bug, caught by the user asking the right question: "if I switch voice, does replaying a message use the new voice, or cost more?"** Checked the code — the answer was neither, and worse than either: the per-message cache key was `${messageTs}:${chunkIndex}`, with no voice in it. Switching voice and tapping "Listen" on a message you'd already heard would silently replay the **old voice's** cached audio — not regenerate in the new voice, and not warn you it was stale. Fixed: the cache key is now `${messageTs}:${voiceId}:${chunkIndex}` in both `useCoachTts.jsx`'s in-memory cache and `ttsCache.js`'s IndexedDB layer. Correct behavior now: first listen to a message in a given voice costs real ElevenLabs characters (unavoidable — a different voice is a genuinely different, separately-billed synthesis, same cost as the very first generation); every later replay in that *same* voice stays free; switching voice and replaying correctly re-synthesizes instead of reusing stale audio.
+
+**2. The ElevenLabs usage readout (under the voice pill) redesigned to be quieter.** Was a bordered pill with a background fill and a microphone emoji, expanding into a boxed panel with its own border/background — visually heavier than anything else on this screen, for what's explicitly internal developer information. Rewritten to match the screen's existing "quiet utility link" pattern (the same understated underlined-text style as the "type instead" link) — no border, no background fill, no emoji, smaller/thinner progress bar. Same data, same tap-to-expand behavior, same creator-only gating — appearance only.
+
+**Interpretation check, worth confirming:** the request said "the storage system is pretty loud... very basic." Read this as the ElevenLabs usage readout (the only "storage"-adjacent UI built this session) and fixed that — flag it back if something else was meant (e.g. the playback bar, the Listen button, or something on Noticed).
+
+**Files touched:** `src/hooks/useCoachTts.jsx` (cache key), `src/screens/CompanionScreen.jsx` (`TtsUsageBadge` redesign).
+
+**What to test:** play a message in one voice, switch to a different voice, replay the *same* message — should re-synthesize (a brief real delay, new usage in the readout) rather than instantly replaying the old voice. Replay it again in that same (new) voice — should now be instant/free. Check the usage readout under the voice pill reads as a quiet text link, not a boxed badge.
 
 ### Ninth round — tap-to-play TTS, per-message caching, voice roster fix
 
