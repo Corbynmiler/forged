@@ -1,213 +1,183 @@
 # Forged — Preview Branch Handoff
 
-**Branch:** `claude/forged-ai-companion-redesign-agyjl7` (preview only — `main`/production untouched)
-**Purpose:** this is not "Forged with AI added." It's a new AI life companion that reuses Forged's backend, auth, memory, and APIs — but earns its UI from scratch. Wins on continuity, not capability: memory is the product, conversation is the interface. Being built for one user first — the bar is "would you use this instead of ChatGPT for life updates, reflection, planning, and thinking."
-**Last updated:** 2026-07-05 (conversation modes, strengthened) — confirmed modes are genuinely injected into the model's system prompt (traced the exact path, see §3), then rewrote all five modes' steering text to mirror your exact requirements more precisely (Build now names your actual projects, Think explicitly allows a short-reply exception, Reflect explicitly targets emotional tone), and added a persistent mode-hint line under the Ember's status text so you never have to reopen the dropdown to remember what the current mode is for.
-
-This file is the single source of truth for anyone (human or Cursor) picking this branch up cold. Update it at the end of every phase — do not let it drift from what's actually in the diff.
+**Branch:** `claude/forged-ai-companion-redesign-agyjl7`
+**Status:** preview/experimental only. `main` (production) has not been touched, merged into, or modified at any point on this branch.
+**Last updated:** 2026-07-05 — full rewrite for a cold handoff (e.g. to Cursor). Consolidates everything shipped across many rounds into one current-state document instead of a round-by-round log. If you're picking this branch up without prior context, read this file top to bottom before touching code.
 
 ---
 
-## 0. The honest reassessment (read this first)
+## 0. Product direction — what this branch is trying to become
 
-You asked directly: have we accidentally discovered a better product than the one we planned? **Yes — and the evidence is in what's actually happened over the last several rounds, not just in how it feels.**
+Forged today (on `main`) is a habit-tracker app with an AI coach bolted on. This branch is not "Forged with AI added" — it's a bet that the real product hiding inside Forged is a **memory-first voice companion**: something you'd open instead of ChatGPT to think out loud, plan, decide, or reflect on your day, specifically *because* it remembers you — not because it's a better habit tracker. The working benchmark for every decision on this branch is: **"would the user open this instead of ChatGPT for life updates, reflection, planning, and thinking?"**
 
-Every round of real feedback has been about the companion surface (the Ember, the greeting, the conversation modes, memory, voice) — never once about Today, Arc, habits, streaks, or XP-as-a-tally. Those systems haven't been discussed, tuned, or endorsed in this entire branch; they've just been sitting underneath, unquestioned, while the actual product got redesigned around them repeatedly. Your own benchmark for this branch was never "is this a better habit tracker" — it was "would I use this instead of ChatGPT for life updates, reflection, planning, and thinking." That's a different product category, and this branch has been quietly building toward it without the roadmap ever saying so out loud.
+The practical consequence: memory is the product, conversation is the interface. The old habit/Arc/streak/XP machinery isn't being deleted, but it's being demoted — from "the thing you manage" to "a data source the companion reads and writes on your behalf in the background." See §7 for the phased plan this implies.
 
-The deeper tension is structural, not cosmetic: this branch's own stated direction — *"the AI should judge progress using context, not checklists," "keep XP explainable, but don't make it dependent on habits"* — is in direct conflict with Arc/habits/streaks, a fixed, deterministic, checklist-driven system by design. Every round of prompt-tightening on the rollover job has been quietly working *around* that tension, not resolving it. This round is the first one that actually starts resolving it — see §3.
-
-**What this doesn't mean:** delete Today/Arc/habits outright. That data model is real, live, working code with real rows in a shared production database. It means the plan treats the companion as the product going forward and treats Today/Arc/habits as a *backing data source the companion reads and writes on your behalf* — not a set of screens you actively manage.
+This branch is being built for one specific user first (not generic users yet) — expect opinionated, personal defaults rather than configurable-for-everyone choices.
 
 ---
 
-## 1. Phase 2 — the roadmap
+## 1. ⚠️ Shared Supabase database — read this before touching schema
 
-**If Phase 1 was "prove a voice-first companion is technically viable" — Phase 2 is "stop layering the companion on top of the old app, and start collapsing the old app into the companion."**
+**Preview and `main` (production) currently share one Supabase project** (ref `apdmvbzfjuvxworjepze`) — same database, same tables, same users. Only the *deployed application code* differs between the two (they're separate Vercel deployments built from separate branches). This means:
+
+- Any schema change (new table, new column) is visible to **both** deployments immediately, whether or not `main`'s code ever references it.
+- `main`'s deployed frontend/API code has zero references to anything added on this branch (new tables/columns), so adding schema doesn't change `main`'s *behavior* — but it does still change the *shared database*, permanently, for real production data.
+- **Every schema change on this branch must be additive-only** (new tables/columns, never drop/rename/alter existing ones) and **staged for human review before being applied** — see §8 for exactly how.
+- **Never** modify `supabase/migrations/` directly — it's a protected path (see `.claude/hooks/protected-paths.txt`). Real, reviewed schema changes get staged in `supabase/pending_migrations/` instead, and a human applies them manually (SQL editor or CLI) after reviewing.
+- **Never** run a destructive migration (drop/rename on anything with real data) without explicit, explained, human-approved sign-off first.
+
+---
+
+## 2. What has shipped (current state, by area)
+
+### Companion screen ("Talk" tab) — the new home surface
+Replaces the old auto-opened coach drawer as the app's default landing screen. Lives in `src/screens/CompanionScreen.jsx`.
+- **The Ember** — a calm, living presence (not a mic icon) that is the mic control itself (tap to talk, tap to stop = send). Currently a **Blue** palette (soft sky-blue core cooling to muted steel-blue) — went through Moonstone (lavender) and the original warm-orange "fireball" before landing here. Shape is a deliberately clean, undistorted circle (an earlier SVG-turbulence version read as "lumpy"/accidental). Idle state dims toward the background (~half opacity); listening/thinking/speaking are full brightness and visually distinct from each other.
+- **The greeting** — composed client-side (zero extra LLM cost) from `daily_summaries.structured.narrative`, a short, casual, specific 1-2 sentence recap written by the nightly extraction job specifically for this purpose (not a bulleted list — that was an earlier, rejected version). Rendered at normal body-text size/font, not a display-serif headline (an earlier version read as "a dramatic poster").
+- **The conversation carousel** — the current exchange only, floating text (no chat bubbles), fixed-height scrollable region with a top mask-fade. Replaced an earlier "single pair, then a separate full-page History view" pattern.
+- **Live transcript reliability** — fixed two real bugs: the transcript used to disappear during a natural mid-sentence pause (was gated on `speech.interim`, which the browser clears on every finalized phrase including pauses — now shows accumulated dictation regardless), and it used to get replaced by a "thinking" indicator instead of staying visible above it.
+- **Conversation modes** — Just chat / Build / Think / Decide / Reflect (`SITUATIONS` array in `CompanionScreen.jsx`). Confirmed, by tracing the real code path, that these are genuinely injected into the model's system prompt every request (not decorative) — see §5 for the exact path. Each mode's steer text has been rewritten twice to sharpen the behavioral difference between modes (not just tone): Build is terse/direct/names your actual projects (Forged, CloseCraft, sales, websites); Think explicitly requires long-form depth (a short reply is a stated failure unless you ask for brevity); Decide must state a real recommendation before tradeoffs; Reflect targets emotional tone and durable patterns explicitly. A shared baseline instruction (`RESPONSE_STYLE_STEER`) tells the model, as a hard constraint, not to default to ending replies with a question. A persistent one-line description of the current mode now shows under the Ember's status text at all times (not just a transient flash on selection).
+
+### Memory architecture (Phase 2a — in progress)
+The bet: real long-term memory, not fake/hallucinated callbacks.
+- **`conversation_messages`** — a new table (raw per-turn transcript, one row per user message and one per assistant reply, written live). **Applied and confirmed working** — real rows verified via direct SQL query after using the Companion screen. Written from `CompanionScreen.jsx` via `persistConversationMessage()`, fire-and-forget, fail-soft.
+- **`api/memory-rollover.js`** (the nightly extraction job) now reads from `conversation_messages` and folds real conversation content into what it feeds the model, alongside the existing habit-log/journal digest — capped at `CONVERSATION_DIGEST_MAX_CHARS_PER_DAY` (default 4000 chars/day, env-overridable). This is the actual mechanism behind "judge progress from context, not checklists" — previously the job only ever saw curated notes and habit ticks, never what you actually said. Bundled correctness fix: a day with real conversation but zero habit logs used to be silently skipped entirely (never summarized) — that gap is closed.
+- **Still missing — the real blocker for genuine cross-time recall:** embeddings + similarity search over `memory_facts`. Right now the model only ever sees a small rolling summary + last few days — nothing lets it reach back to "you changed your opinion on this in April" from something real. Vendor undecided (Voyage AI API vs. a Supabase Edge Function running `gte-small`). See §7.
+
+### AI-judged XP (observational only, not live-facing yet)
+Nightly job judges each day 0-50 based on genuine effort/follow-through (now informed by real conversation, see above), writes to `daily_summaries.xp_awarded`/`xp_reason` and an audit table `xp_events`. **Deliberately not wired into `profiles.xp`** (the real, user-facing lifetime total, which still only updates via the existing deterministic per-habit-tap system in `src/arcProgress.js`) — these two systems are on a collision course by design and a human needs to decide how they reconcile (see §6, "the XP collision").
+
+### Voice / TTS (ElevenLabs) — wired, investigated this round, **not yet enabled**
+Full technical writeup in §5. Short version: the code is complete and structurally correct end-to-end (client → `/api/tts` → ElevenLabs → streamed audio → Web-Audio-reactive Ember), but **`ELEVENLABS_API_KEY` has not been confirmed set in Vercel**, and nothing about this path has ever been tested against a real key or a real login session. The UX for turning it on currently lives only in the old Profile screen — a redesign moving voice controls onto the Talk screen itself is proposed (not built) in §9.
+
+### Onboarding copy
+Reworded the notifications screen ("Protect the Arc" → warmer, companion-voiced copy) and the final "you're in" screen's pitch, to stop reading like the old habit-tracker's marketing copy. The underlying Arc-creation flow/wizard itself was not restructured — copy-only pass on the specific phrases flagged as jarring.
+
+### Reliability fixes
+- **iOS Chrome mic bug** — tapping the mic, granting permission, then nothing happening. Root cause: iOS Chrome/Edge/Firefox were wrongly routed through a desktop-Chromium-only "prime the mic via `getUserMedia` first" step, whose `await` breaks the synchronous user-gesture requirement WebKit needs for `SpeechRecognition.start()` on iOS. Fixed in `src/hooks/useSpeechInput.jsx`; also added a generic 4-second start-watchdog so any *other* silent-start failure surfaces a message instead of doing nothing.
+- **Stale PWA on iPhone home screen** — diagnosed as iOS keeping the installed web app's process alive across icon taps rather than reloading (not a caching bug — headers/service-worker were already correct). Added a version-check banner in `src/main.jsx` that offers a manual refresh when it detects a newer deploy, without ever auto-reloading mid-conversation.
+- **Transcription word-loss after a 1-2s pause** — investigated, **not fixed**. On desktop, `continuous=true` is already active (confirmed by reading the code), which rules out a JS-level session restart — the likely cause is a native browser-engine artifact below anything the code can observe. On iOS/Android, `continuous=false` is an intentional prior workaround for a *worse*, previously-discovered bug, so it wasn't flipped blind without a real device to verify against. Real fix, if ever needed: bypass the browser's native speech recognition entirely (custom audio capture + a real streaming ASR backend) — a genuine infrastructure project, not attempted here.
+
+---
+
+## 3. Verified vs. unverified — be honest about this distinction
+
+This entire branch has been built in a sandboxed environment with **no real login session, no ElevenLabs credentials, no Anthropic credentials, and no physical iOS device**. Everything below marked "unverified" has been reasoned through and code-reviewed carefully, but never actually run for real. Don't treat "shipped" as "confirmed working."
+
+**Verified (real testing happened):**
+- `conversation_messages` migration applied; real rows confirmed via direct SQL query after using the Companion screen.
+- `memory_facts` / `xp_events` schema applied (confirmed via `list_tables` earlier in this branch's history).
+- Build passes (`npm run build`) after every change on this branch.
+- Conversation-mode injection path is real (traced in code — `SITUATIONS[].steer` → `system_stable` → `buildSystemBlocks()` in `api/chat.js` → sent to Claude).
+
+**Unverified (reasoned/tested in isolation only, never run live):**
+- iOS Chrome mic fix — no iPhone in this sandbox.
+- Stale-PWA banner — needs a real home-screen install across a real new deploy.
+- The Blue Ember and all prior Ember iterations — confirmed only via disposable rendered previews (screenshotted with Playwright, never inside a real authenticated session).
+- Greeting quality (`structured.narrative`) and XP judgment quality from real conversation — no Anthropic credentials to run a real rollover against.
+- Whether the 5 conversation modes actually *feel* distinct in real replies — the wiring is confirmed real, but extensive live back-and-forth testing across all 5 modes hasn't happened.
+- Voice replies end-to-end — no ElevenLabs key, no real login session tested.
+- The transcription pause bug — diagnosed via code reading only.
+
+---
+
+## 4. Current blockers
+
+1. **ElevenLabs API key not confirmed set in Vercel.** Blocks voice replies entirely. See §6 for the exact steps.
+2. **Embeddings vendor decision** (Voyage AI vs. Supabase Edge Function/`gte-small`) — blocks real cross-time memory retrieval. Sitting unresolved for several rounds.
+3. **The XP collision** — deterministic per-tap XP (`profiles.xp`, live) vs. AI-judged observational XP (`daily_summaries.xp_awarded`, not live-facing) need a human decision: merge them, let one replace the other, or deliberately keep both (weakest option). Not the AI's call.
+4. **The old CoachBar / modal `AICoach` drawer still exists**, duplicating the Companion screen — flagged as overdue for seven-plus rounds now, never actioned.
+
+---
+
+## 5. ElevenLabs / voice — exact current state
+
+- **Fully wired, end to end, in code:** `api/tts.js` (server: auth, Pro-gating, monthly character cap, calls ElevenLabs `eleven_flash_v2_5`, streams `audio/mpeg` back) ↔ `src/hooks/useCoachTts.jsx` (client: chunks replies into sentences, plays back-to-back, exposes the `<audio>` element for the Ember's audio-reactive speaking animation).
+- **Schema already applied** (this one is NOT a preview-only pending migration — it's a normal, already-merged migration: `supabase/migrations/20260611080100_tts_usage_and_voice_prefs.sql`). Added `profiles.voice_replies_enabled`, `profiles.coach_voice_id`, and the `tts_usage` table (per-user-per-month character counter).
+- **Cost is bounded in code**, not just by ElevenLabs' own billing: `TTS_MONTHLY_CHAR_LIMIT` in `api/tts.js` (default 50,000 chars/month/user, env-overridable via `TTS_MONTHLY_CHAR_LIMIT`) hard-stops with a 429 once hit. At ElevenLabs' current Flash v2.5 rate (~$0.05/1,000 chars), that's a ~$2.50/month ceiling per user regardless of usage. **Known inconsistency:** this same constant is duplicated in `src/theme.js` (for display text only) and is not automatically kept in sync — if the env var is ever raised, that file needs a matching manual update or the displayed "X remaining" text will be quietly wrong.
+- **4 premade ElevenLabs voices** configured: Adam, Sarah, Daniel, Rachel (`COACH_VOICE_OPTIONS` in `src/theme.js`), selectable today only via the old Profile screen.
+- **What's missing:** confirmation that `ELEVENLABS_API_KEY` is actually set in Vercel (cannot be checked from this sandbox — no dashboard access), and any real test of the flow.
+- **UX gap, proposed but not built:** voice on/off and voice selection currently only live on the Profile screen, buried away from the Talk screen where they're actually used. §9 proposes moving this onto the Talk screen directly. Not implemented this round.
+
+---
+
+## 6. Next recommended phase
+
+In priority order, with reasoning:
+
+1. **Build the Talk-screen voice controls** (design proposed in §9 of this doc) — the most immediately actionable, well-scoped next build item, and it directly serves this branch's core thesis (voice is the product, not a buried settings toggle). Do this once `ELEVENLABS_API_KEY` is confirmed set (§ "ElevenLabs setup checklist" below) so it can actually be tested as it's built.
+2. **Retire the old CoachBar/modal drawer (Phase 2b)** — doesn't depend on anything else, been overdue longest, and having two chat surfaces is a real, growing inconsistency the longer it's left.
+3. **Embeddings vendor decision + wire up retrieval (Phase 2a, remaining piece)** — the actual unlock for genuine cross-time memory ("you changed your opinion since April"). Bigger and more architecturally significant than 1-2; do it once those are settled.
+4. **Phase 2c/2d/2e** (reframe Today, resolve the XP collision, rename Coach→Companion) — each depends on the above being further along; see the phased plan in §7.
+
+---
+
+## 7. The full phased plan (Phase 2), for context
 
 | Step | What | Status |
 |---|---|---|
-| **2a. Memory architecture** | `conversation_messages` (raw per-turn log) → extraction → embeddings/retrieval. | 🔶 **In progress.** Write side: done, applied, verified. Read side (rollover extraction): done this round, unverified against a real rollover run (see §6). Embeddings/retrieval: not started — still the real blocker for genuine cross-time recall. |
-| **2b. Retire the old CoachBar/modal drawer** | The floating chat surface that duplicates the Companion screen. | ⛔ Not started — next up, can run in parallel with the rest of 2a. |
-| **2c. Reframe Today around the companion** | Today stops being a checklist you manage and becomes a quiet log of what the companion already captured. | ⛔ Not started — depends on 2a existing first. |
-| **2d. Resolve the XP collision** | Deterministic per-tap XP vs. AI-judged observational XP — pick one, merge them, or make a deliberate call to keep both. | ⛔ Not started — your call, not mine (three options preserved in the appendix). |
-| **2e. Rename Coach → Companion** | Only once 2a-2d make it true, not just cosmetic. | ⛔ Not started, intentionally last. |
+| 2a. Memory architecture | `conversation_messages` → extraction → embeddings/retrieval | Write + read sides done. Embeddings/retrieval not started — the real blocker. |
+| 2b. Retire old CoachBar/modal drawer | One true conversation surface | Not started. |
+| 2c. Reframe Today around the companion | Today becomes a quiet log, not a checklist | Not started — depends on 2a. |
+| 2d. Resolve the XP collision | See blocker #3 above | Not started — needs a human decision. |
+| 2e. Rename Coach → Companion | `coachMemory`/`coachName`/`AICoach.jsx` etc. — once 2a-2d make it true, not cosmetic | Not started, intentionally last. |
 
-Full reasoning for this sequencing is preserved in the appendix rather than repeated every round.
-
----
-
-## 2. Memory architecture design (unchanged, still the target)
-
-```
-conversation_messages (raw, every turn) → nightly extraction (existing job)
-  → daily_summaries / memory_facts / coach_memory
-  → embeddings on memory_facts → similarity search at reply-time (retrieval)
-  → ChatGPT import eventually converges onto this same pipeline, backdated
-```
-
-This round builds the arrow between box 1 and box 2 — real conversation content now actually reaches the extraction job. Box 3 (embeddings/retrieval) is still the piece that turns "you changed your opinion since April" from wishful thinking into something real; not started. Full diagram and reasoning preserved in the appendix.
+Full original reasoning for why each step blocks the next, and the full memory-architecture diagram, are preserved in this branch's git history (this file, prior revisions) if a deeper rationale is ever needed — not repeated here to keep this document focused for a cold read.
 
 ---
 
-## 3. This round's change — conversation modes, confirmed and strengthened
+## 8. How schema changes get made on this branch (process)
 
-**First, the direct answer you asked for: are modes actually injected into the model's prompt?** Yes — traced the exact path rather than assuming:
-1. `CompanionScreen.jsx`'s `send()` builds `stableWithSituation` by appending the selected mode's `steer` text (plus the shared `RESPONSE_STYLE_STEER`) onto `system_stable`.
-2. That's sent as `system_stable` in the `/api/chat` request body.
-3. In `api/chat.js` (protected, read-only for this check), `buildSystemBlocks(systemStable, ...)` takes that exact string and makes it the primary cached system-prompt text block sent to Claude.
-
-So this was never decorative — every mode's steering text has been reaching the model since it was introduced. What needed work was precision: the existing steer text (written two rounds ago, in paraphrase) didn't fully match what you'd now specified in your own words.
-
-**What changed, in `src/screens/CompanionScreen.jsx` only:**
-- **All five modes' steer text rewritten** to mirror your requirements directly instead of an earlier paraphrase:
-  - **Just chat** — now explicitly "relaxed... but still genuinely useful, not just filler."
-  - **Build** — now explicitly names your actual projects ("Forged, CloseCraft, sales, websites, product and business decisions") as real, not-hypothetical territory, and adds "take a real position, don't hedge into a menu of options."
-  - **Think** — now explicitly says a short reply is a failure *unless you explicitly ask for something short* (previously had no exception at all), and explicitly lists "ideas, context, memory, patterns, and possible futures" as what to connect, matching your wording almost verbatim.
-  - **Decide** — tightened to "give a real recommendation... and explain the tradeoffs that led you there, not instead of giving one" (previously implied this, now states it directly).
-  - **Reflect** — now explicitly names "the emotional tone underneath it" and "what's actually worth remembering going forward" as its own targets, not folded into "patterns" generically.
-- **New persistent mode-hint line**, under the Ember's "Tap to talk"/"Listening…"/"Thinking…"/"Speaking…" status text — always shows the current mode's one-line description (e.g. "Long-form, deep, connects ideas and patterns.") so you never have to reopen the dropdown mid-conversation to remember what mode you're in. This is separate from and in addition to the transient caption that flashes near the mode pill right when you switch (that one confirms "you just changed it"; this one is the permanent "here's what you're currently in").
-
-**Verified:** `npm run build` passes; visually confirmed the new persistent hint line's layout/spacing via a disposable rendered preview (tight, unobtrusive, doesn't crowd the Ember) before shipping.
+1. Write the migration SQL to `supabase/pending_migrations/<timestamp>_<name>.sql` — never `supabase/migrations/` directly.
+2. Explain plainly, before the human applies anything: what it changes, whether it affects shared/production data, whether it's additive-only, exact rollback SQL, and a pre/post-apply checklist.
+3. The human reviews and applies it manually (Supabase SQL editor, or moving the file into `supabase/migrations/` with a fresh timestamp and running it through the normal process) — never applied by an agent directly.
+4. **Note on current state:** all three schema changes staged so far on this branch (`memory_facts`+`daily_summaries` extensions, `xp_events`, `conversation_messages`) have already been reviewed and applied by the human. Their `.sql` files are still sitting in `supabase/pending_migrations/` with header comments that say "NOT YET APPLIED" — **that comment is now stale/inaccurate for all three.** This wasn't corrected this round (a documentation-only fix bundled into a "no more code this round" instruction) — trust this handoff document's status over those files' internal comments until they're corrected.
 
 ---
 
-## 4. Files touched this round
+## 9. Proposed: Talk-screen voice controls (design only — not built)
 
-| File | What | Risk |
+**The ask:** move voice on/off and voice selection onto the Talk screen itself (mirroring the existing top-right conversation-mode pill with a top-left voice pill), so using voice never requires a trip to the Profile screen.
+
+**Proposed interaction** (refines the requested layout, explained below):
+
+- **Top-left pill**, visually matching the existing top-right situation pill exactly (same border/background/font treatment, mirrored position). Shows a small speaker icon + the current voice's name (e.g. "🔊 Sarah"), or a muted-speaker icon + "Muted" when off.
+- **Tapping the main body of the pill instantly toggles mute/unmute** — no dropdown, no navigation. This is the fast, one-tap control you asked for, for the common case of "shut it up right now."
+- **A small chevron at the end of the pill** (matching the existing situation pill's "▾") opens a short dropdown listing the 4 voices. **Tapping any voice both selects it and enables spoken replies**, per your requirement — this is a deliberate, single action, not two.
+- **Why split into two zones (tap vs. chevron) instead of one:** mute/unmute is something you'll want instantly and often, mid-conversation, without hunting through a menu; changing *which* voice is much rarer. Splitting a fast, frequent action from a rare, deliberate one is a standard pattern (a "split button") and avoids overloading a single tap with two different meanings depending on context. If you'd rather have one single tap always open the dropdown (matching the situation pill's own behavior exactly, with "Mute" as just another item in that list), that's a simpler, more consistent alternative — slightly slower to mute (two taps instead of one) in exchange for one less interaction pattern to learn. Worth a quick preference call before building.
+- **Non-Pro accounts:** show the same pill in a quiet locked state (small lock glyph) that opens the upgrade flow when tapped, rather than hiding it — keeps the top-of-screen layout stable and still advertises the feature, matching the existing `locked`/`onLockedClick` pattern already used elsewhere in this codebase (`MicBtn`).
+- **The old Profile-screen toggle:** left in place as a secondary/advanced-settings location (both write to the same `profiles.voice_replies_enabled`/`coach_voice_id` fields, so nothing conflicts) rather than removed — removing it is a separate, small decision, not required to satisfy "no requirement to visit Profile just to use voice."
+
+**Not built this round** — this is a spec for the next work session (this branch, or via Cursor) to implement against.
+
+---
+
+## 10. Files that matter (and their role)
+
+| File | Role | Protected? |
 |---|---|---|
-| `src/screens/CompanionScreen.jsx` | Rewrote all five `SITUATIONS` entries' `steer` and `desc` text; added a persistent mode-hint line under the Ember's status text. No changes to `send()`'s plumbing, the carousel, or the Ember itself. | Low — text and one small additive UI element; the injection mechanism itself (already correct) is untouched. |
-
-**No other files changed this round. No migration.**
-
----
-
-## 5. Decisions made this round (and why)
-
-**Answered "is this actually wired up" by tracing the real code path, not by re-describing the design.** You asked to confirm, and specifically to be shown where, if it's real — pointing at the exact three-hop path (steer text → `system_stable` → `buildSystemBlocks` in the protected `api/chat.js`) is a stronger answer than "yes, it's wired up," and it's also how the gaps between your wording and the existing steer text actually got found.
-
-**Rewrote steer text to mirror your own phrasing rather than re-paraphrasing again.** Two rounds of my own paraphrasing had already drifted slightly from what you actually wanted (e.g., Build never named your real projects, Think had no explicit short-reply exception). Copying your intent more literally into the prompt reduces that drift and makes it easier for you to spot-check that the prompt says what you meant, next time you read this file.
-
-**Added a persistent hint instead of only relying on the existing transient one.** The transient caption (added two rounds ago) answers "did my tap register" for a few seconds; it doesn't answer "what am I currently in" five minutes into a conversation. Both together cover both moments without removing something that already worked.
-
-**Did not touch `RESPONSE_STYLE_STEER` (the shared anti-question-loop baseline) this round.** Your five mode descriptions were about *shape and stance* differences between modes, not about the shared baseline itself, which was already hardened last round ("hard constraint, not a soft preference"). No reason to re-open something not in scope this time.
-
----
-
-## 6. Risks / open items
-
-- **Unverified against real replies.** Same standing limitation as every prompt-steering change on this branch — this needs a handful of real exchanges per mode to judge whether the rewritten text actually produces the sharper differences described in §3, not just a stronger-sounding prompt.
-- **Prompt engineering is still not a hard guarantee.** Flagged before and still true: even explicit, forceful instructions can be departed from by the model on a given reply. If a specific mode still doesn't feel distinct enough after real testing, the next lever is a mechanism (e.g., a server-side check), not a fourth round of stronger wording.
-- Everything from prior rounds' risk lists (embeddings/retrieval not started, XP collision needs your call, two chat surfaces still both live, Blue Ember/transcription items, ElevenLabs connectivity) still stands unchanged — preserved in the appendix.
+| `src/screens/CompanionScreen.jsx` | The Talk screen — Ember, greeting, carousel, conversation modes, mic handling, conversation persistence. The main surface almost everything in this doc touches. | No |
+| `src/hooks/useSpeechInput.jsx` | Speech-to-text (Web Speech API wrapper) — iOS Chrome fix, start-watchdog, dictation merging. | No |
+| `src/hooks/useCoachTts.jsx` | Text-to-speech playback — chunking, sequential playback, exposes `<audio>` for the Ember's audio reactivity. | No |
+| `api/tts.js` | ElevenLabs server route — auth, Pro-gating, quota, streams audio back. | No |
+| `api/memory-rollover.js` | Nightly extraction job — reads habits/journal/conversation, writes `daily_summaries`/`memory_facts`/`xp_events`/`coach_memory`. | No |
+| `api/chat.js` | Main coach chat endpoint — receives `system_stable`/`system_volatile` from the client and calls Claude. This is where mode-steering text actually reaches the model. | **Yes** — coach personality/cost invariants. Read carefully; don't edit without explicit sign-off. |
+| `src/coach/AICoach.jsx` | Personality/prompt-building logic (`buildCoachSystemPrompts`, day-persistence, quota helpers) — reused by `CompanionScreen.jsx` via exports rather than forked. | **Yes** |
+| `src/main.jsx` | App bootstrap — service worker registration, stale-PWA version-check banner. | No |
+| `src/App.jsx` | Screen routing/nav, top-level state (`voiceRepliesEnabled`, `coachVoiceId`, `isPro`, `coachMemory`), `daily_summaries` fetch. | No |
+| `src/screens/ProfileScreen.jsx` | Existing account/settings screen — current (soon supplemented) voice toggle + picker lives here. | No |
+| `src/screens/OnboardingScreen.jsx` | Signup flow — Arc creation wizard, ChatGPT memory import, reworded companion-first copy. | No |
+| `src/theme.js` | Design tokens (`T`), `COACH_VOICE_OPTIONS`, `TTS_MONTHLY_CHAR_LIMIT` (display-only duplicate — see §5's known inconsistency). | No |
+| `supabase/pending_migrations/*.sql` | Staged schema changes — **all three files present are already applied**, see §8. | No (but treat as reviewed-then-applied-manually, never auto-applied) |
+| `supabase/migrations/` | Real, already-merged schema (includes the TTS/voice-prefs migration, applies to both preview and main). | **Yes** — never edit directly |
+| `api/coach-summary.js`, `api/coach-intro.js` | Other coach-related endpoints, untouched this branch. | **Yes** |
+| `.claude/hooks/protected-paths.txt` | The actual list of protected paths, if in doubt. | — |
 
 ---
 
-## 7. How to test (plain English)
+## 11. How to test what's here today
 
-1. **Open the mode dropdown** — confirm all five show a short description under the label.
-2. **Pick a mode** — confirm the small caption flashes near the pill, and confirm a second, permanent line now sits under "Tap to talk" showing that same mode's description, staying there (not fading) until you switch modes again.
-3. **Try the same real message in at least two different modes** — good test pairs: something work-related in **Build** vs. **Think** (Build should be short/direct/name-a-next-action; Think should be noticeably longer and more developed, connecting to things it remembers), or a real open decision in **Decide** (should state an actual recommendation, not a list) vs. **Just chat** (should feel like a relaxed reaction, not an analysis).
-4. **Check Think specifically** — ask something that would normally get a one-line answer; the reply should still be substantive unless you explicitly say "briefly" or "short answer."
-
----
-
-## 8. Next steps
-
-1. **Real-world read on whether the modes now feel distinct** — the actual point of this round, needs your hands.
-2. **Embeddings vendor decision** — still the real blocker for genuine cross-time retrieval (box 3 of the memory architecture), unresolved for several rounds now.
-3. **2b — retire the old CoachBar/modal drawer** — doesn't depend on anything above, flagged for seven-plus rounds now.
-
----
-
-## Appendix — preserved detail from earlier rounds
-
-*(Kept verbatim for reference rather than re-litigated each round. §1-§2 are the current summary of this material.)*
-
-### Full Phase 2 sequencing reasoning
-
-**2a. Build the real memory architecture first.** Everything else depends on this existing. Without it, "remove the old mental model" just means deleting screens with nowhere for that functionality to actually go.
-
-**2b. Retire the redundant old chat surface** (CoachBar + modal `AICoach` drawer). A prerequisite for 2c-2e: you can't credibly "remove the old mental model" while a second, parallel implementation of it is still sitting there.
-
-**2c. Reframe Today around the companion, not a checklist.** Today's job changes to a quiet, secondary log of what got captured (for correction/inspection), not a screen you visit to manage your day.
-
-**2d. Make an explicit call on XP.** Two systems running in parallel: the real, deterministic, per-tap total (production, load-bearing), and the AI-judged observational total (preview-only, currently just logged, not shown). Pick one of: (i) the AI-judged version becomes the real, user-facing total and the per-tap system is retired, (ii) formally merge them with clear rules, or (iii) keep them parallel on purpose (weakest option).
-
-**2e. Only then, rename.** "Coach" frames the AI as an instructor; "companion" implies a peer. `coachMemory`, `coachName`, `buildCoachSystemPrompts`, `AICoach.jsx` are load-bearing identifiers — renaming before 2a-2d are actually true would just be cosmetic.
-
-**On "Eyes":** no literal feature/screen by that name was found in the codebase — read as shorthand for the tracking/surveillance framing of habit-logging in general, addressed via 2c/2d.
-
-**Not proposed:** deleting the Arc/habit data model or its tables. Proof-actions-as-habits remains a reasonable mechanism for the companion to use when committing to something concrete.
-
-### Full memory architecture diagram
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ 1. RAW LAYER — conversation_messages                             │
-│    Every turn, every day. Ground truth, written live.             │
-│    ✅ Applied. ✅ Client writes confirmed. ✅ Rollover now reads it. │
-└───────────────────────────┬────────────────────────────────────┘
-                             │ nightly rollover reads recent days
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 2. EXTRACTION (existing job)                                      │
-│    - daily_summaries row (title, narrative, structured, xp)       │
-│    - memory_facts rows (atomic, durable, embeddable)               │
-│    - updated coach_memory.content (rolling prose, size-capped)     │
-└───────────────────────────┬────────────────────────────────────┘
-                             │ embeddings generated for memory_facts
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 3. RETRIEVAL (the missing piece — not started)                    │
-│    Embed the current message, vector-search memory_facts (top-K,  │
-│    regardless of recency), inject into system_volatile.           │
-└───────────────────────────┬────────────────────────────────────┘
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 4. IMPORTED HISTORY (ChatGPT export)                               │
-│    Long-term: converge onto the same pipeline as #2, backdated.   │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-Deliberate scope decision: don't embed raw `conversation_messages` for long-term semantic search — only `memory_facts`. Keep `conversation_messages` as a recency-bounded window (30-90 days) the rollover job reads, not something queried directly at reply-time.
-
-### Phase 2a, step 1 (write side) — migration review, preserved for reference
-
-Applied and confirmed working (verified: real rows landed with correct `role`/`day`/`situation`/`content` after using the Companion screen). Full original SQL:
-
-```sql
-create table if not exists public.conversation_messages (
-  id         uuid primary key default gen_random_uuid(),
-  user_id    uuid not null references auth.users(id) on delete cascade,
-  day        date not null,
-  role       text not null check (role in ('user','assistant')),
-  content    text not null,
-  situation  text,
-  created_at timestamptz not null default now()
-);
-
-create index if not exists conversation_messages_user_day_idx
-  on public.conversation_messages (user_id, day);
-
-alter table public.conversation_messages enable row level security;
-
-drop policy if exists "Own conversation_messages" on public.conversation_messages;
-create policy "Own conversation_messages"
-  on public.conversation_messages
-  for all
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
-```
-
-Rollback if ever needed: `drop table if exists public.conversation_messages;` — no longer fully side-effect-free now that the rollover job reads from it (see §3), but still safe (rollover's read is fail-soft and falls back to the pre-existing habit/journal-only digest if the table disappears).
-
-`src/screens/CompanionScreen.jsx` writes to this table via `persistConversationMessage()` — fire-and-forget, not awaited, three call sites (user message, streaming assistant finalization, non-streaming fallback).
-
-### Phase 2a, step 2 (read side) — rollover reads real conversation, preserved for reference
-
-`api/memory-rollover.js` now queries `conversation_messages` for the same candidate date window it already computes (isolated in its own `try`/`catch`, not folded into the main `Promise.all`, so a read failure falls back to the pre-existing habit/journal-only digest rather than breaking the job). `buildConversationDigest(rows)` turns a day's raw turns into a compact `User: .../Companion: ...` transcript, capped at `CONVERSATION_DIGEST_MAX_CHARS_PER_DAY` (default 4000 chars/day, env-overridable). Merged into the per-day digest sent to the extraction model alongside the existing habit/journal digest. Real correctness fix bundled in: a day with conversation but zero habit logs previously produced an empty digest and was silently skipped forever — conversation content alone is now enough to trigger a summary. Verified via a standalone mock-data logic test (formatting, truncation, blank-content filtering, and the conversation-only-day fix specifically) — not yet verified against a real Haiku call with real data (no Anthropic credentials in this sandbox; still needs a real rollover run to judge quality, per this round's §8).
-
-### Other prior-round changes (still live, unrelated to memory architecture)
-
-- **Blue Ember** — calm mid-blue (soft sky-blue core cooling to muted steel-blue), idle state dims toward the background (opacity-only, ~half-brightness, `emberBreatheDormant` animation), full brightness on listening/thinking/speaking. Unverified in the real app — confirmed only via a disposable rendered preview.
-- **Transcription word-loss after a pause** — investigated, not fixed. `continuous=true` confirmed already active on desktop (rules out a JS-level restart there); likely a native browser-engine artifact below the level of any event the code receives. `continuous=false` on iOS/Android is an intentional prior workaround for a worse bug — not changed blind. Real fix (custom audio capture bypassing native `SpeechRecognition` chunking) named as a sized future item.
-- **Conversation modes v3, greeting v3, iOS Chrome mic fix, stale-PWA banner, ElevenLabs connectivity checklist** — all still live and unchanged; see git history of this file for the full original write-ups if needed.
+- **Modes:** open the mode dropdown on Talk, confirm descriptions show; pick different modes and send the same real message in each — Build should be terse/direct, Think noticeably longer/deeper, Decide should state an actual recommendation, Reflect should surface a pattern rather than ask a question.
+- **Memory:** have a real conversation, let the day roll over naturally, then `select date, title, structured->>'narrative' as narrative, xp_awarded, xp_reason from public.daily_summaries where user_id = auth.uid() order by date desc limit 3;` — check whether it references something you only said, not logged.
+- **Voice (once ElevenLabs is enabled — see checklist below):** turn on spoken replies via Profile (until the Talk-screen redesign in §9 ships), send a message, confirm audio plays and the Ember visibly reacts to it while speaking.
+- **iOS Chrome mic / stale PWA:** needs a real iPhone — see §3, both currently unverified.
