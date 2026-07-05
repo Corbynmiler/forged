@@ -130,6 +130,7 @@ async function handler(req, res) {
     let audioBuffer;
     try {
       audioBuffer = Buffer.from(await elevenRes.arrayBuffer());
+      if (!audioBuffer.length) throw new Error("empty audio response from ElevenLabs");
     } catch (bufErr) {
       console.error("[tts] failed to read ElevenLabs response", bufErr?.message || bufErr);
       captureException(bufErr, { route: "tts", userId });
@@ -146,7 +147,14 @@ async function handler(req, res) {
       { onConflict: "user_id,month" },
     );
 
+    // Content-Length must be explicit here — omitting it and relying on
+    // res.end(buffer) to imply it was the actual regression this round:
+    // without a declared length the response framing was inconsistent in
+    // this runtime, and the browser's audio decoder either silently played
+    // nothing or fired onerror ("Playback failed") depending on exactly how
+    // the truncated/malformed transfer landed. This is the fix.
     res.setHeader("Content-Type", "audio/mpeg");
+    res.setHeader("Content-Length", String(audioBuffer.length));
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-TTS-Chars", String(charCount));
     res.setHeader("X-TTS-Remaining", String(Math.max(0, TTS_MONTHLY_CHAR_LIMIT - used - charCount)));
