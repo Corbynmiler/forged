@@ -1,7 +1,7 @@
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
 import { useState, useRef, useEffect } from "react";
 import { T, COACH_ICON_OPTIONS } from "../theme.js";
-import { todayStr, daysAgo, parseLocal, isSatisfiedForTodayRing, getStreak, stripJournalTitleLine } from "../utils.js";
+import { todayStr, daysAgo, parseLocal, isSatisfiedForTodayRing, getStreak, stripJournalTitleLine, composeCompanionNarrative } from "../utils.js";
 import { Ring, SLabel, Modal, GBtn } from "../components/ui.jsx";
 import {
   DailyCard, WeeklyCard, ProjectCard, LimitCard, LogCard,
@@ -109,6 +109,26 @@ function buildCoachGreetingLine({ habits, goals }) {
   }
   if (none) return tod === "morning" ? "Morning — tap a habit when you're ready." : tod === "afternoon" ? "Still time to log something today." : "Evening — log what you got done?";
   return tod === "morning" ? "How's the morning going?" : tod === "evening" ? "How did today go?" : "How's the day going?";
+}
+
+/**
+ * Leads Today with a real observation from the companion — the same
+ * `daily_summaries.structured.narrative` the Talk screen's greeting is built
+ * from, not a separate rules-engine voice. This is the "quieter, reframed
+ * around what the companion noticed" entry point: Today stops being its own
+ * checklist-first surface with its own personality and instead opens with
+ * what the one companion actually noticed, the same as it would on Talk.
+ */
+function CompanionNoticed({ text }) {
+  if (!text) return null;
+  return (
+    <div style={{ margin: "14px 14px 0", padding: "14px 16px", background: T.raised, borderRadius: T.r, border: `0.5px solid ${T.border}` }}>
+      <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.hint, marginBottom: 5 }}>
+        Your companion noticed
+      </div>
+      <div style={{ fontSize: 13.5, color: T.sub, lineHeight: 1.55 }}>{text}</div>
+    </div>
+  );
 }
 
 export function CoachGreeting({ coachName, coachIcon, habits, goals, habitAccent, onOpenMic, habitCompletionPercentage, habitsLoggedTodayCount, totalTrackables }) {
@@ -259,8 +279,8 @@ function TodayReceiptCard({ entry, loggedCount, generating, onGenerate, onOpenJo
     ? (arcActive ? "Writing tonight's verdict…" : "Writing today's receipt…")
     : (arcActive ? (isNight ? "Get tonight's verdict" : "Wrap today") : "Wrap today");
   const ctaSub = arcActive
-    ? "Your coach reads the day and calls it — what counted, what slipped, what's next."
-    : "Your coach writes up the day from your logs and notes";
+    ? "Your companion reads the day and calls it — what counted, what slipped, what's next."
+    : "Your companion writes up the day from your logs and notes";
   return (
     <div style={{ margin:"0 14px 10px" }}>
       <button type="button" onClick={onGenerate} disabled={generating}
@@ -751,7 +771,9 @@ export function TodayScreen({
   onLinkProofHabit = null,
   onUnlinkProofItem = null,
   onOpenHub = null,
+  recentSummaries = [],
 }) {
+  const companionNoticed = composeCompanionNarrative(recentSummaries);
   const [showProofPicker, setShowProofPicker] = useState(false);
   const [showReorder, setShowReorder] = useState(false);
   const [proofOrder, setProofOrder] = useState(() => {
@@ -861,15 +883,16 @@ export function TodayScreen({
 
   if (habits.length === 0 && activeGoals.length === 0) return (
     <div>
+      <CompanionNoticed text={companionNoticed} />
       {onOpenCoachMic && !arcActive && <CoachGreeting coachName={coachName} coachIcon={coachIcon} habits={habits} goals={goals} habitAccent={coachHabitColor} onOpenMic={onOpenCoachMic} habitCompletionPercentage={pct} habitsLoggedTodayCount={loggedCount} totalTrackables={totalTrackables}/>}
       <div style={{ padding:"40px 28px 32px", textAlign:"center" }}>
         <div style={{ fontSize:48, marginBottom:16 }}>⚒️</div>
-        <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, marginBottom:10 }}>Start with an Arc</div>
+        <div style={{ fontFamily:T.serif, fontSize:24, color:T.text, marginBottom:10 }}>Tell your companion what's going on</div>
         <div style={{ fontSize:14, color:T.muted, lineHeight:1.75, marginBottom:28 }}>
-          Tell your coach what's changing in your life — it will shape a short Arc with proof actions you can speak about each day.
+          Talk about what's actually happening in your life. If there's a real change worth committing to, your companion can shape it into a bounded Arc with proof actions — but that's one outcome, not the only way in.
         </div>
         <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:0 }}>
-          <button onClick={onOpenCoachMic || onAdd} style={{ padding:"13px 24px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer" }}>Talk to your coach</button>
+          <button onClick={onOpenCoachMic || onAdd} style={{ padding:"13px 24px", borderRadius:T.rsm, border:"none", background:T.accent, color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer" }}>Talk to your companion</button>
           {onOpenCoachWithDraft && (
             <button
               type="button"
@@ -889,7 +912,7 @@ export function TodayScreen({
                 textDecorationColor:"rgba(168,164,156,0.4)",
               }}
             >
-              Not sure what to track? Ask your coach
+              Not sure what to track? Ask your companion
             </button>
           )}
         </div>
@@ -900,6 +923,7 @@ export function TodayScreen({
   return (
     <div>
       <style>{`@keyframes todayCompleteIn { from { opacity: 0.55; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }`}</style>
+      <CompanionNoticed text={companionNoticed} />
       {!activeBlock && typeof onStartArc === "function" && (
         <button
           type="button"
@@ -910,28 +934,28 @@ export function TodayScreen({
             margin: "8px 14px 0",
             padding: "14px 16px",
             borderRadius: T.r,
-            border: "0.5px solid rgba(200,144,42,0.4)",
-            background: "linear-gradient(90deg, rgba(200,144,42,0.10), rgba(26,26,22,0.96))",
+            border: `0.5px solid ${T.border}`,
+            background: T.raised,
             cursor: "pointer",
             textAlign: "left",
             fontFamily: T.font,
             boxSizing: "border-box",
           }}
         >
-          <div style={{ fontSize: 10, fontWeight: 800, color: T.gold, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 8 }}>
-            NO ACTIVE ARC
+          <div style={{ fontSize: 9.5, fontWeight: 700, color: T.hint, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8 }}>
+            Optional — long-term direction
           </div>
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontFamily: T.serif, fontSize: 18, color: T.text, lineHeight: 1.2, marginBottom: 6 }}>
-                What season are you in?
+                Want to set a season?
               </div>
               <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.55 }}>
-                Pick an outcome or deadline, commit for a bounded period, and collect proof — your companion helps you shape it.
+                An Arc is a bounded stretch of change with proof actions — pick one if there's a real outcome you're working toward. Not required to use Forged day to day.
               </div>
             </div>
             <div style={{ flexShrink: 0, alignSelf: "center", fontSize: 12, fontWeight: 700, color: T.gold }}>
-              Define Arc →
+              Set a direction →
             </div>
           </div>
         </button>
@@ -1084,7 +1108,7 @@ export function TodayScreen({
                 style={{ display:"flex", alignItems:"center", gap:14, margin:"0 14px 10px", width:"calc(100% - 28px)", padding:"14px 16px", borderRadius:T.r, border:"0.5px dashed rgba(200,144,42,0.4)", background:"rgba(200,144,42,0.04)", cursor:"pointer", textAlign:"left" }}>
                 <div style={{ width:38, height:38, borderRadius:11, background:"rgba(200,144,42,0.12)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>🎯</div>
                 <div style={{ flex:1 }}>
-                  <div style={{ fontSize:14, fontWeight:500, color:T.text, marginBottom:2 }}>Set a goal with your coach</div>
+                  <div style={{ fontSize:14, fontWeight:500, color:T.text, marginBottom:2 }}>Set a goal with your companion</div>
                   <div style={{ fontSize:12, color:T.muted, lineHeight:1.45 }}>Tell the AI what outcome you&apos;re working toward — it&apos;ll help you plan milestones and track progress.</div>
                 </div>
                 <div style={{ fontSize:16, color:T.gold, flexShrink:0 }}>→</div>

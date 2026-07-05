@@ -164,6 +164,26 @@ export function stripPartialGoalPlan(text) {
   return text.replace(/<goal_plan>[\s\S]*$/, "").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+/**
+ * Most recent day's ready-made 1-2 sentence recap, written by the nightly
+ * rollover job specifically to be read back to the user — real conversation
+ * + logs, not a rules-engine nudge. Shared by the Talk screen's greeting and
+ * Today's "what your companion noticed" line so both surfaces speak with
+ * the same voice about the same day, instead of Today having its own
+ * separate deterministic-nudge personality.
+ */
+export function composeCompanionNarrative(recentSummaries) {
+  const list = Array.isArray(recentSummaries) ? recentSummaries : [];
+  const last = list[list.length - 1]; // oldest-first — last entry is most recent
+  const narrative = (last?.structured?.narrative || "").trim();
+  if (narrative) return narrative;
+  const title = (last?.title || "").trim();
+  if (title) return `Yesterday: ${title}.`;
+  const summary = (last?.summary || "").trim();
+  if (summary) return summary;
+  return null;
+}
+
 /** Split coach reply into conversational body + server-appended action receipt (separator from api/chat.js). */
 export function splitCoachReceipt(text) {
   if (!text || typeof text !== "string") return { main: text, receipt: null };
