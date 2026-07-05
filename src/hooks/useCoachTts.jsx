@@ -1,6 +1,7 @@
 import { useRef, useState, useCallback } from "react";
 import { supabase } from "../supabase.js";
 import { todayStr } from "../utils.js";
+import { getCachedTtsChunk, putCachedTtsChunk, pruneStaleTtsCache } from "../lib/ttsCache.js";
 
 /**
  * Splits a reply into sentence-sized chunks so speak() can synthesize and
@@ -29,9 +30,12 @@ const REWIND_SECONDS = 10;
 /**
  * Pro spoken coach replies via /api/tts (ElevenLabs Flash, server-side).
  * Forged remains the brain — this hook only plays the reply text aloud.
+ * No longer auto-invoked when a reply finishes streaming — speak() is only
+ * ever called from an explicit per-message tap now (see CompanionScreen.jsx),
+ * so nothing gets synthesized unless the user actually asks to hear it.
  *
- * speak(text) synthesizes each sentence-chunk via fetch, decodes it to an
- * AudioBuffer, and schedules it on a single Web Audio graph back-to-back
+ * speak(text, cacheKey) synthesizes each sentence-chunk via fetch, decodes it
+ * to an AudioBuffer, and schedules it on a single Web Audio graph back-to-back
  * with the previous chunk (gapless — see the scheduling comment in speak()
  * below). Playback used to go through a single reused <audio> element with
  * .src reassigned per chunk; once that element got routed through a
@@ -48,6 +52,12 @@ const REWIND_SECONDS = 10;
  * ctx.currentTime and reschedules already-decoded chunks from up to 10s
  * earlier, using AudioBufferSourceNode's own `offset` start parameter
  * rather than re-fetching anything.
+ *
+ * `cacheKey` (the message's stable ts, passed by the caller) makes replaying
+ * a message free: each chunk's decoded AudioBuffer is kept in memory for the
+ * rest of the session (audioCacheRef), and its raw bytes are also written to
+ * IndexedDB (src/lib/ttsCache.js) so a replay survives a page refresh too —
+ * "for today only," pruned once per session against today's date.
  */
 export function useCoachTts({ enabled = false, isPro = false, voiceId = null } = {}) {
   const audioCtxRef = useRef(null);
@@ -60,9 +70,14 @@ export function useCoachTts({ enabled = false, isPro = false, voiceId = null } =
   const positionOriginRef = useRef(0);
   /** Ref (not a closure-local) so rewind() can redirect where the still-running speak() loop schedules its NEXT not-yet-decoded chunk. */
   const nextStartTimeRef = useRef(0);
+  /** In-memory decoded-AudioBuffer cache, keyed by `${cacheKey}:${chunkIndex}` — survives for the life of this hook instance (the whole session), not just one speak() call. */
+  const audioCacheRef = useRef(new Map());
+  const prunedRef = useRef(false);
   const [speaking, setSpeaking] = useState(false);
   const [paused, setPaused] = useState(false);
   const [ttsError, setTtsError] = useState(null);
+  /** Which message (by the cacheKey the caller passed to speak()) is the currently active one — lets the UI show pause/stop/rewind controls on the right message bubble instead of a single global indicator. */
+  const [speakingKey, setSpeakingKey] = useState(null);
   /** Bumped by stopSpeaking()/a new speak() call to cancel any in-flight chunk sequence. */
   const sessionRef = useRef(0);
 
@@ -86,6 +101,10 @@ export function useCoachTts({ enabled = false, isPro = false, voiceId = null } =
         analyserRef.current = analyser;
       }
       audioCtxRef.current.resume?.().catch(() => { /* gesture may not be enough yet */ });
+      if (!prunedRef.current) {
+        prunedRef.current = true;
+        void pruneStaleTtsCache(todayStr());
+      }
     } catch { /* ignore — falls back to the CSS-only pulse / speak() just won't play */ }
     return audioCtxRef.current;
   }, []);
@@ -103,6 +122,7 @@ export function useCoachTts({ enabled = false, isPro = false, voiceId = null } =
     chunkMarksRef.current = [];
     setSpeaking(false);
     setPaused(false);
+    setSpeakingKey(null);
   }, []);
 
   /** Pause playback in place — suspends the whole AudioContext clock, so every scheduled chunk freezes and resumes together with no per-chunk bookkeeping. */
@@ -168,7 +188,7 @@ export function useCoachTts({ enabled = false, isPro = false, voiceId = null } =
     nextStartTimeRef.current = startAt;
 
     if (lastSource) {
-      lastSource.onended = () => { if (session === sessionRef.current) setSpeaking(false); };
+      lastSource.onended = () => { if (session === sessionRef.current) { setSpeaking(false); setSpeakingKey(null); } };
     }
 
     if (wasPaused) { ctx.suspend?.().catch(() => {}); setPaused(true); }
@@ -176,14 +196,35 @@ export function useCoachTts({ enabled = false, isPro = false, voiceId = null } =
 
   /**
    * Fetches one chunk's audio and decodes it to a playable AudioBuffer, or
-   * null on failure. Takes an already-fetched `token` rather than calling
+   * null on failure. Checks caches first when `cacheKey` is given (a
+   * per-message identity, e.g. the message's ts) — in-memory first (this
+   * session), then IndexedDB (survives a refresh, today only) — and only
+   * hits ElevenLabs on a genuine miss, writing the result back to both
+   * caches so the next replay of this exact message is free.
+   *
+   * Takes an already-fetched `token` rather than calling
    * supabase.auth.getSession() itself — that was previously refetched on
    * every single chunk, adding a needless async round-trip to the critical
    * path of the very first (most latency-sensitive) chunk. speak() now
    * fetches the session once per call and reuses it.
    */
-  const fetchChunkBuffer = useCallback(async (chunkText, token, session, ctx) => {
+  const fetchChunkBuffer = useCallback(async (chunkText, token, session, ctx, cacheKey) => {
     try {
+      if (cacheKey) {
+        const mem = audioCacheRef.current.get(cacheKey);
+        if (mem) return { buffer: mem, quotaExhausted: false };
+
+        const cachedBytes = await getCachedTtsChunk(cacheKey);
+        if (session !== sessionRef.current) return { buffer: null, quotaExhausted: false };
+        if (cachedBytes) {
+          try {
+            const buf = await ctx.decodeAudioData(cachedBytes);
+            audioCacheRef.current.set(cacheKey, buf);
+            return { buffer: buf, quotaExhausted: false };
+          } catch { /* corrupt/stale cache entry — fall through to a real fetch */ }
+        }
+      }
+
       if (!token) return { buffer: null, quotaExhausted: false };
 
       const res = await fetch("/api/tts", {
@@ -209,8 +250,14 @@ export function useCoachTts({ enabled = false, isPro = false, voiceId = null } =
 
       const arrayBuf = await res.arrayBuffer();
       if (session !== sessionRef.current) return { buffer: null, quotaExhausted: false };
-      const audioBuffer = await ctx.decodeAudioData(arrayBuf);
+      // decodeAudioData detaches the buffer it's given — decode a clone so
+      // the original bytes are still valid to hand to the cache below.
+      const audioBuffer = await ctx.decodeAudioData(arrayBuf.slice(0));
       if (session !== sessionRef.current) return { buffer: null, quotaExhausted: false };
+      if (cacheKey) {
+        audioCacheRef.current.set(cacheKey, audioBuffer);
+        void putCachedTtsChunk(cacheKey, arrayBuf, todayStr());
+      }
       return { buffer: audioBuffer, quotaExhausted: false };
     } catch {
       if (session === sessionRef.current) setTtsError("Could not play reply");
@@ -218,7 +265,7 @@ export function useCoachTts({ enabled = false, isPro = false, voiceId = null } =
     }
   }, [voiceId]);
 
-  const speak = useCallback(async (text) => {
+  const speak = useCallback(async (text, cacheKey = null) => {
     const spoken = String(text || "").trim();
     if (!enabled || !isPro || !spoken) return;
     setTtsError(null);
@@ -232,14 +279,19 @@ export function useCoachTts({ enabled = false, isPro = false, voiceId = null } =
     if (!ctx) return;
 
     setSpeaking(true);
+    setSpeakingKey(cacheKey);
     try {
       // Fetch the auth token ONCE for this whole reply, not once per chunk —
       // shaves a redundant async round-trip off the critical path of the
       // very first chunk, which is exactly the delay between "reply
-      // finished streaming" and "audio actually starts."
+      // finished streaming" and "audio actually starts." Skipped entirely
+      // when every chunk turns out to be cached, since fetchChunkBuffer
+      // never needs the token in that case — but we don't know that yet,
+      // so it's still fetched eagerly to avoid a second round-trip on a
+      // partial cache hit.
       const { data: { session: sbSession } } = await supabase.auth.getSession();
       const token = sbSession?.access_token;
-      if (!token || session !== sessionRef.current) return;
+      if (session !== sessionRef.current) return;
 
       // Prefetch with a bounded sliding window instead of either extreme:
       //   - staggered one-ahead: chunk N+1 only starts fetching once chunk
@@ -250,11 +302,14 @@ export function useCoachTts({ enabled = false, isPro = false, voiceId = null } =
       //     blows through that and gets extra requests rejected outright.
       // A window of 2 concurrent fetches stays within even the free tier's
       // limit while giving every chunk beyond the first two a real head start.
+      // (Cached chunks resolve near-instantly regardless of this window —
+      // it only throttles genuine network fetches.)
       const CONCURRENT_TTS_FETCH_WINDOW = 2;
       const windowSize = Math.min(CONCURRENT_TTS_FETCH_WINDOW, chunks.length);
+      const chunkKey = i => (cacheKey ? `${cacheKey}:${i}` : null);
       const chunkPromises = new Array(chunks.length);
       for (let i = 0; i < windowSize; i++) {
-        chunkPromises[i] = fetchChunkBuffer(chunks[i], token, session, ctx);
+        chunkPromises[i] = fetchChunkBuffer(chunks[i], token, session, ctx, chunkKey(i));
       }
 
       // Gapless scheduling: each chunk is scheduled to start exactly when the
@@ -285,7 +340,7 @@ export function useCoachTts({ enabled = false, isPro = false, voiceId = null } =
         // that caused ElevenLabs to reject requests outright.
         const nextIdx = i + windowSize;
         if (nextIdx < chunks.length) {
-          chunkPromises[nextIdx] = fetchChunkBuffer(chunks[nextIdx], token, session, ctx);
+          chunkPromises[nextIdx] = fetchChunkBuffer(chunks[nextIdx], token, session, ctx, chunkKey(nextIdx));
         }
         if (quotaExhausted) break; // further chunks will fail the same way — stop early
         if (buffer) {
@@ -318,6 +373,7 @@ export function useCoachTts({ enabled = false, isPro = false, voiceId = null } =
         activeSourcesRef.current = [];
         setSpeaking(false);
         setPaused(false);
+        setSpeakingKey(null);
       }
     }
   }, [enabled, isPro, stopSpeaking, fetchChunkBuffer, ensureAudioContext]);
@@ -325,8 +381,8 @@ export function useCoachTts({ enabled = false, isPro = false, voiceId = null } =
   return {
     speak, stopSpeaking, primeAudio, speaking, ttsError,
     clearTtsError: () => setTtsError(null),
-    /** Playback controls for the floating bar — pause/resume/rewind 10s. */
-    paused, pauseSpeaking, resumeSpeaking, rewindSpeaking,
+    /** Playback controls — pause/resume/rewind 10s/stop, plus which message (by cacheKey) is currently active. */
+    paused, pauseSpeaking, resumeSpeaking, rewindSpeaking, speakingKey,
     /** Read-only: analyser node a consumer can pull frequency data from for an audio-reactive animation. */
     analyserRef,
   };

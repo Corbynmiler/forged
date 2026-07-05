@@ -358,6 +358,35 @@ function PlaybackBar({ paused, onPause, onResume, onRewind, onStop }) {
 }
 
 /**
+ * Per-message "hear this reply" control — deliberately a real, labeled
+ * button (not a bare tiny icon) per direct request: "should not be tiny or
+ * hidden." Replaces auto-playing every reply; tapping this is now the ONLY
+ * way a reply gets spoken, so it needs to read as an obvious, inviting
+ * affordance, ChatGPT-style, not a buried icon someone has to go looking for.
+ */
+function ListenButton({ onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label="Listen to this reply"
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 6, marginTop: 6,
+        padding: "6px 12px", borderRadius: 20,
+        border: `0.5px solid ${T.borderStrong}`, background: T.raised, color: T.sub,
+        fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: T.font,
+      }}
+    >
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+        <path d="M4 9v6h4l5 5V4L8 9H4Z" fill="currentColor" />
+        <path d="M16.5 8.5a5 5 0 0 1 0 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+      Listen
+    </button>
+  );
+}
+
+/**
  * Preview-only developer badge: how much of the ElevenLabs quota is left.
  * Creator-account-only (checked by the caller), on top of this whole branch
  * never shipping to `main` in the first place — belt and suspenders, since
@@ -739,7 +768,12 @@ export function CompanionScreen({
                 });
                 if (user?.id) void persistConversationMessage(user.id, doneDay, "assistant", finalContent, situation);
 
-                if (voiceRepliesEnabled && isPro && finalContent) coachTts.speak(finalContent);
+                // Replies are no longer spoken automatically — every reply
+                // costs real ElevenLabs characters, and most turns in a text
+                // conversation don't need to be read aloud. Each assistant
+                // bubble now has its own tap-to-listen control instead (see
+                // the carousel render below), same as ChatGPT's per-message
+                // speaker icon.
 
                 if (evt.created) {
                   const rows = Array.isArray(evt.created) ? evt.created : [evt.created];
@@ -992,6 +1026,21 @@ export function CompanionScreen({
                         <CapturedLine items={m.captured} onNavigateTo={onNavigateTo} />
                       </div>
                     ) : null}
+                    {!isUser && !isThinking && m.id !== STREAM_ID && isPro && voiceRepliesEnabled ? (
+                      coachTts.speakingKey === m.ts ? (
+                        <div style={{ display: "inline-block", textAlign: "left" }}>
+                          <PlaybackBar
+                            paused={coachTts.paused}
+                            onPause={coachTts.pauseSpeaking}
+                            onResume={coachTts.resumeSpeaking}
+                            onRewind={coachTts.rewindSpeaking}
+                            onStop={coachTts.stopSpeaking}
+                          />
+                        </div>
+                      ) : (
+                        <ListenButton onClick={() => { coachTts.primeAudio?.(); coachTts.speak(coachMain, m.ts); }} />
+                      )
+                    ) : null}
                   </div>
                 );
               })}
@@ -1038,15 +1087,6 @@ export function CompanionScreen({
             <div style={{ fontSize: 10.5, color: T.hint, textAlign: "center" }}>
               {SITUATIONS.find(s => s.id === situation)?.desc}
             </div>
-          ) : null}
-          {coachTts.speaking ? (
-            <PlaybackBar
-              paused={coachTts.paused}
-              onPause={coachTts.pauseSpeaking}
-              onResume={coachTts.resumeSpeaking}
-              onRewind={coachTts.rewindSpeaking}
-              onStop={coachTts.stopSpeaking}
-            />
           ) : null}
         </div>
       </div>

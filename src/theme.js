@@ -82,23 +82,35 @@ export const CREATOR_ID = "5e9b4ba7-bf15-4e94-ab05-fe3306496973";
 export const FREE_DAILY_LIMIT = 5;
 
 /**
- * ElevenLabs premade voices — Pro spoken replies only. Labels are
- * descriptive (not human names) so the picker reads as "pick a character,"
- * not "pick a person." The first ("Warm") used to be ElevenLabs' "Adam" —
- * swapped for "George" (their own default-voice library, described as a
- * warm British male) after direct feedback that Adam read as robotic;
- * unverified by ear in this sandbox — worth confirming it's actually better,
- * not just different, once you can listen.
+ * ElevenLabs premade voices — Pro spoken replies only. Companion-style
+ * names (not generic mood words, not human first names) so the picker
+ * reads as "pick a character," not "pick a mood" or "pick a person."
+ *
+ * All four are male, per direct request. The previous roster had two
+ * generic-labeled entries ("Calm", "Grounded") that were actually
+ * ElevenLabs' "Sarah" and "Rachel" — both female voices, mislabeled in a
+ * way that hid that. Swapped out for two more ElevenLabs default male
+ * voices instead.
+ *
+ * Atlas (George) and Vale (Daniel) are both already live in this app and
+ * confirmed working. Orion (Antoni) and Echo (Josh) are NEW this round —
+ * their voice IDs are recalled from training knowledge of ElevenLabs'
+ * long-standing premade voice library (these are commonly-referenced,
+ * globally-available premade IDs, not account-specific), but have NOT been
+ * verified against a live ElevenLabs call in this sandbox. Test both by
+ * ear before trusting them; if either is wrong, ElevenLabs' Voice Library
+ * (elevenlabs.io → Voices) lists the correct ID for any premade voice by
+ * name, or generates a 4xx from api/tts.js immediately if the ID is bad.
  *
  * NOTE: ElevenLabs' default-voice library (all 4 of these IDs) is
  * documented as retiring end of 2026 — worth revisiting voice IDs well
  * before then rather than discovering it's broken on the day.
  */
 export const COACH_VOICE_OPTIONS = [
-  { id: "JBFqnCBsd6RMkjVDRZzb", label: "Warm",     desc: "Warm, direct" },
-  { id: "EXAVITQu4vr4xnSDxMaL", label: "Calm",     desc: "Calm, clear" },
-  { id: "onwK4e9ZLuTAKqWW03F9", label: "Measured", desc: "Measured, steady" },
-  { id: "21m00Tcm4TlvDq8ikWAM", label: "Grounded", desc: "Grounded, friendly" },
+  { id: "JBFqnCBsd6RMkjVDRZzb", label: "Atlas", desc: "Warm, steady presence" },
+  { id: "onwK4e9ZLuTAKqWW03F9", label: "Vale",  desc: "Measured and deliberate" },
+  { id: "ErXwobaYiN019PkySvjV", label: "Orion", desc: "Easygoing, natural tone" }, // Antoni — unverified in this sandbox, test by ear
+  { id: "TxGEqnHWrfWFTfGW9XjX", label: "Echo",  desc: "Deep, grounded voice" },   // Josh — unverified in this sandbox, test by ear
 ];
 
 /**

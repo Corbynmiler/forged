@@ -453,7 +453,7 @@ export function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCo
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 }}>
               <div style={{ flex:1, minWidth:0 }}>
                 <div style={{ fontSize:14, color:T.text }}>Spoken replies</div>
-                <div style={{ fontSize:12, color:T.muted, marginTop:2, lineHeight:1.45 }}>Companion reads replies aloud after you speak</div>
+                <div style={{ fontSize:12, color:T.muted, marginTop:2, lineHeight:1.45 }}>Adds a "Listen" button to each reply on Talk — tap to hear it, nothing plays automatically</div>
               </div>
               <ToggleSwitch on={voiceRepliesEnabled} onClick={() => onSaveVoicePrefs({ voiceRepliesEnabled: !voiceRepliesEnabled, coachVoiceId })} ariaLabel="Spoken coach replies" />
             </div>

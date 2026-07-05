@@ -2,7 +2,38 @@
 
 **Branch:** `claude/forged-ai-companion-redesign-agyjl7`
 **Status:** preview/experimental only. `main` (production) has not been touched, merged into, or modified at any point on this branch.
-**Last updated:** 2026-07-05 (eighth round today) — quick fix: `TTS_MONTHLY_CHAR_LIMIT` was wrong. See "Eighth round" below, then "Seventh round" for the playback controls + usage monitor it corrects.
+**Last updated:** 2026-07-05 (ninth round today) — audio UX/cost pass: replies are no longer spoken automatically (real ElevenLabs cost per reply, and most turns don't need to be read aloud). Each assistant message now has its own tap-to-listen control, generated audio is cached (in-memory + IndexedDB, today only) so replaying never re-calls ElevenLabs, and the voice roster is male-only with companion-style names. See "Ninth round."
+
+### Ninth round — tap-to-play TTS, per-message caching, voice roster fix
+
+**1. Auto-play removed. Each assistant message now has its own "Listen" button.**
+`CompanionScreen.jsx` no longer calls `coachTts.speak()` when a reply finishes streaming (that call site is gone — see the comment left in its place). Instead, every assistant bubble in the carousel gets a real, labeled `ListenButton` (icon + the word "Listen," not a bare tiny icon — per direct request that it "should not be tiny or hidden"), shown whenever `isPro && voiceRepliesEnabled`. Tapping it calls `coachTts.speak(coachMain, m.ts)` — `coachMain` is the already-cleaned/display-formatted text (receipt stripped, goal-plan stripped, markdown formatted), the same text the bubble actually shows, not the raw stream text the old auto-play used — so what you hear now always matches what you read. `m.ts` (the message's creation timestamp) is the per-message cache key — the only field guaranteed to survive both this session and a page reload (message `.id` does not persist through `saveCoachDayMessages`/`loadCoachDayMessages`, `.ts` does).
+
+While a message is playing, its `ListenButton` is replaced in place by the same `PlaybackBar` (pause/resume/rewind 10s/stop) from last round — now driven by `coachTts.speakingKey` (sits alongside `speaking`/`paused`, set to whatever cacheKey was passed to `speak()`) so the controls appear on the *correct* message, not a single global indicator. Starting a new message's audio still stops whatever was playing first, same as before.
+
+**2. Generated audio is cached — replaying never re-calls ElevenLabs.**
+Two layers, both keyed by `${m.ts}:${chunkIndex}` (per sentence-chunk, matching how replies are already synthesized):
+- **In-memory** (`audioCacheRef` in `useCoachTts.jsx`) — decoded `AudioBuffer`s kept for the life of the session. Free, instant replays within one visit.
+- **IndexedDB** (new `src/lib/ttsCache.js`) — raw MP3 bytes, survives a page refresh. Every cache write is tagged with today's date; a prune pass (once per session, on first `AudioContext` creation) deletes anything not from today, so this is explicitly "cached for today only," never an unbounded store. `fetchChunkBuffer` checks in-memory → IndexedDB → real fetch, in that order, and writes back to both on a genuine miss.
+- **Not done, and explained rather than guessed at:** cross-day persistence (e.g. "still cached tomorrow") was deliberately not built — the request was "today only," and a longer-lived cache raises real questions (staleness if a voice is changed, unbounded IndexedDB growth) that weren't part of this ask.
+
+**3. Voice roster fixed — was accidentally half female, despite "prefer male voices."**
+Two of the four previous entries (labeled generically as "Calm" and "Grounded") were actually ElevenLabs' premade **Sarah** and **Rachel** — both female voices, with labels that gave no indication of that. All four `COACH_VOICE_OPTIONS` entries are now male, renamed to companion-style names instead of mood words or human first names: **Atlas** (George — already live, unchanged), **Vale** (Daniel — already live, unchanged), **Orion** (Antoni), **Echo** (Josh). Name and description no longer repeat each other (e.g. "Vale — Measured and deliberate," not "Measured — Measured, steady").
+- **Honest gap, not guessed past:** Orion's and Echo's voice IDs (`ErXwobaYiN019PkySvjV`, `TxGEqnHWrfWFTfGW9XjX`) are recalled from training knowledge of ElevenLabs' long-standing premade voice library — these are commonly-referenced, globally-available IDs, not account-specific — but **not verified against a live ElevenLabs call in this sandbox**. Test both by ear before trusting them. If either is wrong, ElevenLabs' Voice Library (elevenlabs.io → Voices) shows the correct ID for any premade voice by name — swap it into `theme.js`'s `COACH_VOICE_OPTIONS`, one line, no other code changes needed.
+
+**4. `TTS_MONTHLY_CHAR_LIMIT` — already fixed last round, confirmed still correct.** 10,000 in `theme.js`, `api/tts.js`, and `api/tts-usage.js`'s fallback — no change needed this round, just verified.
+
+**Also fixed in passing:** `ProfileScreen.jsx`'s "Spoken replies" toggle description said "Companion reads replies aloud after you speak" — described the now-removed auto-play behavior. Updated to describe the real tap-to-listen behavior.
+
+**Files touched:** `src/hooks/useCoachTts.jsx` (caching, `speakingKey`, `speak(text, cacheKey)` signature change), `src/lib/ttsCache.js` (new), `src/screens/CompanionScreen.jsx` (`ListenButton`, per-message wiring, auto-play call removed), `src/theme.js` (voice roster), `src/screens/ProfileScreen.jsx` (copy fix).
+
+**What to test:**
+- Send a message, confirm it does NOT speak automatically.
+- Tap "Listen" on an assistant reply — confirm it plays, and the button becomes pause/rewind/stop controls while it does.
+- Let it finish or stop it, tap "Listen" again on the *same* message — should play instantly with no network delay (cached) and should not show up as new usage in the ElevenLabs usage badge.
+- Refresh the page, tap "Listen" on a message from earlier today — should still play from cache (IndexedDB), not re-fetch.
+- Try each of the 4 voices in the picker — confirm all read as male, and that "Orion"/"Echo" (the two new ones) actually work and sound distinct; report back if either voice ID is wrong so it can be swapped.
+- Confirm the usage badge (creator-only, under the voice pill) still shows a 10,000-char monthly limit.
 
 ### Eighth round — fixed the TTS monthly cap: it was 5x the real ElevenLabs limit
 
