@@ -67,7 +67,7 @@ async function persistConversationMessage(userId, day, role, content, situationI
 // which means the reply needs the same range: observations, analysis,
 // explanations, stories, connections to what it remembers — not a reflex
 // question every turn. ──
-const RESPONSE_STYLE_STEER = "RESPONSE STYLE: Match the range of a sharp, well-read conversational partner, not a coaching app's follow-up loop. THIS IS A HARD CONSTRAINT, NOT A SOFT PREFERENCE: do not end your reply with a question by default. Before you add a question, ask yourself whether you actually need the answer to help — if you're not sure, don't ask it. Lead with a real observation, an honest take, an explanation, a relevant story or analogy, or a connection to something you remember about them. Vary the shape and length of your replies to match the weight of what they said — a throwaway comment gets a throwaway reply, a real problem gets real thought.";
+const RESPONSE_STYLE_STEER = "RESPONSE STYLE: Match the range of a sharp, well-read conversational partner, not a coaching app's follow-up loop. THIS IS A HARD CONSTRAINT, NOT A SOFT PREFERENCE: do not end your reply with a question by default. Before you add a question, ask yourself whether you actually need the answer to help — if you're not sure, don't ask it. Lead with a real observation, an honest take, an explanation, a relevant story or analogy, or a connection to something you remember about them. Vary the shape and length of your replies to match the weight of what they said — a throwaway comment gets a throwaway reply, a real problem gets real thought.\n\nDO NOT REFLEXIVELY REDIRECT TO THE ARC, PROOF ACTIONS, HABITS, STREAKS, OR TRACKED GOALS. You are a capable, versatile AI companion first — not a compliance monitor whose job is to steer every conversation back to tracked progress. Only bring up the Arc/habits/goals when they're genuinely relevant to what's actually being discussed, never as a reflex or because it feels like your role. If asked for a joke, tell an actual joke — not a joke about their goals or proof actions. If asked something with nothing to do with their tracked progress, just engage with it directly and fully, the way any capable AI assistant would — humor, tangents, whatever the user actually wants, all fully in bounds. Saying something is \"not your lane\" or otherwise declining to just engage is exactly the failure mode to avoid.";
 
 // ── Situations — designed around how the user actually reaches for AI, not
 // generic coaching postures. Each one asks for a genuinely different
@@ -78,7 +78,7 @@ const RESPONSE_STYLE_STEER = "RESPONSE STYLE: Match the range of a sharp, well-r
 const SITUATIONS = [
   {
     id: "chat", label: "Just chat", desc: "Casual, mate-to-mate — relaxed, still useful.",
-    steer: "This is casual, mate-to-mate conversation — relaxed, no agenda, but still genuinely useful, not just filler. React like a sharp, well-read friend would: give an honest take, notice what's actually interesting, connect it to something you know about their life. A question is fine sometimes, but it is never the default move — most turns should end on a thought, not a question mark.",
+    steer: "This is casual, mate-to-mate conversation — relaxed, no agenda, but still genuinely useful, not just filler. This is the most open of every mode here: talk about absolutely anything the user brings up, on its own terms, exactly like a good general-purpose AI assistant would — jokes, random questions, whatever's actually on their mind. Do NOT redirect to the Arc, proof actions, habits, or tracked goals unless the user explicitly brings those up first — that instinct is switched off in this mode specifically. If they ask for a joke, just tell one. React like a sharp, well-read friend would: give an honest take, notice what's actually interesting, connect it to something you know about their life when it's genuinely relevant — not as a reflex. A question is fine sometimes, but it is never the default move — most turns should end on a thought, not a question mark.",
   },
   {
     id: "build", label: "Build", desc: "Founder mode — direct, opinionated, action-focused.",
@@ -362,7 +362,31 @@ export function CompanionScreen({
   // playback itself — any failure here just leaves the CSS pulse running.
   const audioAnalyserSetupRef = useRef(false);
   const audioAnalyserRef = useRef(null);
+  const audioCtxRef = useRef(null);
   const audioRafRef = useRef(null);
+
+  // Create (and attempt to resume) the AudioContext as close to a real user
+  // gesture as possible, instead of only when TTS playback actually starts.
+  // This turned out to be the actual cause of "state says Speaking, ember
+  // reacts, but genuinely no sound" — new AudioContexts are commonly created
+  // in a 'suspended' state (especially iOS Safari), and once
+  // createMediaElementSource() reroutes the <audio> element's output through
+  // a suspended context, that element is PERMANENTLY silent from then on —
+  // .play() still resolves fine, the element still reports "playing," but
+  // zero signal reaches the speakers. Every earlier fix in this area (fetch
+  // latency, Content-Length, concurrency) was real, but none of them could
+  // have mattered if this was silently true the whole time. Safe to call
+  // repeatedly — a no-op once created/running.
+  function primeEmberAudioContext() {
+    try {
+      if (!audioCtxRef.current) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        audioCtxRef.current = new AC();
+      }
+      audioCtxRef.current.resume?.().catch(() => {});
+    } catch { /* ignore — falls back to the CSS-only pulse if this never works */ }
+  }
+
   useEffect(() => {
     if (!coachTts.speaking) {
       if (audioRafRef.current) { cancelAnimationFrame(audioRafRef.current); audioRafRef.current = null; }
@@ -371,11 +395,13 @@ export function CompanionScreen({
     }
     const audioEl = coachTts.audioElRef?.current;
     if (!audioEl) return;
+    // Some browsers auto-suspend an idle AudioContext — worth another
+    // resume attempt every time speaking starts, not just once.
+    primeEmberAudioContext();
     if (!audioAnalyserSetupRef.current) {
       audioAnalyserSetupRef.current = true;
       try {
-        const AC = window.AudioContext || window.webkitAudioContext;
-        const ctx = new AC();
+        const ctx = audioCtxRef.current;
         const source = ctx.createMediaElementSource(audioEl);
         const analyser = ctx.createAnalyser();
         analyser.fftSize = 64;
@@ -622,6 +648,12 @@ export function CompanionScreen({
   }
 
   function handleEmberTap() {
+    // Prime the analyser's AudioContext synchronously inside this real tap
+    // gesture — the best chance it has of actually unlocking on browsers
+    // (notably iOS Safari) that require audio-context-resume to happen
+    // within a genuine user-initiated event, not several async hops later
+    // once a reply has actually finished streaming.
+    primeEmberAudioContext();
     if (!speech.supported) { alert(speechUnsupportedHelpMessage()); return; }
     if (speech.listening) {
       // Stopping IS the send trigger — no separate confirm step. Read the
@@ -878,11 +910,11 @@ export function CompanionScreen({
               value={input}
               onChange={e => setInput(e.target.value)}
               onInput={e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 88) + "px"; }}
-              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !atFreeCap) { e.preventDefault(); send(input); } }}
+              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !atFreeCap) { e.preventDefault(); primeEmberAudioContext(); send(input); } }}
               placeholder="Type instead…"
               style={{ flex: 1, background: T.surface, border: `0.5px solid ${T.borderStrong}`, borderRadius: T.rsm, padding: "10px 14px", fontSize: 16, color: T.text, resize: "none", fontFamily: T.font, lineHeight: 1.5, outline: "none", minHeight: 42, maxHeight: 88 }}
             />
-            <button type="button" onClick={() => send(input)} disabled={!input.trim() || loading || atFreeCap}
+            <button type="button" onClick={() => { primeEmberAudioContext(); send(input); }} disabled={!input.trim() || loading || atFreeCap}
               aria-label="Send message"
               style={{ width: 40, height: 40, borderRadius: "50%", border: `0.5px solid ${T.border}`, flexShrink: 0, background: input.trim() && !loading ? T.gold : T.surface, cursor: input.trim() && !loading ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <svg width="15" height="15" viewBox="0 0 18 18" fill="none">
