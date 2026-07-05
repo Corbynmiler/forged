@@ -3925,10 +3925,15 @@ export default function App() {
     setScreen(target);
   }
 
+  // V2 IA, step 1: three tabs, not four. "Arc" is deliberately no longer a
+  // persistent destination — it's still fully built and reachable (Noticed
+  // always surfaces a way in: the ArcStrip when a direction is active, or
+  // the "Want to set a season?" card when it isn't), it just isn't a
+  // permanent bottom-nav slot for something optional. See
+  // PREVIEW_BRANCH_HANDOFF.md for the full V2 vision this is one step toward.
   const NAV = [
-    { id:"companion", label:"Talk",    icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 12.5a2.5 2.5 0 0 0 2.5-2.5V6a2.5 2.5 0 1 0-5 0v4a2.5 2.5 0 0 0 2.5 2.5Z" stroke="currentColor" strokeWidth="1.5"/><path d="M6.5 9.5v.5a3.5 3.5 0 0 0 7 0v-.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
-    { id:"today",    label:"Today",    icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.5"/><path d="M10 6v4l2.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
-    { id:"arc",      label:"Arc",      icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 15a7 7 0 0 1 14 0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><path d="M10 3.5v2M4.6 5.6l1.4 1.4M15.4 5.6L14 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
+    { id:"companion", label:"Talk",     icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 12.5a2.5 2.5 0 0 0 2.5-2.5V6a2.5 2.5 0 1 0-5 0v4a2.5 2.5 0 0 0 2.5 2.5Z" stroke="currentColor" strokeWidth="1.5"/><path d="M6.5 9.5v.5a3.5 3.5 0 0 0 7 0v-.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
+    { id:"today",    label:"Noticed",  icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.5"/><path d="M10 6v4l2.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
     { id:"profile",  label:"You",      icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="7" r="3" stroke="currentColor" strokeWidth="1.5"/><path d="M4 17c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg> },
   ];
 

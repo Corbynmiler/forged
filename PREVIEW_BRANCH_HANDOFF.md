@@ -2,7 +2,30 @@
 
 **Branch:** `claude/forged-ai-companion-redesign-agyjl7`
 **Status:** preview/experimental only. `main` (production) has not been touched, merged into, or modified at any point on this branch.
-**Last updated:** 2026-07-05 (third round today) — this round's request was explicitly about product coherence, not new features: "Today" and "Arc" were reframed so the product feels like one companion, not a new Talk tab bolted onto old Forged. See "Third round" below for what shipped and the bigger nav/IA vision proposed (not yet built) for future rounds.
+**Last updated:** 2026-07-05 (fourth round today) — explicit instruction this round: stop renovating the old Forged IA, design from first principles instead ("what would the complete experience look like if designed today"), reusing the backend but not feeling obligated to reuse the old screens/nav. Full V2 vision proposed below; smallest real step toward it shipped (nav collapsed from 4 tabs to 3 — see "Fourth round").
+
+### Fourth round — Version 2 information architecture (proposed) + step 1 (shipped)
+
+**The one-sentence product bet, restated as the design brief:** "A companion that remembers me, notices patterns, helps me think clearly, and quietly helps me move forward." Everything below is designed against that sentence, not against preserving Today/Arc/You as they exist on `main`.
+
+**V2 IA proposal — three surfaces, not four:**
+
+1. **Talk** (unchanged) — the front door. Conversation, voice, modes (including the new opt-in long-form Ramble mode). This already matches the vision; not touched this round beyond what already shipped.
+2. **Noticed** (replaces "Today" as a tab; absorbs "Arc"'s role as a tab) — a single reverse-chronological feed of your life through the companion's eyes. Today's live state (quick logging, what's pending) sits at the top; narrated past days (`daily_summaries`) scroll below as entries, not a separate "History" destination. An active direction (today's "Arc") surfaces as a contextual strip *within this feed*, not a dedicated tab — visible when relevant, invisible when not, exactly like the vision's "helps me think clearly, quietly helps me move forward" rather than "here is a mandatory progress bar." Habits/proof actions become things you tap to log inline in this feed, not a grid you're required to visit and clear.
+3. **You** — the quiet control panel underneath everything: profile, the structured management console (habit/goal list editing, direction/Arc setup when you want one, social/friends, voice + subscription settings). Visited rarely, on purpose — it's infrastructure, not a daily surface.
+4. **(Future, not yet buildable) Patterns** — once embeddings/retrieval (Phase 2a's remaining piece) exist, this could become a real 4th surface: a companion-narrated view of actual long-term trends ("you've mentioned burnout every Sunday for a month"), which is a genuinely new capability rather than a repurposed old screen. Proposed as the natural next surface once the memory layer can support it — not before.
+
+**What this deliberately does NOT preserve:** a permanent, always-visible "Arc" destination. The current product structurally implies every user should have an active Arc at all times (a whole tab dedicated to it, empty or nagging when you don't). The vision explicitly wants Arc optional — so in V2, it isn't a place you go, it's a strip that appears in Noticed when it's relevant to what the companion is already showing you.
+
+**Step 1, shipped this round:** collapsed the bottom nav from 4 tabs (Talk/Today/Arc/You) to 3 (Talk/Noticed/You) in `App.jsx`'s `NAV` array. "Today" relabeled **"Noticed"** (ties directly to the "Your companion noticed" block shipped last round — same word, same idea, reinforcing it's one voice) — still routes to the same `TodayScreen.jsx` (id `"today"` unchanged internally; this is a nav/label change, not a screen rewrite). "Arc" removed as a persistent tab — **not deleted, not hidden**: `ArcScreen.jsx` is fully intact and reachable exactly as before via the existing `onViewArc` navigation (the ArcStrip when a direction is active, or the "Want to set a season?" card when it isn't — both already present in Today/Noticed from last round, both already call `setScreen("arc")`). Every state of Noticed except the true zero-habits empty state already surfaces a way into Arc; the zero-habits state instead leads to Talk, where the companion can create a direction through conversation. No functionality removed — only the permanent nav slot.
+
+**What was NOT done this round (bigger, deliberately deferred, needs its own review):**
+- Actually merging Today's and Arc's *content* into one literal feed component — this round only collapsed the *navigation*; `TodayScreen.jsx` and `ArcScreen.jsx` remain separate components/files. A true unified "Noticed" feed (today's state + narrated past days + Arc's proof timeline all in one scroll) is a substantially bigger rewrite of both screens and deserves its own dedicated, reviewed pass.
+- Shrinking the habit/proof-action grid's visual dominance within Today/Noticed itself (still the same layout as before, just reframed by the header above it last round).
+- Any change to `You`/Profile's structure.
+- The "Patterns" surface (blocked on embeddings/retrieval, Phase 2a).
+
+**Risk assessment for this step:** Nav-only change (`App.jsx`'s `NAV` array + one label string). No component deleted, no route removed from the `screen === "..."` switch, no data model touched. Every existing path to Arc (`onViewArc`, `navigateTo("arc")`, the journal/insights redirects) still works identically — verified by reading each call site, not just assumed. Fully reversible by restoring the 4th `NAV` entry if it doesn't feel right in practice.
 
 ### Third round — product coherence (Today reframe + Arc de-emphasis)
 
@@ -17,11 +40,7 @@
 
 **What did NOT change:** the habit checklist/grid, proof-action mechanics, Arc timeline/reviews, Hub, streaks, XP — all fully intact, same data, same behavior. This round only touched *framing*: what leads the page and how the no-Arc state is worded. "Habits/proof actions become tools the companion suggests, not the main experience" is **not yet done** — that's a bigger visual-hierarchy change (de-emphasizing the grid itself, not just the header above it) and deserves its own round with its own review, not bundled in here.
 
-**Bigger nav/IA vision, proposed but NOT built — for a future round, needs explicit approval first:**
-- Rename nav tabs to match the reframed story: "Talk" stays; "Today" → something like **"Noticed"** (a companion-narrated feed of the day — logging still available, but presented as a record of what happened, not a todo list); "Arc" → **"Direction"**, and only visually prominent in the nav when one is actually active — otherwise it could collapse to a small "+ Set a direction" affordance reachable from Talk/Today rather than a permanently-empty 3rd tab; "You" stays as settings.
-- Longer-term, once embeddings/retrieval (Phase 2a's remaining piece) exists: the 4th nav slot could become **"Patterns"** — a companion-narrated view of real trends over time ("you've mentioned burnout every Sunday for a month"), which would be a genuinely new, differentiated surface rather than a repurposed old one.
-- Habits/proof-actions could move from a permanent grid to an on-demand "manage what's tracked" surface (Hub already exists for this) reachable via a small affordance from Today, with the grid itself shrinking to a compact "logged today" strip rather than the page's dominant visual element.
-- None of this was built — it's a direction to react to, not a plan already in motion.
+**Nav/IA vision proposed here was superseded and then partly built in the very next round — see "Fourth round" near the top of this document for the full V2 IA proposal and what actually shipped.**
 
 **This round's changes:**
 1. **"Ramble" mode — a genuine long-form (5-10 min) companion mode.** New `SITUATIONS` entry in `CompanionScreen.jsx` for real ChatGPT-caliber long replies (humor, real callbacks to what the companion remembers, no forced structure) — explicitly calibrated to only go long when the message actually calls for it, not a standing "always 10 minutes" default (per explicit decision: opt-in per message, not a standing mode, to keep monthly TTS cost bounded). `MAX_SPEECH_CHUNKS` in `useCoachTts.jsx` raised from 8→60 so a genuinely long reply doesn't merge its overflow sentences into one oversized chunk that would fail `api/tts.js`'s per-request 2000-char cap.
