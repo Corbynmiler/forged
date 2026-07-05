@@ -72,11 +72,15 @@ export function useCoachTts({ enabled = false, isPro = false, voiceId = null } =
     setSpeaking(false);
   }, []);
 
-  /** Fetch one chunk's audio and resolve to a playable object URL, or null on failure. */
-  const fetchChunkAudioUrl = useCallback(async (chunkText, session) => {
+  /**
+   * Fetch one chunk's audio and resolve to a playable object URL, or null on failure.
+   * Takes an already-fetched `token` rather than calling supabase.auth.getSession()
+   * itself — that was previously refetched on every single chunk, adding a needless
+   * async round-trip to the critical path of the very first (most latency-sensitive)
+   * chunk. speak() now fetches the session once per call and reuses it.
+   */
+  const fetchChunkAudioUrl = useCallback(async (chunkText, token, session) => {
     try {
-      const { data: { session: sbSession } } = await supabase.auth.getSession();
-      const token = sbSession?.access_token;
       if (!token) return { url: null, quotaExhausted: false };
 
       const res = await fetch("/api/tts", {
@@ -135,17 +139,25 @@ export function useCoachTts({ enabled = false, isPro = false, voiceId = null } =
 
     setSpeaking(true);
     try {
+      // Fetch the auth token ONCE for this whole reply, not once per chunk —
+      // shaves a redundant async round-trip off the critical path of the
+      // very first chunk, which is exactly the delay between "reply
+      // finished streaming" and "audio actually starts."
+      const { data: { session: sbSession } } = await supabase.auth.getSession();
+      const token = sbSession?.access_token;
+      if (!token || session !== sessionRef.current) return;
+
       // Kick off the first chunk, and always keep the NEXT chunk's fetch
       // in flight while the current one plays — by the time playback of
       // chunk N ends, chunk N+1's audio is usually already downloaded.
-      let nextChunkPromise = fetchChunkAudioUrl(chunks[0], session);
+      let nextChunkPromise = fetchChunkAudioUrl(chunks[0], token, session);
       for (let i = 0; i < chunks.length; i++) {
         if (session !== sessionRef.current) return;
         const { url, quotaExhausted } = await nextChunkPromise;
         if (session !== sessionRef.current) { if (url) URL.revokeObjectURL(url); return; }
         if (quotaExhausted) break; // further chunks will fail the same way — stop early
         nextChunkPromise = i + 1 < chunks.length
-          ? fetchChunkAudioUrl(chunks[i + 1], session)
+          ? fetchChunkAudioUrl(chunks[i + 1], token, session)
           : Promise.resolve({ url: null, quotaExhausted: false });
         if (url) await playChunkUrl(url, session);
       }

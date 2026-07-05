@@ -2,7 +2,9 @@
 
 **Branch:** `claude/forged-ai-companion-redesign-agyjl7`
 **Status:** preview/experimental only. `main` (production) has not been touched, merged into, or modified at any point on this branch.
-**Last updated:** 2026-07-05 — the Talk-screen voice pill (proposed in §9 of the prior revision) is now actually built, committed, and pushed. **Important note on process:** a prior attempt at this same feature (via Cursor) reported a commit hash that was verified, directly against the remote repository, to not exist on any branch — nothing had actually reached GitHub, which is why it never appeared live. That work was redone from scratch here rather than debugged, since there was nothing on the remote to inspect or build on top of. If a tool reports a commit/milestone as complete, verify it landed on `origin` (`git log origin/<branch>`) before trusting the report or building further on top of it.
+**Last updated:** 2026-07-05 — voice quality/reliability fixes from real hands-on feedback (first real test of ElevenLabs on this branch): fixed a real ~3s latency bug, fixed a real cause of audio silently cutting out mid-reply, added voice speed control, dropped human names from the voice picker, and swapped the worst-reviewed voice for a different default. See §5.
+
+**Prior note on process, still worth keeping in mind:** an earlier attempt at the Talk-screen voice pill (via Cursor) reported a commit hash that was verified, directly against the remote repository, to not exist on any branch — nothing had actually reached GitHub, which is why it never appeared live. That work was redone from scratch instead of debugged, since there was nothing on the remote to inspect. If a tool reports a commit/milestone as complete, verify it landed on `origin` (`git log origin/<branch>`) before trusting the report or building further on top of it.
 
 ---
 
@@ -69,6 +71,7 @@ This entire branch has been built in a sandboxed environment with **no real logi
 - `memory_facts` / `xp_events` schema applied (confirmed via `list_tables` earlier in this branch's history).
 - Build passes (`npm run build`) after every change on this branch.
 - Conversation-mode injection path is real (traced in code — `SITUATIONS[].steer` → `system_stable` → `buildSystemBlocks()` in `api/chat.js` → sent to Claude).
+- **Voice replies work end-to-end** — confirmed by real use: ElevenLabs key set, audio played, Ember reacted. First genuinely live-tested subsystem on this branch. Real feedback from that test (robotic voice, slow pace, mid-reply cutouts, human names, ~3s delay) drove this round's fixes — see §5.
 
 **Unverified (reasoned/tested in isolation only, never run live):**
 - iOS Chrome mic fix — no iPhone in this sandbox.
@@ -76,7 +79,7 @@ This entire branch has been built in a sandboxed environment with **no real logi
 - The Blue Ember and all prior Ember iterations — confirmed only via disposable rendered previews (screenshotted with Playwright, never inside a real authenticated session).
 - Greeting quality (`structured.narrative`) and XP judgment quality from real conversation — no Anthropic credentials to run a real rollover against.
 - Whether the 5 conversation modes actually *feel* distinct in real replies — the wiring is confirmed real, but extensive live back-and-forth testing across all 5 modes hasn't happened.
-- Voice replies end-to-end — no ElevenLabs key, no real login session tested.
+- **This round's voice fixes specifically** — the latency fix, the cutting-out fix, the speed bump, and the "George" swap are all reasoned from code and a real API doc lookup, not re-confirmed by ear in this sandbox. Needs a real listen to confirm they actually landed.
 - The transcription pause bug — diagnosed via code reading only.
 
 ---
@@ -92,12 +95,16 @@ This entire branch has been built in a sandboxed environment with **no real logi
 
 ## 5. ElevenLabs / voice — exact current state
 
-- **Fully wired, end to end, in code:** `api/tts.js` (server: auth, Pro-gating, monthly character cap, calls ElevenLabs `eleven_flash_v2_5`, streams `audio/mpeg` back) ↔ `src/hooks/useCoachTts.jsx` (client: chunks replies into sentences, plays back-to-back, exposes the `<audio>` element for the Ember's audio-reactive speaking animation).
-- **Schema already applied** (this one is NOT a preview-only pending migration — it's a normal, already-merged migration: `supabase/migrations/20260611080100_tts_usage_and_voice_prefs.sql`). Added `profiles.voice_replies_enabled`, `profiles.coach_voice_id`, and the `tts_usage` table (per-user-per-month character counter).
-- **Cost is bounded in code**, not just by ElevenLabs' own billing: `TTS_MONTHLY_CHAR_LIMIT` in `api/tts.js` (default 50,000 chars/month/user, env-overridable via `TTS_MONTHLY_CHAR_LIMIT`) hard-stops with a 429 once hit. At ElevenLabs' current Flash v2.5 rate (~$0.05/1,000 chars), that's a ~$2.50/month ceiling per user regardless of usage. **Known inconsistency:** this same constant is duplicated in `src/theme.js` (for display text only) and is not automatically kept in sync — if the env var is ever raised, that file needs a matching manual update or the displayed "X remaining" text will be quietly wrong.
-- **4 premade ElevenLabs voices** configured: Adam, Sarah, Daniel, Rachel (`COACH_VOICE_OPTIONS` in `src/theme.js`), selectable today only via the old Profile screen.
-- **What's missing:** confirmation that `ELEVENLABS_API_KEY` is actually set in Vercel (cannot be checked from this sandbox — no dashboard access), and any real test of the flow.
-- **UX gap, proposed but not built:** voice on/off and voice selection currently only live on the Profile screen, buried away from the Talk screen where they're actually used. §9 proposes moving this onto the Talk screen directly. Not implemented this round.
+**Confirmed actually working this round** — first real hands-on test on this branch, with real feedback acted on:
+
+- **Voice names:** dropped human names (Adam/Sarah/Daniel/Rachel) from `COACH_VOICE_OPTIONS` in `src/theme.js` — the picker now shows descriptive labels (Warm/Calm/Measured/Grounded) instead, per direct request not to have human names.
+- **Adam replaced:** reported as "sounds like a robot." Swapped its underlying ElevenLabs voice ID for "George," one of ElevenLabs' own default-library voices (documented as a warm British male) — **unverified by ear in this sandbox** (no audio playback here), worth confirming it's actually an improvement once you can listen, not just different. `DEFAULT_VOICE_ID` in `api/tts.js` updated to match (it's the fallback used if `voice_replies_enabled` is on but no specific voice was ever picked).
+- **Voice speed:** added `voice_settings.speed` (ElevenLabs' documented range is 0.7-1.2, default 1.0) to the API request in `api/tts.js`, set to `1.08` — a modest speedup rather than an aggressive one, since extreme values start audibly degrading quality per ElevenLabs' own docs. Env-overridable via `ELEVENLABS_VOICE_SPEED` if it needs tuning after listening.
+- **Fixed a real ~3 second latency bug:** `useCoachTts.jsx` was calling `supabase.auth.getSession()` fresh on *every single sentence chunk* instead of once per reply — a needless async round-trip sitting directly in the critical path of the very first, most latency-sensitive chunk. Now fetched once per `speak()` call and reused. Also parallelized two Supabase reads in `api/tts.js` (profile + usage lookup) that didn't depend on each other but were running sequentially.
+- **Fixed a real cause of audio "cutting out" mid-reply:** `api/tts.js` used to relay ElevenLabs' audio stream to the client as bytes arrived — but the client (`useCoachTts.jsx`) already calls `await res.blob()`, which waits for the *entire* body before it can play anything. So the streaming relay bought zero latency benefit while adding a real reliability cost: if the connection to ElevenLabs hiccuped partway through, the client had already received a 200 with headers committed, so the reply just silently ended up truncated with no error shown anywhere — exactly what "cutting out" and "thought my volume was off" describes. Now the server fully buffers ElevenLabs' response first; a failed/incomplete upstream response is caught server-side and turned into a real error (which the client already knows how to surface) instead of a truncated-but-200 response. This was a genuinely free fix — no latency cost, since the client was already waiting for the complete response either way.
+- **Worth knowing, unrelated to any bug:** ElevenLabs' entire default-voice library (all 4 voice IDs currently in use, including the new "George" swap) is documented by ElevenLabs as retiring end of 2026. Worth planning a real voice-ID refresh before then rather than discovering it's broken on the day.
+- **Still applies:** `TTS_MONTHLY_CHAR_LIMIT` cost bound (~$2.50/month ceiling per user at 50,000 chars/month default), the `theme.js`/`api/tts.js` duplicate-constant sync risk if that limit is ever raised, and the Talk-screen voice pill (§9) as the way to actually use any of this day to day.
+- **Still unverified:** whether the latency fix actually closes the gap to something reasonable, whether the cutting-out fix actually eliminates the symptom, and whether "George" is genuinely better than "Adam" — all need your ears, not mine.
 
 ---
 
@@ -183,5 +190,6 @@ Full original reasoning for why each step blocks the next, and the full memory-a
 
 - **Modes:** open the mode dropdown on Talk, confirm descriptions show; pick different modes and send the same real message in each — Build should be terse/direct, Think noticeably longer/deeper, Decide should state an actual recommendation, Reflect should surface a pattern rather than ask a question.
 - **Memory:** have a real conversation, let the day roll over naturally, then `select date, title, structured->>'narrative' as narrative, xp_awarded, xp_reason from public.daily_summaries where user_id = auth.uid() order by date desc limit 3;` — check whether it references something you only said, not logged.
-- **Voice (once ElevenLabs is enabled — see §5):** on the Talk screen as a Pro account, tap the chevron on the top-left pill, pick a voice (pill should update to "🔊 {name}"), send a message, confirm audio plays and the Ember visibly reacts while speaking. Tap the pill body mid-reply — audio should stop immediately and the pill should switch to "🔇 Muted". Tap it again — should resume with the same voice still selected. As a non-Pro account, the same spot should show a locked "🔒 Voice" pill that opens the upgrade flow.
+- **Voice (once ElevenLabs is enabled — see §5):** on the Talk screen as a Pro account, tap the chevron on the top-left pill, pick a voice (pill should update to "🔊 Warm"/"🔊 Calm"/etc — no human names anymore), send a message, confirm audio plays and the Ember visibly reacts while speaking. Tap the pill body mid-reply — audio should stop immediately and the pill should switch to "🔇 Muted". Tap it again — should resume with the same voice still selected. As a non-Pro account, the same spot should show a locked "🔒 Voice" pill that opens the upgrade flow.
+- **Voice quality/reliability fixes (this round) — specifically judge these against the original complaints:** does the delay between a reply's text finishing and audio starting feel noticeably shorter than before; does the audio ever still cut out/truncate mid-sentence; does "Warm" (formerly Adam) sound less robotic than before; does the overall pace feel slightly quicker without sounding rushed or degraded.
 - **iOS Chrome mic / stale PWA:** needs a real iPhone — see §3, both currently unverified.

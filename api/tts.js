@@ -8,7 +8,12 @@ const SUPABASE_ANON_KEY =
 /** Hard cap per user per local calendar month (~$2.50 COGS at Flash pricing). */
 const TTS_MONTHLY_CHAR_LIMIT = parseInt(process.env.TTS_MONTHLY_CHAR_LIMIT || "50000", 10);
 const ELEVENLABS_MODEL = "eleven_flash_v2_5";
-const DEFAULT_VOICE_ID = process.env.ELEVENLABS_DEFAULT_VOICE_ID || "pNInz6obpgDQGcFmaJgB";
+// Matches the first entry in COACH_VOICE_OPTIONS (src/theme.js) — keep in sync if that changes.
+const DEFAULT_VOICE_ID = process.env.ELEVENLABS_DEFAULT_VOICE_ID || "JBFqnCBsd6RMkjVDRZzb";
+// ElevenLabs' documented range is 0.7-1.2 (1.0 = unmodified). A slight
+// speedup reads as more present/engaged rather than sluggish — modest on
+// purpose; extreme values start audibly degrading quality per their docs.
+const VOICE_SPEED = parseFloat(process.env.ELEVENLABS_VOICE_SPEED || "1.08");
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 function safeClientDate(raw) {
@@ -59,11 +64,14 @@ async function handler(req, res) {
   if (!serviceRoleKey) return res.status(500).json({ error: "Not configured." });
   const db = createClient(SUPABASE_URL, serviceRoleKey);
 
-  const { data: prof, error: profErr } = await db
-    .from("profiles")
-    .select("is_pro, is_admin, voice_replies_enabled, coach_voice_id")
-    .eq("id", userId)
-    .maybeSingle();
+  // Profile and usage lookups don't depend on each other's results — run them
+  // concurrently instead of back-to-back. Saves one round-trip's worth of
+  // latency off every spoken reply, contributing to the delay reported
+  // between a reply finishing and audio starting.
+  const [{ data: prof, error: profErr }, { data: usageRow }] = await Promise.all([
+    db.from("profiles").select("is_pro, is_admin, voice_replies_enabled, coach_voice_id").eq("id", userId).maybeSingle(),
+    db.from("tts_usage").select("chars_used").eq("user_id", userId).eq("month", monthKey).maybeSingle(),
+  ]);
   if (profErr) return res.status(500).json({ error: "Profile lookup failed." });
 
   const isPro = !!(prof?.is_pro || prof?.is_admin);
@@ -73,12 +81,6 @@ async function handler(req, res) {
   }
 
   const charCount = spoken.length;
-  const { data: usageRow } = await db
-    .from("tts_usage")
-    .select("chars_used")
-    .eq("user_id", userId)
-    .eq("month", monthKey)
-    .maybeSingle();
   const used = usageRow?.chars_used ?? 0;
   if (used + charCount > TTS_MONTHLY_CHAR_LIMIT) {
     return res.status(429).json({
@@ -102,13 +104,35 @@ async function handler(req, res) {
       body: JSON.stringify({
         text: spoken,
         model_id: ELEVENLABS_MODEL,
-        voice_settings: { stability: 0.45, similarity_boost: 0.75, style: 0.0, use_speaker_boost: true },
+        voice_settings: { stability: 0.45, similarity_boost: 0.75, style: 0.0, use_speaker_boost: true, speed: VOICE_SPEED },
       }),
     });
 
     if (!elevenRes.ok) {
       const errBody = await elevenRes.text().catch(() => "");
       console.error("[tts] ElevenLabs error", elevenRes.status, errBody.slice(0, 200));
+      return res.status(502).json({ error: "Could not generate speech right now." });
+    }
+
+    // Buffer the full response here rather than relaying bytes to the client
+    // as they arrive. This used to stream-relay on the theory that it cut
+    // time-to-first-audio — but the client (useCoachTts.jsx) already calls
+    // `await res.blob()`, which waits for the ENTIRE body before it can play
+    // anything, so the client never actually benefited from the progressive
+    // relay; it was strictly latency-neutral. What the streaming relay DID
+    // cost: if the connection to ElevenLabs hiccuped partway through, the
+    // client had already been sent a 200 with headers committed, so the
+    // reply silently ended up truncated mid-clip with no error surfaced
+    // anywhere — reported as audio "cutting out." Buffering first means a
+    // failed/incomplete upstream response gets caught HERE and turned into a
+    // real error status the client already knows how to show, instead of a
+    // truncated-but-200 response.
+    let audioBuffer;
+    try {
+      audioBuffer = Buffer.from(await elevenRes.arrayBuffer());
+    } catch (bufErr) {
+      console.error("[tts] failed to read ElevenLabs response", bufErr?.message || bufErr);
+      captureException(bufErr, { route: "tts", userId });
       return res.status(502).json({ error: "Could not generate speech right now." });
     }
 
@@ -122,34 +146,12 @@ async function handler(req, res) {
       { onConflict: "user_id,month" },
     );
 
-    // Relay ElevenLabs' audio stream to the client as chunks arrive instead of
-    // buffering the whole clip first — cuts time-to-first-audio, especially
-    // for longer replies. (Matches the streaming pattern already used by
-    // api/chat.js — X-Accel-Buffering: no keeps intermediate proxies from
-    // re-buffering the response.)
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "no-store");
-    res.setHeader("X-Accel-Buffering", "no");
     res.setHeader("X-TTS-Chars", String(charCount));
     res.setHeader("X-TTS-Remaining", String(Math.max(0, TTS_MONTHLY_CHAR_LIMIT - used - charCount)));
     res.status(200);
-
-    const reader = elevenRes.body.getReader();
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value) res.write(Buffer.from(value));
-      }
-    } catch (streamErr) {
-      // Headers (200) are already flushed by this point — can't fall back to
-      // a JSON error response. Log it and end the (truncated) stream; the
-      // client's <audio> onerror/onended handles a cut-off clip gracefully.
-      console.error("[tts] stream relay failed", streamErr?.message || streamErr);
-      captureException(streamErr, { route: "tts", userId });
-    } finally {
-      res.end();
-    }
+    res.end(audioBuffer);
     return undefined;
   } catch (err) {
     console.error("[tts] stream failed", err?.message || err);

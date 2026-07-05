@@ -81,12 +81,24 @@ export const WEEKLY_SUMMARY_TTL_MS  = 24 * 60 * 60 * 1000; // generated summary 
 export const CREATOR_ID = "5e9b4ba7-bf15-4e94-ab05-fe3306496973";
 export const FREE_DAILY_LIMIT = 5;
 
-/** ElevenLabs premade voices — Pro spoken replies only. */
+/**
+ * ElevenLabs premade voices — Pro spoken replies only. Labels are
+ * descriptive (not human names) so the picker reads as "pick a character,"
+ * not "pick a person." The first ("Warm") used to be ElevenLabs' "Adam" —
+ * swapped for "George" (their own default-voice library, described as a
+ * warm British male) after direct feedback that Adam read as robotic;
+ * unverified by ear in this sandbox — worth confirming it's actually better,
+ * not just different, once you can listen.
+ *
+ * NOTE: ElevenLabs' default-voice library (all 4 of these IDs) is
+ * documented as retiring end of 2026 — worth revisiting voice IDs well
+ * before then rather than discovering it's broken on the day.
+ */
 export const COACH_VOICE_OPTIONS = [
-  { id: "pNInz6obpgDQGcFmaJgB", label: "Adam",   desc: "Warm, direct" },
-  { id: "EXAVITQu4vr4xnSDxMaL", label: "Sarah",  desc: "Calm, clear" },
-  { id: "onwK4e9ZLuTAKqWW03F9", label: "Daniel", desc: "Measured, steady" },
-  { id: "21m00Tcm4TlvDq8ikWAM", label: "Rachel", desc: "Grounded, friendly" },
+  { id: "JBFqnCBsd6RMkjVDRZzb", label: "Warm",     desc: "Warm, direct" },
+  { id: "EXAVITQu4vr4xnSDxMaL", label: "Calm",     desc: "Calm, clear" },
+  { id: "onwK4e9ZLuTAKqWW03F9", label: "Measured", desc: "Measured, steady" },
+  { id: "21m00Tcm4TlvDq8ikWAM", label: "Grounded", desc: "Grounded, friendly" },
 ];
 
 /** ~50k chars/mo ≈ $2.50 COGS at Flash pricing — enforced server-side in api/tts.js */
