@@ -3960,7 +3960,7 @@ export default function App() {
             <div style={{ fontFamily:T.serif, fontSize:30, color:T.text, letterSpacing:"-0.01em" }}>Forged</div>
             <div style={{ fontSize:12, color:T.muted, marginTop:1, lineHeight:1.35 }}>
               {screen === "today"
-                ? fmtDateLong()
+                ? "Your Arc"
                 : screen === "profile" ? user.name
                 : screen === "arc" ? "Your Arc"
                 : screen === "hub" ? "All tracked items"
@@ -4027,7 +4027,28 @@ export default function App() {
           }}
           onOpenProgress={() => setScreen("today")}
         />}
-        {screen === "today"    && <TodayScreen    habits={habits} goals={goals} xp={xp} activeBlock={activeBlock} todayArcScore={todayArcScore} arcLedgerRows={arcLedgerRows} arcProofSyncing={arcProofSyncing} onStartArc={openArcCoachCreate} onViewArc={() => { setScreen("arc"); setArcTab("arc"); }} onLinkProofHabit={linkHabitAsProof} onUnlinkProofItem={unlinkProofItem} onTap={handleTap} onUndo={handleUndoLimit} onSkip={handleSkipDay} onAddNote={handleAddNote} onLogZero={handleLogZero} onOpenLog={id => setLogId(id)} onOpenGoalLog={id => setLogGoalId(id)} onEditGoal={openEditGoal} onCompleteGoal={handleCompleteGoal} onDeleteGoal={handleDeleteGoal} onShareGoal={handleShareGoal} onEditHabit={openEditHabit} onDeleteHabit={handleDeleteHabit} onShareHabit={handleShareHabit} sharingHabitId={sharingHabitId} onAdd={handleStartAdd} onSaveLogEntry={handleSaveLogEntry} onOpenCoachMic={() => openCoachWithMode("mic")} onOpenCoachWithDraft={openCoachWithDraft} onCreateProofViaCoach={openCoachForProofAction} coachName={coachName} coachIcon={coachIcon} coachHabitColor={habits.find(h => h.habitType !== "log")?.color || T.accent} onOpenGoalDetail={id => setOpenGoalId(id)} todayJournalEntry={journalEntries.find(e => e.date === todayStr()) ?? null} onGenerateReceipt={handleGenerateReceipt} generatingReceipt={generatingReceipt} onOpenJournal={() => { setJournalOpenTab("journal"); setJournalAutoGenerate(false); navigateTo("arc"); }} onLowerBudget={handleLowerBudget} tasks={tasks} onAddTask={handleAddTask} onCompleteTask={handleCompleteTask} onPinTask={handlePinTask} onDeleteTask={handleDeleteTask} onOpenHub={() => setScreen("hub")} recentSummaries={coachMemory?.recentSummaries} isPro={isPro} onUpgrade={() => setShowUpgrade(true)} journalEntries={journalEntries}/>}
+        {/* "Noticed" (nav id "today") now renders the real Arc screen directly —
+            same component, same props as the "arc" route below — instead of the
+            old TodayScreen habit-grid/chapters experiment. Per explicit direction:
+            stop approximating the Arc page's look from scratch and just use the
+            real thing as the base for this tab. onOpenHub is added here since
+            TodayScreen was the only route that used to expose it. */}
+        {screen === "today"    && <ArcScreen
+          tab={arcTab} onTabChange={setArcTab}
+          activeBlock={activeBlock} habits={habits} goals={goals} journalEntries={journalEntries}
+          arcLedgerRows={arcLedgerRows}
+          isPro={isPro} onUpgrade={() => setShowUpgrade(true)}
+          userId={sessionUserId} userName={user.name || ""} coachName={coachName}
+          onStartArc={openArcCoachCreate} onEditArc={openArcCoachEdit}
+          onRunItBack={handleArcContinue} onEvolve={handleArcEvolve}
+          onReflect={setReflectId} onDeleteJournalLog={handleDeleteJournalLogEntry}
+          onSaveJournalEntry={handleSaveJournalEntry} onJournalGenerated={handleJournalGenerated}
+          journalInitialTab={showJournalCompose ? "compose" : journalOpenTab ?? undefined}
+          journalAutoGenerate={journalAutoGenerate}
+          onJournalInitialComposeDone={() => { setShowJournalCompose(false); setJournalOpenTab(null); setJournalAutoGenerate(false); }}
+          completedArcBlock={completedArcBlock}
+          onOpenHub={() => setScreen("hub")}
+        />}
         {screen === "hub"      && <HubScreen
           habits={habits} goals={goals} tasks={tasks} activeBlock={activeBlock}
           onBack={() => setScreen("today")}

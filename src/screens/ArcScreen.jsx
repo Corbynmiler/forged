@@ -76,11 +76,36 @@ function PastArcsSection({
   );
 }
 
+/** Small, consistent link back to habit logging — Arc Timeline itself has no
+ * concept of tapping a habit to log it for today; that lives on Hub. */
+function HubLink({ onOpenHub }) {
+  if (!onOpenHub) return null;
+  return (
+    <button
+      type="button"
+      onClick={onOpenHub}
+      aria-label="Open Hub — all habits, goals, and loose ends"
+      style={{
+        display: "flex", alignItems: "center", gap: 8, margin: "12px 4px 0",
+        padding: "10px 14px", borderRadius: T.r,
+        background: "rgba(200,144,42,0.07)", border: `0.5px solid rgba(200,144,42,0.3)`,
+        cursor: "pointer", fontFamily: T.font, textAlign: "left",
+      }}
+    >
+      <span style={{ fontSize: 16, flexShrink: 0 }}>🗂️</span>
+      <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>Hub</span>
+      <span style={{ fontSize: 12, color: T.muted }}>— log habits, goals, loose ends</span>
+      <span style={{ fontSize: 13, color: T.gold, fontWeight: 700, marginLeft: "auto" }}>→</span>
+    </button>
+  );
+}
+
 export function ArcScreen({
   tab = "arc", onTabChange,
   activeBlock, habits, goals, journalEntries, arcLedgerRows = [],
   isPro, onUpgrade, userId, userName,
   onStartArc, onEditArc, onRunItBack, onEvolve,
+  onOpenHub,
 }) {
   const [initialWeek, setInitialWeek] = useState(null);
   const [openChronology, setOpenChronology] = useState(false);
@@ -116,6 +141,7 @@ export function ArcScreen({
             Define your Arc →
           </button>
         ) : null}
+        <HubLink onOpenHub={onOpenHub} />
         <PastArcsSection
           userId={userId} isPro={isPro} onUpgrade={onUpgrade}
           habits={habits} goals={goals} journalEntries={journalEntries}
@@ -142,6 +168,8 @@ export function ArcScreen({
         initialWeek={initialWeek}
         openChronologyOnMount={openChronology}
       />
+
+      <HubLink onOpenHub={onOpenHub} />
 
       <PastArcsSection
         userId={userId} isPro={isPro} onUpgrade={onUpgrade}

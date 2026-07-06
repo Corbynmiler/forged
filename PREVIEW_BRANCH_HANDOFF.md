@@ -2,7 +2,23 @@
 
 **Branch:** `claude/forged-ai-companion-redesign-agyjl7`
 **Status:** preview/experimental only. `main` (production) has not been touched, merged into, or modified at any point on this branch.
-**Last updated:** 2026-07-06 (fifteenth round today) — the fourteenth round's rail was still a from-scratch approximation and looked visibly different from the real thing. This round replaces it with an actual port: Noticed's week rail now renders using the *same* `RailCheckpoint`/`ProofRing`/`useRailCenterSelection` code the Arc screen uses (exported from `ArcTimeline.jsx`, not reimplemented), in the same single-selected-week-detail arrangement, just swapping "Arc week, habit proof" for "calendar week, chapter count." See "Fifteenth round" below.
+**Last updated:** 2026-07-06 (sixteenth round today) — explicit direction after three rounds of approximating the Arc screen's look from scratch: stop rebuilding it, just use it. **Noticed now renders the real `ArcScreen` component directly** (same component, same props, as the "Arc" nav route) instead of `TodayScreen`'s habit-grid/chapters experiment. This is a genuine reset, not a tweak — see "Sixteenth round" below for exactly what that means and what it gives up.
+
+### Sixteenth round — Noticed is now literally the Arc screen
+
+**What was asked, verbatim-adjacent:** after three rounds of a hand-built "week rail + chapter spine" that kept looking wrong next to the real Arc screen, explicit direction to stop reimplementing it and just point the Noticed tab at the actual `ArcScreen`/`ArcTimeline` component — "I'd rather have that version and start from there."
+
+**What changed:** in `src/App.jsx`, the `screen === "today"` route (the "Noticed" tab) now renders `<ArcScreen>` with the same props the `screen === "arc"` route already uses — not a copy, the literal same component. `TodayScreen` (habit grid, the `DailyChapters`/`MemoryWeekRail`/`MemoryWeekDetail` chapters work from the last several rounds) is no longer in the render path for real user navigation at all. Also added an `onOpenHub` prop + a small "Hub" link inside `ArcScreen.jsx` (both the no-Arc and active-Arc states), since `TodayScreen` was the only place that link used to live — without it, habit logging would have become unreachable from the bottom nav.
+
+**What this gives up, honestly:** the "Your companion noticed" daily-chapter archive (reading `daily_summaries` — the AI-narrated per-day memory, XP reasoning, emotional context) is no longer shown anywhere in the live app. It's not deleted — `TodayScreen.jsx` still has all of it, still renders in demo mode — but it's disconnected from real navigation. If any of that data/narrative is wanted back later, it exists to pull back in; it just isn't where you land right now.
+
+**What this fixes:** Noticed's Arc content (rail, week detail, day spine, habit proof) is now guaranteed pixel-identical to the Arc screen, because it *is* the Arc screen — there's no gap left to keep chasing. `TodayScreen`'s old proof-action grid/ArcStrip/ring-card debris that kept showing "down the bottom" is gone from this tab too, since that whole component is out of the route.
+
+**Files touched:** `src/App.jsx` (route swap + header subtitle), `src/screens/ArcScreen.jsx` (`onOpenHub` prop + `HubLink`).
+
+**Verified:** `npm run build` passes. **Not verified:** live visual check — needed more than ever after three rounds of this being wrong on inspection.
+
+**What to test:** open Noticed — it should look and behave exactly like the "Arc" screen used to (because it's the same component): hero identity card, real horizontal week rail with proof rings, week detail with day-by-day evidence below, past-Arcs history at the bottom. If there's no active Arc, it should show "What season are you in? / Define your Arc," with a Hub link beneath it. Confirm the Hub link works from both states (it's new).
 
 ### Fifteenth round — the rail is now an actual port, not a lookalike
 
