@@ -2,7 +2,21 @@
 
 **Branch:** `claude/forged-ai-companion-redesign-agyjl7`
 **Status:** preview/experimental only. `main` (production) has not been touched, merged into, or modified at any point on this branch.
-**Last updated:** 2026-07-06 (twelfth round today) — redesigned Noticed's daily archive to group chapters into calendar weeks with a locally-derived caption per week, replacing the flat day-list. See "Twelfth round" below.
+**Last updated:** 2026-07-06 (thirteenth round today) — the twelfth round's "week regrouping" only added a date-range header above the same plain day cards; this round actually ports the old Arc timeline's connected day-spine visual (small filled nodes, connecting line, headline-per-day) into Noticed, minus the Arc. See "Thirteenth round" below.
+
+### Thirteenth round — Noticed archive actually redone (storage system fix, take 2)
+
+**Why this round exists:** the twelfth round's fix was correctly told it wasn't good enough — it grouped chapters by week and added a gold date-range label above each group, but the days themselves were still rendered as the same plain bordered boxes as before. That's not what "copy the main branch's layout" meant. The actual thing worth copying from `main`'s `ArcTimeline.jsx` is the connected-spine day list: a vertical line running through small circular nodes, one per day, each showing a short headline instead of a full card — the "journal" feel, not a stack of boxes.
+
+**What changed this round:** within each week group, the flat `DailyChapterCard` list is replaced by `ChapterSpineRow` — ported directly from `main`'s `WeekDayJourney`/`DaySpineNode`: a 16px circular node connected top-and-bottom by a vertical spine line, date label above a single-line headline (the chapter's narrative opening sentence, same `dayDisplayTitle`-style preference for a real sentence over a raw title). Since every chapter rendered here already has real content (empty days are filtered out before this point), every node renders in the same "captured" state `main` uses for a day with a receipt — green-bordered circle with a checkmark — there's no proof-ring/percentage version of this because nothing here measures habit completion; it's purely "did the companion write about this day."
+
+The week header itself (gold accent bar + kicker + serif caption) is unchanged from last round — that part matched `main`'s `WeekDetail` panel already. What was missing was the day list underneath, which is what's fixed now.
+
+**Files touched:** `src/screens/TodayScreen.jsx` (`ChapterSpineRow`, `WeekAccent`, `chapterHeadline`, rewired `WeekChapterGroup` to render the spine instead of flat cards). `src/lib/arcTimeline.js` untouched this round (last round's exports still apply).
+
+**Verified:** `npm run build` passes. **Not verified:** real visual review in a browser (no live session in this sandbox) — this is exactly the kind of thing that needs an actual look before calling it done twice in a row.
+
+**What to test:** open Noticed with a few days of history — each week section should now show a connecting vertical line through small green checkmark nodes, one per day, with the day's opening sentence next to it (not a boxed card). Tap a node or its text — should open the same chapter detail sheet as before.
 
 ### Twelfth round — Noticed archive regrouped into weeks (the "storage system" redesign)
 

@@ -242,34 +242,121 @@ function groupChaptersByWeek(chapters) {
   return groups;
 }
 
+/** Same accent gold-bar-then-fade rule the old Arc chapter panels opened with. */
+function WeekAccent() {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+      <div style={{ width: 3, height: 14, borderRadius: 2, background: T.gold, flexShrink: 0 }} />
+      <div style={{ flex: 1, height: 1, background: `linear-gradient(90deg, ${T.gold}55, transparent)` }} />
+    </div>
+  );
+}
+
+/** Best single-line headline for a chapter — narrative's opening sentence beats a longer title. */
+function chapterHeadline(entry) {
+  const narrative = (entry?.structured?.narrative || entry?.summary || "").trim();
+  if (narrative) {
+    const first = narrative.split(/(?<=[.!?])\s+/)[0]?.trim();
+    if (first) return first;
+  }
+  return (entry?.title || "").trim() || null;
+}
+
+const CHAPTER_NODE = 16;
+
 /**
- * One week's worth of chapters, grouped under a gold kicker + a locally
- * derived caption — the same "weeks and days" shape the old Arc timeline
- * used, minus the Arc: no fixed start date or duration to anchor "Week N of
- * M" to, so weeks are just calendar weeks, and the caption comes from
- * whichever day in that week already earned the best chapter title (no new
- * AI call — see deriveWeekChapterFromDays).
+ * One chapter's row in the connected spine — same visual as the old Arc
+ * timeline's WeekDayJourney day rows (spine line, small filled node, date +
+ * headline), just without the proof-ring/percent machinery that only made
+ * sense against habit actions. Every entry rendered here already has real
+ * content (DailyChapters filters out empty days), so every node reads as
+ * "captured" — no partial/empty/future states to distinguish.
+ */
+function ChapterSpineRow({ entry, isFirst, isLast, onOpen }) {
+  const headline = chapterHeadline(entry);
+  const spineColor = "rgba(61,155,95,0.35)";
+  return (
+    <div style={{ display: "flex", gap: 10, minWidth: 0 }}>
+      <div style={{ width: 20, display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
+        {!isFirst ? <div style={{ width: 2, height: 6, background: spineColor, flexShrink: 0 }} /> : <div style={{ height: 4 }} />}
+        <button
+          type="button"
+          onClick={() => onOpen(entry)}
+          aria-label={`Open ${fmtEntryDate(entry.date)} chapter`}
+          style={{
+            width: CHAPTER_NODE, height: CHAPTER_NODE, borderRadius: "50%",
+            border: "2px solid #3d9b5f", background: "rgba(61,155,95,0.18)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 0, cursor: "pointer", flexShrink: 0,
+          }}
+        >
+          <span style={{ fontSize: 9, color: "#4ade80", fontWeight: 700, lineHeight: 1 }}>✓</span>
+        </button>
+        {!isLast ? <div style={{ width: 2, flex: 1, minHeight: 8, background: spineColor }} /> : null}
+      </div>
+      <button
+        type="button"
+        onClick={() => onOpen(entry)}
+        style={{
+          flex: 1, minWidth: 0, textAlign: "left", background: "none", border: "none",
+          padding: 0, cursor: "pointer", fontFamily: T.font, paddingBottom: isLast ? 4 : 14,
+        }}
+      >
+        <div style={{ fontSize: 10, fontWeight: 500, color: T.muted, lineHeight: 1.3 }}>
+          {fmtEntryDate(entry.date)}
+        </div>
+        {headline ? (
+          <div style={{
+            fontSize: 13, fontWeight: 600, color: T.text, marginTop: 2, lineHeight: 1.3,
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+          }}>
+            {headline}
+          </div>
+        ) : null}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * One week's worth of chapters: gold accent, date-range kicker, a locally
+ * derived serif caption (see deriveWeekChapterFromDays — no new AI call),
+ * then the connected day-spine — the same "weeks containing days" shape the
+ * old Arc timeline used, minus the Arc: no fixed start date/duration to
+ * number weeks against, so weeks are just calendar weeks and there's no
+ * proof-ring/percent readout (nothing here is measuring habit completion).
  */
 function WeekChapterGroup({ week, isCurrentWeek, isFirst, onOpen }) {
   const rangeLabel = isCurrentWeek
     ? "This week"
     : `${fmtEntryDate(week.weekStart)} – ${fmtEntryDate(week.weekEnd)}`;
   const caption = deriveWeekChapterFromDays(week.items);
+  const n = week.items.length;
+
   return (
-    <div style={{ marginTop: isFirst ? 0 : 22 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: caption ? 4 : 8 }}>
-        <div style={{ width: 3, height: 12, borderRadius: 2, background: T.gold, flexShrink: 0 }} />
-        <div style={{ fontSize: 10, fontWeight: 800, color: T.gold, letterSpacing: "0.1em", textTransform: "uppercase" }}>
-          {rangeLabel}
-        </div>
+    <div style={{ marginTop: isFirst ? 0 : 26 }}>
+      <WeekAccent />
+      <div style={{ fontSize: 10, fontWeight: 800, color: T.gold, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+        {rangeLabel}
       </div>
       {caption && (
-        <div style={{ fontFamily: T.serif, fontSize: 16, color: T.text, lineHeight: 1.3, marginBottom: 10, paddingLeft: 11 }}>
+        <div style={{ fontFamily: T.serif, fontSize: 19, color: T.text, lineHeight: 1.2, marginTop: 8 }}>
           {caption}
         </div>
       )}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {week.items.map(s => <DailyChapterCard key={s.date} entry={s} onOpen={onOpen} />)}
+      <div style={{ fontSize: 11.5, color: T.sub, marginTop: caption ? 6 : 4 }}>
+        {n} chapter{n === 1 ? "" : "s"} captured
+      </div>
+      <div style={{ marginTop: 14 }}>
+        {week.items.map((entry, i) => (
+          <ChapterSpineRow
+            key={entry.date}
+            entry={entry}
+            isFirst={i === 0}
+            isLast={i === week.items.length - 1}
+            onOpen={onOpen}
+          />
+        ))}
       </div>
     </div>
   );
