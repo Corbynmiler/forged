@@ -9,7 +9,7 @@ import {
 } from "../components/habitCards.jsx";
 import { resolveArcTitle } from "../arcProofMatch.js";
 import { parseReceiptStructured, ymdAddDays, deriveWeekChapterFromDays } from "../lib/arcTimeline.js";
-import { ReceiptExpandedBody } from "../components/ArcTimeline.jsx";
+import { ReceiptExpandedBody, ProofRing } from "../components/ArcTimeline.jsx";
 import { getArcDayStatus, ARC_STATUS_META } from "../arcProgress.js";
 
 // ── Coach greeting helpers (deterministic, no AI) ──────────────────────────
@@ -318,6 +318,80 @@ function ChapterSpineRow({ entry, isFirst, isLast, onOpen }) {
   );
 }
 
+const RAIL_NODE = 44;
+
+/**
+ * One node on the horizontal week rail — same ProofRing component the old
+ * Arc timeline used for its week checkpoints, just showing "how many of this
+ * week's 7 days got a chapter" instead of "how much proof got shown." Tapping
+ * it scrolls the page down to that week's full section below.
+ */
+function WeekRailNode({ week, isCurrentWeek, selected, onSelect }) {
+  const percent = Math.min(100, Math.round((week.items.length / 7) * 100));
+  const label = isCurrentWeek ? "Now" : fmtEntryDate(week.weekStart).replace(/,.*/, "");
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(week.weekStart)}
+      aria-pressed={selected}
+      style={{
+        flex: "0 0 60px", width: 60, scrollSnapAlign: "center",
+        background: "none", border: "none", padding: "2px 0 4px",
+        cursor: "pointer", fontFamily: T.font,
+        opacity: selected ? 1 : 0.68,
+      }}
+    >
+      <div style={{ position: "relative", width: RAIL_NODE, height: RAIL_NODE, margin: "0 auto" }}>
+        <ProofRing percent={percent} size={RAIL_NODE} active={selected || isCurrentWeek} complete={percent >= 100} />
+        <div style={{
+          position: "absolute", inset: 5, borderRadius: "50%",
+          background: selected ? "rgba(200,144,42,0.22)" : "rgba(255,255,255,0.03)",
+          border: `2px solid ${selected ? T.gold : "rgba(255,255,255,0.1)"}`,
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2,
+        }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: selected ? T.gold : T.muted }}>{week.items.length}</span>
+        </div>
+      </div>
+      <div style={{
+        marginTop: 5, fontSize: 8.5, fontWeight: 600, textAlign: "center",
+        color: selected ? T.sub : T.muted, whiteSpace: "nowrap",
+      }}>
+        {label}
+      </div>
+    </button>
+  );
+}
+
+/**
+ * Horizontal scrollable strip of week nodes — the piece actually missing
+ * from the last pass. `main`'s Arc timeline uses this exact rail shape
+ * (scroll-snap row of circular checkpoints) to move between Arc weeks; here
+ * it's just a quick-jump nav over calendar weeks, oldest on the left, tapping
+ * a node scrolls to that week's full section instead of hiding the others
+ * (Noticed is a scrollable archive, not a one-week-at-a-time viewer).
+ */
+function WeekRail({ weeks, thisWeekStart, selected, onSelect }) {
+  if (weeks.length <= 1) return null;
+  return (
+    <div style={{
+      overflowX: "auto", overflowY: "hidden", WebkitOverflowScrolling: "touch",
+      scrollSnapType: "x proximity", margin: "0 0 18px",
+    }}>
+      <div style={{ display: "flex", gap: 2, padding: "0 8px" }}>
+        {weeks.map(week => (
+          <WeekRailNode
+            key={week.weekStart}
+            week={week}
+            isCurrentWeek={week.weekStart === thisWeekStart}
+            selected={week.weekStart === selected}
+            onSelect={onSelect}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /**
  * One week's worth of chapters: gold accent, date-range kicker, a locally
  * derived serif caption (see deriveWeekChapterFromDays — no new AI call),
@@ -326,7 +400,7 @@ function ChapterSpineRow({ entry, isFirst, isLast, onOpen }) {
  * number weeks against, so weeks are just calendar weeks and there's no
  * proof-ring/percent readout (nothing here is measuring habit completion).
  */
-function WeekChapterGroup({ week, isCurrentWeek, isFirst, onOpen }) {
+function WeekChapterGroup({ week, isCurrentWeek, isFirst, onOpen, sectionRef }) {
   const rangeLabel = isCurrentWeek
     ? "This week"
     : `${fmtEntryDate(week.weekStart)} – ${fmtEntryDate(week.weekEnd)}`;
@@ -334,7 +408,7 @@ function WeekChapterGroup({ week, isCurrentWeek, isFirst, onOpen }) {
   const n = week.items.length;
 
   return (
-    <div style={{ marginTop: isFirst ? 0 : 26 }}>
+    <div ref={sectionRef} style={{ marginTop: isFirst ? 0 : 26, scrollMarginTop: 16 }}>
       <WeekAccent />
       <div style={{ fontSize: 10, fontWeight: 800, color: T.gold, letterSpacing: "0.12em", textTransform: "uppercase" }}>
         {rangeLabel}
@@ -379,6 +453,8 @@ function WeekChapterGroup({ week, isCurrentWeek, isFirst, onOpen }) {
  */
 function DailyChapters({ recentSummaries, isPro, onUpgrade, journalEntries = [] }) {
   const [openDate, setOpenDate] = useState(null);
+  const [selectedWeekStart, setSelectedWeekStart] = useState(null);
+  const weekSectionRefs = useRef(new Map());
   const today = todayStr();
   const cutoff = daysAgo(6);
   const chapters = (Array.isArray(recentSummaries) ? recentSummaries : [])
@@ -413,14 +489,26 @@ function DailyChapters({ recentSummaries, isPro, onUpgrade, journalEntries = [] 
 
   const visible = isPro ? chapters : chapters.filter(s => s.date >= cutoff);
   const locked = chapters.slice(visible.length);
-  const weekGroups = groupChaptersByWeek(visible);
+  const weekGroups = groupChaptersByWeek(visible); // most recent first
   const thisWeekStart = weekStartFor(today);
+  const railWeeks = [...weekGroups].reverse(); // oldest → newest, left → right, like the old Arc rail
+
+  function scrollToWeek(weekStart) {
+    setSelectedWeekStart(weekStart);
+    weekSectionRefs.current.get(weekStart)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   return (
     <div style={{ margin: "14px 14px 0" }}>
       <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.hint, marginBottom: 8, padding: "0 2px" }}>
         Your companion noticed
       </div>
+      <WeekRail
+        weeks={railWeeks}
+        thisWeekStart={thisWeekStart}
+        selected={selectedWeekStart ?? thisWeekStart}
+        onSelect={scrollToWeek}
+      />
       {todayGhost}
       {weekGroups.map((week, i) => (
         <WeekChapterGroup
@@ -429,6 +517,10 @@ function DailyChapters({ recentSummaries, isPro, onUpgrade, journalEntries = [] 
           isCurrentWeek={week.weekStart === thisWeekStart}
           isFirst={i === 0}
           onOpen={e => setOpenDate(e.date)}
+          sectionRef={el => {
+            if (el) weekSectionRefs.current.set(week.weekStart, el);
+            else weekSectionRefs.current.delete(week.weekStart);
+          }}
         />
       ))}
       {locked.length > 0 && (
@@ -1469,12 +1561,44 @@ export function TodayScreen({
           </button>
         );
 
+        const proofCardsInner = [
+          ...proofItemsSorted.map(h => {
+            if (h.habitType === "daily")   return <DailyCard key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} proofMode={true} onUnlinkProof={onUnlinkProofItem}/>;
+            if (h.habitType === "limit")   return <LimitCard key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} onLowerBudget={onLowerBudget} onOpenCoachWithDraft={onOpenCoachWithDraft} proofMode={true} onUnlinkProof={onUnlinkProofItem}/>;
+            if (h.habitType === "weekly")  return <WeeklyCard key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} proofMode={true} onUnlinkProof={onUnlinkProofItem}/>;
+            if (h.habitType === "project") return <ProjectCard key={h.id} habit={h} onOpenLog={onOpenLog} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} proofMode={true} onUnlinkProof={onUnlinkProofItem}/>;
+            if (h.habitType === "goal")    return <TodayGoalCard key={h.id} goal={h} onOpenLog={onOpenGoalLog} onEdit={onEditGoal} onComplete={onCompleteGoal} onDelete={onDeleteGoal} onShareGoal={onShareGoal} onOpen={onOpenGoalDetail} onUnlinkProof={onUnlinkProofItem}/>;
+            return null;
+          }),
+          onLinkProofHabit && (
+            <button
+              key="add-proof"
+              type="button"
+              onClick={() => setShowProofPicker(true)}
+              style={{
+                display: "block", width: "calc(100% - 28px)", margin: "0 14px 12px",
+                padding: "10px 14px", borderRadius: T.rsm,
+                border: `0.5px dashed rgba(200,144,42,0.4)`,
+                background: "rgba(200,144,42,0.06)", cursor: "pointer",
+                fontFamily: T.font, textAlign: "left", boxSizing: "border-box",
+              }}
+            >
+              <span style={{ fontSize: 13, fontWeight: 600, color: T.gold }}>+ Add proof action</span>
+            </button>
+          ),
+        ].filter(Boolean);
+
+        // Same "collapsed by default" treatment the no-Arc trackedSection
+        // already got — this was the one branch that got missed: with an
+        // Arc active, this used to render the full proof-action card grid
+        // wide open, unconditionally, right in the middle of Noticed's
+        // memory feed. That's the exact "old habit tracker" dump this
+        // redesign is supposed to have moved past.
         const proofSection = arcActive && (
           proofTotal === 0
             ? <div key="proof-empty">{proofSyncCard || proofEmptyCard}</div>
             : <>
-                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 14px", marginBottom:6 }}>
-                  <span style={{ fontSize:11, fontWeight:600, letterSpacing:"0.08em", color:T.sub, textTransform:"uppercase" }}>Proof actions</span>
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"flex-end", padding:"0 14px", marginBottom:2 }}>
                   <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                     {onOpenHub && (
                       <button
@@ -1491,29 +1615,9 @@ export function TodayScreen({
                     >Edit order</button>
                   </div>
                 </div>
-                {proofItemsSorted.map(h => {
-                  if (h.habitType === "daily")   return <DailyCard key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} proofMode={true} onUnlinkProof={onUnlinkProofItem}/>;
-                  if (h.habitType === "limit")   return <LimitCard key={h.id} habit={h} onTap={onTap} onUndo={onUndo} onLogZero={onLogZero} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} onLowerBudget={onLowerBudget} onOpenCoachWithDraft={onOpenCoachWithDraft} proofMode={true} onUnlinkProof={onUnlinkProofItem}/>;
-                  if (h.habitType === "weekly")  return <WeeklyCard key={h.id} habit={h} onTap={onTap} onSkip={onSkip} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} proofMode={true} onUnlinkProof={onUnlinkProofItem}/>;
-                  if (h.habitType === "project") return <ProjectCard key={h.id} habit={h} onOpenLog={onOpenLog} onAddNote={onAddNote} onEditHabit={onEditHabit} onDeleteHabit={onDeleteHabit} onShareHabit={onShareHabit} sharingThisHabit={sharingHabitId===h.id} proofMode={true} onUnlinkProof={onUnlinkProofItem}/>;
-                  if (h.habitType === "goal")    return <TodayGoalCard key={h.id} goal={h} onOpenLog={onOpenGoalLog} onEdit={onEditGoal} onComplete={onCompleteGoal} onDelete={onDeleteGoal} onShareGoal={onShareGoal} onOpen={onOpenGoalDetail} onUnlinkProof={onUnlinkProofItem}/>;
-                  return null;
-                })}
-                {onLinkProofHabit && (
-                  <button
-                    type="button"
-                    onClick={() => setShowProofPicker(true)}
-                    style={{
-                      display: "block", width: "calc(100% - 28px)", margin: "0 14px 12px",
-                      padding: "10px 14px", borderRadius: T.rsm,
-                      border: `0.5px dashed rgba(200,144,42,0.4)`,
-                      background: "rgba(200,144,42,0.06)", cursor: "pointer",
-                      fontFamily: T.font, textAlign: "left", boxSizing: "border-box",
-                    }}
-                  >
-                    <span style={{ fontSize: 13, fontWeight: 600, color: T.gold }}>+ Add proof action</span>
-                  </button>
-                )}
+                <SectionCollapsible key="proof-cards" label={`Proof actions — ${proofDone} of ${proofTotal}`} defaultOpen={false}>
+                  {proofCardsInner}
+                </SectionCollapsible>
               </>
         );
 

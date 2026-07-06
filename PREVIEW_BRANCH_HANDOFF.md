@@ -2,7 +2,21 @@
 
 **Branch:** `claude/forged-ai-companion-redesign-agyjl7`
 **Status:** preview/experimental only. `main` (production) has not been touched, merged into, or modified at any point on this branch.
-**Last updated:** 2026-07-06 (thirteenth round today) — the twelfth round's "week regrouping" only added a date-range header above the same plain day cards; this round actually ports the old Arc timeline's connected day-spine visual (small filled nodes, connecting line, headline-per-day) into Noticed, minus the Arc. See "Thirteenth round" below.
+**Last updated:** 2026-07-06 (fourteenth round today) — added the horizontal week-rail `main`'s Arc timeline actually uses (this was the missing piece from the thirteenth round), and fixed a real bug found from a live screenshot: with an Arc active, Noticed was rendering the *entire* old proof-action habit grid wide open, unconditionally, below the chapters — never wrapped in the same collapsed-by-default section the no-Arc path already got. See "Fourteenth round" below.
+
+### Fourteenth round — the actual horizontal rail, and a real bug fix (from live screenshots)
+
+**Two separate things were wrong, both found from real screenshots, not guessed at:**
+
+**1. The horizontal rail was still missing.** Rounds twelve/thirteen built the *vertical* pieces correctly (week header, connected day-spine) but never added `main`'s other defining visual: a horizontal scroll-snap strip of circular week nodes across the top. Added now as `WeekRail`/`WeekRailNode` in `TodayScreen.jsx`, reusing the **exact same `ProofRing` component** `main`'s `ArcTimeline.jsx` uses for its week checkpoints (now exported from that file instead of kept private) — each node's ring fills based on "how many of that week's 7 days got a chapter" instead of "how much proof got shown," since there's no Arc proof concept here. Nodes run oldest → newest, left → right, tapping one smooth-scrolls the page to that week's full section below (a "jump to," not a "hide everything else" selector — Noticed is a scrollable archive, `main`'s Arc screen is a bounded one-season viewer, so the two shouldn't behave identically here).
+
+**2. Real bug: the old habit/proof grid was fully exposed on Noticed whenever an Arc is active.** A screenshot showed the exact thing this whole redesign has been trying to get away from — the full "Build the System" Arc hero, a "0/7 PROOF" ring card, and then a completely open "PROOF ACTIONS" list (Workout, Forged Build, Pouches, Drink Water, full stat cards) sitting right below the chapters, taking up most of the scroll. Root cause, in `TodayScreen.jsx`: the "collapse the habit grid by default" fix from several rounds ago (`SectionCollapsible` around `trackedSection`) only wrapped the **no-Arc** path. The **Arc-active** path (`proofSection`) was left rendering its card list in full, unconditionally — an oversight from when that path was written under a different, earlier assumption ("Arc Takeover: proof IS the point"). Fixed: `proofSection`'s card list now renders inside the same `SectionCollapsible` pattern (`defaultOpen={false}`, labeled `"Proof actions — X of Y"`), so it's reachable on purpose instead of dominating the screen by default. The compact Hub/Edit-order controls stay visible above it (not worth hiding, they're one row); only the actual wall of habit cards collapses.
+
+**Files touched:** `src/components/ArcTimeline.jsx` (exported `ProofRing`), `src/screens/TodayScreen.jsx` (`WeekRail`, `WeekRailNode`, `scrollToWeek`/section refs in `DailyChapters`; `proofCardsInner` extraction + `SectionCollapsible` wrap in the main `TodayScreen` body).
+
+**Verified:** `npm run build` passes. **Not verified:** real visual review in a browser — everything in this round was diagnosed directly from the screenshots provided, not blind guessing, but still needs a real look, especially the rail's scroll-snap feel on an actual phone.
+
+**What to test:** open Noticed — there should now be a horizontal row of small ring nodes above the chapter list; tapping one scrolls to that week. Scroll all the way to the bottom of Noticed with an Arc active — the "Proof actions" habit cards should now be **collapsed by default** (a single "Proof actions — X of Y ▸" row), not a fully expanded wall of cards; tapping it should still open the same cards as before, unchanged in function.
 
 ### Thirteenth round — Noticed archive actually redone (storage system fix, take 2)
 

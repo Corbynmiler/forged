@@ -121,7 +121,7 @@ function useRailCenterSelection(railRef, onSegment, reducedMotion) {
   return { scrollToSegment, detectCenter };
 }
 
-function ProofRing({ percent, size = 40, active, complete }) {
+export function ProofRing({ percent, size = 40, active, complete }) {
   const p = percent == null ? 0 : Math.max(0, Math.min(100, percent));
   const sw = Math.max(3.5, size * 0.115);
   const r = (size - sw) / 2;
