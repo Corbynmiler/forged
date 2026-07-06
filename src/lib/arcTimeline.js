@@ -282,7 +282,7 @@ function briefSummaryFromBrief(briefText, usedTitle) {
 const WEAK_TITLE_RE = /^(solid|good|quiet|productive|recovery|reset|steady|building|foundations?|deep work|mixed|partial|light)\b/i;
 const COMMA_LIST_RE = /^[^,]+,\s*[^,]+/;
 
-function isWeakChapterCandidate(title) {
+export function isWeakChapterCandidate(title) {
   if (!title?.trim()) return true;
   const t = title.trim();
   if (t.length < 8) return true;
@@ -291,7 +291,7 @@ function isWeakChapterCandidate(title) {
   return false;
 }
 
-function scoreChapterCandidate(text) {
+export function scoreChapterCandidate(text) {
   if (!text?.trim()) return -99;
   const t = text.trim();
   let score = 0;
@@ -391,6 +391,29 @@ export function deriveChapterContent({ status, briefText, range, journalByDate, 
 /** @deprecated use deriveChapterContent */
 export function deriveChapterTitle(opts) {
   return deriveChapterContent(opts).chapterTitle;
+}
+
+/**
+ * Pick a single representative title for a calendar week's worth of daily
+ * chapters — reuses the exact same scoring heuristic Arc week chapters use
+ * (specific, declarative, not a generic mood word), just applied to a plain
+ * list of { title } days instead of an Arc-bound receipt range. No AI call:
+ * every candidate here was already written by the nightly rollover when it
+ * created that day's daily_summaries row, so this is a free, local pick —
+ * not a new summary.
+ */
+export function deriveWeekChapterFromDays(days) {
+  const candidates = [];
+  for (const d of days || []) {
+    const title = (d?.title || "").trim();
+    if (title && !isWeakChapterCandidate(title)) {
+      candidates.push({ text: title, score: scoreChapterCandidate(title) });
+    }
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  if (candidates[0]) return truncateChapterTitle(candidates[0].text);
+  const fallback = (days || []).find(d => (d?.title || "").trim());
+  return fallback ? truncateChapterTitle(fallback.title.trim()) : null;
 }
 
 /**

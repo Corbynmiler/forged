@@ -1,14 +1,14 @@
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
 import { useState, useRef, useEffect } from "react";
 import { T, COACH_ICON_OPTIONS } from "../theme.js";
-import { todayStr, daysAgo, parseLocal, isSatisfiedForTodayRing, getStreak, stripJournalTitleLine, fmtEntryDate } from "../utils.js";
+import { todayStr, daysAgo, parseLocal, isSatisfiedForTodayRing, getStreak, stripJournalTitleLine, fmtEntryDate, weekStartFor } from "../utils.js";
 import { Ring, SLabel, Modal, GBtn } from "../components/ui.jsx";
 import {
   DailyCard, WeeklyCard, ProjectCard, LimitCard, LogCard,
   TodayGoalCard,
 } from "../components/habitCards.jsx";
 import { resolveArcTitle } from "../arcProofMatch.js";
-import { parseReceiptStructured } from "../lib/arcTimeline.js";
+import { parseReceiptStructured, ymdAddDays, deriveWeekChapterFromDays } from "../lib/arcTimeline.js";
 import { ReceiptExpandedBody } from "../components/ArcTimeline.jsx";
 import { getArcDayStatus, ARC_STATUS_META } from "../arcProgress.js";
 
@@ -223,11 +223,66 @@ function ChapterDetailSheet({ entry, journalEntry, onClose }) {
 }
 
 /**
+ * Bucket a most-recent-first list of daily chapters into Monday-start
+ * calendar weeks — same week boundary `weekStartFor` uses everywhere else in
+ * the app (Insights, weekly briefs), so "a week" means one consistent thing
+ * across screens. Input order is preserved, so output groups stay newest-first.
+ */
+function groupChaptersByWeek(chapters) {
+  const groups = [];
+  let current = null;
+  for (const c of chapters) {
+    const ws = weekStartFor(c.date);
+    if (!current || current.weekStart !== ws) {
+      current = { weekStart: ws, weekEnd: ymdAddDays(ws, 6), items: [] };
+      groups.push(current);
+    }
+    current.items.push(c);
+  }
+  return groups;
+}
+
+/**
+ * One week's worth of chapters, grouped under a gold kicker + a locally
+ * derived caption — the same "weeks and days" shape the old Arc timeline
+ * used, minus the Arc: no fixed start date or duration to anchor "Week N of
+ * M" to, so weeks are just calendar weeks, and the caption comes from
+ * whichever day in that week already earned the best chapter title (no new
+ * AI call — see deriveWeekChapterFromDays).
+ */
+function WeekChapterGroup({ week, isCurrentWeek, isFirst, onOpen }) {
+  const rangeLabel = isCurrentWeek
+    ? "This week"
+    : `${fmtEntryDate(week.weekStart)} – ${fmtEntryDate(week.weekEnd)}`;
+  const caption = deriveWeekChapterFromDays(week.items);
+  return (
+    <div style={{ marginTop: isFirst ? 0 : 22 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: caption ? 4 : 8 }}>
+        <div style={{ width: 3, height: 12, borderRadius: 2, background: T.gold, flexShrink: 0 }} />
+        <div style={{ fontSize: 10, fontWeight: 800, color: T.gold, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+          {rangeLabel}
+        </div>
+      </div>
+      {caption && (
+        <div style={{ fontFamily: T.serif, fontSize: 16, color: T.text, lineHeight: 1.3, marginBottom: 10, paddingLeft: 11 }}>
+          {caption}
+        </div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {week.items.map(s => <DailyChapterCard key={s.date} entry={s} onOpen={onOpen} />)}
+      </div>
+    </div>
+  );
+}
+
+/**
  * The real daily-memory archive — replaces a single "yesterday" teaser line
  * with the actual companion-narrated history: every day the nightly
- * rollover has summarized, most recent first, rendered as a small tappable
- * chapter rather than a report row. This is Today/Noticed's real reason to
- * exist beyond habit logging — a place worth scrolling back into.
+ * rollover has summarized, most recent first, grouped into calendar weeks
+ * (see groupChaptersByWeek/WeekChapterGroup) the same way the old Arc
+ * timeline grouped days under weeks — just without an Arc's fixed start
+ * date/duration to number them against. This is Today/Noticed's real reason
+ * to exist beyond habit logging — a place worth scrolling back into.
  *
  * Free accounts see the same recent window as the rest of the app's history
  * gating (last 7 days — matches HistoryModal's `daysAgo(6)` cutoff exactly,
@@ -252,7 +307,7 @@ function DailyChapters({ recentSummaries, isPro, onUpgrade, journalEntries = [] 
   // isn't a report you're behind on, it's a page that fills in as the day
   // happens, no action required.
   const todayGhost = (
-    <div style={{ padding: "14px 16px", borderRadius: T.r, border: `0.5px dashed ${T.borderStrong}` }}>
+    <div style={{ padding: "14px 16px", borderRadius: T.r, border: `0.5px dashed ${T.borderStrong}`, marginBottom: 8 }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: T.muted, letterSpacing: "0.04em", marginBottom: 4 }}>Today</div>
       <div style={{ fontSize: 12.5, color: T.hint, lineHeight: 1.5, fontStyle: "italic" }}>Still being written — talk to your companion, and tonight this becomes a chapter.</div>
     </div>
@@ -271,16 +326,24 @@ function DailyChapters({ recentSummaries, isPro, onUpgrade, journalEntries = [] 
 
   const visible = isPro ? chapters : chapters.filter(s => s.date >= cutoff);
   const locked = chapters.slice(visible.length);
+  const weekGroups = groupChaptersByWeek(visible);
+  const thisWeekStart = weekStartFor(today);
 
   return (
     <div style={{ margin: "14px 14px 0" }}>
       <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.hint, marginBottom: 8, padding: "0 2px" }}>
         Your companion noticed
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {todayGhost}
-        {visible.map(s => <DailyChapterCard key={s.date} entry={s} onOpen={e => setOpenDate(e.date)} />)}
-      </div>
+      {todayGhost}
+      {weekGroups.map((week, i) => (
+        <WeekChapterGroup
+          key={week.weekStart}
+          week={week}
+          isCurrentWeek={week.weekStart === thisWeekStart}
+          isFirst={i === 0}
+          onOpen={e => setOpenDate(e.date)}
+        />
+      ))}
       {locked.length > 0 && (
         <div style={{ position: "relative", marginTop: 8, borderRadius: T.r, overflow: "hidden" }}>
           <div style={{ filter: "blur(3px)", pointerEvents: "none", userSelect: "none", display: "flex", flexDirection: "column", gap: 8 }}>

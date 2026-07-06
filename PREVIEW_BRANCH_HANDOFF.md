@@ -2,7 +2,25 @@
 
 **Branch:** `claude/forged-ai-companion-redesign-agyjl7`
 **Status:** preview/experimental only. `main` (production) has not been touched, merged into, or modified at any point on this branch.
-**Last updated:** 2026-07-06 (eleventh round today) — raised the TTS char cap for heavy personal testing, then did a real coherence pass on **You** (`ProfileScreen.jsx`) — the one primary screen that hadn't been touched all session. See "Eleventh round" below.
+**Last updated:** 2026-07-06 (twelfth round today) — redesigned Noticed's daily archive to group chapters into calendar weeks with a locally-derived caption per week, replacing the flat day-list. See "Twelfth round" below.
+
+### Twelfth round — Noticed archive regrouped into weeks (the "storage system" redesign)
+
+**What was asked:** the flat day-by-day list in Noticed ("your companion noticed") read as "pretty loud... very basic" compared to the old Arc timeline on `main`, which grouped days under weeks, each week titled with a caption summarizing it. The ask was to bring that same visual shape back — weeks containing days, each week captioned — but *without* a fixed Arc duration to number the weeks against, since Noticed's archive has no Arc-style start date/duration governing it.
+
+**How it works:** the flat list of chapters (`daily_summaries` rows) is now bucketed into Monday-start calendar weeks via a new `groupChaptersByWeek()` in `TodayScreen.jsx`, using the same `weekStartFor()` week boundary already used everywhere else in the app (Insights, weekly briefs) — one consistent definition of "a week," not a new one. Each week renders as a `WeekChapterGroup`: a gold uppercase kicker (date range, or "This week" for the current week) plus a serif caption line, then that week's `DailyChapterCard`s nested below — visually the same shape as the old Arc rail's week-detail panel (gold kicker → serif title → days), just as a vertical section instead of a horizontal scrolling rail, since Noticed is a normal scroll page.
+
+**The caption is free — no new AI call.** `deriveWeekChapterFromDays()` (new export in `src/lib/arcTimeline.js`) picks the single best day-title out of that week's chapters, reusing the *exact same* scoring heuristic (`scoreChapterCandidate`/`isWeakChapterCandidate`, now exported instead of private) the old Arc chapter-title logic already used to pick a good, specific headline over a generic mood word ("Building the closecraft system" over "Solid week"). Every candidate title was already written by the nightly rollover when it created that day's `daily_summaries` row — this only *selects* one, it doesn't generate new prose. So there's no per-week Anthropic cost, no new schema, and it degrades gracefully: a week with only vague day-titles still falls back to the most recent one rather than showing nothing.
+
+**Why not reuse the AI-generated weekly brief (`/api/weekly-summary`) instead?** That endpoint (already in the repo, already wired to Insights) only ever covers *the current* ISO week and is quota-gated (1/week free, 2/week Pro) — it has no concept of writing a brief for a past week on demand, and stretching it to do so would mean either burning quota against past weeks or adding new schema/quota semantics. Given the caption is meant to be an always-there scanning aid for potentially many weeks of history, the free local derivation was the right fit; the AI weekly brief remains Insights' separate, deliberate, quota-gated "ask for a real weekly review" feature — untouched.
+
+**Free/Pro gating unchanged:** only the already-unlocked chapters get grouped into weeks. The existing blurred "N more chapters — Unlock full archive" block for locked days is untouched and still renders below the week groups exactly as before — this round didn't touch paywall logic, only the visual grouping of what a user can already see.
+
+**Verified:** `npm run build` passes. **Not verified:** real visual review in a browser (no live session in this sandbox) — worth a real look, especially how a week header with only 1-2 days in it (partial current week, or a week that starts right at the free-tier's 7-day cutoff) reads.
+
+**Files touched:** `src/lib/arcTimeline.js` (exported `scoreChapterCandidate`/`isWeakChapterCandidate`, added `deriveWeekChapterFromDays`), `src/screens/TodayScreen.jsx` (`groupChaptersByWeek`, `WeekChapterGroup`, wired into `DailyChapters`).
+
+**What to test:** open Noticed with more than ~7-10 days of history — chapters should now appear under week headers ("This week", then date ranges like "Jun 23 – Jun 29") each with a short italic-free serif caption above that week's day cards, instead of one long flat list. Tap into a couple of day cards to confirm they still open the same detail sheet as before (grouping is purely visual, `ChapterDetailSheet` untouched). Confirm the locked/blurred section for free accounts still appears below the visible week groups.
 
 ### Eleventh round — TTS cap raised for real testing + You screen coherence pass
 
