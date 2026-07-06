@@ -83,6 +83,7 @@ import { TodayScreen, CoachGreeting } from "./screens/TodayScreen.jsx";
 import { CompanionScreen } from "./screens/CompanionScreen.jsx";
 import { ArcScreen } from "./screens/ArcScreen.jsx";
 import { HubScreen } from "./screens/HubScreen.jsx";
+import { CompanionMemoryScreen } from "./screens/CompanionMemoryScreen.jsx";
 import ArcSetupSheet from "./screens/ArcSetupSheet.jsx";
 import ArcCoachSheet from "./screens/ArcCoachSheet.jsx";
 import { ArcCompletedSheet, hasDecidedArc, markArcDecided } from "./components/ArcCompletedSheet.jsx";
@@ -3964,6 +3965,7 @@ export default function App() {
                 : screen === "profile" ? user.name
                 : screen === "arc" ? "Your Arc"
                 : screen === "hub" ? "All tracked items"
+                : screen === "companion-memory" ? "What it remembers"
                 : screen.charAt(0).toUpperCase()+screen.slice(1)}
             </div>
           </div>
@@ -4037,6 +4039,7 @@ export default function App() {
           tab={arcTab} onTabChange={setArcTab}
           activeBlock={activeBlock} habits={habits} goals={goals} journalEntries={journalEntries}
           arcLedgerRows={arcLedgerRows}
+          dailySummaries={coachMemory?.recentSummaries}
           isPro={isPro} onUpgrade={() => setShowUpgrade(true)}
           userId={sessionUserId} userName={user.name || ""} coachName={coachName}
           onStartArc={openArcCoachCreate} onEditArc={openArcCoachEdit}
@@ -4071,6 +4074,7 @@ export default function App() {
           tab={arcTab} onTabChange={setArcTab}
           activeBlock={activeBlock} habits={habits} goals={goals} journalEntries={journalEntries}
           arcLedgerRows={arcLedgerRows}
+          dailySummaries={coachMemory?.recentSummaries}
           isPro={isPro} onUpgrade={() => setShowUpgrade(true)}
           userId={sessionUserId} userName={user.name || ""} coachName={coachName}
           onStartArc={openArcCoachCreate} onEditArc={openArcCoachEdit}
@@ -4187,6 +4191,13 @@ export default function App() {
           onNotifCategoryChange={handleNotifCategoryChange}
           onOpenSocial={() => setScreen("social")}
           onOpenHub={() => setScreen("hub")}
+          onOpenCompanionMemory={() => setScreen("companion-memory")}
+        />}
+        {screen === "companion-memory" && <CompanionMemoryScreen
+          userId={sessionUserId}
+          activeBlock={activeBlock}
+          coachName={coachName}
+          onBack={() => setScreen("profile")}
         />}
 
         {/* Coach bar above nav (+ page guide / nudge / Today add). Hidden on Profile and while coach sheet open. */}

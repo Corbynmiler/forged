@@ -151,12 +151,17 @@ export function formatDayLabel(dateStr, today = todayStr()) {
 export function buildWeekDayJourney(week, {
   arcLedgerRows = [],
   journalEntries = [],
+  dailySummaries = [],
   today = todayStr(),
 } = {}) {
   if (!week?.startDate || !week?.endDate) return [];
 
   const ledger = ledgerMap(arcLedgerRows);
   const journalByDate = journalMap(journalEntries);
+  const summaryByDate = new Map();
+  for (const s of dailySummaries || []) {
+    if (s?.date) summaryByDate.set(s.date, s);
+  }
   const days = datesInRange(week.startDate, week.endDate);
 
   return days.map((dateStr, i) => {
@@ -169,9 +174,18 @@ export function buildWeekDayJourney(week, {
     const isToday = dateStr === today;
     const isFuture = dateStr > today;
 
+    const summary = summaryByDate.get(dateStr);
+    // A real daily_summaries title is written from the actual conversation —
+    // a moment worth remembering ("Planting in the Rain Again") — rather
+    // than the receipt's proof-accounting framing ("Recovery & Reset").
+    // Prefer it as the day's headline when the nightly rollover has produced
+    // one; the receipt title still backs it up otherwise.
+    const summaryTitle = (summary?.title || "").trim() || null;
+    const summaryNarrative = (summary?.structured?.narrative || summary?.summary || "").trim() || null;
+
     let state;
     if (isFuture) state = "future";
-    else if (hasReceipt) state = isToday ? "today" : "evidence";
+    else if (hasReceipt || summaryTitle) state = isToday ? "today" : "evidence";
     else if (hasProof) state = isToday ? "today" : "partial";
     else if (isToday) state = "today";
     else state = "empty";
@@ -189,6 +203,8 @@ export function buildWeekDayJourney(week, {
       proofTotal,
       journal: hasReceipt ? { content: journal.content, date: dateStr } : null,
       parsed,
+      summaryTitle,
+      summaryNarrative,
       isFirst: i === 0,
       isLast: i === days.length - 1,
     };
@@ -360,7 +376,15 @@ export function deriveChapterContent({ status, briefText, range, journalByDate, 
     return { chapterTitle: null, chapterSummary: null };
   }
 
-  const fromReceipts = chapterFromReceipts(range, journalByDate);
+  // A single day's receipt "pattern" line (e.g. "Seven straight days of full
+  // Arc proof") is scoped to that one day — it can be true when written and
+  // false by the time the week actually finishes (a streak that later broke,
+  // a day that over-claimed). Hoisting it up as THE WEEK'S title asserts a
+  // whole-week claim the data doesn't back yet. Only trust it once the week
+  // is actually over (status === "complete") — for a week still in progress,
+  // prefer an explicit weekly brief (which is written about the whole period
+  // on purpose) or say nothing rather than borrow one day's confidence.
+  const fromReceipts = status === "complete" ? chapterFromReceipts(range, journalByDate) : null;
   const receiptTitle = fromReceipts ? truncateChapterTitle(fromReceipts) : null;
   const briefHeadline = headlineFromBrief(briefText);
 
@@ -385,6 +409,9 @@ export function deriveChapterContent({ status, briefText, range, journalByDate, 
   if (evidenceDays === 0 && status === "complete") {
     return { chapterTitle: "A quiet week", chapterSummary: null };
   }
+  // status === "current" with no brief and no completed-week receipt title:
+  // stay quiet rather than assert anything — formatWeekStatusLine's "Week in
+  // progress" already covers this honestly.
   return { chapterTitle: null, chapterSummary: null };
 }
 

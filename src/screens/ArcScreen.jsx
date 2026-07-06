@@ -8,7 +8,7 @@ import { ArcTimeline, ArcArchiveCard } from "../components/ArcTimeline.jsx";
 
 function PastArcsSection({
   userId, isPro, onUpgrade, habits, goals, journalEntries, arcLedgerRows,
-  userName, onRunItBack, onEvolve,
+  userName, onRunItBack, onEvolve, dailySummaries,
 }) {
   const [pastArcs, setPastArcs] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
@@ -61,6 +61,7 @@ function PastArcsSection({
               goals={goals}
               journalEntries={journalEntries}
               arcLedgerRows={arcLedgerRows.filter(r => r.blockId === block.id || r.block_id === block.id)}
+              dailySummaries={dailySummaries}
               userId={userId}
               userName={userName}
               isPro={isPro}
@@ -103,6 +104,7 @@ function HubLink({ onOpenHub }) {
 export function ArcScreen({
   tab = "arc", onTabChange,
   activeBlock, habits, goals, journalEntries, arcLedgerRows = [],
+  dailySummaries = [],
   isPro, onUpgrade, userId, userName,
   onStartArc, onEditArc, onRunItBack, onEvolve,
   onOpenHub, hideHero = false,
@@ -147,6 +149,7 @@ export function ArcScreen({
           habits={habits} goals={goals} journalEntries={journalEntries}
           arcLedgerRows={arcLedgerRows} userName={userName}
           onRunItBack={onRunItBack} onEvolve={onEvolve}
+          dailySummaries={dailySummaries}
         />
       </div>
     );
@@ -160,6 +163,7 @@ export function ArcScreen({
         goals={goals}
         journalEntries={journalEntries}
         arcLedgerRows={arcLedgerRows}
+        dailySummaries={dailySummaries}
         userId={userId}
         userName={userName}
         isPro={isPro}
@@ -177,6 +181,7 @@ export function ArcScreen({
         habits={habits} goals={goals} journalEntries={journalEntries}
         arcLedgerRows={arcLedgerRows} userName={userName}
         onRunItBack={onRunItBack} onEvolve={onEvolve}
+        dailySummaries={dailySummaries}
       />
     </div>
   );

@@ -279,7 +279,7 @@ export function UpgradeModal({ onClose, habitCount = 0, userId, userEmail }) {
     </div>
   );
 }
-export function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onReplayPageGuides, previewNormalCoachGreeting = false, onTogglePreviewNormalCoachGreeting, onSignOut, onShowTour, onUpgrade, coachName, coachIcon, onSaveCoach, voiceRepliesEnabled = false, coachVoiceId = null, onSaveVoicePrefs, notifEnabled, notifTime, notifLoading, notifPermission, dailyRemindersEnabled, nudgesEnabled, invitesEnabled, onNotifToggle, onNotifTimeChange, onNotifCategoryChange, onOpenSocial = null, onOpenHub = null }) {
+export function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCode, authEmail, onUpdateUser, onResetOnboarding, onPreviewOnboarding, onReplayPageGuides, previewNormalCoachGreeting = false, onTogglePreviewNormalCoachGreeting, onSignOut, onShowTour, onUpgrade, coachName, coachIcon, onSaveCoach, voiceRepliesEnabled = false, coachVoiceId = null, onSaveVoicePrefs, notifEnabled, notifTime, notifLoading, notifPermission, dailyRemindersEnabled, nudgesEnabled, invitesEnabled, onNotifToggle, onNotifTimeChange, onNotifCategoryChange, onOpenSocial = null, onOpenHub = null, onOpenCompanionMemory = null }) {
   const [editingName,    setEditingName]    = useState(false);
   const [nameVal,        setNameVal]        = useState(user.name);
   const [showCoachSheet, setShowCoachSheet] = useState(false);
@@ -476,6 +476,18 @@ export function ProfileScreen({ user, xp, habits, isPro, stripeCustomerId, refCo
             <span style={{ fontSize:18, color:T.hint }}>›</span>
           </button>
         </div>
+        {onOpenCompanionMemory ? (
+          <div style={{ borderBottom:`0.5px solid ${T.border}`, padding:"12px 16px" }}>
+            <button type="button" onClick={onOpenCompanionMemory} style={{ display:"flex", alignItems:"center", width:"100%", background:"none", border:"none", cursor:"pointer", gap:10 }}>
+              <div style={{ fontSize:18, flexShrink:0 }}>🧭</div>
+              <div style={{ flex:1, textAlign:"left", minWidth:0 }}>
+                <div style={{ fontSize:14, color:T.text }}>What it remembers</div>
+                <div style={{ fontSize:12, color:T.muted, marginTop:1, lineHeight:1.35 }}>Projects, people, patterns — what your companion has picked up on</div>
+              </div>
+              <span style={{ fontSize:18, color:T.hint }}>›</span>
+            </button>
+          </div>
+        ) : null}
         {isPro && onSaveVoicePrefs ? (
           <>
             <div style={{ padding:"12px 16px 14px", borderBottom:`0.5px solid ${T.border}` }}>

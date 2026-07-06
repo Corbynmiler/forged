@@ -563,10 +563,10 @@ function dayDisplayTitle(parsed) {
   return null;
 }
 
-function WeekDayJourney({ week, arcLedgerRows, journalEntries, reducedMotion }) {
+function WeekDayJourney({ week, arcLedgerRows, journalEntries, dailySummaries, reducedMotion }) {
   const days = useMemo(
-    () => buildWeekDayJourney(week, { arcLedgerRows, journalEntries }),
-    [week, arcLedgerRows, journalEntries],
+    () => buildWeekDayJourney(week, { arcLedgerRows, journalEntries, dailySummaries }),
+    [week, arcLedgerRows, journalEntries, dailySummaries],
   );
   const [expandedDate, setExpandedDate] = useState(null);
   const dayRefs = useRef(new Map());
@@ -625,7 +625,7 @@ function WeekDayJourney({ week, arcLedgerRows, journalEntries, reducedMotion }) 
                   type="button"
                   onClick={() => {
                     scrollToDay(day.date);
-                    if (day.hasReceipt) setExpandedDate(expandedDate === day.date ? null : day.date);
+                    if (day.hasReceipt || day.summaryNarrative) setExpandedDate(expandedDate === day.date ? null : day.date);
                   }}
                   style={{
                     width: "100%", textAlign: "left", background: "none", border: "none",
@@ -670,8 +670,12 @@ function WeekDayJourney({ week, arcLedgerRows, journalEntries, reducedMotion }) 
                       }}>
                         {day.label}
                       </div>
-                      {day.hasReceipt ? (() => {
-                        const headline = dayDisplayTitle(day.parsed);
+                      {(day.summaryTitle || day.hasReceipt) ? (() => {
+                        // The nightly rollover's title is written from the real
+                        // conversation — a moment worth remembering — so it
+                        // takes priority over the receipt's proof-accounting
+                        // title when both exist for the same day.
+                        const headline = day.summaryTitle || dayDisplayTitle(day.parsed);
                         return headline ? (
                           <div style={{
                             fontSize: 13, fontWeight: 600, color: T.text,
@@ -698,6 +702,17 @@ function WeekDayJourney({ week, arcLedgerRows, journalEntries, reducedMotion }) 
                   {expandedDate === day.date && day.hasReceipt ? (
                     <div onClick={e => e.stopPropagation()} style={{ marginTop: 10, paddingLeft: 46 }}>
                       <ReceiptExpandedBody parsed={day.parsed} content={day.journal.content} />
+                      <button type="button" onClick={() => setExpandedDate(null)}
+                        style={{ marginTop: 6, padding: 0, background: "none", border: "none", color: T.sub, fontSize: 11, cursor: "pointer", fontFamily: T.font }}>
+                        Collapse ▴
+                      </button>
+                    </div>
+                  ) : expandedDate === day.date && day.summaryNarrative ? (
+                    // No proof receipt for this day, but the companion has a
+                    // real conversation-derived narrative for it — show that
+                    // instead of nothing.
+                    <div onClick={e => e.stopPropagation()} style={{ marginTop: 10, paddingLeft: 46 }}>
+                      <div style={{ fontSize: 12.5, color: T.sub, lineHeight: 1.55 }}>{day.summaryNarrative}</div>
                       <button type="button" onClick={() => setExpandedDate(null)}
                         style={{ marginTop: 6, padding: 0, background: "none", border: "none", color: T.sub, fontSize: 11, cursor: "pointer", fontFamily: T.font }}>
                         Collapse ▴
@@ -835,7 +850,7 @@ function DetailAccent() {
 }
 
 function WeekDetail({
-  week, arcLedgerRows, journalEntries, generatingBrief, onGenerateBrief, briefError, reducedMotion, panelKey,
+  week, arcLedgerRows, journalEntries, dailySummaries, generatingBrief, onGenerateBrief, briefError, reducedMotion, panelKey,
 }) {
   if (!week) return null;
 
@@ -869,6 +884,7 @@ function WeekDetail({
         week={week}
         arcLedgerRows={arcLedgerRows}
         journalEntries={journalEntries}
+        dailySummaries={dailySummaries}
         reducedMotion={reducedMotion}
       />
     </div>
@@ -1086,6 +1102,7 @@ export function ArcTimeline({
   goals = [],
   journalEntries = [],
   arcLedgerRows = [],
+  dailySummaries = [],
   userId,
   userName = "",
   isPro = false,
@@ -1164,6 +1181,16 @@ export function ArcTimeline({
     weeklyBriefsByWeekStart: weeklyBriefs,
   }), [block, ledgerRows, journalInArc, weeklyBriefs]);
 
+  // For a live, ongoing Arc, "the timeline" is history + today — it doesn't
+  // project a wall of upcoming/future weeks toward a fixed finish line
+  // (that framing implied the Arc was a race with an end, not a direction).
+  // Past/closed Arcs (isActive === false, shown in Arc history) keep their
+  // full week list since those really did conclude.
+  const visibleWeeks = useMemo(
+    () => isActive ? timeline.weeks.filter(w => w.status !== "upcoming") : timeline.weeks,
+    [isActive, timeline.weeks],
+  );
+
   const currentWeek = timeline.currentWeek;
   const duration = getArcDurationDays(block);
   const dayNum = getArcDayNumber(block);
@@ -1207,10 +1234,10 @@ export function ArcTimeline({
     const list = [];
     if (unassigned.length > 0) list.push(SEG.before);
     list.push(SEG.start);
-    timeline.weeks.forEach(w => list.push(SEG.week(w.weekNum)));
-    list.push(SEG.finish);
+    visibleWeeks.forEach(w => list.push(SEG.week(w.weekNum)));
+    if (!isActive) list.push(SEG.finish);
     return list;
-  }, [unassigned.length, timeline.weeks]);
+  }, [unassigned.length, visibleWeeks, isActive]);
 
   const selectedIndex = segmentList.indexOf(selectedSegment);
   const isAdjacent = (seg) => {
@@ -1285,6 +1312,7 @@ export function ArcTimeline({
         panelKey={selectedSegment}
         arcLedgerRows={ledgerRows}
         journalEntries={journalInArc}
+        dailySummaries={dailySummaries}
         generatingBrief={generatingBrief}
         onGenerateBrief={isActive ? handleGenerateBrief : null}
         briefError={briefError}
@@ -1322,7 +1350,7 @@ export function ArcTimeline({
       {isActive && !embedded ? (
         <ArcTimelineSplit
           segments={segmentList.map(seg => ({ key: seg, weekNum: SEG.parseWeek(seg) }))}
-          weeks={timeline.weeks}
+          weeks={visibleWeeks}
           ledgerRows={ledgerRows}
           selectedSegment={selectedSegment}
           reducedMotion={reducedMotion}
@@ -1387,7 +1415,7 @@ export function ArcTimeline({
               />,
             );
 
-            timeline.weeks.forEach((week) => {
+            visibleWeeks.forEach((week) => {
               const seg = SEG.week(week.weekNum);
               pushConnector(weekSegIndex(week.weekNum));
               nodes.push(
@@ -1403,21 +1431,26 @@ export function ArcTimeline({
               );
             });
 
-            pushConnector(currentWeek >= timeline.weekCount);
-            nodes.push(
-              <FinishNode
-                key="finish"
-                block={block}
-                daysLeft={daysLeft}
-                weeksLeft={weeksLeft}
-                isComplete={isArcComplete}
-                selected={selectedSegment === SEG.finish}
-                adjacent={isAdjacent(SEG.finish)}
-                onSelect={handleSelectSegment}
-                reducedMotion={reducedMotion}
-                index={nodeIndex++}
-              />,
-            );
+            // A live Arc's rail simply ends at the current week — no finish
+            // line, no countdown wall. Closed/past Arcs (isActive === false)
+            // still show FinishNode, since those genuinely reached an end.
+            if (!isActive) {
+              pushConnector(currentWeek >= timeline.weekCount);
+              nodes.push(
+                <FinishNode
+                  key="finish"
+                  block={block}
+                  daysLeft={daysLeft}
+                  weeksLeft={weeksLeft}
+                  isComplete={isArcComplete}
+                  selected={selectedSegment === SEG.finish}
+                  adjacent={isAdjacent(SEG.finish)}
+                  onSelect={handleSelectSegment}
+                  reducedMotion={reducedMotion}
+                  index={nodeIndex++}
+                />,
+              );
+            }
 
             return nodes;
           })()}
