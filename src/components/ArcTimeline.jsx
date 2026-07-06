@@ -16,9 +16,9 @@ import {
   formatWeekStatusLine,
 } from "../lib/arcTimeline.js";
 
-const CHECKPOINT_W = 80;
-const NODE = 44;
-const RAIL_PAD = "calc(50% - 40px)";
+export const CHECKPOINT_W = 80;
+export const NODE = 44;
+export const RAIL_PAD = "calc(50% - 40px)";
 
 const SEG = {
   before: "before",
@@ -31,7 +31,7 @@ const SEG = {
   },
 };
 
-const ARC_MOTION_CSS = `
+export const ARC_MOTION_CSS = `
 @keyframes arcPathReveal {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
@@ -58,7 +58,7 @@ const SECONDARY_BTN = {
   fontFamily: T.font, textAlign: "left", width: "100%",
 };
 
-function useRailCenterSelection(railRef, onSegment, reducedMotion) {
+export function useRailCenterSelection(railRef, onSegment, reducedMotion) {
   const timerRef = useRef(null);
   const skipRef = useRef(false);
 
@@ -144,7 +144,7 @@ export function ProofRing({ percent, size = 40, active, complete }) {
   );
 }
 
-function RailCheckpoint({
+export function RailCheckpoint({
   segment, label, sublabel, selected, adjacent, onSelect, reducedMotion, index,
   children, quiet = false, scrollSnap = "center",
 }) {
@@ -803,7 +803,7 @@ function BeforeArcChronology({ entries, reducedMotion }) {
   );
 }
 
-function RailConnector({ active, width = 14 }) {
+export function RailConnector({ active, width = 14 }) {
   return (
     <div
       aria-hidden

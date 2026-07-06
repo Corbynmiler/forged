@@ -1,15 +1,19 @@
 // ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Fragment } from "react";
 import { T, COACH_ICON_OPTIONS } from "../theme.js";
-import { todayStr, daysAgo, parseLocal, isSatisfiedForTodayRing, getStreak, stripJournalTitleLine, fmtEntryDate, weekStartFor } from "../utils.js";
+import { todayStr, daysAgo, parseLocal, isSatisfiedForTodayRing, getStreak, stripJournalTitleLine, fmtEntryDate, fmtWeekRange, weekStartFor } from "../utils.js";
 import { Ring, SLabel, Modal, GBtn } from "../components/ui.jsx";
 import {
   DailyCard, WeeklyCard, ProjectCard, LimitCard, LogCard,
   TodayGoalCard,
 } from "../components/habitCards.jsx";
 import { resolveArcTitle } from "../arcProofMatch.js";
-import { parseReceiptStructured, ymdAddDays, deriveWeekChapterFromDays } from "../lib/arcTimeline.js";
-import { ReceiptExpandedBody, ProofRing } from "../components/ArcTimeline.jsx";
+import { parseReceiptStructured, ymdAddDays, deriveWeekChapterFromDays, formatEvidenceLabel } from "../lib/arcTimeline.js";
+import {
+  ReceiptExpandedBody, ProofRing, RailCheckpoint, RailConnector,
+  useRailCenterSelection, ARC_MOTION_CSS, NODE as RAIL_NODE_SIZE, RAIL_PAD,
+} from "../components/ArcTimeline.jsx";
+import { useReducedMotion } from "../hooks/useReducedMotion.js";
 import { getArcDayStatus, ARC_STATUS_META } from "../arcProgress.js";
 
 // ── Coach greeting helpers (deterministic, no AI) ──────────────────────────
@@ -318,74 +322,121 @@ function ChapterSpineRow({ entry, isFirst, isLast, onOpen }) {
   );
 }
 
-const RAIL_NODE = 44;
-
 /**
- * One node on the horizontal week rail — same ProofRing component the old
- * Arc timeline used for its week checkpoints, just showing "how many of this
- * week's 7 days got a chapter" instead of "how much proof got shown." Tapping
- * it scrolls the page down to that week's full section below.
+ * One node on the horizontal week rail — a direct port of the old Arc
+ * timeline's `WeekNode`, reusing the actual `RailCheckpoint`/`ProofRing`
+ * components it used (imported from ArcTimeline.jsx, not reimplemented),
+ * just re-bound to "how many of this week's 7 days got a chapter" instead of
+ * "how much habit proof got shown." Only weeks that have actually happened
+ * are ever passed in — there's no Arc duration to project future weeks
+ * against, so the rail simply ends at "this week," exactly like asked.
  */
-function WeekRailNode({ week, isCurrentWeek, selected, onSelect }) {
-  const percent = Math.min(100, Math.round((week.items.length / 7) * 100));
-  const label = isCurrentWeek ? "Now" : fmtEntryDate(week.weekStart).replace(/,.*/, "");
+function MemoryWeekNode({ week, isCurrentWeek, selected, adjacent, onSelect, reducedMotion, index }) {
+  const n = week.items.length;
+  const percent = Math.min(100, Math.round((n / 7) * 100));
+  const isFullyCaptured = !isCurrentWeek && percent >= 100;
+
+  const nodeBg = selected
+    ? "rgba(200,144,42,0.22)"
+    : isFullyCaptured ? "rgba(61,155,95,0.10)" : "rgba(255,255,255,0.03)";
+  const borderColor = selected
+    ? T.gold
+    : isFullyCaptured ? "rgba(61,155,95,0.5)" : isCurrentWeek ? "rgba(200,144,42,0.55)" : "rgba(255,255,255,0.1)";
+
+  const evidenceLabel = formatEvidenceLabel(n, 7, isCurrentWeek ? "current" : "complete");
+  const topLabel = isCurrentWeek ? "NOW" : String(parseLocal(week.weekStart).getDate());
+
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(week.weekStart)}
-      aria-pressed={selected}
-      style={{
-        flex: "0 0 60px", width: 60, scrollSnapAlign: "center",
-        background: "none", border: "none", padding: "2px 0 4px",
-        cursor: "pointer", fontFamily: T.font,
-        opacity: selected ? 1 : 0.68,
-      }}
+    <RailCheckpoint
+      segment={week.weekStart}
+      selected={selected}
+      adjacent={adjacent}
+      onSelect={onSelect}
+      reducedMotion={reducedMotion}
+      index={index}
+      label={(
+        <div style={{ fontSize: 8, fontWeight: 800, letterSpacing: "0.1em", color: selected || isCurrentWeek ? T.gold : T.hint, textAlign: "center", marginBottom: 4 }}>
+          {topLabel}
+        </div>
+      )}
+      sublabel={evidenceLabel}
     >
-      <div style={{ position: "relative", width: RAIL_NODE, height: RAIL_NODE, margin: "0 auto" }}>
-        <ProofRing percent={percent} size={RAIL_NODE} active={selected || isCurrentWeek} complete={percent >= 100} />
+      <div style={{ position: "relative", width: RAIL_NODE_SIZE, height: RAIL_NODE_SIZE, margin: "0 auto" }}>
+        <ProofRing percent={percent} size={RAIL_NODE_SIZE} active={selected || isCurrentWeek} complete={isFullyCaptured} />
         <div style={{
           position: "absolute", inset: 5, borderRadius: "50%",
-          background: selected ? "rgba(200,144,42,0.22)" : "rgba(255,255,255,0.03)",
-          border: `2px solid ${selected ? T.gold : "rgba(255,255,255,0.1)"}`,
-          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2,
+          background: nodeBg, border: `2px solid ${borderColor}`,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          boxShadow: selected ? `0 0 12px ${T.gold}44` : "none",
+          animation: isCurrentWeek && selected && !reducedMotion ? "arcPulse 2.8s ease-in-out infinite" : undefined,
+          zIndex: 2,
         }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: selected ? T.gold : T.muted }}>{week.items.length}</span>
+          {isFullyCaptured ? (
+            <span style={{ fontSize: 13, color: "#4ade80", fontWeight: 700 }}>✓</span>
+          ) : isCurrentWeek ? (
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: T.gold }} />
+          ) : (
+            <span style={{ fontSize: 11, fontWeight: 700, color: T.muted }}>{n}</span>
+          )}
         </div>
       </div>
-      <div style={{
-        marginTop: 5, fontSize: 8.5, fontWeight: 600, textAlign: "center",
-        color: selected ? T.sub : T.muted, whiteSpace: "nowrap",
-      }}>
-        {label}
-      </div>
-    </button>
+    </RailCheckpoint>
   );
 }
 
 /**
- * Horizontal scrollable strip of week nodes — the piece actually missing
- * from the last pass. `main`'s Arc timeline uses this exact rail shape
- * (scroll-snap row of circular checkpoints) to move between Arc weeks; here
- * it's just a quick-jump nav over calendar weeks, oldest on the left, tapping
- * a node scrolls to that week's full section instead of hiding the others
- * (Noticed is a scrollable archive, not a one-week-at-a-time viewer).
+ * The horizontal scroll-snap rail itself — same rail mechanics the Arc screen
+ * uses (`useRailCenterSelection`: tap a node to smooth-scroll it to center,
+ * or scroll the rail by hand and the centered node becomes selected), just
+ * driving week selection instead of Arc-week selection. Weeks run oldest →
+ * newest, left → right, ending at the current week — no upcoming/future
+ * nodes, because unlike an Arc there's no fixed end date to draw them against.
  */
-function WeekRail({ weeks, thisWeekStart, selected, onSelect }) {
+function MemoryWeekRail({ weeks, thisWeekStart, selectedSegment, onSegmentChange }) {
+  const railRef = useRef(null);
+  const reducedMotion = useReducedMotion();
+  const { scrollToSegment } = useRailCenterSelection(railRef, onSegmentChange, reducedMotion);
+  const initialScrollDone = useRef(false);
+
+  useEffect(() => {
+    if (initialScrollDone.current || !selectedSegment) return;
+    const t = setTimeout(() => {
+      scrollToSegment(selectedSegment);
+      initialScrollDone.current = true;
+    }, 80);
+    return () => clearTimeout(t);
+  }, [selectedSegment, scrollToSegment]);
+
   if (weeks.length <= 1) return null;
+
+  const selectedIndex = weeks.findIndex(w => w.weekStart === selectedSegment);
+
   return (
-    <div style={{
-      overflowX: "auto", overflowY: "hidden", WebkitOverflowScrolling: "touch",
-      scrollSnapType: "x proximity", margin: "0 0 18px",
-    }}>
-      <div style={{ display: "flex", gap: 2, padding: "0 8px" }}>
-        {weeks.map(week => (
-          <WeekRailNode
-            key={week.weekStart}
-            week={week}
-            isCurrentWeek={week.weekStart === thisWeekStart}
-            selected={week.weekStart === selected}
-            onSelect={onSelect}
-          />
+    <div
+      ref={railRef}
+      style={{
+        overflowX: "auto", overflowY: "hidden", WebkitOverflowScrolling: "touch",
+        scrollSnapType: "x mandatory", minWidth: 0, maxWidth: "100%", marginBottom: 8,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "flex-start", position: "relative", paddingLeft: RAIL_PAD, paddingRight: RAIL_PAD, minHeight: 100 }}>
+        {weeks.map((week, i) => (
+          <Fragment key={week.weekStart}>
+            {/* Every week on this rail is, by construction, "this week or earlier" —
+                there's no future Arc week to grey out against — so unlike the Arc
+                rail (which dims connectors past the current week) every connector
+                here is always active. */}
+            {i > 0 ? <RailConnector active={true} /> : null}
+            <MemoryWeekNode
+              week={week}
+              isCurrentWeek={week.weekStart === thisWeekStart}
+              selected={week.weekStart === selectedSegment}
+              adjacent={selectedIndex >= 0 && Math.abs(i - selectedIndex) === 1}
+              onSelect={scrollToSegment}
+              reducedMotion={reducedMotion}
+              index={i}
+            />
+          </Fragment>
         ))}
       </div>
     </div>
@@ -393,22 +444,22 @@ function WeekRail({ weeks, thisWeekStart, selected, onSelect }) {
 }
 
 /**
- * One week's worth of chapters: gold accent, date-range kicker, a locally
- * derived serif caption (see deriveWeekChapterFromDays — no new AI call),
- * then the connected day-spine — the same "weeks containing days" shape the
- * old Arc timeline used, minus the Arc: no fixed start date/duration to
- * number weeks against, so weeks are just calendar weeks and there's no
- * proof-ring/percent readout (nothing here is measuring habit completion).
+ * The single selected week's detail panel — gold accent, date-range kicker
+ * (or "This week"), a locally derived serif caption (see
+ * deriveWeekChapterFromDays — no new AI call), an evidence stat line, then
+ * the connected day-spine. Direct analogue of the old Arc timeline's
+ * WeekDetail + WeekDayJourney, just reading daily_summaries chapters instead
+ * of habit proof/journal receipts, and with no proof-percent readout since
+ * nothing here measures habit completion.
  */
-function WeekChapterGroup({ week, isCurrentWeek, isFirst, onOpen, sectionRef }) {
-  const rangeLabel = isCurrentWeek
-    ? "This week"
-    : `${fmtEntryDate(week.weekStart)} – ${fmtEntryDate(week.weekEnd)}`;
+function MemoryWeekDetail({ week, isCurrentWeek, onOpen }) {
+  const rangeLabel = isCurrentWeek ? "This week" : fmtWeekRange(week.weekStart);
   const caption = deriveWeekChapterFromDays(week.items);
   const n = week.items.length;
+  const evidenceLabel = formatEvidenceLabel(n, 7, isCurrentWeek ? "current" : "complete");
 
   return (
-    <div ref={sectionRef} style={{ marginTop: isFirst ? 0 : 26, scrollMarginTop: 16 }}>
+    <div key={week.weekStart} style={{ animation: "arcChapterIn 0.28s ease both", paddingBottom: 8 }}>
       <WeekAccent />
       <div style={{ fontSize: 10, fontWeight: 800, color: T.gold, letterSpacing: "0.12em", textTransform: "uppercase" }}>
         {rangeLabel}
@@ -418,10 +469,11 @@ function WeekChapterGroup({ week, isCurrentWeek, isFirst, onOpen, sectionRef }) 
           {caption}
         </div>
       )}
-      <div style={{ fontSize: 11.5, color: T.sub, marginTop: caption ? 6 : 4 }}>
-        {n} chapter{n === 1 ? "" : "s"} captured
-      </div>
+      <div style={{ fontSize: 12, color: T.sub, marginTop: caption ? 8 : 4 }}>{evidenceLabel}</div>
       <div style={{ marginTop: 14 }}>
+        <div style={{ fontSize: 9, fontWeight: 700, color: T.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8 }}>
+          Daily evidence
+        </div>
         {week.items.map((entry, i) => (
           <ChapterSpineRow
             key={entry.date}
@@ -439,11 +491,15 @@ function WeekChapterGroup({ week, isCurrentWeek, isFirst, onOpen, sectionRef }) 
 /**
  * The real daily-memory archive — replaces a single "yesterday" teaser line
  * with the actual companion-narrated history: every day the nightly
- * rollover has summarized, most recent first, grouped into calendar weeks
- * (see groupChaptersByWeek/WeekChapterGroup) the same way the old Arc
- * timeline grouped days under weeks — just without an Arc's fixed start
- * date/duration to number them against. This is Today/Noticed's real reason
- * to exist beyond habit logging — a place worth scrolling back into.
+ * rollover has summarized, grouped into calendar weeks (groupChaptersByWeek)
+ * and browsed exactly like the old Arc timeline browsed Arc weeks — a
+ * horizontal scroll-snap rail of week nodes (MemoryWeekRail, reusing the
+ * real RailCheckpoint/ProofRing/useRailCenterSelection pieces) with the
+ * selected week's connected day-spine (MemoryWeekDetail) below it. The one
+ * real difference from an Arc: there's no fixed start date/duration to size
+ * the rail against, so it simply ends at the most recent week with a
+ * chapter in it — no upcoming/future weeks ever render. This is
+ * Today/Noticed's real reason to exist beyond habit logging.
  *
  * Free accounts see the same recent window as the rest of the app's history
  * gating (last 7 days — matches HistoryModal's `daysAgo(6)` cutoff exactly,
@@ -454,7 +510,6 @@ function WeekChapterGroup({ week, isCurrentWeek, isFirst, onOpen, sectionRef }) 
 function DailyChapters({ recentSummaries, isPro, onUpgrade, journalEntries = [] }) {
   const [openDate, setOpenDate] = useState(null);
   const [selectedWeekStart, setSelectedWeekStart] = useState(null);
-  const weekSectionRefs = useRef(new Map());
   const today = todayStr();
   const cutoff = daysAgo(6);
   const chapters = (Array.isArray(recentSummaries) ? recentSummaries : [])
@@ -493,36 +548,37 @@ function DailyChapters({ recentSummaries, isPro, onUpgrade, journalEntries = [] 
   const thisWeekStart = weekStartFor(today);
   const railWeeks = [...weekGroups].reverse(); // oldest → newest, left → right, like the old Arc rail
 
-  function scrollToWeek(weekStart) {
-    setSelectedWeekStart(weekStart);
-    weekSectionRefs.current.get(weekStart)?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
+  // Default selection is the most recent week with a chapter in it — not
+  // necessarily "this calendar week," since that may not have a chapter yet
+  // (nightly rollover hasn't run for any day in it) and would otherwise
+  // select a week with nothing to show.
+  const selectedWeekStartResolved = selectedWeekStart && weekGroups.some(w => w.weekStart === selectedWeekStart)
+    ? selectedWeekStart
+    : weekGroups[0].weekStart;
+  const selectedWeek = weekGroups.find(w => w.weekStart === selectedWeekStartResolved);
 
   return (
     <div style={{ margin: "14px 14px 0" }}>
+      <style>{ARC_MOTION_CSS}</style>
       <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.hint, marginBottom: 8, padding: "0 2px" }}>
         Your companion noticed
       </div>
-      <WeekRail
+      {todayGhost}
+      <MemoryWeekRail
         weeks={railWeeks}
         thisWeekStart={thisWeekStart}
-        selected={selectedWeekStart ?? thisWeekStart}
-        onSelect={scrollToWeek}
+        selectedSegment={selectedWeekStartResolved}
+        onSegmentChange={setSelectedWeekStart}
       />
-      {todayGhost}
-      {weekGroups.map((week, i) => (
-        <WeekChapterGroup
-          key={week.weekStart}
-          week={week}
-          isCurrentWeek={week.weekStart === thisWeekStart}
-          isFirst={i === 0}
-          onOpen={e => setOpenDate(e.date)}
-          sectionRef={el => {
-            if (el) weekSectionRefs.current.set(week.weekStart, el);
-            else weekSectionRefs.current.delete(week.weekStart);
-          }}
-        />
-      ))}
+      <div style={{ padding: "4px 6px 0" }}>
+        {selectedWeek && (
+          <MemoryWeekDetail
+            week={selectedWeek}
+            isCurrentWeek={selectedWeek.weekStart === thisWeekStart}
+            onOpen={e => setOpenDate(e.date)}
+          />
+        )}
+      </div>
       {locked.length > 0 && (
         <div style={{ position: "relative", marginTop: 8, borderRadius: T.r, overflow: "hidden" }}>
           <div style={{ filter: "blur(3px)", pointerEvents: "none", userSelect: "none", display: "flex", flexDirection: "column", gap: 8 }}>
