@@ -4048,6 +4048,7 @@ export default function App() {
           onJournalInitialComposeDone={() => { setShowJournalCompose(false); setJournalOpenTab(null); setJournalAutoGenerate(false); }}
           completedArcBlock={completedArcBlock}
           onOpenHub={() => setScreen("hub")}
+          hideHero
         />}
         {screen === "hub"      && <HubScreen
           habits={habits} goals={goals} tasks={tasks} activeBlock={activeBlock}

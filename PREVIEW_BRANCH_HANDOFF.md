@@ -2,7 +2,25 @@
 
 **Branch:** `claude/forged-ai-companion-redesign-agyjl7`
 **Status:** preview/experimental only. `main` (production) has not been touched, merged into, or modified at any point on this branch.
-**Last updated:** 2026-07-06 (sixteenth round today) — explicit direction after three rounds of approximating the Arc screen's look from scratch: stop rebuilding it, just use it. **Noticed now renders the real `ArcScreen` component directly** (same component, same props, as the "Arc" nav route) instead of `TodayScreen`'s habit-grid/chapters experiment. This is a genuine reset, not a tweak — see "Sixteenth round" below for exactly what that means and what it gives up.
+**Last updated:** 2026-07-06 (seventeenth round today) — Noticed keeps the real ArcScreen (confirmed as the right call), just with the top identity hero (Arc title/edit/progress bar) hidden — Timeline Split, the week rail, and the daily breakdown stay exactly as they were. Also: verified against the live database that chat persistence and the nightly rollover are both genuinely working (not asked to trust a comment — checked the actual tables), and fixed a real bug where daily breakdown titles were showing a long descriptive sentence instead of the short catchy headline that was already being generated and just never displayed. See "Seventeenth round" below.
+
+### Seventeenth round — trim the Arc hero, verify data is real, fix the title bug
+
+**1. Hid the Arc identity hero, kept everything below it.** Added a `hideHero` prop to `ArcTimeline` (`src/components/ArcTimeline.jsx`) that suppresses only `ArcJourneyHero` (the "Your Arc / 8 WEEKS · WEEK 6 OF 8 / Build the System / Edit Arc / Details / Day 42 of 56" block) — `ArcTimelineSplit` (the Future You / You / Default Path graph), the week rail, and the day-by-day detail below it are untouched, same as before. Wired `hideHero` through `ArcScreen` → `App.jsx`, set to `true` only for the Noticed ("today") route — the actual "Arc" nav destination (reached from journal/add-log flows) still shows the full hero, unchanged.
+
+**2. Checked whether preview chat data is real and shared with the main account — directly against the database, not by trusting code comments.** Queried the live Supabase project (`apdmvbzfjuvxworjepze` — confirmed via `list_projects` that this is the *only* project on the account, so there is no separate "preview database" to sync from):
+   - `conversation_messages`: 60 real rows for your account, spanning 2026-07-05 to 2026-07-06 (today) — chat is genuinely being saved, not just displayed.
+   - `daily_summaries`: has a real row for 2026-07-05 with title *"System Sunday: All Seven Points Landed"* and `xp_awarded: 38` — the nightly rollover ran and produced a real summary from that day's actual conversation.
+   - **Conclusion, stated plainly: there is nothing to "bring across" from preview to main.** Preview and main have always pointed at the exact same Supabase project/database (same hardcoded URL in every `api/*.js` file and in `src/supabase.js` — verified again this round). Logging into the same account on either one shows the same data, because it *is* the same data — there's only one copy. The chat is really saving and really being summarized; it was never at risk of being preview-only or lost.
+   - Side note, not urgent: a handful of older days (pre-dating this session's conversation_messages/rollover work) have `title: null` in `daily_summaries` — that's old data from before the richer extraction existed, not a live failure. `xp_events` currently has only 1 row against 77 `daily_summaries` rows, which looks low — flagging it as something worth a look later, but it wasn't part of this round's ask.
+
+**3. Fixed the actual cause of "titles look weird, not catchy, and cut off."** The day-by-day breakdown rows were pulling the wrong field: `dayDisplayTitle()` in `ArcTimeline.jsx` was preferring the long `Pattern:` line or the first sentence of the narrative — full descriptive prose — over the short, catchy 2–5 word headline (`Title: ...`) that the journal generator (`api/journal-generate.js`) was *already writing for every entry and never showing*. That's exactly the "Seven straight days of full Arc proof. Build…" text getting chopped off mid-word in the screenshot — it was a whole sentence being squeezed into a title-sized space. Fixed the field priority (title first, pattern/narrative only as fallback for older entries that predate the title field), and changed the row's CSS from hard single-line truncation to a 2-line wrap as a backstop for any headline that's still a little long.
+
+**Files touched:** `src/components/ArcTimeline.jsx` (`hideHero` prop, `dayDisplayTitle` fix, headline CSS), `src/screens/ArcScreen.jsx` (`hideHero` passthrough), `src/App.jsx` (`hideHero` on the Noticed route only).
+
+**Verified:** `npm run build` passes; the data claims above are read directly from the live database, not guessed.
+
+**What to test:** open Noticed — should now start straight at "Timeline Split," no Arc title/progress bar above it. Check the day-by-day breakdown rows under a week — titles should now read as short phrases (closer to "Recovery & Reset" than a full sentence), and if a title is still long it should wrap onto a second line instead of getting cut off mid-word.
 
 ### Sixteenth round — Noticed is now literally the Arc screen
 

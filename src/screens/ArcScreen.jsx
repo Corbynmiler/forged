@@ -105,7 +105,7 @@ export function ArcScreen({
   activeBlock, habits, goals, journalEntries, arcLedgerRows = [],
   isPro, onUpgrade, userId, userName,
   onStartArc, onEditArc, onRunItBack, onEvolve,
-  onOpenHub,
+  onOpenHub, hideHero = false,
 }) {
   const [initialWeek, setInitialWeek] = useState(null);
   const [openChronology, setOpenChronology] = useState(false);
@@ -167,6 +167,7 @@ export function ArcScreen({
         onEditArc={onEditArc}
         initialWeek={initialWeek}
         openChronologyOnMount={openChronology}
+        hideHero={hideHero}
       />
 
       <HubLink onOpenHub={onOpenHub} />

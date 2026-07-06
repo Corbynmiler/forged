@@ -547,15 +547,18 @@ function useViewportDayFocus(dayRefs, reducedMotion) {
 // Avoids the raw "Proof shown: ..." first line — uses pattern or narrative opener instead.
 function dayDisplayTitle(parsed) {
   if (!parsed) return null;
+  // The generator writes a short (2-5 word) headline specifically for this —
+  // e.g. "Recovery & Reset", "Proof in, build moved" — so it belongs first.
+  // Falling back to `pattern` or the first sentence of `narrative` (both full
+  // descriptive sentences, not headlines) was the actual bug behind "titles
+  // are long, not catchy, and cut off mid-word": those are prose, not titles.
+  if (parsed.title?.trim()) {
+    return parsed.title.replace(/^Proof shown:\s*/i, "").trim();
+  }
   if (parsed.pattern?.trim()) return parsed.pattern.trim();
   if (parsed.narrative?.trim()) {
     const first = parsed.narrative.split(/(?<=[.!?])\s+/)[0]?.trim();
     if (first) return first;
-  }
-  // Strip the "Proof shown: ..." prefix as a last resort — take text after the first sentence
-  if (parsed.title) {
-    const clean = parsed.title.replace(/^Proof shown:\s*/i, "").trim();
-    return clean.split(/(?<=[.!?])\s+/)[0]?.trim() || clean;
   }
   return null;
 }
@@ -673,7 +676,8 @@ function WeekDayJourney({ week, arcLedgerRows, journalEntries, reducedMotion }) 
                           <div style={{
                             fontSize: 13, fontWeight: 600, color: T.text,
                             marginTop: 2, lineHeight: 1.3,
-                            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                            display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+                            overflow: "hidden", overflowWrap: "anywhere",
                           }}>
                             {headline}
                           </div>
@@ -1092,6 +1096,7 @@ export function ArcTimeline({
   initialWeek = null,
   openChronologyOnMount = false,
   embedded = false,
+  hideHero = false,
 }) {
   const railRef = useRef(null);
   const containerRef = useRef(null);
@@ -1294,7 +1299,7 @@ export function ArcTimeline({
     <div ref={containerRef} style={{ minWidth: 0, overflow: "hidden", maxWidth: "100%" }}>
       <style>{ARC_MOTION_CSS}</style>
 
-      {isActive && !embedded ? (
+      {isActive && !embedded && !hideHero ? (
         <ArcJourneyHero
           block={block}
           dayNum={dayNum}
