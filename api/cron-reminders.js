@@ -197,11 +197,27 @@ function isWeekend(todayYmd) {
 }
 
 
-// ── Normal-user fixed send hours ───────────────────────────────────────────────
-// Every regular user gets a notification at these three local-time hours per day
+// ── Normal-user fixed send times ───────────────────────────────────────────────
+// Every regular user gets a notification at these three local times per day
 // (instead of their configured reminder_time). The cron's 5-minute windowed check
-// filters to :00 buckets at these hours only.
-const NORMAL_FIRE_HOURS = [7, 12, 19];
+// filters to the matching 5-minute bucket at each of these times only.
+//
+// The morning send is deliberately early (05:30 local): the highest-risk moment
+// for the users we're serving is waking up and reaching straight for a cone, so
+// the day-anchoring push has to land *before* they're awake, not at breakfast.
+const NORMAL_FIRE_TIMES = [
+  { hour: 5, minute: 30 }, // morning — before the wake-and-cone window
+  { hour: 12, minute: 0 }, // midday check-in
+  { hour: 19, minute: 0 }, // evening — peak-risk / capture-the-day slot
+];
+const MORNING_FIRE = NORMAL_FIRE_TIMES[0];
+
+/** True when `now` (local h/m) falls in a scheduled fire time's 5-minute bucket. */
+function matchesFireWindow(now) {
+  return NORMAL_FIRE_TIMES.some(
+    t => t.hour === now.hour && bucketMinute(now.minute) === bucketMinute(t.minute)
+  );
+}
 
 /** Map a local hour → the slot label used for dedup keys and pool selection. */
 function normalUserSlot(hour) {
@@ -780,12 +796,12 @@ async function handler(req, res) {
       continue;
     }
 
-    // ── Windowed mode: only fire at 7am, 12pm, 7pm local time (:00 bucket) ──
+    // ── Windowed mode: only fire at the scheduled local times (5-min bucket) ──
     if (isWindowed) {
-      if (!NORMAL_FIRE_HOURS.includes(now.hour) || bucketMinute(now.minute) !== 0) {
+      if (!matchesFireWindow(now)) {
         if (debug) trace.push({
           user_id: sub.user_id, skipped: "window_miss",
-          tz, now_local: now, fire_hours: NORMAL_FIRE_HOURS,
+          tz, now_local: now, fire_times: NORMAL_FIRE_TIMES,
         });
         skippedWindow++;
         continue;
@@ -819,7 +835,9 @@ async function handler(req, res) {
 
     const arcDuration = arcBlock?.duration_days || 56;
     const arcDayX = arcBlock ? forgeBlockDayNumber(arcBlock, todayYmd) : 0;
-    const isArcEndMorning = isWindowed && now.hour === 7 && bucketMinute(now.minute) === 0;
+    const isArcEndMorning = isWindowed
+      && now.hour === MORNING_FIRE.hour
+      && bucketMinute(now.minute) === bucketMinute(MORNING_FIRE.minute);
 
     if (arcBlock && arcDayX >= arcDuration && isArcEndMorning) {
       const pauseKey = `${todayYmd}${ARC_PAUSE_SUFFIX}`;
